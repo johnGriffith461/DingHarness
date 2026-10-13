@@ -204,3 +204,38 @@
 .wb-chip:active:not(:disabled) {
   transform: scale(0.97);
 }
+
+/* ---------- 流式光标（2026-10-14）：正文末尾那根闪动的竖条 ---------- */
+
+.wb-draft .wb-assistant-text {
+  /* 草稿与正式那一步同宽同排版，收尾时不会"跳一下" */
+  white-space: pre-wrap;
+}
+
+.wb-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: wb-caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes wb-caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 系统里开了「减少动态效果」时别闪（全局那条 reduced-motion 只管 duration，动画是 infinite 的） */
+@media (prefers-reduced-motion: reduce) {
+  .wb-caret {
+    animation: none;
+  }
+}

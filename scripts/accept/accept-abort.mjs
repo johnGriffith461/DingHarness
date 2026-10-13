@@ -58,13 +58,28 @@ try {
    * 所以：轮询间隔压到 100ms，看到 **。停止键就点，不等任何别的东西。
    */
   let stopAppeared = false;
+  /** 流式正文的**长度采样**（2026-10-14：这条顺带验"文字真的在一个个长出来"）。 */
+  const draftSamples = [];
   for (let i = 0; i < 120; i += 1) {
-    if ((await page.locator('[data-testid="wb-send-stop"]').count()) > 0) {
-      stopAppeared = true;
-      break;
-    }
-    await page.waitForTimeout(100);
+    /*
+     * ⚠️ **先采样、再看停止键**：第一版把停止键的判断放前面，于是"停止键立刻就在"
+     * 让循环第一次就退出、采样是空数组（断言直接假红）。
+     */
+    const len = await page.evaluate(
+      () => (document.querySelector('[data-testid="wb-draft-text"]')?.textContent ?? "").length,
+    );
+    draftSamples.push(len);
+    if ((await page.locator('[data-testid="wb-send-stop"]').count()) > 0) stopAppeared = true;
+    // 采到"正文真的长起来了"就够（≥3 个样本且出现过非零长度）
+    if (draftSamples.length >= 3 && Math.max(...draftSamples) > 0) break;
+    await page.waitForTimeout(150);
   }
+  out.draftSamples = draftSamples.slice(-6);
+  /*
+   * ⭐ 判据：流式过程中**正文在长**。在此之前工作台只有一行「正在回复」，
+   * `.wb-assistant-text` 要到收尾才出现 —— 所以"长度出现过增长"本身就是"流式显示生效"的证据。
+   */
+  out.draftGrew = draftSamples.length >= 3 && Math.max(...draftSamples) > Math.min(...draftSamples);
   out.stopAppeared = stopAppeared;
   out.textBeforeStop = await page.evaluate(
     () => (document.querySelector(".wb-assistant-text")?.textContent ?? "").trim().slice(0, 40),
@@ -97,6 +112,8 @@ try {
    * 停止之后那一步**如实写着「已中止」**（而不是让他对着空白猜"是不是坏了"）。
    */
   out.toldAborted = out.textAfterStop.includes("已中止");
+  /* 收尾之后草稿必须消失（正文已经落成正式那一步；两份共存就是重复渲染） */
+  out.draftAfterSettle = await page.locator('[data-testid="wb-draft-text"]').count();
   out.shotAfter = await shot(page, "abort-2.png");
 
   /*
@@ -157,5 +174,9 @@ if (!out.diskSaysAborted) {
 } else if (!out.toldAborted) {
   bad.push(`磁盘上写了「已中止」但界面没显示（${JSON.stringify(out.diskStepText)}）—— 是界面这一侧的问题`);
 }
+if (!out.draftGrew) {
+  bad.push(`⭐ 流式过程中正文没在长（采样：${JSON.stringify(out.draftSamples)}）—— 又变回「整段蹦出来」了`);
+}
+if (out.draftAfterSettle !== 0) bad.push(`收尾后草稿没清掉（还剩 ${out.draftAfterSettle} 个）`);
 if (!out.hasAbortRecord) bad.push("⭐ 会话日志里没有终止记录（读日志的人分不清断了还是还在跑）");
-verdict(bad, "停止成立：流式中有停止键 / 点了真的收 / 步骤如实写「已中止」/ 日志有终止记录");
+verdict(bad, "停止与流式都成立：正文实时在长 / 有停止键 / 点了真的收 / 步骤说「已中止」/ 日志有终止记录");

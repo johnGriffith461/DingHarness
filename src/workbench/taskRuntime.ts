@@ -398,7 +398,12 @@ export async function runStream(
         turn = applyEvent(turn, event);
 
         if (event.type === "text") {
-          onPatch({ activity: "正在回复" });
+          /*
+           * 把正在长出来的正文一起 patch 进去（2026-10-14）：原来这里只改 activity，
+           * 用户看到的只有一行「正在回复」，整段回答结束时才蹦出来 —— 而聊天侧一直逐字显示。
+           * 正文取自投影（finishTurn(turn).text）：与收尾时落成一步用的是同一份数据。
+           */
+          onPatch({ activity: "正在回复", draft: finishTurn(turn).text });
         }
         if (event.type === "tool-call") {
           /*
@@ -426,6 +431,8 @@ export async function runStream(
     failure = error instanceof Error ? error.message : String(error);
   }
   port.setState({ runningRequestId: null });
+  /* 收尾清掉流式草稿（正文已经落成那一步了，再留着会出现两份）。 */
+  onPatch({ draft: undefined });
 
   /*
    * 收尾：正文与工具留痕都从投影取。

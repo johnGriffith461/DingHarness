@@ -194,6 +194,20 @@ export function TaskView() {
             <HelpCircle size={13} /> {task.activity}
           </div>
         ) : null}
+        {/*
+          ⭐ **流式正文**（2026-10-14 补）：在此之前工作台流式时只有上面那行「正在回复」，
+          整段回答**结束时才蹦出来**（聊天侧一直是逐字显示的 —— 两边手感不一致）。
+          草稿挂在任务上（`task.draft`），收尾时由 `runStream` 清掉、正文落成正式的一步。
+          `data-testid` 给验收用：`accept-abort.mjs` 靠它断言"文字真的在一个个长出来"。
+        */}
+        {task.draft ? (
+          <div className="wb-assistant wb-draft" data-testid="wb-draft-text">
+            <div className="wb-assistant-text">
+              {task.draft}
+              <span className="wb-caret" aria-hidden />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {currentQuestion(task) ? <QuestionCard task={task} /> : null}

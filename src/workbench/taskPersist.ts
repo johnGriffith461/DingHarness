@@ -118,7 +118,11 @@ function schedulePersist(port: StorePort): void {
     saveTimer = null;
     const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
     if (!bridge?.tasks) return;
-    const tasks = port.getState().tasks;
+    /*
+     * 落盘前剥掉流式草稿（`draft`）：它每几十毫秒变一次，写进磁盘纯属浪费；
+     * 而且它不该跨重启活下来（被中断的那一步会被标成 failed，草稿留着自相矛盾）。
+     */
+    const tasks = port.getState().tasks.map((t) => (t.draft === undefined ? t : { ...t, draft: undefined }));
     saveQueue = saveQueue.then(() => bridge.tasks.save(tasks)).catch(() => undefined);
   }, 600);
 }

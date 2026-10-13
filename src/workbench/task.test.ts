@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeTask } from "./taskPersist";
 import {
   STEP_NOTE_LIMIT,
   makeStepId,
@@ -486,5 +487,33 @@ describe("真实用量进步骤（C5）", () => {
   it("0 是合法值（真正的 0 与「没拿到」是两回事）", () => {
     const step = normalizeStep({ id: "s1", role: "assistant", text: "答", at: 1, usage: { inputTokens: 0 } }, 0);
     expect(step.usage).toEqual({ inputTokens: 0 });
+  });
+});
+
+describe("流式草稿不落盘（2026-10-14）", () => {
+  it("⭐ `draft` 是纯运行时字段：恢复出来的任务里**不许**带着它", () => {
+    /*
+     * 工作台流式时会把"正在长出来的正文"挂在 `task.draft` 上（在此之前只有一行「正在回复」，
+     * 整段回答结束时才蹦出来）。但它**不该跨重启**：被中断的那一步本来就会被标成 failed，
+     * 再留一份半截草稿只会自相矛盾 —— 而且它每几十毫秒变一次，落盘纯属浪费。
+     * 落盘那侧会剥掉它（`taskPersist.ts`），这里钉的是**恢复那侧也不认它**。
+     */
+    const got = normalizeTask({
+      id: "t1",
+      title: "标题",
+      brief: "做事",
+      createdAt: 1,
+      stage: "running",
+      startedAt: 1,
+      finishedAt: null,
+      steps: [],
+      questions: [],
+      questionIndex: 0,
+      activity: "正在回复",
+      artifacts: [],
+      draft: "半截正文不该活下来",
+    });
+    expect(got).not.toBeNull();
+    expect((got as Record<string, unknown>).draft).toBeUndefined();
   });
 });
