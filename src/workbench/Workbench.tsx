@@ -8,7 +8,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useWorkbenchStore, restoreTasks, startTaskPersistence } from "./store";
-import { CloudPage, PhonePage, PluginsPage, ScheduledPage } from "./pages";
+/*
+ * ⚠️ C6-2：`pages.tsx` 已按组件拆成 `ScheduledPage.tsx` / `PluginsPage.tsx` / `CloudPage.tsx` / `PhonePage.tsx`
+ * （原来那个 1669 行的文件不再存在，避免留一个只是转发的"桶文件"）。
+ */
+import { CloudPage } from "./CloudPage";
+import { PhonePage } from "./PhonePage";
+import { PluginsPage } from "./PluginsPage";
+import { ScheduledPage } from "./ScheduledPage";
 import CanvasRuntime from "@/canvas/CanvasRuntime";
 import ChatSidebar from "@/chat/ChatSidebar";
 import { startScheduler } from "./scheduleStore";
