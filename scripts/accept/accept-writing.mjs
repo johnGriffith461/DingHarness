@@ -95,3 +95,35 @@ console.log(JSON.stringify(report, null, 2));
 
 await browser.close();
 child.kill();
+
+/*
+ * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"。
+ *
+ * ⚠️ 这条脚本**真的连模型**（点「写短一点」然后等 15 秒），所以
+ * 「文字真的被改写了」（`report.changed`）**故意不纳入判定** ——
+ * 那是"等 N 毫秒后必须变"的时序判据，模型慢一点、机器忙一点、没配通道就会假红，
+ * 属于本文件外面那条"判据要落在稳定后果上"的例外。
+ * 它留下了一个**已知缺口**（改写本身没被钉住），如实记在这里，不拿别的断言凑数。
+ *
+ * 只断**不依赖模型**的那部分：
+ *   · 目标节点 n1 本来就有文字 —— 读取点没失效（否则整条脚本是在空跑，跑完还说"绿"）
+ *   · 写作入口展开后有菜单项，且**逐字**含「写短一点」（脚本点的就是它）
+ *   · 改写之后**节点数不变** —— 写作助手改的是这个节点自己的内容，
+ *     不是像「AI 生成」那样落一个新节点（新增/删除都算错）
+ */
+const bad = [];
+if (typeof report.textBefore !== "string" || report.textBefore.trim() === "") {
+  bad.push(`读不到 n1 的原文（选择器可能已过期，整条脚本在空跑）：${JSON.stringify(report.textBefore)}`);
+}
+const menuItems = report.menuItems ?? [];
+if (menuItems.length === 0) bad.push("「写作」入口展开后菜单是空的");
+else if (!menuItems.includes("写短一点")) bad.push(`菜单里没有「写短一点」：${JSON.stringify(menuItems)}`);
+if (report.nodesAfter !== report.nodesBefore) {
+  bad.push(`写作把节点数改了（${report.nodesBefore} → ${report.nodesAfter}）—— 该就地改写，不是新增/删除节点`);
+}
+if (bad.length) {
+  console.error("✗ 写作产物：" + bad.join("；"));
+  process.exitCode = 1;
+} else {
+  console.log("✓ 写作产物：n1 有原文 / 菜单里有「写短一点」/ 改写前后节点数不变（模型是否改写成功不在此判定）");
+}

@@ -105,8 +105,75 @@ try {
     };
   });
   await shot(page, "chips-skillpanel.png");
+
+  /*
+   * ⚠️ 2026-10-13 补：`wb-rec-*`（面板里的「推荐」那一组）**原来没有任何脚本引用过**
+   * （`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）——
+   * 上面那条只数了 `wb-cmd-*`，推荐组是另一套 testid，一条都不在计数里。
+   * 断**后果**：推荐组在、且**有条目**（`SUGGESTIONS` 是静态表，一条都没有就是坏了）。
+   */
+  out.recItems = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="wb-rec-"]')).map((e) => (e.textContent ?? "").trim()),
+  );
+  out.recHead = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-skill-panel"] .wb-cmd-head')?.textContent?.trim() ?? "",
+  );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
+
+  /*
+   * ── 「插件」chip 的下拉（2026-10-13 补，见 §208 零覆盖清单）──
+   *
+   * 这条数据目录里没装任何插件，所以下拉里应当是**那句如实说明**（而不是空面板）。
+   * `wb-plugin-toggle-*` 要有条目才出现 —— 那条属于"装了插件之后"的场景，没在这里补。
+   */
+  await page.locator('[data-testid="wb-plugins"]').click();
+  await page.waitForTimeout(600);
+  out.pluginPop = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-plugin-pop"]');
+    return { count: box ? 1 : 0, text: box ? (box.textContent ?? "").trim() : "" };
+  });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
+  /*
+   * ── 项目 chip 的选项与「不归入项目」（2026-10-13 补，见 §208 零覆盖清单）──
+   *
+   * `wb-project-option-*` / `wb-project-clear` 都没有脚本点过。要出现它们得先**有一个项目** ——
+   * 所以在左栏现建一个（`wb-project-new` → 填名字 → Enter），再来点 chip：
+   *   · 选中项目 → chip 上的字真的跟着变（"能选"的证据）；
+   *   · 点「不归入项目」→ chip 回到「项目」（`wb-project-clear` 真能清）。
+   */
+  await page.locator('[data-testid="wb-project-new"]').click();
+  await page.waitForTimeout(400);
+  await page.locator('[data-testid="wb-project-name"]').fill("周报项目");
+  await page.locator('[data-testid="wb-project-name"]').press("Enter");
+  await page.waitForTimeout(900);
+  await page.locator('[data-testid="wb-project"]').click();
+  await page.waitForTimeout(500);
+  out.projectOptions = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="wb-project-option-"]')).map((e) => (e.textContent ?? "").trim()),
+  );
+  const firstProjectOption = await page.evaluate(
+    () => document.querySelector('[data-testid^="wb-project-option-"]')?.getAttribute("data-testid") ?? "",
+  );
+  if (firstProjectOption) {
+    await page.locator(`[data-testid="${firstProjectOption}"]`).click();
+    await page.waitForTimeout(600);
+  }
+  out.projectChipAfterPick = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-project"]')?.textContent?.replace(/\s+/g, "") ?? "",
+  );
+  await page.locator('[data-testid="wb-project"]').click();
+  await page.waitForTimeout(500);
+  out.clearBtnShown = await page.locator('[data-testid="wb-project-clear"]').count();
+  if (out.clearBtnShown) {
+    await page.locator('[data-testid="wb-project-clear"]').click();
+    await page.waitForTimeout(600);
+  }
+  out.projectChipAfterClear = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-project"]')?.textContent?.replace(/\s+/g, "") ?? "",
+  );
 
   await b.close();
 } catch (e) {
@@ -129,6 +196,24 @@ try {
     }
     if (!out.skillPanel.hasSearch) bad.push("技能面板底部没有搜索框");
     if (out.skillPanel.items < 3) bad.push(`技能面板条目太少（${out.skillPanel.items} 条）`);
+  }
+
+  /* 补的那组（零覆盖清单里的推荐组 / 插件下拉 / 项目选项与清除，§208） */
+  if ((out.recItems ?? []).length < 1) bad.push("技能面板里没有「推荐」那一组（wb-rec-*）");
+  else if (!(out.recHead ?? "").startsWith("推荐")) {
+    bad.push(`推荐组的标题不对：${out.recHead}`);
+  }
+  if (out.pluginPop?.count !== 1) bad.push("「插件」chip 没有下拉（wb-plugin-pop）");
+  else if (!out.pluginPop.text.includes("还没安装任何插件")) {
+    bad.push(`没装插件时下拉该如实说明，实际文本：${JSON.stringify(out.pluginPop.text)}`);
+  }
+  if ((out.projectOptions ?? []).length < 1) bad.push("「项目」下拉里没有项目选项（wb-project-option-*）");
+  if (!(out.projectChipAfterPick ?? "").includes("周报项目")) {
+    bad.push(`选了项目之后 chip 上的字没跟着变：${out.projectChipAfterPick}`);
+  }
+  if (out.clearBtnShown !== 1) bad.push("选中项目后没有「不归入项目」（wb-project-clear）");
+  if ((out.projectChipAfterClear ?? "").includes("周报项目")) {
+    bad.push(`点了「不归入项目」chip 还挂着项目名：${out.projectChipAfterClear}`);
   }
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {

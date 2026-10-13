@@ -146,6 +146,39 @@ try {
     () => document.querySelector('[data-testid="wb-coding-top-note"]')?.textContent?.trim() ?? "",
   );
 
+  /*
+   * ── ⑧ 卡片/排行的容器与按钮（2026-10-13 补）──
+   *
+   * ⚠️ 这一组 testid **原来一个都没被任何脚本引用过**（`src/` 的 `data-testid`
+   * 与 `scripts/accept/` 交叉，见 HANDOFF §208 那份零覆盖清单）。
+   * 同一个类里出过事：技能面板被挤成 59px（中文一字一行）没人知道 —— 因为没人点过它（§201）。
+   *
+   * 所以这里断的是**后果**，不是"点了没报错"：
+   *   · 「创作应用」是**真能点**的入口（不是 disabled 的假按钮）；
+   *   · 网格容器在（有应用时）；**不是**错误态（`wb-coding-note` 是读取失败的告警）；
+   *   · 每张卡上「预览应用」在，且**网格宽度没有被挤塌**（阈值取得保守：>200px）。
+   * ⚠️ **不点「预览应用」** —— 那是系统默认程序打开（会真拉起浏览器），
+   *    与文件头那条"不点预览"的理由一致。
+   */
+  out.createBtn = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-coding-create"]');
+    return e ? { text: (e.textContent ?? "").trim(), disabled: e.hasAttribute("disabled") } : null;
+  });
+  out.gridCount = await page.locator('[data-testid="wb-coding-grid"]').count();
+  out.gridWidth = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-coding-grid"]');
+    return e ? Math.round(e.getBoundingClientRect().width) : null;
+  });
+  out.previewButtons = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="wb-coding-preview-"]')).map((e) => ({
+      id: e.getAttribute("data-testid"),
+      text: (e.textContent ?? "").trim(),
+    })),
+  );
+  out.rankOpenButtons = await page.locator('[data-testid^="wb-coding-open-"]').count();
+  /* 读取成功时**不该**有告警（它是"读不到产物目录"那条路的），这里断"没有" */
+  out.readNote = await page.locator('[data-testid="wb-coding-note"]').count();
+
   /* ── ⑦ 创作同款 → 交到主输入区 ── */
   await page.locator('[data-testid="wb-coding-remix-销售看板"]').click();
   await page.waitForTimeout(1200);
@@ -204,6 +237,27 @@ try {
   if (!(out.topNote ?? "").includes("最近更新")) {
     bad.push(`排行的口径没写在界面上：${out.topNote}`);
   }
+
+  /* ⑧ 容器与按钮（零覆盖清单里那一组，§208） */
+  const CREATE_APP_LABEL = "创作应用";
+  const PREVIEW_LABEL = "预览应用";
+  if (!out.createBtn) bad.push("页头没有「创作应用」入口");
+  else {
+    if (out.createBtn.text !== CREATE_APP_LABEL) bad.push(`「创作应用」文案不对：${out.createBtn.text}`);
+    if (out.createBtn.disabled) bad.push("⭐「创作应用」被禁用了（点了没反应的假入口）");
+  }
+  if (out.gridCount !== 1) bad.push(`有应用时应当有网格容器，实际 ${out.gridCount} 个`);
+  if (!(out.gridWidth > 200)) bad.push(`⭐ 网格被挤塌了（宽 ${out.gridWidth}px）—— 中文会一字一行`);
+  if ((out.previewButtons ?? []).length !== (out.allApps ?? []).length) {
+    bad.push(`「${PREVIEW_LABEL}」按钮数与卡片数不符：${JSON.stringify(out.previewButtons)}`);
+  }
+  for (const b of out.previewButtons ?? []) {
+    if (b.text !== PREVIEW_LABEL) bad.push(`${b.id} 文案不对：${b.text}`);
+  }
+  if (out.rankOpenButtons !== (out.topRows ?? []).length) {
+    bad.push(`排行里每行都该有打开按钮：${out.rankOpenButtons} vs ${(out.topRows ?? []).length}`);
+  }
+  if (out.readNote !== 0) bad.push("读得到产物时不该出现「读不到产物目录」的告警");
 
   /* ⑦ 创作同款 */
   if (!out.backHome) bad.push("「创作同款」没有切回首页");

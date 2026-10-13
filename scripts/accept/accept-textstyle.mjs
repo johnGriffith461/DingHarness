@@ -111,6 +111,22 @@ const report = {};
   const doc = JSON.parse(fs.readFileSync(SNAP, "utf8"));
   report.onDisk = doc.nodes.find((n) => n.id === "n1")?.data?.textStyle ?? null;
 
+  /*
+   * 5b) 「恢复默认排版」那颗按钮（2026-10-13 补）
+   *
+   * ⚠️ `text-reset` 这个 testid **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，
+   * 见 HANDOFF §208 的零覆盖清单）—— 一排滑杆里那颗 × 就是"没人点过"的那类控件。
+   * 断的是**后果**：点下去计算样式**真的回到默认**（字距 normal / 对齐 left / 边框 0 / 字号 13），
+   * 不是"点了没报错"。放在读盘之后 —— 落盘那一步要的是"调过的"那一份（上面已取）。
+   */
+  report.resetBtn = await page.locator('[data-testid="text-reset"]').count();
+  report.resetTitle = await page.evaluate(
+    () => document.querySelector('[data-testid="text-reset"]')?.getAttribute("title") ?? "",
+  );
+  await page.locator('[data-testid="text-reset"]').click();
+  await page.waitForTimeout(700);
+  report.styleAfterReset = await bodyStyle(page, "n1");
+
   // 6) 图片节点选中时不该出现
   await page.mouse.click(box.x + 40, box.y + 600, { force: true });
   await page.waitForTimeout(200);
@@ -136,3 +152,27 @@ const report = {};
 }
 
 console.log(JSON.stringify(report, null, 2));
+
+/*
+ * 2026-10-13 补：这条脚本**原来一条判定都没有**（只有 console.log(report)）——
+ * 在批跑里等于"静默不测"（永远 exit 0）。这里只补**零覆盖那一组**（`text-reset`）的判定，
+ * 其余仍是报告 —— 判据是"点下去样式真的回默认"，可证伪。
+ */
+{
+  const bad = [];
+  if (report.resetBtn !== 1) bad.push("排版工具条上没有「恢复默认排版」那颗按钮");
+  if (report.resetTitle !== "恢复默认排版") bad.push(`那颗按钮的 title 不对：${report.resetTitle}`);
+  const s = report.styleAfterReset ?? {};
+  if (s.letterSpacing !== "normal") bad.push(`恢复默认后字距不对：${s.letterSpacing}`);
+  if (s.textAlign !== "left") bad.push(`恢复默认后对齐不对：${s.textAlign}`);
+  if (s.borderTopWidth !== "0px") bad.push(`恢复默认后边框不对：${s.borderTopWidth}`);
+  if (s.fontSize !== "13px") bad.push(`恢复默认后字号不对：${s.fontSize}`);
+  const lh = Number.parseFloat(s.lineHeight ?? "");
+  if (!(lh > 15 && lh < 25)) bad.push(`恢复默认后行高不对（1.6 × 13px 应在 20 上下）：${s.lineHeight}`);
+  if (bad.length) {
+    console.error("✗ 零覆盖那一组（恢复默认排版）：" + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 零覆盖那一组成立：「恢复默认排版」真的把字距/对齐/边框/字号/行高全部改回默认");
+  }
+}

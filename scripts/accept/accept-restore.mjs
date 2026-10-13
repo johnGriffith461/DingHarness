@@ -140,6 +140,23 @@ try {
     CALL_ID,
   );
   out.costShown = await page.evaluate(() => document.body.textContent?.includes("0.48") ?? false);
+
+  /*
+   * ⚠️ 2026-10-13 补：`preamble-elapsed-timer` 这个 testid **原来没有任何脚本引用过**
+   * （`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 它是 `TaskView` 里那行进度（"共用时 X"），并且**带着一个上位契约属性**
+   * `data-preamble-elapsed-timer=<stage>`（源码注释写着"自动化与埋点都挂在它上面"）——
+   * 契约属性没人验 = 说改就改。这里断**后果**：这条已完成的任务要看得到「共用时」，
+   * 且契约属性真的等于 `done`。
+   */
+  out.progressTimer = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="preamble-elapsed-timer"]');
+    const box = document.querySelector('[data-testid="wb-progress"]');
+    return {
+      text: el?.textContent?.trim() ?? "",
+      stage: box?.getAttribute("data-preamble-elapsed-timer") ?? "",
+    };
+  });
   out.shot = await shot(page, "restore.png");
 
   await b.close();
@@ -159,6 +176,13 @@ try {
   if (!(out.toolLine ?? "").includes("阿岩")) bad.push(`重启之后留痕里的参数没了：${JSON.stringify(out.toolLine)}`);
   /* ④ 评价 / 消耗 */
   if (!out.costShown) bad.push("消耗（0.48）没恢复出来");
+  /* ④b 进度行（零覆盖清单里的 `preamble-elapsed-timer`，§208） */
+  if (!(out.progressTimer?.text ?? "").includes("共用时")) {
+    bad.push(`已完成的任务没有那行「共用时 X」：${JSON.stringify(out.progressTimer?.text)}`);
+  }
+  if (out.progressTimer?.stage !== "done") {
+    bad.push(`进度行上的契约属性 data-preamble-elapsed-timer 应为 done，实际 ${out.progressTimer?.stage}`);
+  }
   /* ⑤ 被中断那条 */
   if (!(out.interruptedActivity ?? "").includes("上次关闭时被中断")) {
     bad.push(`上次没跑完的任务没说清是被中断的：${JSON.stringify(out.interruptedActivity)}`);

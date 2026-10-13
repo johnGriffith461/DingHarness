@@ -110,7 +110,8 @@
   font-size: 11.5px;
   line-height: 1.5;
 }
-.wb-tool-line.is-bad { background: var(--warn-soft); color: var(--warn-strong); }
+/* 原来 --warn-strong 压 --warn-soft = 1.98:1（报错看不见等于没报错）→ --warn = 4.62:1 */
+.wb-tool-line.is-bad { background: var(--warn-soft); color: var(--warn); }
 
 /* 工具参数的「展开看原文」（补完③，账本 P3）—— 默认收起，点开给完整 JSON */
 .wb-tool-args { margin-top: 2px; }

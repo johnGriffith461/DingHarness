@@ -1,3 +1,12 @@
+/*
+ * ⚠️ **已退役（2026-10-14）**：这条脚本点的是设置弹窗里的「外观」行，而外观**早就挪到账号菜单的
+ * 子菜单**（`wb-acct-appearance` / `wb-acct-theme-*`）—— 导航是死的（点了永远等不到），
+ * 而它**没有判定**，所以一直 exit 0 混在批跑里。
+ *
+ * 它的判据已由 `scripts/accept/accept-accountmenu.mjs` 接住（三选一 + 持久化 + **刷新后仍按选过的那档渲染**）。
+ * 保留这个文件是为了留个墓碑：**下次有人想加"外观"脚本，去改 accountmenu 那条，别再开一条**。
+ * 想复活它：先把导航改成账号菜单 → 外观设置。
+ */
 ﻿import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -73,4 +82,58 @@ try {
 } finally {
   console.log(JSON.stringify(report, null, 2));
   child.kill();
+
+  /*
+   * 判定（2026-10-13 补）：这条原来只有 `console.log(report)`，而且外面是 try/catch ——
+   * 于是连"中途炸了"也只是把 error 写进报告、照样 exit 0（批跑里等于"静默不测"）。
+   *
+   * 断的是「外观」这个开关的**三件后果**（脚本自己就是这么读的）：
+   *   ① 点一下真的变：生效的 `data-theme` 翻转 —— 不是"看着有、其实没用"的假开关
+   *   ② 再点一下切得回来（两侧都要能用，只做单向的话等于只能变深不能变浅）
+   *   ③ 刷新之后**按存下来的那一档渲染**：stored=dark 就该是深色、light 就该是浅色、
+   *      system 就跟随系统（即与初始值一致）—— 这是 `theme.ts` 里 `resolvesToDark` 的口径。
+   *      这样写**不依赖"点一下是几态循环"**，只依赖"存了什么就该渲染什么"。
+   *
+   * ⚠️ 已知（读源码与 git 全历史核过，不是猜）：这条脚本点的
+   * `[data-testid="wb-set-外观"]` 在设置里**从来不存在** —— SettingsDialog 的 rows 里
+   * 没有「外观」这一行（只剩一个 `r.label === "外观"` 的死渲染分支），
+   * 外观现在是**账号菜单里的子菜单**（`wb-acct-appearance` / `wb-acct-theme-*`）。
+   * 所以这一段**大概率会红**，红的是脚本的导航过期、不是产品坏了 ——
+   * 而那正是"它一直在静默通过"该被报出来的事。导航修好（改走账号菜单）之后，
+   * 下面这几条判据不需要改。
+   */
+  const bad = [];
+  const at = (k) => report[k] ?? {};
+  if (report.error) bad.push(`脚本中途出错了（选择器/入口过期？）：${report.error}`);
+  for (const k of ["initial", "afterToggle", "afterToggleBack", "afterReload"]) {
+    if (typeof at(k).isDark !== "boolean") bad.push(`${k} 没读到有效状态（缺字段或那一步没跑到）`);
+  }
+  const dark = (v) => (v ? "深色" : "浅色");
+  if (typeof at("initial").isDark === "boolean" && typeof at("afterToggle").isDark === "boolean") {
+    if (at("afterToggle").isDark === at("initial").isDark) {
+      bad.push(`点了「外观」生效值没变（${dark(at("initial").isDark)} → ${dark(at("afterToggle").isDark)}）—— 假开关`);
+    }
+  }
+  if (typeof at("afterToggleBack").isDark === "boolean" && typeof at("initial").isDark === "boolean") {
+    if (at("afterToggleBack").isDark !== at("initial").isDark) {
+      bad.push("再点一次没切回原状 —— 「双向」不成立（只能变过去、变不回来）");
+    }
+  }
+  const stored = at("afterReload").stored;
+  if (stored !== "light" && stored !== "dark" && stored !== "system") {
+    bad.push(`刷新后 localStorage 里那一档不是三档之一：${JSON.stringify(stored)}（选择没落盘）`);
+  } else if (typeof at("afterReload").isDark === "boolean") {
+    const wantDark = stored === "dark" ? true : stored === "light" ? false : Boolean(at("initial").isDark);
+    if (at("afterReload").isDark !== wantDark) {
+      bad.push(
+        `刷新后没按存下来的那一档渲染：stored=${stored} 应为${dark(wantDark)}，实际是${dark(at("afterReload").isDark)}（"刷新就丢"）`,
+      );
+    }
+  }
+  if (bad.length) {
+    console.error("✗ 外观开关：" + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 外观开关：点了真变 / 再点切得回来 / 刷新后按存下来的那一档渲染");
+  }
 }

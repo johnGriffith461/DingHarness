@@ -304,7 +304,7 @@
   background: transparent;
   color: var(--fg);
   font-size: 12.5px;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
 }
 .wb-search-empty { margin: 14px 0 0; color: var(--fg-3); font-size: 13px; }
 

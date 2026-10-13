@@ -121,6 +121,47 @@ try {
     () => document.querySelector('[data-testid="wb-thread-t-yest"] .wb-threads-row-title')?.textContent?.trim() ?? null,
   );
 
+  /*
+   * ── 置顶（2026-10-13 补）──
+   *
+   * ⚠️ `wb-thread-pinned-*`、`wb-threads-new`、`wb-threads-more`、`wb-threads-empty`
+   * 这几个 testid **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，
+   * 见 HANDOFF §208 的零覆盖清单）—— 行内那枚置顶小旗正属于"没人点过"的那一类。
+   *
+   * 断**后果**：点了「置顶」之后**那一行上真出现置顶标记**（不是"点了没报错"）。
+   * 顺带把顶部两颗按钮的性质也钉住：`wb-threads-new` 可点、`wb-threads-more` 如实禁用且说明原因
+   * （手册那条"杜绝假按钮"的可检查形式 —— 与 `accept-accountmenu` 对账号菜单用的同一口径）。
+   */
+  out.headNew = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-threads-new"]');
+    return e ? { title: e.getAttribute("title") ?? "", disabled: e.hasAttribute("disabled") } : null;
+  });
+  out.headMore = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-threads-more"]');
+    return e ? { title: e.getAttribute("title") ?? "", disabled: e.hasAttribute("disabled") } : null;
+  });
+  await page.locator('[data-testid="wb-threads-menu-t-yest"]').click({ force: true });
+  await page.waitForTimeout(500);
+  await page.locator('[data-testid="wb-menu"] button', { hasText: "置顶" }).first().click();
+  await page.waitForTimeout(900);
+  out.pinnedFlag = await page.locator('[data-testid="wb-thread-pinned-t-yest"]').count();
+
+  /*
+   * ⚠️ `wb-unpin-*`（左栏置顶行上那个「取消置顶」的 ★）原来也没有脚本点过（§208）。
+   * 断**后果**：点下去之后**行上的置顶标记真的没了**（不是"点了没报错"）。
+   * 顺带把左栏那颗装饰用的搜索键钉住：本机版没有它，**必须如实禁用并说明**（杜绝假按钮）。
+   */
+  out.unpinCtrl = await page.locator('[data-testid="wb-unpin-t-yest"]').count();
+  if (out.unpinCtrl === 1) {
+    await page.locator('[data-testid="wb-unpin-t-yest"]').click();
+    await page.waitForTimeout(800);
+  }
+  out.pinnedFlagAfterUnpin = await page.locator('[data-testid="wb-thread-pinned-t-yest"]').count();
+  out.navSearch = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-search"]');
+    return e ? { title: e.getAttribute("title") ?? "", disabled: e.hasAttribute("disabled") } : null;
+  });
+
   // 删除 → 那一行消失
   await page.locator('[data-testid="wb-threads-menu-t-30d"]').click({ force: true });
   await page.waitForTimeout(500);
@@ -154,6 +195,23 @@ try {
     bad.push(`行内菜单项不对：${JSON.stringify(out.menuItems)}`);
   }
   if (out.renamedAfterReload !== "改过名字的对话") bad.push(`重命名没保住（刷新后是 ${out.renamedAfterReload}）`);
+
+  /* 补的那组（零覆盖清单里的置顶标记与顶部两颗按钮，§208） */
+  if (!out.headNew) bad.push("页面顶部没有「新工作任务」按钮");
+  else if (out.headNew.disabled) bad.push("⭐「新工作任务」被禁用了（点了没反应的假按钮）");
+  if (!out.headMore) bad.push("页面顶部没有那颗「更多」按钮");
+  else {
+    if (!out.headMore.disabled) bad.push("⭐ 本机版没做批量操作，那颗「更多」应当是 disabled 的");
+    if (!out.headMore.title) bad.push("那颗 disabled 的「更多」没说为什么（title 为空）");
+  }
+  if (out.pinnedFlag !== 1) bad.push("点了「置顶」那一行上没有出现置顶标记");
+  if (out.unpinCtrl !== 1) bad.push("左栏置顶行上没有「取消置顶」（wb-unpin-*）");
+  if (out.pinnedFlagAfterUnpin !== 0) bad.push("点了「取消置顶」标记还在");
+  if (!out.navSearch) bad.push("左栏没有那颗（装饰用的）搜索键");
+  else {
+    if (!out.navSearch.disabled) bad.push("⭐ 本机版没做搜索，那颗键应当是 disabled 的");
+    if (!out.navSearch.title) bad.push("那颗 disabled 的搜索键没说为什么（title 为空）");
+  }
   if (!out.deletedGone) bad.push("删除后那一行还在");
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {

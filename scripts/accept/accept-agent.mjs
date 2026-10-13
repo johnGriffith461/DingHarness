@@ -78,6 +78,24 @@ try {
   out.opened = (await page.locator('[data-testid="wb-agent"]').count()) > 0;
   out.panelTitle = await page.evaluate(() => document.querySelector(".wb-agent-head h2")?.textContent?.trim() ?? "");
 
+  /*
+   * ⚠️ 2026-10-13 补：`wb-agent-existing` 与 `wb-agent-cancel` 这两个 testid
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 断**后果**：已有智能体那一块在（标题逐字）、**一个新智能体都没有时它要说实话**
+   * （空态文案 —— 空白面板最容易糊弄过去），并且「取消」不是死按钮（点了要回对话）。
+   */
+  out.existingBox = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-agent-existing"]');
+    return {
+      count: box ? 1 : 0,
+      text: box ? (box.textContent ?? "").replace(/\s+/g, "") : "",
+    };
+  });
+  out.cancelBtn = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-agent-cancel"]');
+    return e ? { text: (e.textContent ?? "").trim(), disabled: e.hasAttribute("disabled") } : null;
+  });
+
   /* ── ② 文案与标签 ── */
   out.namePlaceholder = await page.evaluate(
     () => document.querySelector('[data-testid="wb-agent-name"]')?.getAttribute("placeholder") ?? "",
@@ -165,6 +183,34 @@ try {
     out.afterRestartLabel = await page.evaluate(
       () => document.querySelector('[data-testid^="wb-agent-pick-"]')?.textContent?.trim() ?? "",
     );
+
+    /*
+     * ── ④c 「我的智能体」那块的删除按钮 + 「取消」（2026-10-13 补，见 §208 零覆盖清单）──
+     *
+     * `wb-agent-del-*` 与 `wb-agent-cancel` 原来都没被任何脚本引用过。
+     * 断**后果**（不是"点了没报错"）：删了之后**行真的少了、磁盘上那条也真没了**；
+     * 「取消」点了真的要回到对话（`setView("home")`）。
+     */
+    const firstAgentId = (out.agentIdsOnDisk ?? [])[0] ?? "";
+    out.delBtn = firstAgentId ? await page.locator(`[data-testid="wb-agent-del-${firstAgentId}"]`).count() : 0;
+    out.delBtnTitle = firstAgentId
+      ? await page.evaluate(
+          (id) => document.querySelector(`[data-testid="wb-agent-del-${id}"]`)?.getAttribute("title") ?? "",
+          firstAgentId,
+        )
+      : "";
+    if (firstAgentId) {
+      await page.locator(`[data-testid="wb-agent-del-${firstAgentId}"]`).click();
+      await page.waitForTimeout(1200);
+    }
+    out.afterDeleteItems = await page.locator('[data-testid^="wb-agent-pick-"]').count();
+    out.afterDeleteDisk = (readAgents() ?? []).length;
+
+    await page.locator('[data-testid="wb-agent-cancel"]').click();
+    await page.waitForTimeout(1000);
+    out.cancelLeftPanel = (await page.locator('[data-testid="wb-agent"]').count()) === 0;
+    out.backHomeAfterCancel = (await page.locator('[data-testid="wb-composer"]').count()) > 0;
+
     await b.close();
   }
 } catch (e) {
@@ -179,6 +225,21 @@ try {
   if (!out.menuHasAgent) bad.push("+ 菜单里没有「创建 AI 智能体」");
   if (!out.opened) bad.push("点入口没进表单");
   if (out.panelTitle !== "创建 AI 智能体") bad.push(`标题与本体不符：${out.panelTitle}`);
+
+  /* 补的那组（零覆盖清单里的 `wb-agent-existing` / `wb-agent-del-*` / `wb-agent-cancel`，§208） */
+  if (out.existingBox?.count !== 1) bad.push("表单下没有「我的智能体」那一块");
+  if (!(out.existingBox?.text ?? "").includes("我的智能体")) bad.push(`「我的智能体」标题不对：${out.existingBox?.text}`);
+  if (!(out.existingBox?.text ?? "").includes("还没有，建一个试试")) {
+    bad.push(`一个智能体都没有时，那块应当如实说「还没有，建一个试试」：${out.existingBox?.text}`);
+  }
+  if (!out.cancelBtn) bad.push("表单上没有「取消」按钮");
+  else if (out.cancelBtn.disabled) bad.push("⭐「取消」被禁用了（点了出不去的假按钮）");
+  if (out.delBtn !== 1) bad.push("「我的智能体」里那条没有删除按钮");
+  if (out.delBtnTitle !== "删除") bad.push(`删除按钮的 title 不对：${out.delBtnTitle}`);
+  if (out.afterDeleteItems !== 0) bad.push(`删掉那条之后应当没有可选行了，实际 ${out.afterDeleteItems}`);
+  if (out.afterDeleteDisk !== 0) bad.push(`删了但磁盘上还留着：${out.afterDeleteDisk} 条`);
+  if (!out.cancelLeftPanel) bad.push("点了「取消」表单还在");
+  if (!out.backHomeAfterCancel) bad.push("点了「取消」没有回到对话");
   if (out.namePlaceholder !== "输入名称") bad.push(`名称占位与本体不符：${out.namePlaceholder}`);
   if (!(out.descPlaceholder ?? "").includes("你是一位经验丰富的英语老师")) {
     bad.push(`设定描述占位与本体不符：${out.descPlaceholder}`);

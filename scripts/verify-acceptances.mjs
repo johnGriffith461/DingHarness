@@ -80,7 +80,13 @@ const RECORDS_DIR = ".verify";
 const CASES = [
   ["accept-accountmenu.mjs", "账号菜单 + 外观设置子菜单（三选一）"],
   ["accept-chips.mjs", "输入区 chip（项目 / 按需确认点了要有反应）"],
-  ["accept-theme.mjs", "外观开关（切换 / 持久化 / 刷新记住）"],
+  /*
+   * ⚠️ `accept-theme.mjs` **2026-10-14 退役**（从这份清单摘掉，脚本本体留在原地并加了墓碑说明）：
+   * 它点的是设置弹窗里的「外观」行，而**外观早就挪到账号菜单的子菜单**（`wb-acct-appearance`）——
+   * 导航是死的（点了永远等不到），而它**没有判定**，于是长期 exit 0 混在批跑里。
+   * 它的判据（三选一 + 持久化 + **刷新后仍按选过的那档渲染**）已由 `accept-accountmenu.mjs` 接住。
+   */
+  // ["accept-theme.mjs", "外观开关（切换 / 持久化 / 刷新记住）"],
   ["accept-custom.mjs", "自定义能力（加 / 装 / 启用 / 取名字 / 跨重启）"],
   ["accept-media.mjs", "媒体画廊 + 自定义协议 + 视频通道"],
   ["accept-phone.mjs", "手机遥控（远端许可 / 活动状态 / 跨重启）"],

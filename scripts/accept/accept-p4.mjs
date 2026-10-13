@@ -140,4 +140,62 @@ const report = {};
   child.kill();
 }
 
-console.log(JSON.stringify(report, null, 2));
+console.log(JSON.stringify(report, null, 2));
+
+/*
+ * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"
+ * （没落盘、重启后内容没了、崩溃回退没生效，它都照样退 0）。
+ *
+ * 断的是 PLAN 4.2/4.3/4.5 那三件"**画布、状态栏、磁盘对不对得上**"的事：
+ *   ① 加完两个节点：磁盘上的 document.json 真有它们（节点数与类型对得上）、
+ *      目录里真有 rev-* 快照、状态栏不是"未保存/保存失败"
+ *      （自动保存由 ~800ms 防抖驱动，脚本等了 2600ms —— 这里只要求它**至少动起来了**，
+ *       不要求那一下正好是"已保存"：把 ack 的毫秒级竞态当判据会偶发假红）
+ *   ② 杀掉重开：画布上的节点数与类型和关掉之前一致 —— 上次的改动还在
+ *   ③ 伪造一份"未确认快照"（revision+5、只有 2 个节点）→ 再开必须**回退到确认版**
+ *      （脚本记下的 goodNodes），并且**弹出提示**（.canvas-toast 那条 is-recover，
+ *       不会自己消失 —— 只有点它才关）
+ *
+ * 为什么值得断：③ 是"崩溃/强杀之后用户的东西不丢"的唯一证据，①② 是它的前提；
+ * 而这三件事在界面上都只表现为"画布看着正常"。
+ */
+const bad = [];
+const first = report.first ?? {};
+const after = report.afterEdit ?? {};
+const second = report.second ?? {};
+const third = report.third ?? {};
+
+if (report.docOnDisk !== true) bad.push("加完节点磁盘上还没有 document.json（自动保存没落盘）");
+if ((report.revisionFiles ?? []).length < 1) bad.push("画布目录里一份 rev-* 历史快照都没有");
+if (report.diskDoc?.nodes !== after.nodes) {
+  bad.push(`磁盘上的节点数(${report.diskDoc?.nodes}) ≠ 画布上的(${after.nodes})`);
+}
+for (const want of ["whiteboard", "mermaid"]) {
+  if (!(report.diskDoc?.nodeTypes ?? []).includes(want)) {
+    bad.push(`磁盘上的文档里没有 ${want} 节点：${JSON.stringify(report.diskDoc?.nodeTypes)}`);
+  }
+}
+if (!/已保存|保存中/.test(String(after.saveText ?? ""))) {
+  bad.push(`加完节点后状态栏是「${after.saveText}」—— 自动保存没走起来或写盘失败`);
+}
+if (after.nodes !== (first.nodes ?? 0) + 2) {
+  bad.push(`加了两个节点，画布上却不是 +2：${first.nodes} → ${after.nodes}`);
+}
+
+if (second.nodes !== after.nodes) bad.push(`重启后节点数变了：${after.nodes} → ${second.nodes}`);
+if (JSON.stringify(second.types) !== JSON.stringify(after.types)) {
+  bad.push(`重启后节点类型对不上：${JSON.stringify(after.types)} vs ${JSON.stringify(second.types)}`);
+}
+
+if (third.nodes !== third.goodNodes) {
+  bad.push(
+    `伪造未确认快照之后没回退到确认版：画布上 ${third.nodes} 个节点，确认版是 ${third.goodNodes} 个（未确认的那 2 个该被丢掉）`,
+  );
+}
+if (!third.toast) bad.push("回退之后没有任何提示 —— 用户的东西被丢了他却不知道");
+if (bad.length) {
+  console.error("✗ 持久化（落盘 / 重启恢复 / 未确认快照回退）：" + bad.join("；"));
+  process.exitCode = 1;
+} else {
+  console.log("✓ 持久化：加的两个节点真落盘 / 重启后一模一样 / 伪造的未确认快照被回退到确认版且有提示");
+}

@@ -154,6 +154,57 @@ try {
       .map((x) => x.replace("wb-artcard-", "")),
   );
 
+  /*
+   * ── 右侧「对话摘要」面板（2026-10-13 补）──
+   *
+   * ⚠️ `wb-summary-tabs` / `wb-summary-desc` / `wb-artifacts` / `wb-artifact-*` /
+   * `wb-artifact-reveal-*` / `wb-artifact-note` / `wb-media-empty` 这一组
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 右侧面板正是"没人点过"的重灾区（同类事故：技能面板被挤成 59px，§201）。
+   *
+   * 断的是**后果**：
+   *   · 页签容器在且四个页签齐（少一个筛选就残了）；
+   *   · 那行说明逐字（`仅支持查看最近 50 条消息的产物`）；
+   *   · 产物容器在、里面有**这张卡**、每张卡都有「在文件夹里定位」；
+   *   · ⭐ **点这张还没落盘的卡** → 面板要说「这个产物还没落盘」（不假装打开）；
+   *   · 切到「图片与视频」→ 没有图片时给**空态文案**（不是一片空白）。
+   * ⚠️ **不点「在文件夹里定位」**：那会真去拉起资源管理器（污染这台机器）。
+   */
+  out.summaryTabs = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-summary-tabs"]');
+    return {
+      count: box ? 1 : 0,
+      labels: box ? Array.from(box.querySelectorAll("button")).map((b) => (b.textContent ?? "").trim()) : [],
+    };
+  });
+  out.summaryDesc = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-summary-desc"]')?.textContent?.trim() ?? "",
+  );
+  out.summaryArtifacts = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-artifacts"]');
+    return {
+      count: box ? 1 : 0,
+      cards: box
+        ? box.querySelectorAll('[data-testid^="wb-artifact-"]:not([data-testid^="wb-artifact-reveal-"])').length
+        : 0,
+      reveals: box ? box.querySelectorAll('[data-testid^="wb-artifact-reveal-"]').length : 0,
+    };
+  });
+  /* 点这张**没有 filePath** 的产物卡：面板应当如实说"还没落盘"，而不是假装打开了 */
+  await page.locator('[data-testid="wb-artifact-a-good"] .wb-artifact-main').click();
+  await page.waitForTimeout(600);
+  out.artifactNote = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-artifact-note"]')?.textContent?.trim() ?? "",
+  );
+  /* 切到「图片与视频」：这个数据目录里没有任何图片 → 空态文案（看完切回产物页签） */
+  await page.locator('[data-testid="wb-summary-tab-media"]').click();
+  await page.waitForTimeout(1500);
+  out.mediaEmpty = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-media-empty"]')?.textContent?.trim() ?? "",
+  );
+  await page.locator('[data-testid="wb-summary-tab-artifacts"]').click();
+  await page.waitForTimeout(500);
+
   out.errors = errors;
   out.shot = await shot(page, "artifacts.png");
 
@@ -193,6 +244,27 @@ try {
 
   /* 没报错 */
   if ((out.errors ?? []).length > 0) bad.push(`渲染期有报错：${JSON.stringify(out.errors)}`);
+
+  /* 补的那组：右侧「对话摘要」面板（零覆盖清单，§208） */
+  if (out.summaryTabs?.count !== 1) bad.push("右侧没有「对话摘要」的页签容器");
+  const wantTabs = ["产物", "浏览器", "图片与视频", "子智能体"];
+  for (const t of wantTabs) {
+    if (!(out.summaryTabs?.labels ?? []).includes(t)) {
+      bad.push(`摘要面板缺「${t}」页签：${JSON.stringify(out.summaryTabs?.labels)}`);
+    }
+  }
+  if (out.summaryDesc !== "仅支持查看最近 50 条消息的产物") {
+    bad.push(`摘要面板那行说明不对：${out.summaryDesc}`);
+  }
+  if (out.summaryArtifacts?.count !== 1) bad.push("摘要面板没有产物容器");
+  if (out.summaryArtifacts?.cards !== 1) bad.push(`产物容器里应当只有 1 张卡：${out.summaryArtifacts?.cards}`);
+  if (out.summaryArtifacts?.reveals !== 1) bad.push(`每张卡都该有「在文件夹里定位」：${out.summaryArtifacts?.reveals}`);
+  if (out.artifactNote !== "这个产物还没落盘") {
+    bad.push(`点没落盘的产物卡，面板该说「这个产物还没落盘」，实际：${JSON.stringify(out.artifactNote)}`);
+  }
+  if (!(out.mediaEmpty ?? "").includes("还没有图片或视频")) {
+    bad.push(`没有图片时的空态文案不对：${JSON.stringify(out.mediaEmpty)}`);
+  }
 
   if (bad.length) {
     console.error("✗ " + bad.join("；"));

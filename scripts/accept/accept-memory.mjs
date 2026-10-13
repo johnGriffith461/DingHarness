@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { freshDir, killTree, shot } from "./harness.mjs";
+import path from "node:path";
+import { freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 验收：记忆（对应本体 `chat/memory/list|clear|delete`）。
@@ -64,6 +65,15 @@ try {
     text: document.querySelector(".wb-memory-text")?.textContent ?? null,
   }));
 
+  /*
+   * ⚠️ 2026-10-13 补：`wb-memory-list` / `wb-memory-item-*` / `wb-memory-clear` 这三个 testid
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 上面数的是 `.wb-memory-item`（class），**列表容器本身**没人看过 —— 容器没渲染、行悬空
+   * 也不会红。先钉住容器与行的对应关系。
+   */
+  out.listBox = await page.locator('[data-testid="wb-memory-list"]').count();
+  out.listItems = await page.locator('[data-testid^="wb-memory-item-"]').count();
+
   // 刷新 —— 关键一步
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
@@ -92,6 +102,33 @@ try {
     empty: document.querySelectorAll('[data-testid="wb-memory-empty"]').length,
   }));
 
+  /*
+   * ── 「全部清除」要真清（2026-10-13 补，见 §208 零覆盖清单）──
+   *
+   * 断**后果**（不是"点了没报错"）：再加一条 → 点「全部清除」→ 界面空 + **磁盘也空**
+   * （这条 store 是"先改本地再落盘"，所以两边都要看）。
+   */
+  await page.locator('[data-testid="wb-memory-input"]').fill("第二条：以后叫我老板");
+  await page.locator('[data-testid="wb-memory-add"]').click();
+  await page.waitForTimeout(900);
+  out.beforeClear = await page.locator('[data-testid^="wb-memory-item-"]').count();
+  if (out.beforeClear > 0) {
+    await page.locator('[data-testid="wb-memory-clear"]').click();
+    await page.waitForTimeout(1200);
+  }
+  out.afterClear = await page.evaluate(() => ({
+    items: document.querySelectorAll('[data-testid^="wb-memory-item-"]').length,
+    empty: document.querySelectorAll('[data-testid="wb-memory-empty"]').length,
+  }));
+  out.diskAfterClear = (() => {
+    try {
+      const d = readStoreFile(path.join(DATA, "memory.json"));
+      return Array.isArray(d?.entries) ? d.entries.length : Array.isArray(d) ? d.length : null;
+    } catch {
+      return null;
+    }
+  })();
+
   // 截图是留给人看的证据，不是判定依据 —— 偶发超时不该把功能全过的验收拖红。
   out.shot = await shot(page, "memory.png");
   await browser.close();
@@ -106,6 +143,14 @@ try {
   if ((out.afterAdd?.items ?? 0) !== 1) bad.push("加完没有 1 条");
   if ((out.afterReload?.items ?? 0) !== 1) bad.push("刷新后丢了（关键）");
   if ((out.afterDrop?.items ?? -1) !== 0) bad.push("删完还剩");
+
+  /* 补的那组（零覆盖清单里的列表容器 / 行 / 全部清除，§208） */
+  if (out.listBox !== 1) bad.push("记忆面板里没有列表容器（wb-memory-list）");
+  if (out.listItems !== 1) bad.push(`加完列表里应有 1 行，实际 ${out.listItems}`);
+  if (out.beforeClear !== 1) bad.push(`「全部清除」之前应当有 1 条，实际 ${out.beforeClear}`);
+  if ((out.afterClear?.items ?? -1) !== 0) bad.push(`点了「全部清除」列表里还剩 ${out.afterClear?.items} 条`);
+  if ((out.afterClear?.empty ?? 0) !== 1) bad.push("全部清除之后没有回到空态");
+  if (out.diskAfterClear !== 0) bad.push(`⭐ 全部清除没落盘（磁盘上还有 ${out.diskAfterClear} 条）`);
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
     console.error("✗ " + bad.join("；"));

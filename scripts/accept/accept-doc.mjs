@@ -69,6 +69,23 @@ try {
   out.panelOpened = (await page.locator('[data-testid="wb-doc"]').count()) > 0;
 
   /* ── ② 文案与本体一致 ── */
+  /*
+   * ⚠️ 2026-10-13 补：`wb-doc-list` / `wb-doc-new` / `wb-doc-export` / `wb-doc-delete`
+   * 这几个 testid **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，
+   * 见 HANDOFF §208 的零覆盖清单）—— 正是"没人点过 ⇒ 烂了也没人知道"的那一类（§201）。
+   * 断**后果**：列表在且真有行、三颗按钮在且**没被禁用**、title 说的就是它该干的事。
+   * ⚠️ **不点「导出文件」**：它走 `workbench.saveArtifact`（会弹系统保存框，把脚本挂住）。
+   */
+  out.docListCount = await page.locator('[data-testid="wb-doc-list"]').count();
+  out.docItemCount = await page.locator('[data-testid^="wb-doc-item-"]').count();
+  out.docHeadBtns = await page.evaluate(() =>
+    ["wb-doc-new", "wb-doc-export", "wb-doc-delete"].map((id) => {
+      const e = document.querySelector(`[data-testid="${id}"]`);
+      return e
+        ? { id, title: e.getAttribute("title") ?? "", disabled: e.hasAttribute("disabled") }
+        : { id, missing: true };
+    }),
+  );
   out.titlePlaceholder = await page.evaluate(
     () => document.querySelector('[data-testid="wb-doc-title"]')?.getAttribute("placeholder") ?? "",
   );
@@ -100,6 +117,21 @@ try {
   out.copyNote = await page.evaluate(
     () => document.querySelector('[data-testid="wb-doc-note"]')?.textContent?.trim() ?? "",
   );
+
+  /*
+   * ── ④b 「插入附件」在**云盘是空的时候**要如实说（2026-10-13 补）──
+   *
+   * `wb-doc-attach-empty` 原来没有脚本引用过。这条数据目录里没有任何云盘文件，
+   * 所以点开「插入附件」应当看到空态 —— 断的是**文案逐字**（空面板最容易被做成一堆空白）。
+   * 看完再点一次收起弹层，免得它挡住后面的操作。
+   */
+  await page.locator('[data-testid="wb-doc-attach"]').click();
+  await page.waitForTimeout(600);
+  out.attachEmptyText = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-doc-attach-empty"]')?.textContent?.trim() ?? "",
+  );
+  await page.locator('[data-testid="wb-doc-attach"]').click();
+  await page.waitForTimeout(300);
 
   /* ── ⑤ 历史记录 + 回到此版本 ── */
   out.historyHiddenFirst = (await page.locator('[data-testid="wb-doc-history"]').count()) === 0;
@@ -153,6 +185,32 @@ try {
     }
     out.afterRestartTitle = await page.locator('[data-testid="wb-doc-title"]').inputValue();
     out.afterRestartBody = await page.locator('[data-testid="wb-doc-body"]').inputValue();
+
+    /*
+     * ── ⑤b 删除 → 真的回到空态，空态那颗按钮也真能开工（2026-10-13 补）──
+     *
+     * `wb-doc-delete` / `wb-doc-empty` / `wb-doc-create` 三个 testid 原来都没被点过（§208）。
+     * `remove()` 把当前这篇删掉后 `activeId` 变 null → 渲染的是**空态**那一支，
+     * 所以这一下同时断了三件事：
+     *   ① 删除真的生效（列表里那篇没了）；
+     *   ② 空态出来且文案逐字（不是一片空白）；
+     *   ③ 空态里的「新建文档」是**真能点**的（点下去又开出一篇来）——
+     *      「看起来能点、点了没反应」是最坏的一种（手册那条"杜绝假按钮"）。
+     */
+    await page.locator('[data-testid="wb-doc-delete"]').click();
+    await page.waitForTimeout(900);
+    out.emptyShown = (await page.locator('[data-testid="wb-doc-empty"]').count()) === 1;
+    out.emptyText = await page.evaluate(
+      () => document.querySelector('[data-testid="wb-doc-empty"]')?.textContent?.replace(/\s+/g, "") ?? "",
+    );
+    out.deletedGone = (await page.locator('[data-testid^="wb-doc-item-"]', { hasText: "周报草稿" }).count()) === 0;
+    out.createBtnText = await page.evaluate(
+      () => document.querySelector('[data-testid="wb-doc-create"]')?.textContent?.trim() ?? "",
+    );
+    await page.locator('[data-testid="wb-doc-create"]').click();
+    await page.waitForTimeout(1200);
+    out.reopenedBody = await page.locator('[data-testid="wb-doc-body"]').count();
+
     await b.close();
   }
 } catch (e) {
@@ -171,6 +229,35 @@ try {
   if (out.titlePlaceholder !== "添加标题") bad.push(`标题占位与本体不符：${out.titlePlaceholder}`);
   if (out.bodyPlaceholder !== "记录你的想法") bad.push(`正文占位与本体不符：${out.bodyPlaceholder}`);
   if (!(out.status ?? "").includes("已保存")) bad.push(`状态不对：${out.status}`);
+
+  /* 补的那组（零覆盖清单里的列表与三颗顶部按钮，§208） */
+  if (out.docListCount !== 1) bad.push("左侧没有「文档」列表");
+  if ((out.docItemCount ?? 0) < 1) bad.push("列表里一条文档都没有（当前这篇应当也在列表里）");
+  const wantHead = { "wb-doc-new": "新建文档", "wb-doc-export": "导出文件", "wb-doc-delete": "删除" };
+  for (const [id, title] of Object.entries(wantHead)) {
+    const row = (out.docHeadBtns ?? []).find((b) => b.id === id);
+    if (!row || row.missing) bad.push(`顶部少了这颗按钮：${id}`);
+    else {
+      if (row.disabled) bad.push(`⭐ ${id} 被禁用了（点了没反应的假按钮）`);
+      if (row.title !== title) bad.push(`${id} 的 title 应当是「${title}」，实际「${row.title}」`);
+    }
+  }
+  if (out.attachEmptyText !== "云盘里还没有文件") {
+    bad.push(`云盘为空时「插入附件」的空态文案不对：${JSON.stringify(out.attachEmptyText)}`);
+  }
+  if (!out.emptyShown) bad.push("删掉当前文档后没有回到空态");
+  /*
+   * ⚠️ 注意这里比的是**实际文案**（"开启你的第一篇AI文档" —— 正文里 AI 前后**没有空格**），
+   * 而且容器 textContent 会把旁边的「新建文档」按钮一起拼进来。
+   * 第一版按"逐字全等"断（还带着空格），于是读到 `开启你的第一篇AI文档新建文档` 就红 ——
+   * **是断言选错了元素/口径，不是产品坏了**。这里用 includes + 实际文案。
+   */
+  if (!(out.emptyText ?? "").includes("开启你的第一篇AI文档")) {
+    bad.push(`空态文案不对：${JSON.stringify(out.emptyText)}`);
+  }
+  if (!out.deletedGone) bad.push("删掉的文档还在列表里");
+  if (!(out.createBtnText ?? "").includes("新建文档")) bad.push(`空态里那颗按钮文案不对：${out.createBtnText}`);
+  if (!out.reopenedBody) bad.push("⭐ 空态里的「新建文档」点了没开出新文档（假按钮）");
   if (JSON.stringify(out.actions) !== JSON.stringify(["缩写", "扩写", "润色", "总结概括"])) {
     bad.push(`操作条与本体不符：${JSON.stringify(out.actions)}`);
   }

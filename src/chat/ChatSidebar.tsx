@@ -209,11 +209,16 @@ export default function ChatSidebar() {
         ) : null}
         {active.map((m) => (
           <div key={m.id} className={`chat-msg ${m.role}${m.status === "error" ? " is-error" : ""}`}>
-            {m.role === "assistant" && m.status === "streaming" ? (
-              <span className="chat-cursor" aria-hidden />
-            ) : null}
             <div className="chat-bubble">
               {m.content || (m.status === "streaming" ? "…" : "")}
+              {/*
+                ⚠️ 2026-10-14 挪进来的：光标原来挂在这个 `<div className="chat-msg">`（column flex）
+                的**第一个子位置** —— 于是它**另起一行挂在气泡上方**，看起来像页面坏了。
+                光标属于"正文的末尾"，所以放在正文之后、气泡里面。
+              */}
+              {m.role === "assistant" && m.status === "streaming" ? (
+                <span className="chat-cursor" aria-hidden />
+              ) : null}
               {m.status === "error" ? (
                 <div className="chat-msg-error">
                   <AlertTriangle size={11} />

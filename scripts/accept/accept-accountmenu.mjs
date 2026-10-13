@@ -150,6 +150,18 @@ try {
   await page.waitForTimeout(900);
   out.afterPickLight = await state();
 
+  /*
+   * ⭐ 刷新之后**仍按选过的那一档渲染**（2026-10-14 从退役的 `accept-theme.mjs` 移过来的覆盖）。
+   *
+   * 为什么移过来：那条脚本点的是设置里的「外观」行，而**外观早就挪到账号菜单子菜单**了
+   * —— 它的导航是死的（点了永远等不到），于是它一直**读不到任何状态**。
+   * 它的判据本身是对的（"选了之后刷新还在"），所以把这条**独有覆盖**搬到这里，脚本退役。
+   */
+  await page.reload();
+  await page.waitForTimeout(1200);
+  out.afterReload = await state();
+  out.reloadKeptLight = out.afterReload.isDark === false && out.afterReload.stored === "light";
+
   await browser.close();
 } catch (e) {
   out.error = String(e).slice(0, 240);
@@ -170,11 +182,14 @@ try {
     bad.push(`⭐ 这些"壳"disabled 了却没说为什么（title 为空）：${out.shellNoReason.join(" / ")}`);
   }
   if ((out.realDisabled ?? []).length) bad.push(`⭐ 这些是真入口却被禁掉了：${out.realDisabled.join(" / ")}`);
+  if (!out.reloadKeptLight) {
+    bad.push(`⭐ 选了浅色之后刷新没保持：isDark=${out.afterReload?.isDark} stored=${out.afterReload?.stored}`);
+  }
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
     console.error("✗ " + bad.join("；"));
     process.exitCode = 1;
   } else {
-    console.log("✓ 账号菜单九项齐全 / 五个壳都 disabled 且有说明 / 三个真入口可用 / 外观三选一与持久化成立");
+    console.log("✓ 账号菜单九项齐全 / 五个壳都 disabled 且有说明 / 三个真入口可用 / 外观三选一 + 刷新后保持");
   }
 }

@@ -102,3 +102,49 @@ console.log(JSON.stringify(report, null, 2));
 
 await browser.close();
 child.kill();
+
+/*
+ * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"
+ * （复制没进剪贴板、粘贴没多出节点、甚至把别人的文本吃进去，它都照样退 0）。
+ *
+ * 断的是 PLAN 4.6 那三件后果：
+ *   · 先真的选中了 n1 + n2 —— 否则后面几步全是空转（"静默少测"最常见的样子）
+ *   · Ctrl+C 之后剪贴板里**是本程序的载荷**：开头 80 个字符里带
+ *     `dsh-canvas-graph/v1` 这个格式标记（唯一的识别依据，见 `src/canvas/clipboard.ts`）
+ *   · Ctrl+V 之后画布上正好**多出这两个节点**，原来的一个都没丢，且 id **没有重复**
+ *     —— 粘贴会重排 id；不重排就会出现两个同 id 的节点，看着"多了一个"，其实是坏的
+ *   · 剪贴板里放别人的文本再 Ctrl+V：**一个字都不许吃进去**（节点数不变），
+ *     并且如实说一句「剪贴板里不是画布内容」（逐字）
+ *
+ * 为什么值得断：剪贴板是跨窗口、跨进程的入口，测不出来就只剩"手感"；
+ * 而"误吃别人的文本"这种事在界面上只表现为"莫名其妙多了一个节点"。
+ */
+const bad = [];
+const before = report.idsBefore ?? [];
+const after = report.idsAfterPaste ?? [];
+
+if ((report.selected ?? []).join(",") !== "n1,n2") {
+  bad.push(`没选中 n1 + n2（实际 ${JSON.stringify(report.selected)}）—— 后面几步都没有对象`);
+}
+if (report.clipboardHead?.ok !== true) {
+  bad.push(`读不到剪贴板：${JSON.stringify(report.clipboardHead?.error ?? report.clipboardHead)}`);
+} else if (!String(report.clipboardHead.head ?? "").includes("dsh-canvas-graph/v1")) {
+  bad.push(`剪贴板里不是画布载荷（头 80 个字符里没有格式标记）：${JSON.stringify(report.clipboardHead.head)}`);
+}
+if (after.length !== before.length + 2) bad.push(`粘贴后节点数不是 +2：${before.length} → ${after.length}`);
+if (new Set(after).size !== after.length) bad.push(`粘贴后有重复的节点 id：${JSON.stringify(after)}（id 没重排）`);
+for (const id of before) {
+  if (!after.includes(id)) bad.push(`粘贴把原来的节点 ${id} 弄丢了`);
+}
+if (report.nodesAfterForeign !== after.length) {
+  bad.push(`剪贴板里是别人的文字，节点数却变了：${after.length} → ${report.nodesAfterForeign}（误吃了别人的文本）`);
+}
+if (!String(report.toastForeign ?? "").includes("剪贴板里不是画布内容")) {
+  bad.push(`粘别人的文本时没有如实提示：${JSON.stringify(report.toastForeign)}`);
+}
+if (bad.length) {
+  console.error("✗ 画布剪贴板：" + bad.join("；"));
+  process.exitCode = 1;
+} else {
+  console.log("✓ 画布剪贴板：复制进剪贴板的是带标记的载荷 / 粘贴 +2 且 id 重排不重复 / 别人的文本一个字没吃进去且有提示");
+}

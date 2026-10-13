@@ -141,6 +141,24 @@ try {
   out.recentTitles = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-testid^="wb-reader-recent-"]')).map((e) => (e.textContent ?? "").trim()),
   );
+
+  /*
+   * ⚠️ 2026-10-13 补：`wb-reader-saved` 与 `wb-reader-desc` 这两个 testid
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 断**后果**：收进最近阅读之后那句「已收进最近阅读」**真的出现**（不是静默成功）；
+   * 每个页签下那行说明**非空**（空说明等于这个页签没人解释它是干什么的）。
+   */
+  out.savedHint = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-reader-saved"]')?.textContent?.trim() ?? "",
+  );
+  out.descByTab = {};
+  for (const t of ["outline", "page", "chart"]) {
+    await page.locator(`[data-testid="wb-reader-tab-${t}"]`).click();
+    await page.waitForTimeout(300);
+    out.descByTab[t] = await page.evaluate(
+      () => document.querySelector('[data-testid="wb-reader-desc"]')?.textContent?.trim() ?? "",
+    );
+  }
   await page.locator('[data-testid="wb-reader-sidebar-toggle"]').click();
   await page.waitForTimeout(400);
   out.sidebarHidden = (await page.locator('[data-testid="wb-reader-side"]').count()) === 0;
@@ -175,6 +193,20 @@ try {
     out.reopenedTitle = await page.evaluate(
       () => document.querySelector('[data-testid="wb-reader-title"]')?.textContent?.trim() ?? "",
     );
+
+    /*
+     * ⚠️ `wb-reader-forget-*`（最近阅读里那条「移除」）原来也没有脚本点过（§208）。
+     * 断**后果**：点下去那一行**真的没了**，并且落盘的那份也少了（重启后不会再冒出来）。
+     */
+    const forgetId = await page.evaluate(
+      () => document.querySelector('[data-testid^="wb-reader-forget-"]')?.getAttribute("data-testid") ?? "",
+    );
+    out.forgetId = forgetId;
+    if (forgetId) {
+      await page.locator(`[data-testid="${forgetId}"]`).click();
+      await page.waitForTimeout(900);
+    }
+    out.recentAfterForget = await page.locator('[data-testid^="wb-reader-recent-"]').count();
     await b.close();
   }
 } catch (e) {
@@ -222,6 +254,16 @@ try {
     bad.push(`重开后最近阅读没恢复：${JSON.stringify(out.recentAfterRestart)}`);
   }
   if (!(out.reopenedTitle ?? "").includes("季度复盘")) bad.push(`点最近阅读没打开内容：${out.reopenedTitle}`);
+
+  /* 补的那组（零覆盖清单里的「已收进最近阅读」/ 页签说明 / 移除，§208） */
+  if (out.savedHint !== "已收进最近阅读") bad.push(`收进之后那句提示不对：${JSON.stringify(out.savedHint)}`);
+  for (const t of ["outline", "page", "chart"]) {
+    if (!(out.descByTab?.[t] ?? "").trim()) bad.push(`「${t}」页签下那行说明是空的`);
+  }
+  const descs = Object.values(out.descByTab ?? {});
+  if (new Set(descs).size !== descs.length) bad.push(`三个页签的说明应当各不相同：${JSON.stringify(out.descByTab)}`);
+  if (!out.forgetId) bad.push("最近阅读那一行上没有「移除」按钮（wb-reader-forget-*）");
+  if (out.recentAfterForget !== 0) bad.push(`点了「移除」那一行还在：${out.recentAfterForget}`);
 
   if (bad.length) {
     console.error("✗ " + bad.join("；"));

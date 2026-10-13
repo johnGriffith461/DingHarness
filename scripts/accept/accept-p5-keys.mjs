@@ -101,3 +101,51 @@ report.toolAfterEscape = await tool();
 console.log(JSON.stringify(report, null, 2));
 await browser.close();
 child.kill();
+
+/*
+ * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"
+ * （快捷键没接上、标记清不掉，它都照样退 0）。
+ *
+ * 断的是这几个键**真的做了事**（全是脚本自己已经在读的量）：
+ *   · 先真的选中了一个节点（否则 Ctrl+D 那一步没有对象，+1 无从谈起）
+ *   · Ctrl+D：节点 +1（复制到同一处，所以只能数个数）
+ *   · Ctrl+M：画布根的 `data-marker-tool` 从 off 变成 rect —— 标记模式真打开了
+ *   · 于是在标记模式下画一笔：标记数 1；Ctrl+Shift+M：标记数 0
+ *     （前一条是"模式打开了"的证据，后一条是"清空真清了"的证据，互为对照）
+ *   · Esc：`data-marker-tool` 回到 off
+ *   · 快捷键说明面板里**列着它要测的这三条**（Ctrl+D / Ctrl+M / Ctrl+Shift+M）
+ *     —— 面板与实现是两张表，漏一条就有一半人不知道有这个键
+ *
+ * 为什么值得断：快捷键最容易"注册了但没接上"（匹配表里少一条、或处理器里忘了
+ * preventDefault），而界面上什么都看不出来 —— 只有做一遍、数一数才知道。
+ */
+const bad = [];
+/** 从「标记 3」这类文案里取出数字。 */
+const countOf = (s) => {
+  const m = /(\d+)/.exec(String(s ?? ""));
+  return m ? Number(m[1]) : NaN;
+};
+
+if (!(report.selectedBefore >= 1)) bad.push("点选之后一个节点都没选中（Ctrl+D 那一步没有对象）");
+const dup = report.duplicate ?? {};
+if (dup.after !== dup.before + 1) bad.push(`Ctrl+D 没让节点 +1：${dup.before} → ${dup.after}`);
+if (report.toolBefore !== "off") bad.push(`起手 data-marker-tool 不是 off：${JSON.stringify(report.toolBefore)}`);
+if (report.toolAfter !== "rect") bad.push(`Ctrl+M 没打开标记模式（data-marker-tool）：${JSON.stringify(report.toolAfter)}`);
+if (countOf(report.marketCountAfterDraw) !== 1) {
+  bad.push(`标记模式下画了一笔，标记数不是 1：${JSON.stringify(report.marketCountAfterDraw)}`);
+}
+if (countOf(report.markerCountAfterClear) !== 0) {
+  bad.push(`Ctrl+Shift+M 没清空标记：${JSON.stringify(report.markerCountAfterClear)}`);
+}
+if (report.toolAfterEscape !== "off") bad.push(`Esc 没退出标记模式：${JSON.stringify(report.toolAfterEscape)}`);
+for (const want of ["Ctrl+D", "Ctrl+M", "Ctrl+Shift+M"]) {
+  if (!(report.cheatsheetKeys ?? []).includes(want)) {
+    bad.push(`快捷键说明面板里没有 ${want}：${JSON.stringify(report.cheatsheetKeys)}`);
+  }
+}
+if (bad.length) {
+  console.error("✗ 画布快捷键：" + bad.join("；"));
+  process.exitCode = 1;
+} else {
+  console.log("✓ 画布快捷键：Ctrl+D 真复制 / Ctrl+M 真开标记模式且画得出、Ctrl+Shift+M 真清空 / Esc 退出 / 面板列全");
+}

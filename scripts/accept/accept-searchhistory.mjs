@@ -161,6 +161,25 @@ try {
     await page.waitForTimeout(800);
     out.wordsAfterRestart = await historyWords(page, "skills");
 
+    /*
+     * ── ⑦a2 单条删除（2026-10-13 补）──
+     *
+     * ⚠️ `wb-history-forget-*`（每条历史右边那个 ×）**原来没有任何脚本点过**
+     * （`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+     * 下面验的「清空全部」是另一条路 —— 断**后果**：点掉一个词之后
+     * **它没了、另一个还在**，且磁盘同步（不是只改内存）。
+     */
+    out.wordsBeforeForget = out.wordsAfterRestart;
+    out.forgetTarget = (out.wordsAfterRestart ?? []).includes("个股")
+      ? "个股"
+      : ((out.wordsAfterRestart ?? [])[0] ?? "");
+    if (out.forgetTarget) {
+      await page.locator(`[data-testid="wb-history-forget-skills-${out.forgetTarget}"]`).click();
+      await page.waitForTimeout(800);
+    }
+    out.wordsAfterForget = await historyWords(page, "skills");
+    out.diskAfterForget = readFile();
+
     /* ── ⑦b 清空全部 → 重开也是空的 ── */
     await page.locator('[data-testid="wb-history-clear-skills"]').click();
     await page.waitForTimeout(800);
@@ -217,6 +236,20 @@ try {
 
   if (JSON.stringify(out.wordsAfterRestart) !== JSON.stringify(["个股", "估值"])) {
     bad.push(`⭐ 重开后历史丢了：${JSON.stringify(out.wordsAfterRestart)}`);
+  }
+
+  /* 补的那条（零覆盖清单里的单条删除 `wb-history-forget-*`，§208） */
+  if (!out.forgetTarget) bad.push("重开后没有可删的历史词（单条删除没验成）");
+  else {
+    if ((out.wordsAfterForget ?? []).includes(out.forgetTarget)) {
+      bad.push(`点了 × 之后那个词还在：${JSON.stringify(out.wordsAfterForget)}`);
+    }
+    if ((out.wordsAfterForget ?? []).length !== (out.wordsBeforeForget ?? []).length - 1) {
+      bad.push(`单条删除应只少一条：${JSON.stringify(out.wordsBeforeForget)} → ${JSON.stringify(out.wordsAfterForget)}`);
+    }
+    if ((out.diskAfterForget?.skills ?? []).includes(out.forgetTarget)) {
+      bad.push(`⭐ 单条删除没落到磁盘：${JSON.stringify(out.diskAfterForget?.skills)}`);
+    }
   }
   if (out.stripAfterClear) bad.push("点了清空之后历史条还在");
   if ((out.diskAfterClear?.skills ?? ["x"]).length !== 0) bad.push("清空没落到磁盘");

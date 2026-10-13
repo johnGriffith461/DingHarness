@@ -93,3 +93,66 @@ console.log(JSON.stringify(report, null, 2));
 
 await browser.close();
 child.kill();
+
+/*
+ * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"。
+ *
+ * 断的是**版本历史这一路的四件后果**，全部落在脚本自己已经在读的字段上：
+ *   ① 面板真开着，顶部那行写着「最新版本」（逐字，见 `VersionHistoryPanel.tsx`），
+ *      历史里真的列出了磁盘上的修订，且"预览按钮数 == 列出的修订数"
+ *   ② 点「预览」看到的是**点的那一版**，且预览里报的节点数 == 点「恢复此版本」之后
+ *      画布上的节点数 —— "说的是哪一版"和"真换上去的内容"是同一版
+ *   ③ 恢复后节点数**变少**（造过两个节点，回到更早的一版就该少）—— 恢复真的生效了
+ *   ④ 恢复**不回退修订号**（把老内容写成一次更大的修订），且这次恢复自己进了历史列表
+ *      —— 修订号必须单调，否则后续自动保存会被"修订号不能倒退"拒掉、界面卡在"保存失败"
+ *
+ * 为什么值得断：恢复错了（没换内容 / 换错了版本 / 把号改回去）在界面上都只是
+ * "看着回去了"，只有把预览里的节点数、DOM 节点数、磁盘修订号摆在一起才分得清。
+ */
+const bad = [];
+/** 「第 N 次修订」→ N（面板文案格式见 VersionHistoryPanel.tsx）。 */
+const revNums = (list) =>
+  (list ?? [])
+    .map((s) => Number(/第 (\d+) 次修订/.exec(String(s ?? ""))?.[1] ?? NaN))
+    .filter((n) => Number.isFinite(n));
+
+if (report.panelOpen !== 1) bad.push("版本历史面板没打开（下面那些字段全是空的）");
+if (report.latestLabel !== "最新版本") {
+  bad.push(`面板顶部那一行不是「最新版本」：${JSON.stringify(report.latestLabel)}`);
+}
+const listed = revNums(report.revisions);
+if (listed.length === 0) bad.push(`历史里一条修订都没列出来：${JSON.stringify(report.revisions)}`);
+if (report.previewButtons !== (report.revisions ?? []).length) {
+  bad.push(`预览按钮数与列出的修订数对不上：${report.previewButtons} vs ${(report.revisions ?? []).length}`);
+}
+
+const previewRev = Number(/第 (\d+) 次修订/.exec(report.previewText ?? "")?.[1] ?? NaN);
+const previewNodes = Number(/节点 (\d+) 个/.exec(report.previewText ?? "")?.[1] ?? NaN);
+if (previewRev !== Number(report.oldestRev)) {
+  bad.push(`预览的不是点的那一版：预览第 ${previewRev} 次 / 按钮第 ${report.oldestRev} 次`);
+}
+if (!Number.isFinite(previewNodes)) {
+  bad.push(`预览里读不到节点数：${JSON.stringify(report.previewText)}`);
+}
+if (report.afterRestoreNodes !== previewNodes) {
+  bad.push(
+    `恢复后画布上的节点数(${report.afterRestoreNodes}) ≠ 预览里那一版的节点数(${previewNodes}) —— 「恢复此版本」没真的换内容`,
+  );
+}
+if (!(report.afterRestoreNodes < report.currentNodes)) {
+  bad.push(`恢复后节点数没变少（${report.afterRestoreNodes} vs 造完两个节点后的 ${report.currentNodes}）—— 恢复没生效`);
+}
+if (!(report.disk?.revision > Number(report.oldestRev))) {
+  bad.push(`恢复后磁盘修订号没往前走：disk.revision=${report.disk?.revision}（恢复的是第 ${report.oldestRev} 次）`);
+}
+if (!revNums(report.revisionsAfterRestore).includes(report.disk?.revision)) {
+  bad.push(
+    `这次恢复没进历史列表：磁盘上是第 ${report.disk?.revision} 次修订，列表里只有 ${JSON.stringify(report.revisionsAfterRestore)}`,
+  );
+}
+if (bad.length) {
+  console.error("✗ 版本历史：" + bad.join("；"));
+  process.exitCode = 1;
+} else {
+  console.log("✓ 版本历史：面板列出磁盘上的修订 / 预览说的那一版就是恢复上去的内容 / 恢复不回退修订号且自己进历史");
+}

@@ -29,14 +29,21 @@
   --bg-2: #f4f5f7;
   --line: #eceef1;
   --fg: #1b1d21;
-  --fg-dim: #9aa1ab;
+  /*
+   * 2026-10-14：这三档**按 WCAG 公式算过**。原来 2.61 / 1.91 / 1.70:1 全不达标 ——
+   * 表现是空态、时间戳、占位文字白得看不见。现在：
+   *   --fg-dim   4.97:1（正文级次要文字，AA）
+   *   --fg-faint 4.74:1（占位、时间戳，AA）
+   *   --fg-ghost 4.10:1（只用于尾巴/装饰：过 3:1 的 UI 底线，不做正文）
+   */
+  --fg-dim: #667085;
   color-scheme: light;
 
   --line-strong: #e6e8ec;
-  --fg-faint: #b6bcc4;
+  --fg-faint: #70737c;
   --fg-2: #6b7280;
   --fg-3: #4b5563;
-  --fg-ghost: #c2c7ce;
+  --fg-ghost: #767e8b;
   /* 禁用态专用：弱但可读（不参与 §71 的保真锁定） */
   --fg-disabled: #6b7280;
   --accent: #2f6bff;
@@ -199,7 +206,7 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--fg);
-  outline: none;
+  /* 2026-10-14：删掉 outline:none（它压掉全局 :focus-visible 焦点环） */
   text-align: center;
   min-width: 200px;
 }

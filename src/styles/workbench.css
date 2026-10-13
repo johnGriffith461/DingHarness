@@ -318,7 +318,7 @@
 .wb-question-input {
   flex: 1;
   border: 0;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
   font-size: 13px;
   font-family: inherit;
   color: var(--fg);
@@ -535,7 +535,8 @@
   color: var(--fg-2);
 }
 
-.wb-summary-empty { padding: 10px 0 14px; font-size: 12px; color: var(--fg-ghost); }
+/* 空态是正文级信息（用户真的在读它）：ghost 那档不够 → 提到 faint（4.74:1） */
+.wb-summary-empty { padding: 10px 0 14px; font-size: 12px; color: var(--fg-faint); }
 
 /* ---------- 设置弹窗 ---------- */
 
@@ -944,7 +945,7 @@
   font-size: 13px;
   background: var(--bg);
   color: var(--fg);
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
   resize: vertical;
 }
 
@@ -964,7 +965,7 @@
   font-size: 12.5px;
   background: var(--bg);
   color: var(--fg);
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
 }
 
 .wb-sched-num { width: 68px; }

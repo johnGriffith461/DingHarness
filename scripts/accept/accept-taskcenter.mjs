@@ -102,6 +102,27 @@ try {
   );
   out.hasExploreServices = (await page.locator('[data-testid^="wb-center-service-"]').count()) > 0;
 
+  /*
+   * ⚠️ 2026-10-13 补：`wb-center-explore` 这个 testid **原来没有任何脚本引用过**
+   * （`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）——
+   * 上面那条只数了服务项，**容器本身**没人看过。断**后果**：容器在、里面有服务项、
+   * 且「发现更多服务」那一块的标题逐字（一个空壳区块是最容易被放烂的形态）。
+   *
+   * 另外两条（`wb-center-empty` 空态、`wb-center-confirm-ok/cancel` 确认框）**没在这里补**：
+   *   · 空态要"一条任务都没有"的数据目录 —— 见新脚本 `accept-emptystates.mjs`；
+   *   · 确认框只在任务**真在跑**时才弹（`needsStopConfirm`），而落盘过的任务会被
+   *     `normalizeTask` 标成 failed —— 要造出那个窗口必须先真跑一轮，属于"要模型"那一类。
+   */
+  out.exploreBox = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-center-explore"]');
+    return {
+      count: box ? 1 : 0,
+      heading: box?.querySelector("h3")?.textContent?.trim() ?? "",
+      services: box ? box.querySelectorAll('[data-testid^="wb-center-service-"]').length : 0,
+      width: box ? Math.round(box.getBoundingClientRect().width) : null,
+    };
+  });
+
   /* ── ② 分块正确 ── */
   out.ongoingTitles = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-testid="wb-center-ongoing"] .wb-center-title')).map((e) =>
@@ -192,6 +213,12 @@ try {
     bad.push(`三块分区与本体不符：${JSON.stringify(out.headers)}`);
   }
   if (!out.hasExploreServices) bad.push("「发现更多服务」里没有服务项");
+
+  /* 补的那条（零覆盖清单里的 `wb-center-explore` 容器，§208） */
+  if (out.exploreBox?.count !== 1) bad.push("任务中心没有「发现更多服务」那一块");
+  if ((out.exploreBox?.heading ?? "") !== "发现更多服务") bad.push(`那一块的标题不对：${out.exploreBox?.heading}`);
+  if ((out.exploreBox?.services ?? 0) < 1) bad.push("那一块里一个服务都没有");
+  if (!(out.exploreBox?.width > 200)) bad.push(`⭐「发现更多服务」被挤塌了（宽 ${out.exploreBox?.width}px）`);
 
   if (!out.ongoingEmptyHint) bad.push("「进行中的任务」既没内容也没有空态提示");
   if ((out.ongoingTitles ?? []).length) {

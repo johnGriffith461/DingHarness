@@ -99,6 +99,46 @@ const report = {};
   };
 
   await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/frames.png" });
+
+  /*
+   * ── 底部工具条那三颗（2026-10-13 补）──
+   *
+   * ⚠️ `bottom-undo` / `bottom-redo` / `bottom-marker` 这三个 testid
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 底部工具条正属于"没人点过 ⇒ 烂了也没人知道"的那一类（§201）。
+   * 断的是**后果**：刚拖过画框（一次可撤销的操作）→ 撤销键**必须变成可点**、
+   * 重做键**必须还是禁用的**；「标记」点下去**画布真的进标记态**（`data-marker-tool` 从 off 变 rect）、
+   * 再点一次真的退出来；一个标记都没画时「清空全部标记」**必须是禁用的**。
+   *
+   * ⚠️ 只按「标记」开关，**不点撤销**（那会改掉上面刚验过的位移）。
+   */
+  report.undoRedo = await page.evaluate(() => {
+    const read = (id) => {
+      const e = document.querySelector(`[data-testid="${id}"]`);
+      return e ? { disabled: e.hasAttribute("disabled"), title: e.getAttribute("title") ?? "" } : null;
+    };
+    return { undo: read("bottom-undo"), redo: read("bottom-redo"), marker: read("bottom-marker") };
+  });
+  await page.locator('[data-testid="bottom-marker"]').click();
+  await page.waitForTimeout(600);
+  /*
+   * ⚠️ 判据用**画布根上的 `data-marker-tool`**（画布自身的状态），不要数 `[data-testid="marker-toolbar"]`：
+   * 那条工具条**一直都在 DOM 里**（CSS 也不按模式隐藏），数它等于永远为 1、什么也证明不了。
+   */
+  report.markerToolOn = await page.evaluate(
+    () => document.querySelector("[data-canvas-keyboard-root]")?.getAttribute("data-marker-tool") ?? "",
+  );
+  /* 一个标记都没画 → 「清空全部标记」应当是**禁用**的（不给假按钮） */
+  report.markerClear = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="marker-clear"]');
+    return e ? { disabled: e.hasAttribute("disabled"), title: e.getAttribute("title") ?? "" } : null;
+  });
+  await page.locator('[data-testid="bottom-marker"]').click();
+  await page.waitForTimeout(500);
+  report.markerToolOff = await page.evaluate(
+    () => document.querySelector("[data-canvas-keyboard-root]")?.getAttribute("data-marker-tool") ?? "",
+  );
+
   await page.waitForTimeout(1800);
   report.diskFrames = readDoc().nodes.filter((n) => n.type === "frame").length;
   await browser.close();
@@ -121,3 +161,34 @@ const report = {};
 }
 
 console.log(JSON.stringify(report, null, 2));
+
+/*
+ * 2026-10-13 补：这条脚本**原来一条判定都没有**（只有 console.log(report)）——
+ * 在批跑里等于"静默不测"（永远 exit 0）。这里只补**零覆盖那一组**
+ * （底部工具条的撤销/重做/标记 + 标记工具条的「清空」）的判定，其余仍是报告。
+ */
+{
+  const bad = [];
+  if (!report.undoRedo?.undo) bad.push("底部工具条没有撤销键（bottom-undo）");
+  else {
+    if (report.undoRedo.undo.disabled) {
+      bad.push("⭐ 刚拖过画框（可撤销的操作），撤销键却是禁用的");
+    }
+    if (!report.undoRedo.undo.title) bad.push("撤销键没有 title（说不出它干什么）");
+  }
+  if (!report.undoRedo?.redo) bad.push("底部工具条没有重做键（bottom-redo）");
+  else if (!report.undoRedo.redo.disabled) bad.push("⭐ 什么都没撤销过，重做键却是可点的");
+  if (!report.undoRedo?.marker) bad.push("底部工具条没有「标记」键（bottom-marker）");
+  else if (!report.undoRedo.marker.title) bad.push("「标记」键没有 title");
+  if (report.markerToolOn !== "rect") bad.push(`⭐ 点了「标记」画布没进标记态（data-marker-tool=${report.markerToolOn}）`);
+  if (report.markerClear?.disabled !== true) {
+    bad.push("⭐ 一个标记都没画，「清空全部标记」却可点（假按钮）");
+  }
+  if (report.markerToolOff !== "off") bad.push(`再点一次「标记」没退出标记态（data-marker-tool=${report.markerToolOff}）`);
+  if (bad.length) {
+    console.error("✗ 零覆盖那一组（底部工具条撤销/重做/标记 + 清空标记）：" + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 零覆盖那一组成立：撤销/重做状态跟着历史走 / 「标记」能开能关 / 空标记时「清空」如实禁用");
+  }
+}

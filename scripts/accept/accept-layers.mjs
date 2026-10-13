@@ -52,6 +52,21 @@ await page.waitForTimeout(600);
 report.panelOpen = await page.locator('[data-testid="layer-panel"]').count();
 report.rows = await rowIds();
 
+/*
+ * 2026-10-13 补：`layer-list` 这个 testid **原来没有任何脚本引用过**
+ * （`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+ * 上面数的是 `.layer-row`（class），**列表容器本身**没人看过 —— 容器塌了/没渲染，
+ * 光靠行数也可能"看起来没事"。这里断容器在、行数与它一致。
+ */
+report.layerList = await page.evaluate(() => {
+  const box = document.querySelector('[data-testid="layer-list"]');
+  return {
+    count: box ? 1 : 0,
+    rows: box ? box.querySelectorAll(".layer-row").length : 0,
+    width: box ? Math.round(box.getBoundingClientRect().width) : null,
+  };
+});
+
 // 点第二行 → 应选中它
 const second = report.rows[1];
 await page.locator(`.layer-row[data-layer-id="${second}"]`).click();
@@ -109,3 +124,23 @@ await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/layers.png
 console.log(JSON.stringify(report, null, 2));
 await browser.close();
 child.kill();
+
+/*
+ * 2026-10-13 补：这条脚本**原来一条判定都没有**（只有 console.log(report)）——
+ * 在批跑里等于"静默不测"（永远 exit 0）。这里只补**零覆盖那一组**（`layer-list` 容器）的判定，其余仍是报告。
+ */
+{
+  const bad = [];
+  if (report.layerList?.count !== 1) bad.push("图层面板里没有列表容器（layer-list）");
+  if ((report.layerList?.rows ?? 0) !== (report.rows ?? []).length) {
+    bad.push(`列表容器里的行数与面板行数不符：${report.layerList?.rows} vs ${(report.rows ?? []).length}`);
+  }
+  if ((report.layerList?.rows ?? 0) < 1) bad.push("列表容器是空的");
+  if (!(report.layerList?.width > 100)) bad.push(`⭐ 图层列表被挤塌了（宽 ${report.layerList?.width}px）`);
+  if (bad.length) {
+    console.error("✗ 零覆盖那一组（图层列表容器）：" + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 零覆盖那一组成立：图层面板有列表容器，行数与面板一致，宽度正常");
+  }
+}

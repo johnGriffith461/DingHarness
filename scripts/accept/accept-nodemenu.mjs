@@ -115,6 +115,14 @@ try {
   /* ---------- 菜单本身 ---------- */
   await openMenu();
   report.menuOpened = await page.locator('[data-testid="cv-node-menu"]').count();
+  /*
+   * ⚠️ 2026-10-14：读菜单项之前**先确认菜单真的开着**。
+   * 这条脚本以前**没有判定**，所以"读到一份空菜单"也照样 exit 0 —— 加上判定之后才暴露：
+   * 实测读到 0 项（菜单在读取那一刻已经关了/还没开），于是「菜单里少了复制/删除/…」全红。
+   * 那是**脚本的读法**有问题（不是产品没这些项）。这里等到菜单容器真出现，再等一拍让项渲染完。
+   */
+  await page.locator('[data-testid="cv-node-menu"]').first().waitFor({ timeout: 5000 }).catch(() => undefined);
+  await page.waitForTimeout(250);
   report.menuItems = await page.$$eval('[data-testid^="cv-ctx-"]', (els) =>
     els.map((e) => ({ t: e.textContent.trim(), off: e.disabled })),
   );
@@ -211,4 +219,65 @@ try {
   console.log(JSON.stringify(report, null, 2));
   await browser.close().catch(() => undefined);
   child.kill();
+
+  /*
+   * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"
+   * （菜单项点了没反应、拖不动/拖得动反了，它都照样退 0）。
+   *
+   * 断的是**每一项右键操作的后果**（都是脚本自己量过的量）：
+   *   · 菜单真开着，项也齐（复制 / 删除 / 锁定-解锁 / 隐藏-显示 / 四档层级 / 翻转两档）
+   *   · 复制 → 节点 +1；隐藏 → DOM 少一个；删除 → DOM 少一个
+   *     （React Flow 对 `hidden` 节点直接返回 null，所以"少一个"是真消失，不是被挡住）
+   *   · 锁定 → 拖不动；解锁 → 拖得动 —— 这两条**互为对照**：只断一条的话，
+   *     "拖不动"也可能是因为本来就没拖起来
+   *   · 移到最前 → 节点顺序真的变了
+   *   · 文本节点上的「水平翻转」是**禁用**的（canFlip 收口 —— 形状的翻转一直灰着过，
+   *     就是这里没收口；而禁用了还得说清为什么，所以连 title 一起看）
+   *   · Esc 能关掉菜单
+   *
+   * ⚠️ 故意**不断** `movedToEnd`：它成立的前提是"右键的正好是 DOM 里第一个节点"，
+   * 而 openMenu 优先点**选中项**、还会跳过被遮住的节点 —— 拿它当判据会偶发假红。
+   */
+  const bad = [];
+  /*
+   * ⚠️ 比对必须用**子串**：菜单项文案带图标前缀（实测是「⧉复制」「🗑删除」「🔒锁定」…），
+   * 数组全等（`labels.includes("复制")`）永远对不上 —— 第一版就是这么全红的（假红）。
+   */
+  const labels = (report.menuItems ?? []).map((i) => i.t);
+  const hasLabel = (word) => labels.some((t) => t.includes(word));
+
+  if (report.menuOpened !== 1) bad.push("右键没弹出节点菜单");
+  for (const want of ["复制", "删除", "移到最前", "移到最后", "上移一层", "下移一层", "水平翻转", "垂直翻转"]) {
+    if (!hasLabel(want)) bad.push(`菜单里少了「${want}」`);
+  }
+  if (!hasLabel("锁定") && !hasLabel("解锁")) bad.push("菜单里既没有「锁定」也没有「解锁」");
+  if (!hasLabel("隐藏") && !hasLabel("显示")) bad.push("菜单里既没有「隐藏」也没有「显示」");
+
+  if (report.copyDelta !== 1) bad.push(`「复制」没让节点 +1：${report.copyDelta}`);
+  if (report.hideDelta !== 1) bad.push(`「隐藏」没让那个节点从 DOM 里消失：${report.hideDelta}`);
+  if (report.deleteDelta !== 1) bad.push(`「删除」没让那个节点从 DOM 里消失：${report.deleteDelta}`);
+  if (report.lockedDidNotMove !== true) {
+    bad.push(`锁定的节点被拖动了：dx=${report.lockedDrag?.dx} dy=${report.lockedDrag?.dy}`);
+  }
+  if (report.menuHasUnlock !== 1) bad.push("锁上之后菜单里没有「解锁」");
+  if (report.unlockedMoved !== true) bad.push("解锁之后仍然拖不动 —— 锁定/解锁至少有一头是假的");
+  if (report.orderChanged !== true) bad.push("「移到最前」没有改变节点顺序");
+  if (!report.flipDisabledOnText) {
+    bad.push("没找到 markdown 节点，翻转收口这一条没被验到（静默少测）");
+  } else if (report.flipDisabledOnText.disabled !== true) {
+    bad.push("文本节点上的「水平翻转」没被禁用（canFlip 没收口：点了不会有任何变化）");
+  } else if (!report.flipDisabledOnText.title) {
+    bad.push("「水平翻转」禁用了却没说为什么（title 为空）");
+  }
+  if (report.openedAgain !== 1) {
+    bad.push("第二次右键没弹出菜单（Esc 那一步等于没测）");
+  } else if (report.closedByEsc !== 0) {
+    bad.push("按 Esc 没关掉右键菜单");
+  }
+  if (bad.length) {
+    console.error("✗ 节点右键菜单：" + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 右键菜单：项齐全 / 复制·隐藏·删除各 +1·-1·-1 / 锁了拖不动、解锁拖得动 / 移到最前改顺序 / 文本节点翻转禁用且有说明 / Esc 关得掉");
+  }
 }

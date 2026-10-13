@@ -467,7 +467,7 @@
   background: #0f1319;
   color: var(--text);
   font-size: 11px;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
 }
 
 .frame-resize-line {
@@ -582,7 +582,7 @@
   background: #0f1319;
   color: var(--text);
   font-size: 11px;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
 }
 
 .image-action-input:focus {
@@ -783,7 +783,7 @@
   font-size: 12px;
   line-height: 1.5;
   resize: vertical;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
 }
 
 .gen-panel-input:focus {
@@ -909,7 +909,7 @@
   background: var(--bg-2);
   color: var(--text);
   font-size: 11px;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了，键盘聚焦零提示 */
 }
 
 .gen-size-num:focus {

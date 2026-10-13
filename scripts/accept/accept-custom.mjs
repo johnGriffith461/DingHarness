@@ -40,6 +40,18 @@ try {
   await page.locator('[data-testid="wb-nav-plugins"]').click();
   await page.waitForTimeout(1200);
 
+  /*
+   * ⚠️ 2026-10-13 补：`wb-plugin-searchbox` 与 `wb-plugin-categories` 这两个 testid
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208）。
+   * 它们属于"没人点过 ⇒ 烂了也没人知道"的那一类（§201 技能面板被挤成 59px 就是同类）。
+   * 断**后果**：搜索框在、分类行在且**至少有一个分类按钮**（分类行被做空了等于筛不了）。
+   */
+  report.marketSearchbox = await page.locator('[data-testid="wb-plugin-searchbox"]').count();
+  report.marketCategories = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-plugin-categories"]');
+    return { count: box ? 1 : 0, chips: box ? box.querySelectorAll("button").length : 0 };
+  });
+
   await page.locator('[data-testid="wb-plugin-add"]').click();
   await page.waitForTimeout(700);
   report.formOpened = await page.locator('[data-testid="wb-add-form"]').count();
@@ -77,6 +89,31 @@ try {
   await page.locator('[data-testid="wb-plugin-manage"]').click();
   await page.waitForTimeout(1200);
   report.manageTabs = await page.$$eval(".wb-manage-tab", (els) => els.map((e) => e.textContent.replace(/\s+/g, "")));
+
+  /*
+   * ⚠️ 2026-10-13 补：`wb-manage-tabs` / `wb-manage-add` / `wb-manage-refresh` 三个 testid
+   * 原来也**没有任何脚本引用过**（同 §208 的零覆盖清单）。
+   * 断**后果**：三个分类页签都在、计数徽标是数字、「添加」不被禁用（点了要真能回市场）、
+   * 「刷新」带 title（说明它干什么 —— 它原来是**没有 onClick 的死按钮**，§124 审计报出过）。
+   */
+  report.manageTabsBox = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-manage-tabs"]');
+    return {
+      count: box ? 1 : 0,
+      tabs: box
+        ? Array.from(box.querySelectorAll("button")).map((b) => (b.textContent ?? "").replace(/\s+/g, ""))
+        : [],
+    };
+  });
+  report.manageAdd = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-manage-add"]');
+    return e ? { text: (e.textContent ?? "").trim(), disabled: e.hasAttribute("disabled") } : null;
+  });
+  report.manageRefresh = await page.evaluate(() => {
+    const e = document.querySelector('[data-testid="wb-manage-refresh"]');
+    return e ? { title: e.getAttribute("title") ?? "", disabled: e.hasAttribute("disabled") } : null;
+  });
+
   await page.locator('[data-testid="wb-manage-tab-技能"]').click();
   await page.waitForTimeout(800);
   report.manageSkillItems = await page.$$eval('[data-testid^="wb-managed-"]', (els) =>
@@ -122,4 +159,38 @@ try {
   console.log(JSON.stringify(report, null, 2));
   await browser.close().catch(() => undefined);
   child.kill();
+
+  /*
+   * ⚠️ 这条脚本**原来一条判定都没有**（只有 `console.log(report)`）——
+   * 在批跑里等于"静默不测"（永远 exit 0，正是 §207 乙类那条问题）。
+   * 2026-10-13 只补**零覆盖清单那一组 testid** 的判定（其余仍是报告），
+   * 因为这一组是"没人点过的界面"，最需要一道会红的门（§201 的 59px 就是没人看才烂掉的）。
+   */
+  const bad = [];
+  if (report.marketSearchbox !== 1) bad.push("市场页没有搜索框");
+  if (report.marketCategories?.count !== 1) bad.push("市场页没有分类行");
+  if ((report.marketCategories?.chips ?? 0) < 2) {
+    bad.push(`分类行里几乎没有可点的分类：${report.marketCategories?.chips}`);
+  }
+  const tabs = report.manageTabsBox?.tabs ?? [];
+  if (report.manageTabsBox?.count !== 1) bad.push("管理页没有页签容器");
+  for (const want of ["插件", "技能", "连接器"]) {
+    if (!tabs.some((t) => t.startsWith(want))) bad.push(`管理页少了「${want}」页签：${JSON.stringify(tabs)}`);
+  }
+  if (!report.manageAdd) bad.push("管理页没有「添加」按钮");
+  else {
+    if (report.manageAdd.disabled) bad.push("⭐ 管理页的「添加」被禁用了（点了没反应的假按钮）");
+    if (!report.manageAdd.text.includes("添加")) bad.push(`「添加」文案不对：${report.manageAdd.text}`);
+  }
+  if (!report.manageRefresh) bad.push("管理页没有「刷新」按钮");
+  else {
+    if (report.manageRefresh.disabled) bad.push("⭐ 管理页的「刷新」被禁用了（§124 审计过的死按钮）");
+    if (report.manageRefresh.title !== "刷新") bad.push(`「刷新」的 title 不对：${report.manageRefresh.title}`);
+  }
+  if (bad.length) {
+    console.error("✗ 零覆盖那一组（市场搜索/分类 + 管理页签/添加/刷新）：" + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 零覆盖那一组成立：市场搜索框与分类行在 / 管理页三页签齐 / 「添加」「刷新」是真按钮");
+  }
 }

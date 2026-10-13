@@ -125,6 +125,34 @@ try {
   await page.waitForTimeout(400);
   out.hintAfterLeave = await page.evaluate(() => Boolean(document.querySelector(".wb-cloud-drop-hint")));
 
+  /*
+   * ── ②b 列表本身 / 收起 / 关闭（2026-10-13 补）──
+   *
+   * ⚠️ `wb-upload-list` / `wb-upload-collapse` / `wb-upload-close` 这三个 testid
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 上面那两条断的是"行文案"，**列表容器本身**没人看过 —— 面板被做烂（比如挤塌、列表是空的）
+   * 也不会有脚本红。所以这里断**后果**：
+   *   · 列表在，且里面**行数与面板上的条数一致**；
+   *   · 点「收起」→ 列表真的收起来（`wb-upload-list` 消失）且按钮变成「展开」；
+   *   · 再点「展开」→ 列表回来（不是单向的死按钮）。
+   */
+  out.uploadList = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-upload-list"]');
+    return {
+      count: box ? 1 : 0,
+      rows: box ? box.querySelectorAll('[data-testid^="wb-upload-row-"]').length : 0,
+    };
+  });
+  await page.locator('[data-testid="wb-upload-collapse"]').click();
+  await page.waitForTimeout(400);
+  out.collapsedList = await page.locator('[data-testid="wb-upload-list"]').count();
+  out.collapseTitle = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-upload-collapse"]')?.getAttribute("title") ?? "",
+  );
+  await page.locator('[data-testid="wb-upload-collapse"]').click();
+  await page.waitForTimeout(400);
+  out.expandedAgain = await page.locator('[data-testid="wb-upload-list"]').count();
+
   /* ④ 拖一个 .exe */
   await drop(page, "某个程序.exe", "MZ...");
   await page.waitForTimeout(2500);
@@ -135,7 +163,16 @@ try {
   out.row2 = await page.evaluate(
     () => document.querySelector('[data-testid="wb-upload-row-某个程序.exe"]')?.textContent?.replace(/\\s+/g, " ").trim() ?? "",
   );
+
+  /*
+   * ── ⑤ 「关闭」要真把面板收掉（2026-10-13 补，见 §208 零覆盖清单）──
+   * 断**后果**：点完面板整个消失（`shouldShowPanel` 变 false）——不是"点了没报错"。
+   * 放在截图之后：截图留给人的是**两条都在**的那一屏。
+   */
   out.shot = await shot(page, "drop.png");
+  await page.locator('[data-testid="wb-upload-close"]').click();
+  await page.waitForTimeout(600);
+  out.panelGoneAfterClose = (await page.locator('[data-testid="wb-upload-panel"]').count()) === 0;
 
   await b.close();
 } catch (e) {
@@ -163,6 +200,14 @@ try {
   /* 角标 */
   if (!out.hintAfterEnter) bad.push("拖进来时没有角标");
   if (out.hintAfterLeave) bad.push("拖出去之后角标还在（dragleave 没清干净）");
+
+  /* ②b 列表 / 收起 / 展开 / 关闭（零覆盖清单那一组，§208） */
+  if (out.uploadList?.count !== 1) bad.push("上传面板里没有列表容器");
+  if (out.uploadList?.rows !== 1) bad.push(`列表里应有 1 行，实际 ${out.uploadList?.rows}`);
+  if (out.collapsedList !== 0) bad.push("点了「收起」列表没收起来");
+  if (out.collapseTitle !== "展开") bad.push(`收起之后那颗按钮该变成「展开」，实际「${out.collapseTitle}」`);
+  if (out.expandedAgain !== 1) bad.push("再点一次「展开」列表没回来（单向的死按钮）");
+  if (!out.panelGoneAfterClose) bad.push("点了「关闭」面板还在（没真收掉）");
 
   /* ④ 被拒的那种 */
   if (!(out.row2 ?? "").includes("解析失败")) bad.push(`被拒那行没写解析失败：${out.row2}`);

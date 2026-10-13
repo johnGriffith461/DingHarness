@@ -95,6 +95,34 @@ try {
   await page.locator('[data-testid="wb-cloud-tab-all"]').click();
   await page.waitForTimeout(600);
 
+  /*
+   * ── ①b 页面骨架 / 表格 / 行内「打开」按钮（2026-10-13 补）──
+   *
+   * ⚠️ `wb-page-cloud` / `wb-cloud-searchbox` / `wb-cloud-table` / `wb-open-*` 这几个 testid
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 云盘表格正属于"没人点过 ⇒ 烂了也没人知道"的那一类（同类事故：技能面板被挤成 59px，§201）。
+   *
+   * 断的是**后果**：
+   *   · 页面骨架与表格真在，且**每条记录都有一个「打开」按钮**（按钮数与行数对齐 ——
+   *     §178 那次就是把子元素当成了行本身，所以这边两边都数）；
+   *   · 表格**没有被挤塌**（阈值取保守的 300px；应用窗口是 1440 宽）。
+   * ⚠️ **不点「打开」**：那是系统默认程序打开（会真拉起程序，污染这台机器）。
+   */
+  out.pageShell = await page.locator('[data-testid="wb-page-cloud"]').count();
+  out.searchbox = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-cloud-searchbox"]');
+    return { count: box ? 1 : 0, hasInput: box ? box.querySelectorAll("input").length : 0 };
+  });
+  out.table = await page.evaluate(() => {
+    const t = document.querySelector('[data-testid="wb-cloud-table"]');
+    return {
+      count: t ? 1 : 0,
+      rows: t ? t.querySelectorAll(".wb-tr:not(.wb-th)").length : 0,
+      width: t ? Math.round(t.getBoundingClientRect().width) : null,
+    };
+  });
+  out.openButtons = await page.locator('[data-testid^="wb-open-"]').count();
+
   /* ── ② 筛选 ── */
   out.filterOptions = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-testid="wb-cloud-filter"] option')).map((e) =>
@@ -142,6 +170,8 @@ try {
   /* ── ④ 新建菜单 ── */
   await page.locator('[data-testid="wb-cloud-new"]').click();
   await page.waitForTimeout(400);
+  /* 菜单**容器**（`wb-cloud-newmenu`）与菜单项是两个 testid；原来只数了项，没数容器（§208 零覆盖） */
+  out.newMenuBox = await page.locator('[data-testid="wb-cloud-newmenu"]').count();
   out.menuItems = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-testid^="wb-cloud-new-"]'))
       .filter((e) => e.getAttribute("data-testid") !== "wb-cloud-new")
@@ -174,6 +204,16 @@ try {
     if (!(out.tabLabels ?? []).includes(label)) bad.push(`标签页里缺「${label}」：${JSON.stringify(out.tabLabels)}`);
   }
   if ((out.aiDocRows ?? 0) !== 1) bad.push(`「AI 文档」页应只有 1 份产物文档，实际 ${out.aiDocRows}`);
+
+  /* ①b 页面骨架 / 表格 / 行内按钮（零覆盖清单那一组，§208） */
+  if (out.pageShell !== 1) bad.push("云盘页骨架（wb-page-cloud）不在");
+  if (out.searchbox?.count !== 1) bad.push("云盘页没有搜索框");
+  else if (out.searchbox.hasInput !== 1) bad.push("搜索框里没有输入框");
+  if (out.table?.count !== 1) bad.push("云盘没有表格容器");
+  if (out.table?.rows !== 3) bad.push(`表格行数不对（三条预置）：${out.table?.rows}`);
+  if (!(out.table?.width > 300)) bad.push(`⭐ 表格被挤塌了（宽 ${out.table?.width}px）`);
+  if (out.openButtons !== 3) bad.push(`「打开」按钮数与记录数不符：${out.openButtons} vs 3`);
+  if (out.newMenuBox !== 1) bad.push("点了「新建」没有菜单容器（菜单项可能悬空）");
 
   /* ② 筛选 */
   if (!(out.filterOptions ?? []).includes("所有类型")) bad.push("筛选下拉里没有「所有类型」");

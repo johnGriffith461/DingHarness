@@ -66,6 +66,23 @@ try {
   report.qrHonest = await page.locator('[data-testid="wb-qr-unavailable"]').textContent();
   report.mockRows = await page.$$eval(".wb-mock-menu-row", (els) => els.map((e) => e.textContent.trim()));
   report.mockPrompts = await page.$$eval(".wb-mock-prompt", (els) => els.map((e) => e.textContent));
+
+  /*
+   * ⚠️ 2026-10-13 补：`wb-page-phone`（页面骨架）与 `wb-phone-mock`（右边那台"样机"）
+   * **原来没有任何脚本引用过**（`src/` × `scripts/accept/` 交叉，见 HANDOFF §208 的零覆盖清单）。
+   * 上面数的是 `.wb-mock-menu-row`（class），**容器本身**没人看过 ——
+   * 容器没渲染、内容悬空、被挤塌（§201 那类 59px）都不会红。
+   * 断**后果**：页面骨架在、样机在且**里面有行**、宽度正常。
+   */
+  report.pageBox = await page.locator('[data-testid="wb-page-phone"]').count();
+  report.mockBox = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="wb-phone-mock"]');
+    return {
+      count: box ? 1 : 0,
+      rows: box ? box.querySelectorAll(".wb-mock-menu-row").length : 0,
+      width: box ? Math.round(box.getBoundingClientRect().width) : null,
+    };
+  });
   await page.screenshot({ path: path.join(shots, "wb-24-phone.png") });
 
   /* ---------- 保持唤醒：主进程真的在拦休眠 ---------- */
@@ -116,4 +133,11 @@ if (report.remoteJson?.allowConnect !== false) {
 /* ③ 跨重启：许可是许可（保持关），唤醒是机器真实状态（回到关） */
 if (report.afterRestartConnect !== "false") bad.push(`重启后许可应仍是关，实际 ${report.afterRestartConnect}`);
 if (report.afterRestartAwake !== "false") bad.push(`重启后唤醒应回到关，实际 ${report.afterRestartAwake}`);
-verdict(bad, "手机遥控成立：默认态对齐实机 / 许可真的写盘 / 重启后许可是关、唤醒回到关");
+/* ④ 补的那组（零覆盖清单里的页面骨架与"样机"容器，§208） */
+if (report.pageBox !== 1) bad.push("手机遥控页没有页面骨架（wb-page-phone）");
+if (report.mockBox?.count !== 1) bad.push("右侧那台「样机」没有容器（wb-phone-mock）");
+else {
+  if ((report.mockBox.rows ?? 0) < 1) bad.push("「样机」里一行内容都没有");
+  if (!(report.mockBox.width > 100)) bad.push(`⭐ 「样机」被挤塌了（宽 ${report.mockBox.width}px）`);
+}
+verdict(bad, "手机遥控成立：默认态对齐实机 / 许可真的写盘 / 重启后许可是关、唤醒回到关 / 骨架与样机在");

@@ -85,7 +85,7 @@
   width: 100%;
   background: transparent;
   border: none;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none（它压掉全局 :focus-visible 焦点环） */
   color: inherit;
   font: inherit;
   text-align: center;
@@ -149,7 +149,7 @@
 .layer-title em {
   font-style: normal;
   font-size: 10px;
-  color: var(--muted);
+  color: var(--fg-3);
   padding: 0 5px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
@@ -164,7 +164,7 @@
   border-radius: 5px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--fg-3);
   cursor: pointer;
   flex: 0 0 auto;
 }
@@ -186,7 +186,7 @@
 .layer-empty {
   padding: 14px 8px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-3);
   text-align: center;
 }
 
@@ -217,7 +217,7 @@
 .layer-kind {
   display: inline-flex;
   align-items: center;
-  color: var(--muted);
+  color: var(--fg-3);
   flex: 0 0 auto;
 }
 
@@ -237,7 +237,7 @@
 .layer-name em {
   font-style: normal;
   font-size: 10px;
-  color: var(--muted);
+  color: var(--fg-3);
 }
 
 .layer-menu {
@@ -384,7 +384,7 @@
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--fg-3);
   cursor: pointer;
 }
 
@@ -433,7 +433,7 @@
 
 .versions-item-time {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-3);
 }
 
 .versions-badge {
@@ -458,7 +458,7 @@
   border-radius: 6px;
   border: 1px solid var(--line);
   background: transparent;
-  color: var(--muted);
+  color: var(--fg-3);
   cursor: pointer;
   font-size: 11px;
 }
@@ -482,7 +482,7 @@
 .versions-empty {
   padding: 14px 10px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-3);
   text-align: center;
   line-height: 1.6;
 }
@@ -503,7 +503,7 @@
 
 .versions-preview-body {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-3);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -555,7 +555,7 @@
 }
 
 .shortcut-row span {
-  color: var(--muted);
+  color: var(--fg-3);
 }
 
 .marker-text-input {
@@ -581,7 +581,7 @@
   padding: 6px;
   font: inherit;
   font-size: 12px;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none（它压掉全局 :focus-visible 焦点环） */
 }
 
 .marker-text-actions {
@@ -887,7 +887,7 @@
 .nv-input {
   width: 100%;
   border: 0;
-  outline: none;
+  /* 2026-10-14：删掉 outline:none（它压掉全局 :focus-visible 焦点环） */
   background: transparent;
   color: var(--fg);
   font: inherit;

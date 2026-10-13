@@ -135,3 +135,66 @@ const report = {};
 }
 
 console.log(JSON.stringify(report, null, 2));
+
+/*
+ * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"
+ * （形状建不出来、字没写上去、翻转是假的，它都照样退 0）。
+ *
+ * 断的是形状节点这一路的**后果**（就是脚本头部自列的那几条断言）：
+ *   ① 新建菜单里有 rect / ellipse 两档
+ *   ② 建出来带 `data-shape-kind=rect|ellipse`（原版契约）
+ *   ③ 连建两个不会**完全叠在一起**（级联错位）—— 叠死的后果很实际：上面那个把下面
+ *      整个盖住，用户点不到、也看不出有几个。步长是 48px（CanvasRuntime 的 STEP），
+ *      而历史上这个 bug 的形态恰恰是"只差 8px、基本还叠着"，所以门槛取 16px：
+ *      真错位过就绝不该低于它
+ *   ④ 双击（或兜底按钮）能开输入框，写完**那个字**就在节点上（逐字）
+ *   ⑤ 图层里翻转真的改变了 transform（出现负缩放）
+ *   ⑥ 落盘 + 重启后还在：磁盘文档里的类型、节点上的那行字，重启后一个都不能少
+ *
+ * 为什么值得断：形状是"画布上唯一需要靠肉眼判断对错"的那类东西 ——
+ * 它错了不会有任何报错，只会"看着还行"。
+ */
+const bad = [];
+const kinds = report.menuKinds ?? [];
+for (const want of ["rect", "ellipse"]) {
+  if (!kinds.includes(want)) bad.push(`新建菜单里没有「${want}」（现有：${JSON.stringify(kinds)}）`);
+}
+const shapeKinds = [...(report.shapeKinds ?? [])].sort();
+if (JSON.stringify(shapeKinds) !== JSON.stringify(["ellipse", "rect"])) {
+  bad.push(`画布上的形状不是 rect + ellipse 各一个：${JSON.stringify(report.shapeKinds)}`);
+}
+const boxes = report.shapeBoxes ?? [];
+if (boxes.length !== 2) {
+  bad.push(`量到的形状位置不是两个：${JSON.stringify(boxes)}`);
+} else {
+  const gap = Math.max(Math.abs(boxes[0].x - boxes[1].x), Math.abs(boxes[0].y - boxes[1].y));
+  if (gap < 16) bad.push(`两个形状几乎完全叠着（只错开 ${gap}px）—— 级联错位没生效`);
+}
+if (report.inputAppeared !== 1) bad.push("双击形状没弹出文字输入框（兜底按钮也没顶上）");
+if (String(report.textAfterTyping ?? "").trim() !== "产品主图") {
+  bad.push(`写完的字没落到节点上：${JSON.stringify(report.textAfterTyping)}`);
+}
+if (report.flipEnabled !== true) bad.push("形状的「水平翻转」是灰的（canFlip 没把 rect/ellipse 算进去）");
+const tf = String(report.transformAfterFlip ?? "none");
+if (!/-1/.test(tf)) {
+  bad.push(`翻转没改变 transform（读到 ${JSON.stringify(report.transformAfterFlip)}）—— 点了没有反应`);
+}
+const diskKinds = report.disk?.kinds ?? [];
+for (const want of ["rect", "ellipse"]) {
+  if (!diskKinds.includes(want)) bad.push(`磁盘上的文档里没有 ${want} 节点：${JSON.stringify(diskKinds)}`);
+}
+if (report.disk?.rect?.text !== "产品主图") {
+  bad.push(`磁盘上那个矩形里的字不对：${JSON.stringify(report.disk?.rect?.text)}`);
+}
+const restartKinds = [...(report.afterRestart?.shapeKinds ?? [])].sort();
+if (JSON.stringify(restartKinds) !== JSON.stringify(["ellipse", "rect"])) {
+  bad.push(`重启后画布上的形状不对：${JSON.stringify(report.afterRestart?.shapeKinds)}`);
+}
+const texts = (report.afterRestart?.texts ?? []).map((t) => String(t ?? "").trim());
+if (!texts.includes("产品主图")) bad.push(`重启后那个字没了：${JSON.stringify(report.afterRestart?.texts)}`);
+if (bad.length) {
+  console.error("✗ 形状节点：" + bad.join("；"));
+  process.exitCode = 1;
+} else {
+  console.log("✓ 形状节点：菜单两档齐全 / 契约属性对 / 两个不重叠 / 双击能写字且逐字落到节点上 / 翻转真改了 transform / 落盘且重启后仍在");
+}

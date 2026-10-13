@@ -84,6 +84,16 @@ try {
     () => document.querySelector('[data-testid="wb-coding-detail-name"]')?.textContent?.trim() ?? "",
   );
 
+  /*
+   * ⚠️ 2026-10-13 补：`wb-coding-detail-close` 与 `wb-coding-like-note` **原来没有任何脚本引用过**
+   * （`src/` 的 `data-testid` 与 `scripts/accept/` 交叉，见 HANDOFF §208 那份零覆盖清单）——
+   * 详情面板的「关闭」与那句"不给假的点赞数"正属于"没人点过 ⇒ 烂了也没人知道"的那一类（§201）。
+   */
+  out.detailCloseBtn = await page.locator('[data-testid="wb-coding-detail-close"]').count();
+  out.likeNote = await page.evaluate(
+    () => document.querySelector('[data-testid="wb-coding-like-note"]')?.textContent?.trim() ?? "",
+  );
+
   /* ③ 喜欢 → 取消喜欢 */
   out.likeBefore = await likeText(page);
   await page.locator('[data-testid="wb-coding-like"]').click();
@@ -98,6 +108,14 @@ try {
     () => document.querySelector('[data-testid="wb-coding-detail"]')?.textContent?.replace(/\\s+/g, " ").trim() ?? "",
   );
   out.shot = await shot(page, "codinglike.png");
+
+  /*
+   * ⚠️ 「关闭」要断**后果**：点下去详情面板真的消失（不是"点了没报错"）。
+   * 放在截图之后 —— 截图留给人的样子应当是**详情打开着**的那一屏。
+   */
+  await page.locator('[data-testid="wb-coding-detail-close"]').click();
+  await page.waitForTimeout(500);
+  out.detailGoneAfterClose = (await page.locator('[data-testid="wb-coding-detail"]').count()) === 0;
 
   await b1.close();
   await killTree(first.child);
@@ -141,6 +159,13 @@ try {
   if (!out.detailShown) bad.push("点了「查看详情」详情面板没出来");
   if (out.tab !== "应用详情") bad.push(`详情标签与证据不符：${out.tab}`);
   if (out.name !== "日报生成器") bad.push(`详情里的名字不对：${out.name}`);
+
+  /* 补的那两条（零覆盖清单里的 `wb-coding-detail-close` / `wb-coding-like-note`，§208） */
+  if (out.detailCloseBtn !== 1) bad.push("详情面板上没有「关闭」（×）按钮");
+  if (!(out.likeNote ?? "").includes("不给假的点赞数")) {
+    bad.push(`详情里那句"不给假的点赞数"没了或变了：${out.likeNote}`);
+  }
+  if (!out.detailGoneAfterClose) bad.push("点了「关闭」详情面板没消失");
 
   if (out.likeBefore !== "喜欢") bad.push(`初始按钮文案不对：${out.likeBefore}`);
   if (out.likeAfter !== "取消喜欢") bad.push(`点过之后按钮文案不对：${out.likeAfter}`);

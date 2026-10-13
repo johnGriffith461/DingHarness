@@ -98,4 +98,44 @@ try {
   console.log(JSON.stringify(report, null, 2));
   await browser.close().catch(() => undefined);
   child.kill();
+
+  /*
+   * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"
+   * （卡片一张都没渲染、或者属性没挂上，它也照样退 0）。
+   *
+   * 断的是**协议编号这一处映射**：预置的 4 张卡，每张的 `data-artifact-resource-type`
+   * 必须与它自己的 kind 对得上（docx=10 / markdown=17 / xlsx=12 / html=2，
+   * 唯一一份映射在 `shared/artifactProto.ts` 的 `KIND_TO_TYPE`）。
+   * 为什么值得断：编号对不上时卡片照样渲染、照样能点开 —— 只有读那个属性才看得出来；
+   * 而这正是这条脚本存在的唯一理由（"本地叫 docx、协议里 Docx 是 10"这种关系不能散）。
+   *
+   * ⚠️ 卡数必须先钉死：`cards.every(...)` 在**空数组**上是**真空成立**的，
+   * 所以"卡片一张都没渲染"也会算出 allMapped=true / matchesExpectation=true。
+   */
+  const bad = [];
+  const EXPECT = { docx: 10, markdown: 17, xlsx: 12, html: 2 };
+  /*
+   * ⚠️ 这里**不能**按"总数 == 4"断：同一张产物卡会在**两个地方**各渲染一份
+   * —— 对话流里（`ArtifactCard.tsx`）与右侧「对话产物」列表里（`SummaryPanel.tsx`），
+   * 两处都带 `data-office-artifact-card-kind`。实测 4 张产物 → DOM 里 8 个节点。
+   * 所以：**按"互不相同的 kind"断**（真正的不变量是"四种格式的卡都渲染出来了"），
+   * 再要求总数是 4 的整数倍（防"一张都没渲染"那种真空成立）。
+   */
+  const kinds = new Set((report.cards ?? []).map((c) => c.kind));
+  if (kinds.size !== 4) bad.push(`渲染出的产物卡种类不是 4 种：${[...kinds].join("/") || "（一张都没有）"}`);
+  if (report.cardCount % 4 !== 0) bad.push(`产物卡节点数不是 4 的整数倍（渲染点 × 卡数）：${report.cardCount}`);
+  if ((report.cards ?? []).length !== report.cardCount) bad.push("卡片数与读到的属性条数对不上");
+  for (const c of report.cards ?? []) {
+    if (c.resourceType === null || c.resourceType === "0" || c.resourceType === undefined) {
+      bad.push(`卡片 ${c.kind} 没有协议编号（data-artifact-resource-type 缺失或为 0）`);
+    } else if (String(EXPECT[c.kind] ?? "(未知 kind)") !== c.resourceType) {
+      bad.push(`卡片 ${c.kind} 的协议编号对不上：读到 ${c.resourceType}，应为 ${EXPECT[c.kind]}`);
+    }
+  }
+  if (bad.length) {
+    console.error("✗ 产物卡的协议字段：" + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 四张产物卡的协议编号与 kind 一一对应（docx 10 / markdown 17 / xlsx 12 / html 2）");
+  }
 }
