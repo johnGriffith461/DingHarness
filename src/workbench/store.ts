@@ -36,10 +36,12 @@ import {
   answerQuestion,
   autoTaskTitle,
   cleanTitle,
+  current,
   makeStepId,
   normalizeStep,
   normalizeQuestions,
   normalizeArtifacts,
+  upsertTask,
   type TaskOption,
   type TaskStep,
   type WorkTask,
@@ -157,15 +159,6 @@ type WorkbenchState = {
   /** 中止当前任务。 */
   abort: () => void;
 };
-
-/** 已进入"最近的"任务（用于左侧列表，最新的在前）。 */
-function upsertTask(tasks: WorkTask[], patch: WorkTask): WorkTask[] {
-  const index = tasks.findIndex((t) => t.id === patch.id);
-  if (index === -1) return [patch, ...tasks];
-  const next = [...tasks];
-  next[index] = patch;
-  return next;
-}
 
 let seq = 0;
 const nextId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(seq += 1)}`;
@@ -633,11 +626,6 @@ let calibrationFactor = 1;
 /** 上一轮"发出去的东西"的估算量（收尾时与真实 usage 一起算系数）。 */
 let lastRequestEstimate = 0;
 
-/** 取当前任务（找不到时用传入的兜底，避免闭包里拿到旧对象）。 */
-function current(tasks: WorkTask[], id: string): WorkTask {
-  return tasks.find((t) => t.id === id) ?? tasks[0];
-}
-
 /**
  * 让模型给任务起标题（对标上位 `moa_comms_taskTitleLimit` =「任务标题，不超过16个字。」）。
  *
@@ -696,11 +684,6 @@ async function refineTitle(taskId: string, brief: string): Promise<void> {
  */
 const resolveRoute = resolveChatRoute;
 
-
-/** 生成一个步骤 id（不用渲染层的东西，主进程/测试里也能用）。 */
-function nextStepId(): string {
-  return makeStepId(Date.now());
-}
 
 /* ============================================================
  * 任务持久化（阶段 11.9）
@@ -828,7 +811,7 @@ export function startTaskPersistence(): () => void {
 }
 
 /** 造一个步骤 id（对外暴露给需要稳定 id 的地方）。 */
-export { nextStepId };
+export { nextStepId } from "./task";
 
 /**
  * 取"本次启用能力"的提示词片段（阶段 11.7）。

@@ -528,3 +528,26 @@ export function normalizeQuestions(raw: unknown): TaskQuestion[] {
   }
   return out;
 }
+
+/* ============================================================
+ * 5. 任务列表与 id
+ * ============================================================ */
+
+/** 已进入"最近的"任务（用于左侧列表，最新的在前）。 */
+export function upsertTask(tasks: WorkTask[], patch: WorkTask): WorkTask[] {
+  const index = tasks.findIndex((t) => t.id === patch.id);
+  if (index === -1) return [patch, ...tasks];
+  const next = [...tasks];
+  next[index] = patch;
+  return next;
+}
+
+/** 取当前任务（找不到时用传入的兜底，避免闭包里拿到旧对象）。 */
+export function current(tasks: WorkTask[], id: string): WorkTask {
+  return tasks.find((t) => t.id === id) ?? tasks[0];
+}
+
+/** 生成一个步骤 id（不用渲染层的东西，主进程/测试里也能用）。 */
+export function nextStepId(): string {
+  return makeStepId(Date.now());
+}
