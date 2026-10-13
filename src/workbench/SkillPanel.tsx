@@ -34,6 +34,11 @@ type Command = {
   hint?: string;
   /** 是不是"画布开关"那一条（它的 testid 固定，不随文案变）。 */
   isCanvas?: boolean;
+  /**
+   * 本机版没有对应后端时**如实写在这里**（渲染成禁用 + 悬停说明）。
+   * 不写的话它就成了一颗"点了没反应"的死按钮 —— §124 审计报的就是这类。
+   */
+  todo?: string;
 };
 
 /** 推荐区的一项。`name` 会加粗，`hint` 是后面的说明。 */
@@ -49,8 +54,14 @@ type Suggestion = { icon: typeof Folder; name: string; hint: string };
  */
 function commandsFor(canvasOpen: boolean): Command[] {
   return [
+    /*
+     * 这六条是照本体命令区抄的，但**能不能点要逐条说清**（2026-10-14）：
+     *   选择项目 / 工作模式设置 / 技能管理 / 创建画布 → 本机版都接得上（走 onPick）
+     *   用量 / 反馈 → 没有账号服务端与反馈通道，如实标成 todo
+     * 原来六条全是死按钮（`onPick` 根本没接），用户点了没反应只会以为坏了。
+     */
     { icon: Folder, label: "选择项目" },
-    { icon: Sparkles, label: "用量" },
+    { icon: Sparkles, label: "用量", todo: "需要账号服务端，本机版没有" },
     { icon: Settings, label: "工作模式设置" },
     { icon: ListTodo, label: "技能管理" },
     /*
@@ -64,7 +75,7 @@ function commandsFor(canvasOpen: boolean): Command[] {
       label: canvasOpen ? "收起画布" : "创建画布",
       hint: canvasOpen ? "回到对话与任务" : "在无限画布中自由创建图片与视频",
     },
-    { icon: HelpCircle, label: "反馈", hint: "发送有关此聊天的反馈" },
+    { icon: HelpCircle, label: "反馈", hint: "发送有关此聊天的反馈", todo: "需要反馈通道，本机版没有" },
   ];
 }
 
@@ -141,6 +152,9 @@ export default function SkillPanel({ onClose, onPick, canvasOpen = false }: Skil
                  * 但脚本与用户找的都是"画布那个开关"，所以给它一个稳定名字。
                  */
                 data-testid={c.isCanvas ? "wb-canvas-toggle" : `wb-cmd-${c.label}`}
+                aria-label={c.todo ? `${c.label}（${c.todo}）` : c.label}
+                title={c.todo ?? ""}
+                disabled={Boolean(c.todo)}
                 onClick={() => {
                   onPick?.(c.label);
                   onClose();

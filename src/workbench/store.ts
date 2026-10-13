@@ -98,6 +98,17 @@ export type WorkbenchState = {
   setComposerDraft: (text: string) => void;
   /** 取走那句草稿（取一次就清）。 */
   takeComposerDraft: () => string | null;
+  /**
+   * 「插件页要直接进管理子页」这个意图（2026-10-14）。
+   *
+   * 技能面板的命令区里有「技能管理」（本体口径）—— 它该**直接进**插件页的管理子页，
+   * 而不是先落到市场页让用户再点一次。但那个子页模式是 `PluginsPage` 的**局部 state**，
+   * 从命令区喊不动它 —— 于是走这条"放下意图、由插件页取出即清"的通道
+   * （与 `composerDraft` 同一套做法：谁取出谁负责清，避免反复触发）。
+   */
+  pluginsIntent: "manage" | null;
+  setPluginsIntent: (intent: "manage" | null) => void;
+  takePluginsIntent: () => "manage" | null;
   takeScheduleDraft: () => { title: string; prompt: string } | null;
 
   setView: (view: WorkbenchView) => void;
@@ -201,6 +212,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   closeFloat: () => set({ floatOpen: false, floatSeed: "" }),
 
   composerDraft: null,
+  pluginsIntent: null,
   scheduleDraft: null,
   scheduleFromTask: (title, prompt) => {
     set({ scheduleDraft: { title, prompt }, view: "scheduled" });
@@ -213,6 +225,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   /** 把一句话交到主输入区（§159「创作同款」）。设置的同时切到首页。 */
   setComposerDraft: (text) => {
     set({ composerDraft: text, view: "home" });
+  },
+  setPluginsIntent: (intent) => set({ pluginsIntent: intent }),
+  takePluginsIntent: () => {
+    const intent = get().pluginsIntent;
+    if (intent) set({ pluginsIntent: null });
+    return intent;
   },
   takeComposerDraft: () => {
     const draft = get().composerDraft;

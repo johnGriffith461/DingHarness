@@ -3,7 +3,7 @@
  * 拆分理由见 `docs/PLAN-C6-结构拆分.md`（那个文件 1669 行 / 7 个顶层组件）。
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SEARCH_LABELS, placeholderFor, searchItems } from "@shared/search";
 import { SearchHistoryStrip } from "./SearchHistoryStrip";
 import { useSearchHistoryStore } from "./searchHistoryStore";
@@ -11,6 +11,7 @@ import { Check, ChevronDown, List, Plus, Search, Settings2 } from "lucide-react"
 import { ADMIN_TABS } from "./copy";
 import { FEATURED_ITEMS, RECOMMENDED_PLUGINS, SKILL_GROUPS, type CatalogItem } from "./catalog";
 import { findItemIn, useLibraryStore } from "./libraryStore";
+import { useWorkbenchStore } from "./store";
 
 import { PLUGIN_CATEGORIES } from "./ScheduledPage";
 import { ChevronRight } from "./pagesUtil";
@@ -26,6 +27,19 @@ export function PluginsPage() {
 
   /** 市场 / 管理 两级（实机是子页，不是弹窗）。 */
   const [mode, setMode] = useState<"market" | "manage">("market");
+
+  /*
+   * 技能面板的「技能管理」把我们送到这里时，直接落到**管理子页**（本体口径）。
+   * 取出即清（见 `store.setPluginsIntent`）—— 不清的话，用户下次自己点进插件页
+   * 也会莫名其妙停在管理页。
+   */
+  const takePluginsIntent = useWorkbenchStore((s) => s.takePluginsIntent);
+  useEffect(() => {
+    if (takePluginsIntent() === "manage") {
+      setManageTab("插件");
+      setMode("manage");
+    }
+  }, [takePluginsIntent]);
   /* 技能搜索（§160）：`search_skills_input_placeholder` = 搜索技能 */
   const [skillQuery, setSkillQuery] = useState("");
   const recordSearch = useSearchHistoryStore((s) => s.record);

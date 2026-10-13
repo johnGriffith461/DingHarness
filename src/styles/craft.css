@@ -479,10 +479,21 @@ html[data-kb="1"] .wb-searchbox:focus-within {
   position: relative;
   z-index: 1;
 }
+/*
+ * ⚠️ 右摘要**不给 z-index**（2026-10-14 修回归）。
+ *
+ * 我一开始照左栏那样写了 `z-index: 2` —— 结果它盖住了画布上那颗**文字样式工具条**
+ * （`accept-textstyle` 当场红：`<div class="wb-summary-section"> … intercepts pointer events`）。
+ * 根因：工具条在 `.wb-canvas`（`z-index: 1`）这个层里，而摘要写 2 就整体压在画布之上；
+ * 两者在"节点靠右边缘编辑"时会重叠，于是工具条点不到。
+ *
+ * 摘掉之后：DOM 顺序上摘要在画布**之后**，边界阴影照样画得出去（往工作区那侧）；
+ * 而画布里的浮层重新压回摘要之上 —— **功能优先于装饰**。
+ * 左栏那条 `z-index: 2` 保留：它在 DOM 里排在前面，不给层就压不住右边的邻居；
+ * 且技能面板（打开时在 x≥290）与它不重叠（左栏 270 宽）。
+ */
 .wb-summary {
   box-shadow: var(--edge-shadow-left);
-  position: relative;
-  z-index: 2;
 }
 
 /*

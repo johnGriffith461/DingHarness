@@ -42,6 +42,8 @@ export function Composer({
   const createTask = useWorkbenchStore((s) => s.createTask);
   const canvasOpen = useWorkbenchStore((s) => s.canvasOpen);
   const setCanvasOpen = useWorkbenchStore((s) => s.setCanvasOpen);
+  const setView = useWorkbenchStore((s) => s.setView);
+  const setPluginsIntent = useWorkbenchStore((s) => s.setPluginsIntent);
   const [text, setText] = useState("");
 
   /**
@@ -499,15 +501,23 @@ export function Composer({
             <SkillPanel
               onClose={() => setOpenPop(null)}
               canvasOpen={canvasOpen}
+              /*
+               * 命令区逐条接上（2026-10-14）：原来 `onPick` 根本没接，
+               * 六条命令全是**死按钮**（点了没反应）。有后端的接上，没后端的
+               * 在 `SkillPanel` 里如实标成 `todo`（禁用 + 悬停说明）。
+               */
               onPick={(label) => {
-                /*
-                 * 「创建画布」/「收起画布」：把画布开起来/收起来（2026-10-14）。
-                 * 本机版多数命令没有后端（用量 / 反馈 那几条），**如实什么都不做**，
-                 * 不假装成功 —— 与 SkillPanel 里那句注释同一条规矩。
-                 */
                 if (label === "创建画布") setCanvasOpen(true);
                 if (label === "收起画布") setCanvasOpen(false);
-                if (label === "创建画布" || label === "收起画布") setOpenPop(null);
+                /* 选择项目 / 工作模式设置：就是输入区那两个 chip —— 把它的下拉打开 */
+                if (label === "选择项目") setOpenPop("project");
+                if (label === "工作模式设置") setOpenPop("confirm");
+                /* 技能管理：跳到插件页的**管理子页**（本体口径：直接进管理，不是先落市场） */
+                if (label === "技能管理") {
+                  setPluginsIntent("manage");
+                  setView("plugins");
+                }
+                if (label !== "选择项目" && label !== "工作模式设置") setOpenPop(null);
               }}
             />
           ) : null}
