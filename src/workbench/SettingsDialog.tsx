@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ChevronRight, X } from "lucide-react";
+import { Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, Volume2, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -84,12 +84,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     */
     {
       group: 0,
-      icon: "★",
+      icon: <Crown size={13} />,
       label: "标准套餐",
       value: channel || "还没选模型通道",
     },
     /* 账号：对应本体 chat/settings/account（独立页） */
-    { group: 0, icon: "☺", label: "账号", value: "本机模式" },
+    { group: 0, icon: <User size={13} />, label: "账号", value: "本机模式" },
     /*
       通用（§182）：记忆开关与「开启新话题」都在这儿。
       这一行的 value 直接显示**记忆现在开着没有** —— 在设置列表里就能看见状态，
@@ -97,7 +97,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     */
     {
       group: 0,
-      icon: "☺",
+      icon: <SlidersHorizontal size={13} />,
       label: "通用",
       /*
        * 这一行的 value 把两件事都说了：记忆开着没有 + 新对话默认模型是什么。
@@ -111,15 +111,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         SETTINGS_LABELS.defaultModel
       }${pinnedLabel(pinnedModel)}${pinnedDead ? "（不可用）" : ""}`,
     },
-    /* 关于（§182）：只说本机这一份的事实 */    { group: 1, icon: "☺", label: "关于", value: "" },
-    { group: 0, icon: "◈", label: "订阅与额度管理", todo: "需要账号服务端，本机版没有" },
-    { group: 1, icon: "♪", label: "声音选择" },
+    /* 关于（§182）：只说本机这一份的事实 */    { group: 1, icon: <Info size={13} />, label: "关于", value: "" },
+    { group: 0, icon: <CircleDollarSign size={13} />, label: "订阅与额度管理", todo: "需要账号服务端，本机版没有" },
+    { group: 1, icon: <Volume2 size={13} />, label: "声音选择" },
     /*
       记忆：原来写着「本机版没有」+ 写死的"已启用" —— 那是**错的**。
       本体路由里有 `chat/memory/list|clear|delete`，它就是个真实功能，
       内容存本地一样成立。现在 value 显示**真实条数**，点开就是记忆面板。
     */
-    { group: 1, icon: "◔", label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
+    { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
   ];
   return (
     <div className="wb-modal-mask" onClick={onClose} data-testid="wb-settings">

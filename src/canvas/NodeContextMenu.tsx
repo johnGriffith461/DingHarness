@@ -1,4 +1,17 @@
+import type { ReactNode } from "react";
 import { useEffect } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsDown,
+  ChevronsUp,
+  Copy,
+  Eye,
+  FlipHorizontal2,
+  FlipVertical2,
+  Lock,
+  Trash2,
+} from "lucide-react";
 import { useRuntimeStore } from "./runtimeStore";
 import { canFlip, type LayerOrderOp } from "./layers";
 
@@ -21,7 +34,7 @@ import { canFlip, type LayerOrderOp } from "./layers";
  */
 
 /** 菜单项。 */
-type Item = { label: string; icon: string; run: () => void; danger?: boolean; disabled?: string };
+type Item = { label: string; icon?: ReactNode; run: () => void; danger?: boolean; disabled?: string };
 
 /**
  * 在指定位置弹出节点右键菜单。
@@ -84,22 +97,22 @@ export default function NodeContextMenu({
   const order = (op: LayerOrderOp) => on(() => store.getState().reorderLayer(nodeId, op));
 
   const items: Item[] = [
-    { label: "复制", icon: "⧉", run: on(() => store.getState().duplicateSelected(24)) },
-    { label: "删除", icon: "🗑", danger: true, run: on(() => store.getState().removeSelected()) },
+    { label: "复制", icon: <Copy size={13} />, run: on(() => store.getState().duplicateSelected(24)) },
+    { label: "删除", icon: <Trash2 size={13} />, danger: true, run: on(() => store.getState().removeSelected()) },
     {
       label: data.locked ? "解锁" : "锁定",
-      icon: "🔒",
+      icon: <Lock size={13} />,
       run: on(() => store.getState().setLayerLocked(nodeId, !data.locked)),
     },
     {
       label: data.hidden ? "显示" : "隐藏",
-      icon: "👁",
+      icon: <Eye size={13} />,
       run: on(() => store.getState().setLayerHidden(nodeId, !data.hidden)),
     },
-    { label: "上移一层", icon: "⬆︎", run: order("forward") },
-    { label: "下移一层", icon: "⬇︎", run: order("backward") },
-    { label: "移到最前", icon: "⤒", run: order("front") },
-    { label: "移到最后", icon: "⤓", run: order("back") },
+    { label: "上移一层", icon: <ArrowUp size={13} />, run: order("forward") },
+    { label: "下移一层", icon: <ArrowDown size={13} />, run: order("backward") },
+    { label: "移到最前", icon: <ChevronsUp size={13} />, run: order("front") },
+    { label: "移到最后", icon: <ChevronsDown size={13} />, run: order("back") },
     /*
      * 翻转**必须按 `canFlip` 收口**：`flipTransform` 目前只有形状节点在渲染，
      * 文本/代码这类节点设了 `flipX` 是没有任何变化的。
@@ -108,13 +121,13 @@ export default function NodeContextMenu({
      */
     {
       label: "水平翻转",
-      icon: "⇋",
+      icon: <FlipHorizontal2 size={13} />,
       disabled: canFlip(kind) ? undefined : "这一层没有画面内容，无法翻转",
       run: on(() => store.getState().flipLayer(nodeId, "horizontal")),
     },
     {
       label: "垂直翻转",
-      icon: "⇅",
+      icon: <FlipVertical2 size={13} />,
       disabled: canFlip(kind) ? undefined : "这一层没有画面内容，无法翻转",
       run: on(() => store.getState().flipLayer(nodeId, "vertical")),
     },

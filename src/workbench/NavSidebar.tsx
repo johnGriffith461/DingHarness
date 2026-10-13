@@ -5,7 +5,21 @@
  */
 
 import { useEffect, useState } from "react";
-import { Blocks, ChevronRight, Clock, HardDrive, ListTodo, MoreHorizontal, Settings, Smartphone } from "lucide-react";
+import {
+  Blocks,
+  ChevronRight,
+  Clock,
+  FolderInput,
+  FolderMinus,
+  HardDrive,
+  ListTodo,
+  Minus,
+  MoreHorizontal,
+  Pencil,
+  Pin,
+  Settings,
+  Smartphone,
+} from "lucide-react";
 import { useWorkbenchStore, type WorkbenchView } from "./store";
 import { type WorkTask } from "./task";
 import { useLibraryStore } from "./libraryStore";
@@ -369,12 +383,12 @@ export function NavSidebar() {
           items={[
             {
               label: lib.pinned.includes(rowMenu.task.id) ? "取消置顶" : "置顶",
-              icon: "★",
+              icon: <Pin size={13} />,
               run: () => pin(rowMenu.task.id),
             },
             {
               label: "重命名",
-              icon: "✎",
+              icon: <Pencil size={13} />,
               run: () => {
                 const name = window.prompt("重命名任务", rowMenu.task.title);
                 if (name) renameTask(rowMenu.task.id, name);
@@ -383,16 +397,16 @@ export function NavSidebar() {
             ...(lib.projects.length > 0
               ? lib.projects.map((p) => ({
                   label: `归入「${p.name}」`,
-                  icon: "▤",
+                  icon: <FolderInput size={13} />,
                   run: () => assignProject(p.id, rowMenu.task.id),
                 }))
               : []),
             ...(lib.projects.some((p) => p.memberIds.includes(rowMenu.task.id))
-              ? [{ label: "移出项目", icon: "−", run: () => assignProject(null, rowMenu.task.id) }]
+              ? [{ label: "移出项目", icon: <FolderMinus size={13} />, run: () => assignProject(null, rowMenu.task.id) }]
               : []),
             {
               label: "移除",
-              icon: "×",
+              icon: <Minus size={13} />,
               run: () => {
                 /*
                  * 只是从列表里去掉。**不动磁盘上的产物** ——

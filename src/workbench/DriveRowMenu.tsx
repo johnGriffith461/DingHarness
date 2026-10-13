@@ -8,6 +8,19 @@ import { type DriveEntry } from "@shared/drive";
 import { useLibraryStore } from "./libraryStore";
 import { useWorkbenchStore } from "./store";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
+import {
+  BookOpen,
+  Copy,
+  Download,
+  Link2,
+  MessageCircle,
+  Pencil,
+  Share2,
+  SquarePlus,
+  Star,
+  StarOff,
+  Trash2,
+} from "lucide-react";
 
 export function DriveRowMenu({
   entry,
@@ -43,30 +56,30 @@ export function DriveRowMenu({
   const items: MenuItem[] = [
     {
       label: "问问豆包",
-      icon: "💬",
+      icon: <MessageCircle size={13} />,
       run: () => openFloat(`读一下这个文件：${entry.path}\n然后用一句话说清它讲了什么。`),
     },
     {
       /* 「AI 阅读」：把文件读成文本送进阅读面板 —— 真接上的（大纲/页面检索/图表都能用，§155） */
       label: "AI 阅读",
-      icon: "📖",
+      icon: <BookOpen size={13} />,
       run: () => onAiReading(entry),
     },
     {
       /* 「下载」（§169）：给了目标目录就静默复制，不给就弹系统"另存为"框 */
       label: "下载",
-      icon: "⬇",
+      icon: <Download size={13} />,
       run: () => onDownload(entry),
     },
     {
       label: "重命名",
-      icon: "✏️",
+      icon: <Pencil size={13} />,
       run: () => onRename(entry),
     },
-    { label: "分享", icon: "↗", disabled: "分享需要服务端支持，本机版没有" },
+    { label: "分享", icon: <Share2 size={13} />, disabled: "分享需要服务端支持，本机版没有" },
     {
       label: "复制链接",
-      icon: "🔗",
+      icon: <Link2 size={13} />,
       run: () => {
         void navigator.clipboard.writeText(`dshasset://file/${entry.origin}/${encodeURIComponent(entry.name)}`);
         onChanged("已复制链接");
@@ -74,23 +87,23 @@ export function DriveRowMenu({
     },
     {
       label: "创建副本",
-      icon: "⧉",
+      icon: <Copy size={13} />,
       run: () => {
         void bridge?.drive
           ?.duplicate(entry.path)
           .then((name) => onChanged(name ? `已创建副本：${name}` : "创建副本失败"));
       },
     },
-    { label: "添加快捷方式到", icon: "⊞", disabled: "需要系统级快捷方式支持，本机版没有" },
+    { label: "添加快捷方式到", icon: <SquarePlus size={13} />, disabled: "需要系统级快捷方式支持，本机版没有" },
     {
       label: starred ? "取消收藏" : "收藏",
-      icon: "☆",
+      icon: starred ? <Star size={13} /> : <StarOff size={13} />,
       run: () => star(entry.name),
     },
     {
       // 删除**必须走确认**（证据 `drive_confirm_title_deleteFile`）—— 删文件是不可逆的
       label: "删除",
-      icon: "🗑",
+      icon: <Trash2 size={13} />,
       run: () => onDelete(entry),
     },
   ];

@@ -526,3 +526,26 @@
   background: var(--bg-2);
   color: var(--fg);
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 会变的数字：一律 `tabular-nums`（2026-10-14，照 `better-typography`）
+ *
+ * 依据：`~/.agents/skills/better-typography/SKILL.md`
+ *   > "Digits have different widths by default, so timers, counters and prices
+ *   >  shift the layout as they update. Apply `font-variant-numeric: tabular-nums`
+ *   >  to any value that changes."
+ *
+ * 我们这边会变的数字有四类，原来一处都没加：
+ *   · 任务进度行里的**秒表**（每秒都在变，等宽数字不然整行会左右抖）
+ *   · 消耗（token / 费用）
+ *   · 产物文件大小（生成过程中会变）
+ *   · 定时任务的下次执行时间
+ * 画布与云盘那几处以前就加了（`.wb-td-num` 等），这里补齐工作台这一侧。
+ * ══════════════════════════════════════════════════════════════════════ */
+.wb-progress,
+.wb-cost,
+.wb-artifact-size,
+.wb-job-next,
+.wb-job-last {
+  font-variant-numeric: tabular-nums;
+}

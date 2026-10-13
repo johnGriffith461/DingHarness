@@ -233,7 +233,20 @@
 }
 
 .wb-assistant { display: flex; flex-direction: column; gap: 6px; }
-.wb-assistant-text { font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
+/*
+ * 助手正文：给一个**行宽上限**（2026-10-14，照 `better-typography` 的 "Cap the measure"）。
+ *
+ * 依据原话：长行的毛病是"眼睛找不到下一行"；建议 60–75 个字符一行。
+ * 工作台这块在宽屏上能到 1200px 以上 —— 一行能塞下两百多个汉字，读起来很累。
+ * 72ch 在 13.5px 下约 970px，宽屏上仍是一大块，但已经不是"一条长带子"。
+ * ⚠️ 表格 / 代码块等**结构性内容不受这个上限约束**（它们是块级元素、本来就不换行成散文）。
+ */
+.wb-assistant-text {
+  font-size: 13.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 72ch;
+}
 
 .wb-actions { display: flex; align-items: center; gap: 2px; color: var(--fg-dim); }
 .wb-cost {

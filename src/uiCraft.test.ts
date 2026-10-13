@@ -155,4 +155,34 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
     expect(token, "没有 --focus-ring 令牌").not.toBeNull();
     expect(token![1], `焦点环颜色不是中性的：${token![1]}`).toMatch(/rgba\(\s*(16,\s*24,\s*40|255,\s*255,\s*255)/);
   });
+
+  /*
+   * ⑦ 图标必须来自图标库，不许用 Unicode 字形 / emoji 顶替（2026-10-14）。
+   *
+   * 依据 `~/.agents/skills/impeccable/reference/craft-floor.md`：
+   *   > "Unicode glyphs or emoji standing in for an icon system. Icons are drawn,
+   *   >  from a real library or authored SVG, in one consistent stroke and weight."
+   *
+   * 我们本来就是 lucide 一整套，却有 32 处菜单/设置行写着 `icon: "💬" / "★" / "◈"` 这种
+   * 字符（几乎全是云盘右键菜单、设置弹窗、画布节点菜单这三处）—— 一屏里同时出现
+   * 彩色 emoji 和单色线性图标，最像"半成品"的就是这里。这一轮全换成了 lucide 组件。
+   *
+   * 断的是**写法**（源码级，和这个文件里其它几条一样）：`icon: "…"` 这种字符串图标
+   * 不许再出现 —— 换成 `icon: <X size={13} />`。
+   */
+  it("⑦ 菜单/行的图标走图标库，不许 emoji / Unicode 字形顶替", () => {
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+          const text = readFileSync(full, "utf8");
+          if (/icon:\s*"[^"]/.test(text)) offenders.push(path.relative(ROOT, full).split(path.sep).join("/"));
+        }
+      }
+    };
+    walk(path.join(ROOT, "src"));
+    expect(offenders, "这些文件里还在用字符当图标（换成 lucide 组件）").toEqual([]);
+  });
 });

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 
 /**
@@ -13,7 +14,15 @@ import { useEffect } from "react";
 /** 菜单项。 */
 export type MenuItem = {
   label: string;
-  icon?: string;
+  /**
+   * 左侧图标。
+   *
+   * ⚠️ 2026-10-14：类型从 `string` 改成 `ReactNode` —— 原来这里是**字符**图标
+   * （`💬 📖 ⬇ ✏️ ☆ 🗑` 这种 emoji / Unicode 字形）。`impeccable/craft-floor.md`
+   * 把"用 Unicode 字形或 emoji 顶替图标系统"列为不合格；而本项目的图标系统
+   * 本来就是 lucide（其余界面全是它），这几十处是**自家里最不一致的一角**。
+   */
+  icon?: ReactNode;
   /** 禁用时的原因（同时作为 tooltip）。给了就不响应点击。 */
   disabled?: string;
   run?: () => void;
