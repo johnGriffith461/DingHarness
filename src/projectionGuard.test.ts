@@ -33,7 +33,7 @@ const ROOT = path.resolve(__dirname, "..");
 const FOLD_CALL_SITES = new Set([
   "shared/sessionLog.ts", // 定义 + projectTurn 内部折叠
   "src/ai/chatStore.ts",
-  "src/workbench/store.ts",
+  "src/workbench/taskRuntime.ts", // C6-4：工作台那处折叠随运行时搬去了 taskRuntime.ts
   "src/workbench/FloatingAssistant.tsx",
 ]);
 

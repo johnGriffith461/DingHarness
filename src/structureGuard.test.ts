@@ -30,12 +30,18 @@ const LIMIT = { code: 900, css: 1500 };
 /**
  * 明牌例外（相对仓库根，正斜杠）。
  *
- * - `src/workbench/store.ts`：**运行时状态机**（`createTask` / `answer` / `answerTurn` /
- *   `runStream`）刻意留在一起 —— 拆它要连测试一起重新设计，属**行为级改动**，
- *   不是"结构拆分"。C6-4 在方案里，但只拆纯函数与持久化那两段就够不着 900 行，
- *   所以这一条如实挂着（`docs/PLAN-C6-结构拆分.md` §3 C6-4 已记录）。
+ * ⚠️ **现在是空的**：C6-4 把 `store.ts`（1296 行）拆成
+ * `store.ts` + `taskRuntime.ts` + `taskPersist.ts` + `task.ts` 之后，它已降到 900 行以下。
+ *
+ * 这里原来挂着一条 `src/workbench/store.ts`，理由是"运行时状态机刻意留在一起，
+ * 拆它要连测试一起重新设计，属行为级改动"。C6-4 证明那个判断不对：整块运行时**搬得走** ——
+ * 靠 `StorePort` 把 store 的读写当参数注入，逻辑一个字不改
+ * （见 `src/workbench/taskRuntime.ts` 的文件头与 `docs/PLAN-C6-4-拆store.md`）。
+ *
+ * 空集合是**有意的**：这个仓库现在没有需要豁免的巨石文件。
+ * 真要再加，必须写明理由 —— 并且下面那条"例外必须真超阈值"的断言会盯着。
  */
-const EXEMPT = new Set(["src/workbench/store.ts"]);
+const EXEMPT = new Set<string>();
 
 /** 递归收集要检查的源文件。 */
 function sources(dir: string, out: string[] = []): string[] {
