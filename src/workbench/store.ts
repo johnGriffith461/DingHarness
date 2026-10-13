@@ -11,6 +11,7 @@ import {
   type ToolTrace,
 } from "@shared/agentTools";
 import { applyEvent, emptyTurn, finishTurn, taskSessionId } from "@shared/sessionLog";
+import { assembleSystem } from "@shared/turnAssembly";
 import { buildHistory } from "./history";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
@@ -991,7 +992,11 @@ async function runStream(
    * 这里补上：放在人设之后、能力说明之前。
    */
   const remembered = memoryPromptBlock(useMemoryStore.getState().lib);
-  const fullSystem = [system, persona, remembered, extra].filter(Boolean).join("\n\n");
+  /*
+   * 装配收成一份纯函数（C2-4）：聊天侧用的是**同一个** `assembleSystem`。
+   * 不这么做的时候两边是各写一遍的 —— 于是聊天侧压根没有记忆与人设（实测）。
+   */
+  const fullSystem = assembleSystem({ base: system, persona, memory: remembered, abilities: extra });
   /**
    * 这一轮的**投影**（C2）：正文、工具留痕、用量只有一份算法。
    *

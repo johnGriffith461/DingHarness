@@ -4,6 +4,8 @@ import { mergeToolTraces, rejectedLine, type ToolTrace } from "@shared/agentTool
 import { applyEvent, chatSessionId, emptyTurn, finishTurn, splitTurns, type LogRecord } from "@shared/sessionLog";
 import { artifactFileName, extractArtifacts, type Artifact } from "@/workbench/artifact";
 import { enabledPromptBlock } from "@shared/library";
+import { memoryPromptBlock } from "@shared/memory";
+import { assembleSystem } from "@shared/turnAssembly";
 import type { SessionSummary, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "./aiClient";
 import { readConfirmMode } from "@/workbench/confirmMode";
@@ -207,6 +209,45 @@ async function attachArtifactPaths(messages: ChatMessageRecord[]): Promise<ChatM
 /** 取 preload 桥（与文件里其它地方同一套取法，这里收成一行便于复用）。 */
 const shellBridge = (): ShellBridge | undefined =>
   (globalThis as unknown as { shell?: ShellBridge }).shell;
+
+/**
+ * 这一轮的系统提示词（C2-4）。
+ *
+ * ## 为什么聊天侧原来什么都没有
+ *
+ * 它只有能力块（`abilityBlock`）——**没有长期记忆、没有人设**。
+ * 而工作台两样都有（`store.ts` 里那行 join）。同一个模型、同一个用户，
+ * 在聊天里问"我怎么称呼你"答不出来，在工作台问就能答出来 ——
+ * 这不是产品设计，是**两条路各写一遍**的后果。
+ *
+ * 现在两边都走 `assembleSystem`（`shared/turnAssembly.ts`）：块的顺序与拼法只有一份，
+ * 差异只剩"调用方给了哪些块"。
+ *
+ * ⚠️ 动态 import 工作台那两个 store：避免顶层循环依赖
+ * （与下面 `abilityBlock` 对 `libraryStore` 的做法一致）。
+ */
+async function systemBlocks(): Promise<string> {
+  const [abilities, persona, memory] = await Promise.all([
+    abilityBlock(),
+    (async () => {
+      try {
+        const { agentPromptBlock } = await import("@/workbench/agentStore");
+        return agentPromptBlock();
+      } catch {
+        return "";
+      }
+    })(),
+    (async () => {
+      try {
+        const { useMemoryStore } = await import("@/workbench/memoryStore");
+        return memoryPromptBlock(useMemoryStore.getState().lib);
+      } catch {
+        return "";
+      }
+    })(),
+  ]);
+  return assembleSystem({ persona, memory, abilities });
+}
 
 async function abilityBlock(): Promise<string> {
   try {
@@ -648,7 +689,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
          * 这一段与工作台**同一来源**（`enabledPromptBlock`）：用户
          * 在插件·技能·伙伴里开了什么，聊天里就有什么 —— 两处口径一致。
          */
-        system: await abilityBlock(),
+        system: await systemBlocks(),
       },
       (event: AiStreamEvent) => {
         /*

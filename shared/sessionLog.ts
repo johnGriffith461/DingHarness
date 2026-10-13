@@ -164,7 +164,26 @@ export function conversationIdOf(sessionId: string): string {
  * 后两者是流式那一侧用的（事件先到界面、日志在同一个出口处顺手记）：
  * 同一个 `applyEvent` 两边都吃，这正是"两边不会算出不同结果"的落点。
  */
-export type TurnInput = LogRecord | LogInput | AiStreamEvent;
+export type TurnInput = LogRecord | LogInput | ProjectableEvent | AiStreamEvent;
+
+/**
+ * 投影**真正需要**的最小形状：一个判别字段 + 各分支的字段。
+ *
+ * ⚠️ 刻意**不含 `requestId`**：那个字段是 IPC 归并用的（`aiClient` 按它认自己那次请求），
+ * 而主循环（`electron/ipc/runTurn.ts`）与子智能体压根没有它 ——
+ * 若投影要求带上它，两条路就得往事件里塞一个假 id（"为了通过类型检查而编数据"）。
+ */
+export type ProjectableEvent =
+  | { type: "text"; text: string }
+  | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
+  | { type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
+  | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number } }
+  | { type: "error"; message: string }
+  /*
+   * 「一步结束了」：投影**忽略**它（它不改变正文/工具/用量，只用来数步数）。
+   * 列在这里是为了让主循环（`runTurn`）的事件能**直接**喂进投影，不必到处 cast。
+   */
+  | { type: "step-finish" };
 
 /**
  * 落盘前的记录：还没分配 `seq`/`at`。

@@ -1,8 +1,8 @@
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { stepCountIs, streamText, type ToolSet } from "ai";
+import type { ToolSet } from "ai";
+
+import { applyEvent, emptyTurn, finishTurn } from "../../shared/sessionLog";
 import type { SubagentBlocked, SubagentReport } from "../../shared/agentTools";
-import { resolveSecret } from "./credentials";
-import { getProvider } from "./aiProviders";
+import { runTurn } from "./runTurn";
 
 /**
  * 子智能体（§150）。
@@ -30,17 +30,16 @@ import { getProvider } from "./aiProviders";
  * ⚠️ v1 的取舍（如实）：**子智能体里的 `ask` 没有"当场点允许"的按钮** ——
  * 那些动作要由父级（或用户）另起一次调用才会出现确认按钮。
  * 这比"子智能体静默地绕过了闸门"好得多：**宁可办不成，不能不问就办**。
+ *
+ * ── C2-3（2026-10-13）：主循环收进 `./runTurn` ──
+ *
+ * 这里原来自己写了一份 `streamText` + `fullStream` 循环，于是它**少了父级有的四样**：
+ * 中止信号、`tool-error` 分支、provider 健康标记、模型可用性校验。
+ * 现在两条路都是 `runTurn`，差别只剩**参数**（子智能体 `maxSteps: 6`、父级 4 —— 各自的经验值，不许顺手统一）。
+ *
+ * ⚠️ 报告的**收集**也换成投影（`shared/sessionLog.ts` 的 `applyEvent`）：
+ * 正文、调过哪些工具、哪些被拦下 —— 原来是手写的三个累加变量，现在只有一份算法。
  */
-
-/** 搭一个与主请求同一 provider 的客户端（key 不出主进程）。 */
-function makeClient(providerId: string): { client: ReturnType<typeof createOpenAICompatible>; model: string } | null {
-  const provider = getProvider(providerId);
-  if (!provider) return null;
-  const apiKey = resolveSecret(provider.keyRef);
-  if (!apiKey) return null;
-  const client = createOpenAICompatible({ name: provider.id, baseURL: provider.baseURL, apiKey });
-  return { client, model: provider.models[0] ?? "" };
-}
 
 /**
  * 跑一个子智能体。
@@ -53,6 +52,7 @@ function makeClient(providerId: string): { client: ReturnType<typeof createOpenA
  * @param input.user 子智能体的用户消息
  * @param input.tools **已经按同一个闸门档位建好的**工具集
  * @param input.maxSteps 最多几步（默认 6）
+ * @param input.signal 父级的中止信号（用户点停时，子智能体也得停）
  * @returns 要点报告
  */
 export async function runSubagent(input: {
@@ -62,85 +62,57 @@ export async function runSubagent(input: {
   user: string;
   tools: ToolSet;
   maxSteps?: number;
+  signal?: AbortSignal;
 }): Promise<SubagentReport> {
-  const made = makeClient(input.provider);
-  if (!made) {
-    return { ok: false, summary: "", steps: 0, toolCalls: [], blocked: [], error: "子智能体拿不到可用的 provider" };
-  }
-  const { client, model } = made;
-
-  const toolCalls: string[] = [];
-  /**
-   * 被闸门拦下的调用（§176 起**结构化**：工具名 + 参数都留下）。
-   *
-   * 只存一行显示文字是不够的 —— 父级拿到它就**没有让它办成的办法**
-   * （没有工具名与参数，谁都执行不了）。结构化之后父级能把它挂成自己的待批准项。
-   */
-  const blocked: SubagentBlocked[] = [];
-  let text = "";
-  /** 每步结束会来一个 `finish`，据此数步（拿不到就用工具调用数兜底）。 */
+  /** 这一轮的事件（用投影收集报告：正文/工具/拦下的调用都在里面）。 */
+  let turn = emptyTurn();
   let finishes = 0;
-  /**
-   * 步数（**在 try 之前定义**：catch 那支也要用它报"跑了几步就崩了"）。
-   * 优先用 finish 计数；拿不到就按"工具调用数 + 1"兜底（至少有一轮）。
-   */
-  const stepCount = (): number => Math.max(finishes, toolCalls.length + 1);
 
-  try {
-    const result = streamText({
-      model: client(input.model && model ? input.model : model),
+  const outcome = await runTurn(
+    {
+      provider: input.provider,
+      ...(input.model ? { model: input.model } : {}),
       system: input.system,
       messages: [{ role: "user", content: input.user }],
       tools: input.tools,
-      /*
-       * 步数比父级（4）宽一点：子智能体拿到的是一件完整的活，
-       * 往往要"查一次 → 看到结果 → 再查一次"。但也不放大 ——
-       * 超过 10~20 轮就烂（12-factor 那句）。
-       */
-      stopWhen: stepCountIs(input.maxSteps ?? 6),
-    });
+      maxSteps: input.maxSteps ?? 6,
+      ...(input.signal ? { abortSignal: input.signal } : {}),
+    },
+    (event) => {
+      // 事件先过投影（与界面那两条路同一个函数），再按需要累计
+      turn = applyEvent(turn, event);
+      if (event.type === "step-finish") finishes += 1;
+    },
+  );
 
-    for await (const part of result.fullStream) {
-      if (part.type === "text-delta") text += part.text;
-      if (part.type === "tool-call") toolCalls.push(part.toolName);
-      if (part.type === "tool-result") {
-        /*
-         * 被闸门拦下的那些：**没执行**（口径同 §143）。
-         * 记进报告，别让它看起来像办成了。
-         */
-        const out = part.output as { pending?: boolean } | undefined;
-        if (out?.pending) {
-          blocked.push({
-            toolCallId: part.toolCallId,
-            name: part.toolName,
-            ...(part.input === undefined ? {} : { input: part.input }),
-          });
-        }
-      }
-      if (part.type === "finish") finishes += 1;
-    }
+  const view = finishTurn(turn);
+  /**
+   * 步数：优先用 `finish` 计数，拿不到就按"工具调用数 + 1"兜底（至少有一轮）。
+   * ⚠️ 兜底那一支是原实现就有的（宁可给个保守数，也不要报 0 步）。
+   */
+  const steps = Math.max(finishes, view.traces.length + 1);
+  /** 被闸门拦下的调用：**结构化**（工具名 + 参数都要留下，父级才能就地放行）。 */
+  const blocked: SubagentBlocked[] = view.traces
+    .filter((t) => t.pending)
+    .map((t) => ({
+      toolCallId: t.toolCallId,
+      name: t.name,
+      ...(t.input === undefined ? {} : { input: t.input }),
+    }));
 
-    const usage = await result.usage;
-    const summary = text.trim();
-    if (!summary) {
-      return { ok: false, summary: "", steps: stepCount(), toolCalls, blocked, error: "子智能体没有给出报告" };
-    }
-    return {
-      ok: true,
-      summary,
-      steps: stepCount(),
-      toolCalls,
-      blocked,
-      usage: { inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens },
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      summary: "",
-      steps: stepCount(),
-      toolCalls,
-      blocked,
-      error: error instanceof Error ? error.message : String(error),
-    };
+  const summary = view.text.trim();
+  const base = {
+    steps,
+    toolCalls: view.traces.map((t) => t.name),
+    blocked,
+    ...(view.usage ? { usage: { inputTokens: view.usage.inputTokens, outputTokens: view.usage.outputTokens } } : {}),
+  };
+
+  if (!outcome.ok) {
+    return { ok: false, summary: "", ...base, error: outcome.error ?? "子智能体没有跑完" };
   }
+  if (!summary) {
+    return { ok: false, summary: "", ...base, error: "子智能体没有给出报告" };
+  }
+  return { ok: true, summary, ...base };
 }

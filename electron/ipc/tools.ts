@@ -175,6 +175,9 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       system,
       user,
       tools: subTools,
+      // 父级被停止时子级一起停（信号一路从 ai:chat 传到这里）
+      ...(env.signal ? { signal: env.signal } : {}),
+
     });
   },
 };
@@ -240,6 +243,16 @@ export type ToolEnv = {
   provider: string;
   model?: string;
   depth?: number;
+  /**
+   * 这一轮的中止信号（C2-3）。
+   *
+   * ⚠️ 它一路传到 `spawn_agent` → `runSubagent`：用户点停时**子智能体也得停**。
+   * 在此之前子智能体压根拿不到信号 —— 表现是"点了停止，后台还在跑、还在花钱"。
+   *
+   * ⚠️ 放行路径（`ai:runTool`）**没有**信号：那次请求的上下文早就结束了（§144），
+   * 所以从放行启动的子智能体不可中止 —— 如实记着这个边界。
+   */
+  signal?: AbortSignal;
 };
 
 /**

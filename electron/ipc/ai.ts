@@ -1,12 +1,9 @@
 import { ipcMain, type WebContents } from "electron";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { stepCountIs, streamText } from "ai";
-import { resolveSecret } from "./credentials";
-import { getProvider } from "./aiProviders";
-import { listProvidersWithProbe, markProviderFailed, markProviderOk, probeProviders } from "./aiProbe";
+import { listProvidersWithProbe, probeProviders } from "./aiProbe";
 import { getSessionLogger } from "./sessionStore";
 import { agentTools, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
+import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "./runTurn";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 
 /**
@@ -61,20 +58,6 @@ function safeSend(sender: WebContents, event: AiStreamEvent): void {
   } catch {
     /* 窗口正在关闭，丢掉即可 */
   }
-}
-
-/** 把错误翻成给人看的一句话。 */
-function humanError(error: unknown): string {
-  if (error instanceof Error && error.name === "AbortError") return "已中止";
-  const raw = error instanceof Error ? error.message : String(error);
-  if (/401|unauthorized|invalid api key/i.test(raw)) return "密钥无效或已过期";
-  if (/404|model.*not.*found/i.test(raw)) return "模型不存在（检查模型名与 provider）";
-  if (/429|rate limit/i.test(raw)) return "触发限流，稍后重试";
-  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(raw)) {
-    return "连不上 provider（网络问题，或本地服务未启动）";
-  }
-  if (/insufficient|balance|quota/i.test(raw)) return "余额不足";
-  return raw.slice(0, 200);
 }
 
 export function registerAiIpc(): void {
@@ -167,13 +150,8 @@ export function registerAiIpc(): void {
      * 所以：**发与记在同一处**（下面的 `emit`）—— 两处各写一份必然会漂移，
      * 而"日志说调了工具、界面没显示"这种不一致最难查。
      *
-     * `sessionId` 由发起方给（工作台是任务 id、聊天是对话 id）；
-     * 不给就不记（`refineTitle` 这类附带请求不是 agent 回合）。
-     */
-    /*
-     * ⚠️ 用 `getSessionLogger`（**同一会话共用一个**），不是每次新建：
-     * 用户点「允许」时由 `ai:runTool` 往**同一个文件**写决策记录 ——
-     * 两个写入器各自从 seq=1 数，就会撞号，读回来按 seq 排序时"批准"会排到它那一轮前面。
+     * ⚠️ 用 `getSessionLogger`（**同一会话共用一个**）：用户点「允许」时
+     * `ai:runTool` 要往**同一个文件**写决策记录，两个写入器各自从 seq=1 数就会撞号。
      */
     const sessionLog = getSessionLogger(request.sessionId);
     sessionLog?.log({
@@ -192,22 +170,15 @@ export function registerAiIpc(): void {
       safeSend(sender, e);
     };
 
-    const provider = getProvider(request.provider);
-    if (!provider) {
-      const message = `未知 provider：${request.provider}`;
-      emit({ requestId, type: "error", message });
-      return { requestId, ok: false, error: message };
+    /*
+     * 解析目标要在**同步返回**之前做完：渲染层拿 `{provider, model}` 显示"这次用的谁"。
+     * 规则只有一份（`resolveTurnTarget`），下面 `runTurn` 内部用的也是它。
+     */
+    const target = resolveTurnTarget(request.provider, request.model);
+    if (!target.ok) {
+      emit({ requestId, type: "error", message: target.error });
+      return { requestId, ok: false, error: target.error };
     }
-
-    const apiKey = resolveSecret(provider.keyRef);
-    if (!apiKey) {
-      const message = `${provider.label} 没有可用密钥（需要 ${provider.keyRef}）`;
-      emit({ requestId, type: "error", message });
-      return { requestId, ok: false, error: message };
-    }
-
-    const model =
-      request.model && provider.models.includes(request.model) ? request.model : provider.models[0];
 
     const controller = new AbortController();
     liveStreams.set(requestId, { controller });
@@ -228,126 +199,91 @@ export function registerAiIpc(): void {
         }
       };
 
+      /** 主循环的事件 → IPC 事件（**只在这里补 requestId**；其余字段一一对应）。 */
+      const toStreamEvent = (e: TurnEvent): AiStreamEvent | null => {
+        if (e.type === "text") return { requestId, type: "text", text: e.text };
+        if (e.type === "tool-call") {
+          return { requestId, type: "tool-call", toolCallId: e.toolCallId, toolName: e.toolName, input: e.input };
+        }
+        if (e.type === "tool-result") {
+          return {
+            requestId,
+            type: "tool-result",
+            toolCallId: e.toolCallId,
+            toolName: e.toolName,
+            ...(e.output === undefined ? {} : { output: e.output }),
+            ...(e.error ? { error: e.error } : {}),
+          };
+        }
+        if (e.type === "done") return { requestId, type: "done", ...(e.usage ? { usage: e.usage } : {}) };
+        if (e.type === "error") return { requestId, type: "error", message: e.message };
+        return null; // step-finish：只用来数步数，不进 IPC
+      };
+
       try {
-        const client = createOpenAICompatible({
-          name: provider.id,
-          baseURL: provider.baseURL,
-          apiKey,
-        });
-
-        const result = streamText({          model: client(model),
-          messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
-          system: request.system,
-          temperature: request.temperature,
-          maxOutputTokens: request.maxTokens,
-          abortSignal: controller.signal,
-          /*
-           * ── 工具协议（§141）────────────────────────────────────────────
-           *
-           * `tools`：把共享层的声明交给模型。**执行在主进程**（`./tools`），
-           * 渲染进程绕不过去 —— 这是后面「审批闸门」能只在**一个地方**做的前提。
-           *
-           * `stopWhen: stepCountIs(4)`：这是"模型调完工具、拿到结果、继续把话说完"的
-           * 那几轮。老写法（只调一次模型）会让工具调用的结果**永远回不到模型嘴里**。
-           * 4 步是按 12-factor 那句"超过 10–20 轮就烂"取的保守值：够一次工具往返 + 收尾，
-           * 又不至于让模型在里面打转。
-           *
-           * 工具执行抛错**不会**中断这次流：AI SDK 把它变成 `tool-error`，
-           * 我们照样把它当一次工具结果转发（goose / Factor 9 的口径：错误也要当结果回注）。
-           */
-          /*
-           * 工具**只在发起方明确要求时才带**（§143）。
-           *
-           * 起标题、翻译这类附带请求与回答是并行的，它们拿到工具集就会真的执行动作
-           * —— 一次发送写两次记忆就是这么来的。默认不带，是这里唯一安全的默认值。
-           */
-          ...(request.useTools
-            ? {
-                tools: agentTools({ mode: request.toolPolicy ?? "全部允许", provider: provider.id, model, depth: 0 }),
-                stopWhen: stepCountIs(4),
-              }
-            : {}),
-        });
-
-        /*
-         * ⚠️ 这里从 `textStream` 换成 `fullStream`。
-         *
-         * `textStream` 只有文本增量，**看不见工具调用**；而"模型调了什么、结果如何"
-         * 正是要记进这一步（step 事件化）的东西。换掉之后文本的处理方式不变
-         * （仍是 40ms 攒一批发出去），只是多接了两类事件。
-         */
-        for await (const part of result.fullStream) {
-          if (controller.signal.aborted) break;
-          if (part.type === "text-delta") {
-            buffered += part.text;
-            if (!flushTimer) flushTimer = setTimeout(flush, 40);
-            continue;
-          }
-          if (part.type === "tool-call") {
+        const outcome = await runTurn(
+          {
+            provider: request.provider,
+            model: target.model,
+            ...(request.system ? { system: request.system } : {}),
+            messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+            ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+            ...(request.maxTokens === undefined ? {} : { maxOutputTokens: request.maxTokens }),
+            abortSignal: controller.signal,
             /*
-             * 工具调用事件要**先把自己攒的文本发出去**：不然界面上会出现
+             * 工具**只在发起方明确要求时才带**（§143）。
+             *
+             * 起标题、翻译这类附带请求与回答是并行的，它们拿到工具集就会真的执行动作
+             * —— 一次发送写两次记忆就是这么来的。默认不带，是这里唯一安全的默认值。
+             *
+             * ⚠️ `signal` 也放进 env：它一路传到 `spawn_agent` → 子智能体（C2-3）。
+             */
+            ...(request.useTools
+              ? {
+                  tools: agentTools({
+                    mode: request.toolPolicy ?? "全部允许",
+                    provider: target.provider.id,
+                    model: target.model,
+                    depth: 0,
+                    signal: controller.signal,
+                  }),
+                  // 步数上限：父级 4（子智能体 6）—— **参数，不是两条代码路径**
+                  maxSteps: 4,
+                }
+              : {}),
+          },
+          (e) => {
+            if (e.type === "text") {
+              // 40ms 一批：一个字一次 IPC 会把渲染进程淹掉
+              buffered += e.text;
+              if (!flushTimer) flushTimer = setTimeout(flush, 40);
+              return;
+            }
+            /*
+             * 工具事件要**先把自己攒的文本发出去**：不然界面上会出现
              * "模型说了一半 → 工具执行 → 后半句"，而那半句还压在缓冲里没发。
              */
             flush();
-            emit({
-              requestId,
-              type: "tool-call",
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              input: part.input,
-            });
-            continue;
-          }
-          if (part.type === "tool-result" || part.type === "tool-error") {
-            flush();
-            const failed = part.type === "tool-error";
-            emit({
-              requestId,
-              type: "tool-result",
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              ...(failed
-                ? { error: part.error instanceof Error ? part.error.message : String(part.error) }
-                : { output: part.output }),
-            });
-            continue;
-          }
-          if (part.type === "error") {
-            throw part.error;
-          }
-        }
+            const mapped = toStreamEvent(e);
+            if (mapped) emit(mapped);
+          },
+        );
         flush();
-
-        if (!controller.signal.aborted) {
-          let usage: { inputTokens?: number; outputTokens?: number } | undefined;
-          try {
-            const final = await result.usage;
-            usage = { inputTokens: final.inputTokens, outputTokens: final.outputTokens };
-          } catch {
-            usage = undefined;
-          }
-          // 真的跑通了 —— 把这家 provider 标成"已验证"（界面上才敢说可用）
-          markProviderOk(provider.id);
-          emit({ requestId, type: "done", usage });
-        } else {
-          /*
-           * 被用户中止：主进程**不发**事件（渲染层那边的 `abort()` 已经本地收尾了），
-           * 但**日志里要留下终止记录** —— 否则读日志的人分不清"这一轮断了"
-           * 还是"这一轮还在跑"。所以这里只记不发。
-           */
-          sessionLog?.log({ requestId, type: "error", message: "已中止" });
-        }
+        /*
+         * 被用户中止：主进程**不发**事件（渲染层那边的 `abort()` 已经本地收尾了），
+         * 但**日志里要留下终止记录** —— 否则读日志的人分不清"这一轮断了"
+         * 还是"这一轮还在跑"。所以这里只记不发。
+         */
+        if (outcome.aborted) sessionLog?.log({ requestId, type: "error", message: "已中止" });
       } catch (error) {
+        // runTurn 自己已经把错误翻成事件了；这里只是"连事件都没能发出去"时的兜底
         flush();
-        const message = humanError(error);
-        // 不是"中止"才算失败：中止是用户意图，不该把 provider 判死
-        if (!controller.signal.aborted) markProviderFailed(provider.id, message);
-        emit({ requestId, type: "error", message });
+        emit({ requestId, type: "error", message: humanError(error) });
       } finally {
         liveStreams.delete(requestId);
       }
     })();
 
-    return { requestId, ok: true, provider: provider.id, model };
+    return { requestId, ok: true, provider: target.provider.id, model: target.model };
   });
 }
