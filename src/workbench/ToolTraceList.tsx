@@ -53,6 +53,19 @@ export function ToolTraceList({
           data-testid={t.toolCallId ? `wb-tool-line-${t.toolCallId}` : undefined}
         >
           {t.line}
+          {/*
+            ⚠️ 参数原文**可展开**（补完③，账本 P3 的 `§175.6`）：
+            那一行末尾只放得下一句参数摘要（`（写入「…」）`），模型传的**完整参数**
+            得能看见 —— 否则"它到底传了什么"只能靠猜，而这正是排错时第一个要看的东西。
+            默认收起（不占地方），点开给一段 `JSON.stringify(input, null, 2)`。
+            `t.input === undefined` 时不渲染（**不摆一个空的开合**）。
+          */}
+          {t.input === undefined ? null : (
+            <details className="wb-tool-args" data-testid={t.toolCallId ? `wb-tool-args-${t.toolCallId}` : undefined}>
+              <summary>参数</summary>
+              <pre>{JSON.stringify(t.input, null, 2)}</pre>
+            </details>
+          )}
           {t.pending ? (
             <span className="wb-tool-actions">
               <button

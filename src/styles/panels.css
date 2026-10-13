@@ -112,6 +112,33 @@
 }
 .wb-tool-line.is-bad { background: var(--warn-soft); color: var(--warn-strong); }
 
+/* 工具参数的「展开看原文」（补完③，账本 P3）—— 默认收起，点开给完整 JSON */
+.wb-tool-args { margin-top: 2px; }
+.wb-tool-args > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--fg-dim);
+  user-select: none;
+}
+.wb-tool-args > pre {
+  margin: 4px 0 2px;
+  padding: 6px 8px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  /*
+   * ⚠️ 用**主题变量**，不写 `rgba(...)` 回落值：主题棘轮（`themeRatchet.test.ts`）盯着
+   * "工作台里含硬编码颜色的规则数"，我第一版写了 `var(--surface-sunken, rgba(...))`，
+   * 它当场从 1 涨到 2 就红了 —— 那条棘轮要的正是这个。
+   */
+  background: var(--surface-soft);
+}
+
 /* 被闸门拦下时那一条上的两个按钮（§144） */
 .wb-tool-actions { display: inline-flex; gap: 6px; margin-left: 8px; }
 

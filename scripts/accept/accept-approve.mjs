@@ -133,6 +133,20 @@ try {
   out.allowBtn = await page.locator(`[data-testid="wb-tool-allow-${ALLOW_ID}"]`).count();
   out.denyBtn = await page.locator(`[data-testid="wb-tool-deny-${DENY_ID}"]`).count();
   out.lineBefore = await traceLine(page, ALLOW_ID);
+  /*
+   * ⭐ 参数原文可展开（补完③，账本 P3 的 `§175.6`）：
+   * 那一行末尾只放得下一句摘要，模型传的**完整参数**要能点开看 —— 否则排错时
+   * "它到底传了什么"只能靠猜。这条量的是"点开之后真能看到 JSON"。
+   */
+  out.argsDetails = await page.locator(`[data-testid="wb-tool-args-${ALLOW_ID}"]`).count();
+  if (out.argsDetails) {
+    await page.locator(`[data-testid="wb-tool-args-${ALLOW_ID}"] summary`).click();
+    await page.waitForTimeout(300);
+    out.argsText = await page.evaluate(
+      (id) => document.querySelector(`[data-testid="wb-tool-args-${id}"] pre`)?.textContent?.trim() ?? "",
+      ALLOW_ID,
+    );
+  }
 
   /* ② 允许 */
   await page.locator(`[data-testid="wb-tool-allow-${ALLOW_ID}"]`).click();
@@ -160,6 +174,8 @@ try {
   if (out.allowBtn !== 1) bad.push("「允许」按钮没出现");
   if (out.denyBtn !== 1) bad.push("「拒绝」按钮没出现");
   if (!(out.lineBefore ?? "").includes("等你确认")) bad.push(`待批准那条没有说清在等确认：${out.lineBefore}`);
+  if (!out.argsDetails) bad.push("⭐ 工具参数没有「展开」入口（P3：参数原文可展开）");
+  else if (!/[{[]/.test(out.argsText ?? "")) bad.push(`点开参数没看到 JSON：${(out.argsText ?? "").slice(0, 60)}`);
 
   /* ② 允许 → 真的执行了 */
   if (!(out.memAfterAllow ?? []).includes(ALLOW_TEXT)) {

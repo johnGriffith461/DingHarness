@@ -243,3 +243,32 @@ describe("工具输出进历史（§163）", () => {
     expect(got).not.toContain("（；");
   });
 });
+
+describe("工具输出进历史的上限（补完③：400 → 8000）", () => {
+  const trace = (output: unknown): ToolTrace => ({
+    toolCallId: "c1",
+    name: "memory_list",
+    ok: true,
+    line: "⚙ 记忆：已列出 20 条",
+    output,
+  });
+
+  it("⭐ 400 字那条线松开了：一段千把字的工具输出**完整**进历史（原来会砍掉大半）", () => {
+    // 造一段 1200 字的输出（原来 400 字就截）
+    const items = Array.from({ length: 40 }, (_, i) => `第 ${i + 1} 条记忆内容`).join("；");
+    expect(items.length).toBeGreaterThan(400);
+    const got = withToolLines("好", [trace({ entries: items })]);
+    expect(got).toContain(`第 40 条记忆内容`); // 最后一条也在（没被砍）
+    expect(got).not.toContain("已截断");
+  });
+
+  it("⚠️ 安全阀仍在：单条超过 8000 字时截断并**写明**（不假装完整）", () => {
+    const huge = "字".repeat(9000);
+    const got = withToolLines("好", [trace({ body: huge })]);
+    expect(got).toContain("已截断");
+  });
+
+  it("上限是常量、写在文件头（改它要改这里，逼一次「想清楚」）", () => {
+    expect(TOOL_OUTPUT_LIMIT).toBe(8000);
+  });
+});
