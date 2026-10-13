@@ -1,8 +1,8 @@
-import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import type { ProviderInfo } from "../../shared/ipc";
 import { getProvider, listProviders, PROVIDERS } from "./aiProviders";
+import { createJsonStore } from "./jsonStore";
 
 /**
  * provider 可用性探测。
@@ -21,51 +21,111 @@ import { getProvider, listProviders, PROVIDERS } from "./aiProviders";
  * 那会拖慢启动、还会白烧额度。
  */
 
-type ProbeRecord = Record<string, { verifiedAt: string; ok: boolean; note?: string }>;
+/** 一条探测记录。 */
+type ProbeEntry = { verifiedAt: string; ok: boolean; note?: string };
+
+/** 全部探测记录（provider id → 结论）。 */
+type ProbeRecord = Record<string, ProbeEntry>;
 
 function probeFile(): string {
   return path.join(app.getPath("userData"), "provider-probe.json");
 }
 
-function readProbes(): ProbeRecord {
-  try {
-    const file = probeFile();
-    if (!fs.existsSync(file)) return {};
-    return JSON.parse(fs.readFileSync(file, "utf8")) as ProbeRecord;
-  } catch {
-    return {};
+/**
+ * 收窄从磁盘读回来的探测记录（**磁盘不可信** —— C1 的规矩）。
+ *
+ * 这个文件原来是**裸 `JSON.parse` 加一句 `as ProbeRecord`**：一个手改过的文件
+ * （或者被别的程序写坏）就能让 `listProvidersWithProbe` 里的 `probe?.ok` 抛异常，
+ * 于**整个 provider 列表拉不出来** —— 用户看到的是"AI 全挂了"。
+ *
+ * @param raw 磁盘上的值
+ * @returns 干净记录（坏条目直接丢）
+ */
+export function normalizeProbes(raw: unknown): ProbeRecord {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: ProbeRecord = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const v = value as Record<string, unknown>;
+    if (typeof v.verifiedAt !== "string" || typeof v.ok !== "boolean") continue;
+    out[id] = {
+      verifiedAt: v.verifiedAt,
+      ok: v.ok,
+      ...(typeof v.note === "string" && v.note ? { note: v.note } : {}),
+    };
   }
+  return out;
 }
 
-function writeProbes(record: ProbeRecord): void {
-  try {
-    fs.mkdirSync(path.dirname(probeFile()), { recursive: true });
-    fs.writeFileSync(probeFile(), JSON.stringify(record, null, 1), "utf8");
-  } catch {
-    /* 探测记录写不进去不影响使用 */
-  }
+/*
+ * ── C1 收编（2026-10-13 补完）────────────────────────────────────
+ *
+ * 这个文件原来是**手写落盘**，是全仓唯一被明牌列在 C1 结构守卫例外里的第二处
+ * （另一处是画布快照）。当时没动它的理由是：读路径是**同步**的，改异步会让
+ * "读-改-写"交错 —— 而 `markProviderOk` / `markProviderFailed` 是**即发即忘**地写同一个文件。
+ *
+ * 现在两件一起做掉，那条理由就不成立了：
+ * 1. 落盘走 `createJsonStore`（原子写 + 重试 + 信封版本）；
+ * 2. 读-改-写**串行化**（下面的 `chain`）—— 并发调用排队执行，不会互相覆盖。
+ *
+ * 于是 `provider-probe.json` 与其余 12 个 json 落盘走同一条路，守卫里那条例外可以撤掉。
+ */
+const store = createJsonStore<ProbeRecord>({
+  file: probeFile,
+  initial: () => ({}),
+  normalize: (value) => normalizeProbes(value),
+});
+
+/** 读-改-写的串行队列（并发写会丢条目：甲读到 {}、乙也读到 {}，两者各写一份）。 */
+let chain: Promise<void> = Promise.resolve();
+
+/**
+ * 串行地改一次探测记录。
+ *
+ * ⚠️ 磁盘上是**更新的版本**（`foreign`）时**不写**：那是降级运行，硬写回去等于把
+ * 用户的东西降级销毁 —— 与其余 12 个落盘同一条取舍。
+ *
+ * @param mutate 把当前记录变成新记录
+ */
+function update(mutate: (current: ProbeRecord) => ProbeRecord): void {
+  chain = chain
+    .then(async () => {
+      const got = await store.read();
+      if (got.foreign) {
+        console.error("[probe] 磁盘上的探测记录版本比本程序新，已拒绝覆盖：", got.note);
+        return;
+      }
+      const res = await store.write(mutate(got.data));
+      if (!res.ok) console.error("[probe] 落盘失败（重试过）：", res.error);
+    })
+    .catch(() => undefined); // 探测记录写不进去不影响使用
+}
+
+/** 读一次探测记录（内部用）。 */
+async function readProbes(): Promise<ProbeRecord> {
+  const got = await store.read();
+  if (got.foreign) console.error("[probe] 磁盘上的探测记录读不动（保留原样）：", got.note);
+  return got.data;
 }
 
 /** 记一次"真实调用成功"。 */
 export function markProviderOk(providerId: string): void {
-  const record = readProbes();
-  record[providerId] = { verifiedAt: new Date().toISOString(), ok: true };
-  writeProbes(record);
+  const at = new Date().toISOString();
+  update((current) => ({ ...current, [providerId]: { verifiedAt: at, ok: true } }));
 }
 
 /** 记一次"真实调用失败"，并把原因留在界面上。 */
 export function markProviderFailed(providerId: string, note: string): void {
-  const record = readProbes();
-  record[providerId] = { verifiedAt: new Date().toISOString(), ok: false, note };
-  writeProbes(record);
+  const at = new Date().toISOString();
+  update((current) => ({ ...current, [providerId]: { verifiedAt: at, ok: false, note } }));
 }
 
 /**
  * 组装给渲染进程的 provider 列表（含探测结论）。
  * 密钥本体永远不出主进程，这里只回布尔与文案。
  */
-export function listProvidersWithProbe(): ProviderInfo[] {
-  const probes = readProbes();
+export async function listProvidersWithProbe(): Promise<ProviderInfo[]> {
+  const probes = await readProbes();
   return listProviders().map((info) => {
     const probe = probes[info.id];
     return {

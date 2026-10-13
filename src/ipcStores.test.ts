@@ -304,22 +304,61 @@ describe("记忆库（memory.json）", () => {
   });
 });
 
+describe("provider 探测记录（provider-probe.json）· C1 收编后", () => {
+  it("往返 + 落盘带信封；坏条目在读回时被丢掉（原来是一句裸 as ProbeRecord）", async () => {
+    const { markProviderOk, listProvidersWithProbe } = await import("../electron/ipc/aiProbe");
+    markProviderOk("deepseek");
+    // 队列是异步的：等它落盘（下面的并发用例也是靠这条路径）
+    await new Promise((r) => setTimeout(r, 60));
+
+    const raw = JSON.parse(readFileSync(fileOf("provider-probe.json"), "utf8")) as {
+      __schema: number;
+      data: Record<string, unknown>;
+    };
+    expect(raw.__schema).toBe(SCHEMA_VERSION);
+    expect(raw.data.deepseek).toMatchObject({ ok: true });
+
+    // 手写一个坏条目进去：读回时应当被丢掉，而不是让整个列表拉不出来
+    writeFileSync(
+      fileOf("provider-probe.json"),
+      JSON.stringify({ __schema: 1, data: { deepseek: { ok: true, verifiedAt: "x" }, 坏: { ok: "yes" } } }),
+      "utf8",
+    );
+    const list = await listProvidersWithProbe();
+    expect(Array.isArray(list)).toBe(true); // 不抛就说明收窄生效了
+  });
+
+  it("⭐⭐ 并发记多条**不丢**（这就是当初把它列进例外的那条理由，现在被队列解掉了）", async () => {
+    const { markProviderOk, markProviderFailed } = await import("../electron/ipc/aiProbe");
+    // 不 await、直接连发：读-改-写若交错，后写的会覆盖先写的
+    markProviderOk("p1");
+    markProviderFailed("p2", "连不上");
+    markProviderOk("p3");
+    await new Promise((r) => setTimeout(r, 120));
+
+    const got = JSON.parse(readFileSync(fileOf("provider-probe.json"), "utf8")) as {
+      data: Record<string, { ok: boolean; note?: string }>;
+    };
+    expect(Object.keys(got.data).sort()).toEqual(["p1", "p2", "p3"]);
+    expect(got.data.p2).toMatchObject({ ok: false, note: "连不上" });
+  });
+});
+
 describe("结构守卫：JSON 落盘不许再有第二份手写", () => {
   const ROOT = path.resolve(__dirname, "..");
 
   /**
-   * 允许自己手写 JSON 落盘的地方，**每一条都要有理由**。
+   * 允许自己手写 JSON 落盘的地方。
    *
    * - `snapshotStore`：写的是画布文档 + 按 revision 命名的历史快照，带一套
    *   "revision 倒退就拒绝"的冲突规则，且调用方是**同步**函数 —— 收编要连带改画布调用链，
-   *   属于 C1 之外的动作（越界清单里 `src/canvas/` 只许在 A3 / 阶段 E 动）。
-   * - `aiProbe`：探测缓存**是**一处该收编的真缺陷（无归一化、非原子写），
-   *   但它的读路径被一个**同步** API（`listProvidersWithProbe`，`ai.ts:80` 直接返回）
-   *   用着，改成异步会让"读-改-写"出现交错 —— 同一轮里 `markProviderOk` 与
-   *   `markProviderFailed` 都是**即发即忘**地写同一个文件，交错就是丢条目。
-   *   要收编得先给它加一条写队列，那不是这一项活的范围。
+   *   属于 C1 之外的动作。
+   *
+   * ⚠️ `aiProbe` **已在 2026-10-13 从这份名单里撤掉**：它原来是"读路径同步、改异步会交错"
+   * 才被明牌列进来的。现在落盘走 `createJsonStore`、读-改-写**串行化**（一条队列），
+   * 那条理由不成立了 —— 例外名单该越用越短，不是越用越长。
    */
-  const ALLOWED = new Set(["snapshotStore.ts", "aiProbe.ts"]);
+  const ALLOWED = new Set(["snapshotStore.ts"]);
 
   /**
    * 在源码里找出"手写 JSON 落盘"的行。
