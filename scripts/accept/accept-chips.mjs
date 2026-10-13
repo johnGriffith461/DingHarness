@@ -60,7 +60,7 @@ try {
   out.confirmOptions = await page.evaluate(() =>
     [...document.querySelectorAll('[data-testid^="wb-confirm-option-"]')].map((e) => e.textContent?.trim() ?? ""),
   );
-  await page.screenshot({ path: ".verify/chips.png" });
+  await shot(page, ".verify/chips.png");
 
   // 真选一个，看 chip 上的字有没有跟着变（"能选"的证据）
   await page.locator('[data-testid="wb-confirm-option-每步确认"]').click();

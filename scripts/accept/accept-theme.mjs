@@ -10,6 +10,7 @@
 ﻿import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { shot } from "./harness.mjs";
 
 /**
  * 验收：设置里的「外观」是真开关 —— 点了会变、刷新后记住、能切回来。
@@ -61,7 +62,7 @@ try {
   report.afterToggle = await read(page);
   report.rowValueAfter = await page.locator('[data-testid="wb-set-theme-value"]').textContent();
 
-  await page.screenshot({ path: ".verify/theme-toggled.png" });
+  await shot(page, ".verify/theme-toggled.png");
 
   // 切回来，确认是双向的
   await page.locator('[data-testid="wb-set-外观"]').click();

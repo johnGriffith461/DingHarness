@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { shot } from "./harness.mjs";
 
 /**
  * 写作助手**端到端**验收（对标原版 `canvas_writing_shortcuts_*`）。
@@ -105,7 +106,7 @@ await page.waitForTimeout(900);
 report.textAfterUndo = await textOf();
 report.undoRestored = report.textAfterUndo === report.textBefore;
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-p5/07-writing.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-p5/07-writing.png");
 console.log(JSON.stringify(report, null, 2));
 
 await browser.close();

@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 标记层端到端验收（阶段 5.1 / 5.2 / 5.3）：
@@ -113,7 +114,7 @@ const report = {};
   report.shapes = await shapes(page);
   report.countText = await page.locator('[data-testid="marker-count"]').textContent();
   report.statusText = await page.locator(".canvas-statusbar").textContent();
-  await page.screenshot({ path: `${OUT}/01-markers.png` });
+  await shot(page, `${OUT}/01-markers.png`);
 
   // 样式：换色 + 加粗后再画一条，检查它用了新样式
   await page.locator('[data-marker-color="#4ade80"]').click();
@@ -132,7 +133,7 @@ const report = {};
   await page.locator('[data-testid="marker-undo"]').click();
   await page.waitForTimeout(300);
   report.afterUndo = (await shapes(page)).length;
-  await page.screenshot({ path: `${OUT}/02-styled.png` });
+  await shot(page, `${OUT}/02-styled.png`);
 
   // 标记当提示词：开着时拼接，关掉时不拼
   await page.waitForTimeout(1800); // 落盘
@@ -152,7 +153,7 @@ const report = {};
     shapes: await shapes(page),
     status: await page.locator(".canvas-statusbar").textContent(),
   };
-  await page.screenshot({ path: `${OUT}/03-restart.png` });
+  await shot(page, `${OUT}/03-restart.png`);
   await browser.close();
   child.kill();
 }

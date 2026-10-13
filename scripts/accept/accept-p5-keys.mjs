@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 阶段 5.5 快捷键系统验收：四个新动作在真实应用里生效。
@@ -88,7 +89,7 @@ await page.locator('[data-testid="shortcut-help"]').click();
 await page.waitForTimeout(300);
 report.cheatsheetRows = await page.locator('[data-testid="shortcut-cheatsheet"] .shortcut-row').count();
 report.cheatsheetKeys = await page.locator('[data-testid="shortcut-cheatsheet"] kbd').allTextContents();
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-p5/04-shortcuts.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-p5/04-shortcuts.png");
 
 // Esc 退出标记模式
 await page.locator('[data-testid="shortcut-help"]').click();

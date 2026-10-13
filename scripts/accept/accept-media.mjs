@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 11.13 验收：右栏「图片与视频」画廊 + 另两个 tab 的如实空态。
@@ -65,7 +66,7 @@ report.thumbLoad = await page.evaluate(() => {
 });
 report.allThumbsOk = report.thumbLoad.every((t) => t.ok);
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/wb-18-media.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-18-media.png");
 
 /* ---------- 另两个 tab 的如实空态 ---------- */
 await page.locator('[data-testid="wb-summary-tab-browser"]').click();

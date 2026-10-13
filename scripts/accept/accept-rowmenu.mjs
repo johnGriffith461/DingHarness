@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile } from "./harness.mjs";
+import { readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 11.18 验收：左栏行的悬停 ⋯ 菜单 + 任务标题点击重命名。
@@ -65,7 +65,7 @@ try {
   report.menuItems = await page.$$eval('[data-testid^="wb-navmenu-"]', (els) =>
     els.map((e) => e.textContent.replace(/\s+/g, "")),
   );
-  await page.screenshot({ path: path.join(shots, "wb-21-rowmenu.png") });
+  await shot(page, path.join(shots, "wb-21-rowmenu.png"));
 
   // 置顶
   await page.locator('[data-testid="wb-navmenu-置顶"]').click();

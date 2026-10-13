@@ -112,6 +112,68 @@ describe("referencesToPrompt", () => {
     ]);
     expect(text).toContain("已不在画布上");
   });
+
+  /*
+   * ── 引用要带上**正文**（2026-10-14，参照 WaLiOffice 的 `extractArtifactSummary`）──
+   *
+   * 起因：聊天里 `@某个节点` 只送"引用1：文本「季度总结」→ 节点 n1"，
+   * 而模型手上没有"读节点内容"的工具（`electron/ipc/tools.ts` 只有记忆/定时/加节点/子智能体）
+   * —— 用户引用了，模型却在猜内容。下面几条钉住"引用即把内容带到模型面前"。
+   */
+  it("带正文：文本节点把正文送进请求", () => {
+    const canvas = [makeMarkdownNode("n1", { x: 0, y: 0 }, "季度总结：营收增长 12%", undefined, "季度总结")];
+    const refs = parseReferences("@季度总结 帮我压缩", canvas);
+    const text = referencesToPrompt(refs, canvas);
+    expect(text).toContain("营收增长 12%");
+  });
+
+  it("带正文：代码节点给的是围栏代码块（模型照抄不会跑偏）", () => {
+    const canvas = [makeCodeNode("n2", { x: 0, y: 0 }, "const a = 1;", "ts", undefined, "代码2")];
+    const refs = parseReferences("@代码2 改一下", canvas);
+    const text = referencesToPrompt(refs, canvas);
+    expect(text).toContain("```ts");
+    expect(text).toContain("const a = 1;");
+  });
+
+  it("超长节点被截断（引用两三个大节点不至于把上下文顶爆）", () => {
+    const canvas = [makeMarkdownNode("n1", { x: 0, y: 0 }, "甲".repeat(5000), undefined, "长文")];
+    const refs = parseReferences("@长文", canvas);
+    const text = referencesToPrompt(refs, canvas, 100);
+    expect(text).toContain("甲".repeat(100));
+    expect(text).not.toContain("甲".repeat(101));
+  });
+
+  it("断链引用不给正文（节点都没了，编内容出来最糟）", () => {
+    const text = referencesToPrompt(
+      [{ start: 0, end: 5, nodeId: "n9", label: "旧节点", kind: "markdown", state: "broken" }],
+      [makeMarkdownNode("n1", { x: 0, y: 0 }, "不该出现的内容", undefined, "季度总结")],
+    );
+    expect(text).toContain("已不在画布上");
+    expect(text).not.toContain("不该出现的内容");
+  });
+
+  it("不传节点时退回只写标签的旧形态（调用方漏传不该炸，也不该编内容）", () => {
+    const refs = parseReferences("@使用说明", nodes);
+    const text = referencesToPrompt(refs);
+    expect(text).toContain("节点 n1");
+    expect(text).not.toContain("内容：");
+  });
+
+  it("读不出正文的类型（白板）给一句「这是什么」，而不是空白", () => {
+    const canvas = [
+      {
+        id: "w1",
+        type: "whiteboard",
+        position: { x: 0, y: 0 },
+        data: { title: "草图", strokes: [], color: "#60a5fa", penWidth: 3, tool: "pen" },
+      },
+    ] as never;
+    const refs = parseReferences("@草图", canvas);
+    const text = referencesToPrompt(refs, canvas);
+    expect(text).toContain("节点 w1");
+    /* 手绘草图没有可读文本，但要说清"这里有一张草图" —— 空白会让模型以为这张卡是空的。 */
+    expect(text).toContain("手绘草图");
+  });
 });
 
 describe("expandReferences", () => {

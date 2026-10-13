@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 图片动作端到端验收（阶段 9.3）。
@@ -117,7 +118,7 @@ await page
 await page.waitForTimeout(2000);
 report.afterExpand = await genImg();
 report.errorAfterExpand = await page.locator(`[data-testid="image-error-${nodeId}"]`).textContent().catch(() => null);
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/image-actions.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/image-actions.png");
 
 // 6) Ctrl+Z 撤回
 await page.locator("body").click({ position: { x: 800, y: 500 } }).catch(() => undefined);

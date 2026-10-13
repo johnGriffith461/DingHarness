@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { writeFileSync, mkdirSync } from "node:fs";
+import { shot } from "./harness.mjs";
 
 const OUT = "D:/DoubaoWorkClone/.verify/shots-p2";
 mkdirSync(OUT, { recursive: true });
@@ -64,7 +65,7 @@ const afterUpload = await page.evaluate(() => {
   };
 });
 console.log("上传后 =", JSON.stringify(afterUpload, null, 1));
-await page.screenshot({ path: `${OUT}/10-image-uploaded.png` });
+await shot(page, `${OUT}/10-image-uploaded.png`);
 
 // 打开裁剪，拖右下角，应用
 const cropBtn = page.locator('.react-flow__node[data-id="n5"] button[title="裁剪"]');
@@ -84,7 +85,7 @@ if (await cropBtn.count()) {
     };
   });
   console.log("裁剪态 =", JSON.stringify(boxInfo));
-  await page.screenshot({ path: `${OUT}/11-crop-mode.png` });
+  await shot(page, `${OUT}/11-crop-mode.png`);
 
   // 拖右下角手柄：把裁剪框缩小到左侧 60%
   if (boxInfo) {
@@ -116,7 +117,7 @@ const afterCrop = await page.evaluate(() => {
   };
 });
 console.log("裁剪后 =", JSON.stringify(afterCrop, null, 1));
-await page.screenshot({ path: `${OUT}/12-after-crop.png` });
+await shot(page, `${OUT}/12-after-crop.png`);
 
 // 复原
 const resetBtn = page.locator('.react-flow__node[data-id="n5"] button[title="复原为原图"]');
@@ -165,7 +166,7 @@ console.log(
     }),
   ),
 );
-await page.screenshot({ path: `${OUT}/13-final-p2.png` });
+await shot(page, `${OUT}/13-final-p2.png`);
 
 console.log("\nproblems =", JSON.stringify(problems, null, 1));
 await browser.close();

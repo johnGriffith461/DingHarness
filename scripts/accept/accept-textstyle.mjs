@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 文字排版工具条端到端验收（阶段 8.5）。
@@ -134,7 +135,7 @@ const report = {};
   await page.waitForTimeout(600);
   report.toolbarOnImage = await page.locator('[data-testid="text-toolbar"]').count();
 
-  await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/text-toolbar.png" });
+  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/text-toolbar.png");
   await browser.close();
   child.kill();
   await new Promise((r) => setTimeout(r, 2000));

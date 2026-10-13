@@ -1,6 +1,7 @@
 ﻿import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { shot } from "./harness.mjs";
 
 /**
  * 验收：账号菜单 + 「外观设置」子菜单（三选一）。
@@ -128,7 +129,7 @@ try {
     const el = document.querySelector('[data-testid="wb-acct-theme-system"] svg:last-child');
     return Boolean(el);
   });
-  await page.screenshot({ path: ".verify/acct-menu.png" });
+  await shot(page, ".verify/acct-menu.png");
 
   // 4) 选深色模式 → 颜色真变
   await page.locator('[data-testid="wb-acct-theme-dark"]').click();

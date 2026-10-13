@@ -97,6 +97,31 @@
   font-size: 11px;
   color: #ffb4a8;
 }
+
+/*
+ * 失败后的「重试」（§187 体检 P1）。
+ * 它是这一行里唯一能点的地方，所以要有明确的边界与 ≥22px 的点击区，
+ * 不能长得像一行装饰性文字 —— 用户找不到它，这条红字就还是"不可处置"。
+ */
+.chat-retry {
+  margin-left: 2px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, #f87171 45%, var(--line));
+  background: transparent;
+  color: #ffd7cf;
+  cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-out), color var(--dur-quick) var(--ease-out);
+}
+.chat-retry:hover {
+  background: color-mix(in srgb, #f87171 18%, transparent);
+  color: #fff;
+}
 .chat-meta {
   font-size: 10.5px;
   color: var(--fg-dim);

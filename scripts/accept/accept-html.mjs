@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * HTML 节点端到端验收（阶段 9.1）。
@@ -166,7 +167,7 @@ report.networkTag = await page.evaluate(() => {
   return el?.textContent?.trim().replace(/\s+/g, " ").slice(0, 80) ?? null;
 });
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/html-final.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/html-final.png");
 
 // 7) 落盘 + 重启
 await page.waitForTimeout(1800);

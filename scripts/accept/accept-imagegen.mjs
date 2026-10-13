@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 图片生成端到端验收（阶段 9.2 / 9.3 的图）。
@@ -113,7 +114,7 @@ const report = {};
   });
   report.genToast = await page.locator(".canvas-toast").textContent().catch(() => null);
 
-  await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/gen-image.png" });
+  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/gen-image.png");
 
   // 6) 落盘 + 文档里只有文件名
   await page.waitForTimeout(2000);

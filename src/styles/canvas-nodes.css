@@ -852,21 +852,6 @@
   align-items: center;
   gap: 4px;
 }
-.nv-btn,
-.nv-select {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 5px;
-  border: 1px solid var(--line);
-  background: var(--bg-1);
-  color: var(--fg-dim);
-  cursor: pointer;
-}
-.nv-btn:hover,
-.nv-select:hover {
-  color: var(--fg);
-  background: var(--bg-2);
-}
 .nv-body {
   margin: 0;
   padding: 0;

@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
+import { shot } from "./harness.mjs";
 
 const OUT = "D:/DoubaoWorkClone/.verify/shots-p3";
 mkdirSync(OUT, { recursive: true });
@@ -96,7 +97,7 @@ r.chat = await page.evaluate(() => {
   }));
   return { bubbles, log: window.__aiLog, provider: document.querySelector(".chat-provider select")?.value };
 });
-await page.screenshot({ path: `${OUT}/01-chat.png` });
+await shot(page, `${OUT}/01-chat.png`);
 
 // ---- 画布生成：选中两个节点 → AI 生成 → 结果落成新节点 ----
 const before = await page.locator(".react-flow__node").count();
@@ -130,7 +131,7 @@ r.afterGenerate = await page.evaluate(() => {
   return { nodes, toast: document.querySelector(".canvas-toast")?.textContent?.trim() ?? null };
 });
 r.nodeDelta = (await page.locator(".react-flow__node").count()) - before;
-await page.screenshot({ path: `${OUT}/02-generate.png` });
+await shot(page, `${OUT}/02-generate.png`);
 
 // ---- 重生成（多版本）：点第 3 版节点的重试，看版本号是否变 ----
 const generatedId = r.afterGenerate.nodes.at(-1)?.id;
@@ -151,7 +152,7 @@ if (generatedId) {
   }, generatedId);
 }
 r.regenerate = versionInfo;
-await page.screenshot({ path: `${OUT}/03-regenerate.png` });
+await shot(page, `${OUT}/03-regenerate.png`);
 
 r.stderrHead = stderr.split("\n").filter(Boolean).slice(0, 6);
 console.log(JSON.stringify(r, null, 2));

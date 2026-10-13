@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, AtSign, MessageSquarePlus, Send, Square } from "lucide-react";
+import { AlertTriangle, AtSign, MessageSquarePlus, RotateCcw, Send, Square } from "lucide-react";
 import { useChatStore } from "@/ai/chatStore";
 import { hasShellBridge } from "@/ai/aiClient";
 import { useRuntimeStore } from "@/canvas/runtimeStore";
@@ -118,7 +118,9 @@ export default function ChatSidebar() {
      * 输入框里保持 `@标题` 这种可读可手打的写法，发出去才附上 id 与类型，
      * 这样气泡里仍然是用户写的原话，而模型知道每一枚芯片指向哪个节点。
      */
-    const refBlock = referencesToPrompt(parseReferences(text, canvasNodes, knownNodesRef.current));
+    /* 把**节点正文**一起带上（`referencesToPrompt` 第三个参数是每条的截断长度）——
+     * 不带的话模型只能看见标题，而它没有读节点内容的工具。 */
+    const refBlock = referencesToPrompt(parseReferences(text, canvasNodes, knownNodesRef.current), canvasNodes);
     setDraft("");
     setMentionQuery(null);
     void send(text, refBlock || undefined);
@@ -222,7 +224,22 @@ export default function ChatSidebar() {
               {m.status === "error" ? (
                 <div className="chat-msg-error">
                   <AlertTriangle size={11} />
-                  {m.error ?? "生成失败"}
+                  <span>{m.error ?? "生成失败"}</span>
+                  {/*
+                    失败必须**给出路**（§187 体检 P1）：原来只有一行红字，
+                    用户唯一的办法是自己把话再打一遍。
+                    ⚠️ 这颗按钮**接的是 store 里的 `retry`**（撤掉这条失败回复和
+                    它对应的提问，用同一段话重走 `send`）—— 不是只把红字藏起来。
+                  */}
+                  <button
+                    className="chat-retry"
+                    data-testid={`chat-retry-${m.id}`}
+                    title="用同一段话重发一次"
+                    onClick={() => void useChatStore.getState().retry(activeId, m.id)}
+                  >
+                    <RotateCcw size={11} />
+                    重试
+                  </button>
                 </div>
               ) : null}
             </div>

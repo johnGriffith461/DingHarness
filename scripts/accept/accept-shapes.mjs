@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 形状节点端到端验收（阶段 8.3）。
@@ -106,7 +107,7 @@ const report = {};
     const el = document.querySelector(`.react-flow__node[data-id="${id}"] .shape-node`);
     return el ? getComputedStyle(el).transform : null;
   }, rectId);
-  await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/shapes.png" });
+  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/shapes.png");
 
   await page.waitForTimeout(1500);
   if (fs.existsSync(SNAP)) {

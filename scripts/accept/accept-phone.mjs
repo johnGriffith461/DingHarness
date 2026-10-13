@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, readStoreFile, verdict, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 11.26 验收：手机遥控电脑页的两个开关是**真状态**。
@@ -83,7 +83,7 @@ try {
       width: box ? Math.round(box.getBoundingClientRect().width) : null,
     };
   });
-  await page.screenshot({ path: path.join(shots, "wb-24-phone.png") });
+  await shot(page, path.join(shots, "wb-24-phone.png"));
 
   /* ---------- 保持唤醒：主进程真的在拦休眠 ---------- */
   await page.locator('[data-testid="wb-switch-awake"]').click();

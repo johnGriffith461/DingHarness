@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 画布重渲染**测量**工具（不是验收 —— 它没有判定，只出数字）。
@@ -136,7 +137,7 @@ await arm();
 const move2 = await dragOnce(nodeCount - 1, 15, -180);
 const drag2 = await read();
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/measure-renders-shot.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/measure-renders-shot.png");
 
 const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
 const report = {

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, killLeftovers, killTree } from "./harness.mjs";
+import { bootApp, killLeftovers, killTree, shot } from "./harness.mjs";
 
 /**
  * 持久化端到端验收（PLAN 4.2 / 4.3 / 4.5）。
@@ -110,7 +110,7 @@ const report = {};
       .filter((f) => f.startsWith("rev-"))
       .sort();
   }
-  await page.screenshot({ path: `${OUT}/01-saved.png` });
+  await shot(page, `${OUT}/01-saved.png`);
   await browser.close();
   await killTree(child);
 }
@@ -119,7 +119,7 @@ const report = {};
 {
   const { child, browser, page } = await boot(9271);
   report.second = await snapshot(page);
-  await page.screenshot({ path: `${OUT}/02-restored.png` });
+  await shot(page, `${OUT}/02-restored.png`);
   await browser.close();
   await killTree(child);
 }
@@ -135,7 +135,7 @@ const report = {};
 
   const { child, browser, page } = await boot(9272);
   report.third = { ...(await snapshot(page)), confirmedRevisionBeforeFake: confirmedRevision, goodNodes, fakedNodes: 2 };
-  await page.screenshot({ path: `${OUT}/03-recovered.png` });
+  await shot(page, `${OUT}/03-recovered.png`);
   await browser.close();
   child.kill();
 }

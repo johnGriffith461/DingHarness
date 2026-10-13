@@ -1,5 +1,6 @@
 import type { CanvasNode, NodeKind } from "./types";
 import { NODE_KIND_META } from "./types";
+import { nodeText } from "./nodeText";
 
 /**
  * 节点引用芯片（阶段 5.4，对标原版 `canvasReferenceChip` + target-id/type/state）。
@@ -150,16 +151,45 @@ export function parseReferences(
 /**
  * 把引用展开成发给模型的一小段说明。
  *
- * 只写"哪枚芯片指向哪个节点（id/类型/标题）"，**不重复节点正文** ——
- * 正文由选中素材那一段负责，两处都写会让提示词里出现两份同样内容。
+ * ## 为什么现在**要**带正文（2026-10-14 改）
+ * 原来这里的规矩是"只写哪枚芯片指向哪个节点（id/类型/标题），**不重复节点正文** ——
+ * 正文由选中素材那一段负责"。那条规矩在**画布上点「AI 生成」**那条路上是对的：
+ * 那条路会带上 `buildSelectionContext` 的素材块，两边都写就是两份。
+ *
+ * 但**聊天这条路没有素材块**（`ChatSidebar.submit` 只传这一个引用块）——
+ * 于是 `@某个节点 帮我压缩成三行` 发出去时，模型拿到的是一个标题，
+ * 而它手上也没有"读节点内容"的工具（`electron/ipc/tools.ts` 只注册了
+ * 记忆 / 定时 / 加节点 / 子智能体那几件）。结果是：用户明明引用了，模型却在猜。
+ *
+ * 现在按类型把正文取出来 —— 与"AI 生成"读素材用的是**同一个** `nodeText`：
+ * 文本给正文、代码给围栏代码块、图表给 mermaid、导图给大纲、图片给 alt。
+ * 含义很清楚：**引用即把那个卡片的内容带到模型面前**。
+ *
+ * ⚠️ 每个节点**截断**（默认 2000 字）：引用两三个大节点就可能把上下文顶爆，
+ * 而"顶爆"的表现是莫名其妙的失败，比"少给一点内容"糟得多。
+ * ⚠️ 已被删掉的引用（`broken`）不给正文，只如实说它不在了。
+ * ⚠️ 将来若有哪条路同时带"素材块 + 引用块"，得**二选一**（这是当初那条规矩的真意）。
+ *
+ * @param refs 解析出来的引用
+ * @param nodes 当前画布节点（用来取正文）。**不传就退回只写标签的旧形态** ——
+ *   调用方漏传时不该炸，也不该凭空编内容。
+ * @param maxChars 每个引用最多带多少字正文
+ * @returns 引用块；没有引用时是空串
  */
-export function referencesToPrompt(refs: NodeReference[]): string {
+export function referencesToPrompt(refs: NodeReference[], nodes: CanvasNode[] = [], maxChars = 2000): string {
   if (refs.length === 0) return "";
+  const byId = new Map(nodes.map((node) => [node.id, node]));
   const lines = refs.map((ref, index) => {
     const meta = NODE_KIND_META[ref.kind];
     const kind = meta ? meta.label : ref.kind;
     const broken = ref.state === "broken" ? "（该节点已不在画布上）" : "";
-    return `- 引用${index + 1}：${kind}「${ref.label}」→ 节点 ${ref.nodeId}${broken}`;
+    const head = `- 引用${index + 1}：${kind}「${ref.label}」→ 节点 ${ref.nodeId}${broken}`;
+    if (ref.state === "broken") return head;
+    const node = byId.get(ref.nodeId);
+    if (!node) return head;
+    const body = nodeText(node).trim();
+    if (!body) return head;
+    return `${head}\n  内容：\n  ${body.slice(0, maxChars)}`;
   });
   return `【对话里的节点引用】\n${lines.join("\n")}`;
 }

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { verdict } from "./harness.mjs";
+import { shot, verdict } from "./harness.mjs";
 
 /**
  * 打包产物验收（阶段 6）：直接跑 `release/win-unpacked/工作台.exe`，
@@ -83,7 +83,7 @@ if (report.snapshotWritten) {
 report.statusText = await page.locator(".canvas-statusbar").textContent();
 report.stderrTail = err.split("\n").filter(Boolean).slice(0, 6).join(" | ") || "(空)";
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-p6/packaged.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-p6/packaged.png");
 console.log(JSON.stringify(report, null, 2));
 
 /*

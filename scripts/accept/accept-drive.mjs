@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { verdict } from "./harness.mjs";
+import { shot, verdict } from "./harness.mjs";
 
 /**
  * 云盘接真实目录的验收（阶段 11.5）。
@@ -92,7 +92,7 @@ await page.locator('[data-testid="wb-cloud-tab-starred"]').click();
 await page.waitForTimeout(600);
 report.starredList = await page.$$eval(".wb-td-link", (els) => els.map((e) => e.textContent));
 
-await page.screenshot({ path: path.join(shots, "wb-13-cloud.png") });
+await shot(page, path.join(shots, "wb-13-cloud.png"));
 
 // 「最近」排序：刚改过的排前面 —— 改一个旧文件的 mtime 再刷新
 await page.locator('[data-testid="wb-cloud-tab-recent"]').click();

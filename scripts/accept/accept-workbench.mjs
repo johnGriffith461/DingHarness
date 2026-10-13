@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 工作台外壳验收（阶段 10）。
@@ -61,13 +62,13 @@ report.shortcuts = await page.$$eval(".wb-kbd", (els) => els.map((e) => e.textCo
 // 首页
 report.homeTitle = await page.locator(".wb-home-title").textContent();
 report.suggestions = await page.$$eval(".wb-suggestion", (els) => els.map((e) => e.textContent.trim()));
-await page.screenshot({ path: path.join(shots, "wb-01-home.png") });
+await shot(page, path.join(shots, "wb-01-home.png"));
 
 // 3) 五个页面
 const visit = async (view, file) => {
   await page.locator(`[data-testid="wb-nav-${view}"]`).click();
   await page.waitForTimeout(700);
-  await page.screenshot({ path: path.join(shots, file) });
+  await shot(page, path.join(shots, file));
 };
 await visit("scheduled", "wb-02-scheduled.png");
 report.scheduled = {
@@ -85,7 +86,7 @@ report.plugins = {
 await page.locator('[data-testid="wb-plugin-tab-技能"]').click();
 await page.waitForTimeout(500);
 report.skillsTab = await page.$$eval(".wb-group-title", (els) => els.map((e) => e.textContent.trim()));
-await page.screenshot({ path: path.join(shots, "wb-04-skills-tab.png") });
+await shot(page, path.join(shots, "wb-04-skills-tab.png"));
 
 await visit("cloud", "wb-05-cloud.png");
 report.cloud = {
@@ -117,7 +118,7 @@ report.settingsRows = await page.$$eval(".wb-modal-row", (els) =>
   els.map((e) => e.textContent.replace(/\s+/g, " ").trim()),
 );
 report.settingsId = await page.locator(".wb-modal-id").textContent();
-await page.screenshot({ path: path.join(shots, "wb-07-settings.png") });
+await shot(page, path.join(shots, "wb-07-settings.png"));
 await page.locator(".wb-modal-close").click();
 await page.waitForTimeout(400);
 
@@ -166,7 +167,7 @@ report.taskView = {
     els.map((e) => e.textContent.replace(/\s+/g, " ").trim()),
   ),
 };
-await page.screenshot({ path: path.join(shots, "wb-08-task-running.png") });
+await shot(page, path.join(shots, "wb-08-task-running.png"));
 
 // 等模型回（最多 90 秒），期间看进度计时是否在走
 const ticks = [];
@@ -192,7 +193,7 @@ report.question = {
   customInput: await page.locator('[data-testid="wb-custom-answer"]').count(),
 };
 report.pendingBadge = await page.locator('[data-testid^="wb-pending-"]').count();
-await page.screenshot({ path: path.join(shots, "wb-09-question.png") });
+await shot(page, path.join(shots, "wb-09-question.png"));
 
 // 7) 答一题
 if (report.questionCard > 0) {
@@ -202,7 +203,7 @@ if (report.questionCard > 0) {
     page: await page.locator('[data-testid="wb-question-progress"]').textContent().catch(() => null),
     bubbleCount: await page.locator(".wb-bubble-user").count(),
   };
-  await page.screenshot({ path: path.join(shots, "wb-10-answered.png") });
+  await shot(page, path.join(shots, "wb-10-answered.png"));
 }
 
 // 消息操作栏

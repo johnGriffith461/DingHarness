@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { shot } from "./harness.mjs";
 
 const OUT = "D:/DoubaoWorkClone/.verify/shots-p2";
 mkdirSync(OUT, { recursive: true });
@@ -46,7 +47,7 @@ r.features = await page.evaluate(() => ({
 
 await page.getByTitle("适配视图（一键全览）").click();
 await page.waitForTimeout(1200);
-await page.screenshot({ path: `${OUT}/01-overview.png` });
+await shot(page, `${OUT}/01-overview.png`);
 
 // 节点类型菜单
 await page.locator('[data-testid="add-node"]').click();
@@ -54,7 +55,7 @@ await page.waitForTimeout(300);
 r.menuKinds = await page.$$eval(".canvas-add-menu button[data-kind]", (els) =>
   els.map((e) => e.getAttribute("data-kind")),
 );
-await page.screenshot({ path: `${OUT}/02-add-menu.png` });
+await shot(page, `${OUT}/02-add-menu.png`);
 await page.keyboard.press("Escape");
 
 // 新建白板并画一笔（在点选模式下）
@@ -84,7 +85,7 @@ r.whiteboardStrokes = await page.evaluate(() => {
   const wb = s.nodes.filter((n) => n.type === "whiteboard");
   return wb.map((n) => (n.data.strokes ?? []).length);
 });
-await page.screenshot({ path: `${OUT}/03-whiteboard.png` });
+await shot(page, `${OUT}/03-whiteboard.png`);
 
 // 编辑 Markdown：切到编辑态改内容，再切回预览
 const mdNode = page.locator('.react-flow__node[data-id="n1"]');
@@ -100,7 +101,7 @@ if (await editBtn.count()) {
   await page.waitForTimeout(700);
 }
 r.markdownEdited = await page.evaluate(() => document.querySelector(".nv-markdown-body h1")?.textContent ?? null);
-await page.screenshot({ path: `${OUT}/04-markdown-edited.png` });
+await shot(page, `${OUT}/04-markdown-edited.png`);
 
 // 代码节点换语言：python
 const codeSel = page.locator('.react-flow__node[data-id="n2"] select');
@@ -120,7 +121,7 @@ r.mermaidAfterEdit = await page.evaluate(() => ({
   hasSvg: document.querySelectorAll(".nv-mermaid-svg svg").length,
   warn: document.querySelectorAll(".nv-warn").length,
 }));
-await page.screenshot({ path: `${OUT}/05-mermaid-pie.png` });
+await shot(page, `${OUT}/05-mermaid-pie.png`);
 
 // 导图改大纲
 const mindTa = page.locator('.react-flow__node[data-id="n4"] textarea');
@@ -129,7 +130,7 @@ if (await mindTa.count()) {
   await page.waitForTimeout(1600);
 }
 r.markmapNodes = await page.locator('.react-flow__node[data-id="n4"] .markmap-node').count();
-await page.screenshot({ path: `${OUT}/06-mindmap-edited.png` });
+await shot(page, `${OUT}/06-mindmap-edited.png`);
 
 // 撤销 / 重做仍可用
 await page.keyboard.press("Control+z");
@@ -166,7 +167,7 @@ r.boxSelected = await page.evaluate(() =>
 
 await page.getByTitle("适配视图（一键全览）").click();
 await page.waitForTimeout(1000);
-await page.screenshot({ path: `${OUT}/07-final.png` });
+await shot(page, `${OUT}/07-final.png`);
 
 r.problems = problems;
 console.log(JSON.stringify(r, null, 2));

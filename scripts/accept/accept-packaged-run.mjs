@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 打包产物端到端验收（阶段 9.4 / 9.5）。
@@ -119,7 +120,7 @@ report.generated = await page.evaluate(() => {
 });
 report.nodesDelta = (await page.locator(".react-flow__node").count()) - nodesBefore;
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/packaged.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/packaged.png");
 
 // 6) 打包版的导出目录 / assets 落在哪里
 report.assetsDir = fs.existsSync(path.join(PORTABLE_DATA, "assets"))

@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 版本历史面板端到端验收（对标原版 `canvas_versions_*`）。
@@ -88,7 +89,7 @@ report.revisionsAfterRestore = await page
 const doc = JSON.parse(fs.readFileSync(path.join(DATA, "canvas", "document.json"), "utf8"));
 report.disk = { revision: doc.revision, nodes: doc.nodes.length, confirmed: doc.confirmedRevision };
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-p5/06-versions.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-p5/06-versions.png");
 console.log(JSON.stringify(report, null, 2));
 
 await browser.close();

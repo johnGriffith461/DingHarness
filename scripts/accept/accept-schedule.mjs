@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile, verdict } from "./harness.mjs";
+import { readStoreFile, shot, verdict } from "./harness.mjs";
 
 /**
  * 定时任务真调度的验收（阶段 11.6）。
@@ -131,7 +131,7 @@ report.afterPause = {
   next: await page.locator(`[data-testid="wb-job-next-${report.jobId}"]`).textContent().catch(() => null),
 };
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/wb-14-scheduled.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-14-scheduled.png");
 
 /* ---------- 重启：任务应还在 ---------- */
 await browser.close();

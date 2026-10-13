@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Code2, Eye, Pencil } from "lucide-react";
+import { Check, Code2, Copy, Eye, Pencil } from "lucide-react";
 import type { NodeProps } from "@xyflow/react";
 import Prism from "prismjs";
 // 按需引入语言包：Prism 核心自带 markup / css / clike / javascript
@@ -64,6 +64,13 @@ export default function CodeNodeView({ id, data, selected }: NodeProps<CodeNodeT
   bump("CodeNode");
   const { beginEdit, setData } = useNodeActions();
   const [draft, setDraft] = useState(data.code);
+  /**
+   * 「已复制」的即时反馈（§187 体检 P1 点名缺的那一项）。
+   *
+   * 挂在这颗按钮上、2 秒后自己摘掉 —— 不飘 toast：复制这种小动作的反馈
+   * 应该出现在**手指所在的地方**（与工作台 `MessageActions` 的 flash 同一套）。
+   */
+  const [copied, setCopied] = useState(false);
   const gutterRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -114,6 +121,26 @@ export default function CodeNodeView({ id, data, selected }: NodeProps<CodeNodeT
               </option>
             ))}
           </select>
+          <button
+            className={`nv-btn${copied ? " is-ok" : ""}`}
+            data-testid={`nv-copy-${id}`}
+            title={copied ? "已复制" : "复制代码"}
+            onClick={() => {
+              /*
+               * ⚠️ 这里**必须真的写剪贴板**：本项目反对"摆一颗看起来能用的假按钮"
+               * （§124 死按钮审计报的就是这类）。写完给 2 秒态，失败则如实说。
+               */
+              navigator.clipboard.writeText(data.code).then(
+                () => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 2000);
+                },
+                () => setCopied(false),
+              );
+            }}
+          >
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+          </button>
           <button
             className="nv-btn"
             onClick={() => setData(id, { preview: !data.preview })}

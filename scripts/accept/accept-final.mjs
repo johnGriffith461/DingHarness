@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { shot } from "./harness.mjs";
 
 const OUT = "D:/DoubaoWorkClone/.verify/shots-final";
 mkdirSync(OUT, { recursive: true });
@@ -107,7 +108,7 @@ r.init = await st();
   await page.waitForTimeout(140);
   const w = await page.locator(".sweep-rect").getAttribute("width").catch(() => null);
   const during = (await st()).selected;
-  await page.screenshot({ path: `${OUT}/01-box-during.png` });
+  await shot(page, `${OUT}/01-box-during.png`);
   await page.mouse.up();
   await page.waitForTimeout(280);
   r.box = {
@@ -117,7 +118,7 @@ r.init = await st();
     cleared: (await page.locator(".sweep-rect").count()) === 0,
     selected: (await st()).selected,
   };
-  await page.screenshot({ path: `${OUT}/02-box-result.png` });
+  await shot(page, `${OUT}/02-box-result.png`);
 }
 
 /* 2. 框选模式下拖节点（起手在 header 上，应放行给 React Flow） */
@@ -151,7 +152,7 @@ r.init = await st();
   await page.waitForTimeout(160);
   const pts = await page.locator(".smear-trail").getAttribute("points").catch(() => null);
   const during = (await st()).selected;
-  await page.screenshot({ path: `${OUT}/03-smear-during.png` });
+  await shot(page, `${OUT}/03-smear-during.png`);
   await page.mouse.up();
   await page.waitForTimeout(280);
   r.smear = {
@@ -161,7 +162,7 @@ r.init = await st();
     cleared: (await page.locator(".smear-trail").count()) === 0,
     selected: (await st()).selected,
   };
-  await page.screenshot({ path: `${OUT}/04-smear-result.png` });
+  await shot(page, `${OUT}/04-smear-result.png`);
 }
 
 /* 4. 点选：点节点选中、点空白清空 */
@@ -270,7 +271,7 @@ r.init = await st();
   await page.locator('.canvas-mode[data-mode="box"]').click();
   await page.getByTitle("适配视图（一键全览）").click();
   await page.waitForTimeout(600);
-  await page.screenshot({ path: `${OUT}/05-final.png` });
+  await shot(page, `${OUT}/05-final.png`);
 }
 
 r.problems = problems;

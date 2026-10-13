@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { shot } from "./harness.mjs";
 
 /**
  * 11.10 验收：对话流里的产物卡片 + 悬浮助手窗。
@@ -80,7 +81,7 @@ report.floatReplyLength = replied.length;
 const tasksAfterFloat = await page.locator('[data-testid^="wb-recent-"]').count();
 report.taskCountUnchanged = { before: tasksBeforeFloat, after: tasksAfterFloat };
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/wb-16-float.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-16-float.png");
 
 await page.locator('[data-testid="wb-float-close"]').click();
 await page.waitForTimeout(500);
@@ -125,7 +126,7 @@ await page.locator('[data-testid^="wb-artcard-open-"]').first().click();
 await page.waitForTimeout(1500);
 report.afterOpenNote = await page.locator('[data-testid^="wb-artcard-"]').first().textContent().catch(() => null);
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/wb-17-artcard.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-17-artcard.png");
 
 console.log(JSON.stringify(report, null, 2));
 await browser.close();

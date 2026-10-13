@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 图层面板端到端验收（阶段 8.1 / 8.2）。
@@ -119,7 +120,7 @@ await page.locator(`.layer-row[data-layer-id="${top}"]`).click({ button: "right"
 await page.waitForTimeout(500);
 report.topMenuDisabledFront = await page.locator('[data-layer-op="front"]').isDisabled();
 await page.locator('[data-layer-op="forward"]').isDisabled();
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/layers.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/layers.png");
 
 console.log(JSON.stringify(report, null, 2));
 await browser.close();

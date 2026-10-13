@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot, verdict } from "./harness.mjs";
 
 /**
  * 11.21 验收：点产物卡片 = **在画布里打开**（不是记事本）。
@@ -94,13 +95,73 @@ try {
   )?.slice(0, 70);
   report.selectedHasIframe = await page.locator(".react-flow__node.selected iframe").count();
 
-  await page.screenshot({ path: path.join(shots, "wb-23-canvasopen.png") });
+  await shot(page, path.join(shots, "wb-23-canvasopen.png"));
 
+  /*
+   * ── 画布里的对话侧栏不许把画布压没（2026-10-14 修的真缺陷，这里钉住）──
+   *
+   * 实测过：只开画布时画布宽 **505**；再把画布里的对话展开 → 画布宽 **0**，
+   * 节点被推到右侧面板底下（用户看到的是一块空白 + 一排露出来的卡片边角）。
+   * 根因是那个侧栏 `flex: 0 0 300px` 又不肯缩，而它内部"两个下拉 + 按钮 + 说明"
+   * 那一行的最小内容宽度 ≈ 507 —— 于是同级的画布只能拿 0。
+   *
+   * 断言用**比例**不用绝对像素：窗口大小、以后面板宽度调整都不该让它变红，
+   * 但"画布被压没"永远该红。
+   */
+  report.canvasWidthBeforeChat = await page.evaluate(
+    () => Math.round(document.querySelector(".react-flow")?.getBoundingClientRect().width ?? -1),
+  );
+  await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
+  await page.waitForTimeout(1600);
+  const box = await page.evaluate(() => {
+    const flow = document.querySelector(".react-flow")?.getBoundingClientRect();
+    const chat = document.querySelector(".wb-canvas > .side")?.getBoundingClientRect();
+    const slot = document.querySelector(".wb-canvas")?.getBoundingClientRect();
+    return {
+      flow: flow ? Math.round(flow.width) : -1,
+      chat: chat ? Math.round(chat.width) : -1,
+      slot: slot ? Math.round(slot.width) : -1,
+    };
+  });
+  report.chatOpened = box;
+  await shot(page, path.join(shots, "wb-24-canvas-with-chat.png"));
+
+  /* 关掉对话，再关画布 */
+  await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
+  await page.waitForTimeout(800);
   await page.locator('[data-testid="wb-canvas-toggle"]').click();
   await page.waitForTimeout(1500);
   report.canvasClosed = await page.locator('[data-testid="wb-canvas"]').count();
 } finally {
   console.log(JSON.stringify(report, null, 2));
+
+  const bad = [];
+  if (!report.canvasAfterClick) bad.push("画布没打开");
+  if ((report.nodeDelta ?? 0) < 1) bad.push("「在画布中打开」没有新增节点");
+  if (!report.selectedNodeText) bad.push("新节点没有被选中（用户看不出刚打开的是哪个）");
+  if (report.canvasClosed !== 0) bad.push("再点一次开关没能收起画布");
+
+  /*
+   * 画布 + 对话：画布必须**还剩得下看得见的一块**，且侧栏不许吃掉一半以上。
+   * 这两条合起来才拦得住"画布被压成 0/几十像素"这一类（前者是硬底线，
+   * 后者防止"能看见但没法用"）。
+   */
+  const chat = report.chatOpened ?? {};
+  const before = report.canvasWidthBeforeChat ?? 0;
+  if (chat.flow === undefined) {
+    bad.push("没能测到开了对话之后的画布宽度（这一步没做成，这条断言不算数）");
+  } else {
+    if (chat.flow <= 120) bad.push(`⭐ 打开画布里的对话后，画布只剩 ${chat.flow}px（之前 ${before}px）—— 画布被压没了`);
+    if (chat.slot > 0 && chat.chat > chat.slot * 0.6) {
+      bad.push(`对话侧栏占了画布区的 ${Math.round((chat.chat / chat.slot) * 100)}%（不该超过 60%：画布才是主角）`);
+    }
+    if (chat.flow > before) bad.push(`开对话之后画布反而变宽了（${before} → ${chat.flow}），这不合常理`);
+  }
+
+  console.error(JSON.stringify({ 画布宽: { 开对话前: before, 开对话后: chat.flow }, 侧栏: chat.chat, 画布区: chat.slot }));
+  verdict(bad, "画布打开成立：真加节点并选中 / 开关能收 / **展开对话侧栏后画布仍留得下**");
+
   await browser.close().catch(() => undefined);
   child.kill();
+  process.exit(process.exitCode ?? 0);
 }

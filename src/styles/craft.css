@@ -141,9 +141,17 @@
   color: var(--fg-2);
 }
 
+/*
+ * 选中：左侧一条主色指示条 + 内描边换强一点。
+ *
+ * 原来只靠"底色 + 加粗"——两者都是颜色/字重这一路，浅灰描边在
+ * `--surface-active` 底上对比极低。WCAG 1.4.1 说的正是这件事：
+ * **不能只靠颜色传达信息**（色觉障碍、单色屏、或者只是屏幕暗）。
+ * 指示条是形状信号，它在任何情况下都在。
+ */
 .wb-nav-item.is-on {
   background: var(--surface-active);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 2px 0 0 var(--accent), inset 0 0 0 1px var(--line-strong);
 }
 
 .wb-nav-item svg {
@@ -238,4 +246,167 @@
   .wb-caret {
     animation: none;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 节点头部按钮（.nv-btn / .nv-select）
+ *
+ * 2026-10-14 从 `canvas-nodes.css` 挪过来：那边加完「已复制」态就 1510 行、
+ * 撞了结构守卫（.css ≤ 1500）。挪这里不是为了躲守卫 —— 这一块本来就更像
+ * "做工"（高度、过渡、按下与成功态）而不是"画布节点的布局骨架"，
+ * 和本文件里其它交互细节是一类东西。
+ * ══════════════════════════════════════════════════════════════════════ */
+.nv-btn,
+.nv-select {
+  font-size: 11px;
+  /*
+   * 高度从 18px 抬到 22px（§187 体检 P1 第 14 条）：
+   * 18px 的点击区在密集的头部按钮里太挤，摸错是常事。
+   * 抬高度不回退字号 —— 11px 字号在这类工具界面上是对的。
+   */
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  cursor: pointer;
+  /* 只动颜色与背景：`transition: all` 会把布局属性也带上，代价见 craft.css 那段说明。 */
+  transition: color var(--dur-quick) var(--ease-out), background var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out);
+}
+
+/* 「已复制」（2 秒态）：用强调色 + 对勾，够显眼但不刺眼。 */
+.nv-btn.is-ok {
+  color: var(--ok, #4ade80);
+  border-color: color-mix(in srgb, var(--ok, #4ade80) 45%, var(--line));
+}
+.nv-btn:hover,
+.nv-select:hover {
+  color: var(--fg);
+  background: var(--bg-2);
+}
+
+/* ---------- 体检 P1 收尾（§187）：裸写时长换令牌、触控到 24px、可读性 ---------- */
+
+/*
+ * 快捷键提示与"悬停露出的 ⋯"都写着裸 `0.12s` —— 时长应该只有一个来源
+ * （主题里的 `--dur-quick`）。裸写的问题不是好看不好看：改全局节奏时它们不会跟着动，
+ * 于是同一屏里出现两种快慢。
+ */
+.wb-kbd,
+.wb-nav-rowmore {
+  transition: opacity var(--dur-quick) var(--ease-out);
+}
+
+/* ★ / ＋ 两颗小按钮：桌面 AA 的点击区底线是 24px。 */
+.wb-nav-mini {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* ---------- 产物卡（流内）：整卡响应，而不只是标题变个字色 ---------- */
+.wb-artcard {
+  box-shadow: var(--shadow-chip);
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out),
+    transform var(--dur-quick) var(--ease-out);
+}
+.wb-artcard:hover {
+  border-color: var(--line-faint-2);
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
+}
+.wb-artcard:active {
+  transform: scale(0.99);
+}
+
+/*
+/ 生成中：从"一行 10.5px 小字"变成一枚徽章。
+ * `:not(:empty)` 是必要的：不生成时这个元素仍在 DOM 里但没内容，
+ * 不加就会在每张卡上留一个空胶囊。
+ */
+.wb-artifact-status:not(:empty) {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 10.5px;
+}
+
+/*
+ * 空态与文件大小原来用 `--fg-ghost` / 更浅的一档 —— 1.70:1 与 1.91:1。
+ * 这类"提示/空态"是**必须读懂**的文字，不是装饰，所以抬到 --fg-2。
+ */
+.wb-summary-empty,
+.wb-artifact-size {
+  color: var(--fg-2);
+}
+
+/* ---------- 搜索：键盘焦点（见体检 3.12）----------
+ *
+ * 上一轮已经把 `outline: none` 从输入框上删掉了（全局 `:focus-visible` 因此生效）。
+ * 这里再补一层容器级反馈：整条搜索框亮起来，比只亮输入框内部那一条更容易看见。
+ */
+.wb-searchbox {
+  transition: border-color var(--dur-quick) var(--ease-out), box-shadow var(--dur-quick) var(--ease-out);
+}
+.wb-searchbox:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.wb-cmd-search {
+  transition: box-shadow var(--dur-quick) var(--ease-out);
+}
+.wb-cmd-search:focus-within {
+  box-shadow: inset 0 1px 0 0 var(--accent);
+}
+
+/* 搜索历史 chip：约 20px → 24px（桌面 AA 底线）。 */
+.wb-history-word {
+  min-height: 24px;
+  padding: 4px 4px 4px 10px;
+}
+.wb-history-x {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 画布里的对话侧栏会把画布压成 **0 宽**（2026-10-14 实测修）
+ *
+ * ## 量到的现象（打包产物、窗口 1440）
+ *   画布单独开：  `.canvas-root` 宽 505
+ *   再开对话侧栏：`.canvas-root` 宽 **0**，节点被推到右侧面板底下（x=1241 起）
+ *
+ * ## 根因（不是"面板太宽"，是"面板不能变窄"）
+ * `.side` 是 `flex: 0 0 300px`（不收缩），而它里面 `.chat-provider` 那一行
+ * 是"两个下拉 + 探测按钮 + 一句说明"的不断行横排，`min-width: auto` 之下
+ * **最小内容宽度 ≈ 507** —— 于是flex 项被内容撑到 507 且不肯缩，
+ * 同级的 `.wb-canvas-stage`（flex: 1 1 0%）只能拿到 0。
+ *
+ * ## 改法：让侧栏"能缩"，让那一行"能换行/能省略"
+ * 三处一起改才有用（只改一处，最小内容宽度还是 507）。
+ * ══════════════════════════════════════════════════════════════════════ */
+.wb-canvas > .side {
+  /* 允许收缩；上限一半，保证画布永远留得下看得见的一块 */
+  flex: 0 1 300px;
+  min-width: 0;
+  max-width: 50%;
+}
+.chat-provider {
+  /* 挤不下就换行，而不是把整个画布顶没 */
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.chat-note {
+  /* 说明文字可以省略号，它不该有"最小宽度"这种权力 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

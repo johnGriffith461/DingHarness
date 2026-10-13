@@ -5,6 +5,7 @@ import { appendVersion, readMeta, seedGeneration } from "./generation";
 import type { GenerationMeta, GenerationNode } from "./generation";
 import type { CanvasNode, NodeKind } from "./types";
 import { NODE_KIND_META, makeCodeNode, makeMarkdownNode, makeMermaidNode, makeMindmapNode, nextNodeId } from "./types";
+import { nodeText } from "./nodeText";
 
 /**
  * 「选中内容 → 生成 → 结果落为节点」（PLAN 3.3 / 3.4 / 3.5，对标原版
@@ -61,26 +62,6 @@ export const INTENT_META: Record<GenerateIntent, { label: string; output: NodeKi
   mindmap: { label: "整理成导图", output: "mindmap", hint: "产出 Markdown 大纲 → 思维导图" },
 };
 
-/** 每个节点能贡献给模型的文本。 */
-function nodeText(node: CanvasNode): string {
-  const data = node.data as Record<string, unknown>;
-  switch (node.type) {
-    case "markdown":
-      return String(data.text ?? "");
-    case "code":
-      return `\`\`\`${String(data.lang ?? "")}\n${String(data.code ?? "")}\n\`\`\``;
-    case "mermaid":
-      return `\`\`\`mermaid\n${String(data.code ?? "")}\n\`\`\``;
-    case "mindmap":
-      return String(data.markdown ?? "");
-    case "image":
-      return `[图片节点] ${String(data.alt ?? "")}`;
-    case "whiteboard":
-      return "[白板节点：手绘草图]";
-    default:
-      return "";
-  }
-}
 
 /**
  * 把选中的节点读成给模型看的上下文块。

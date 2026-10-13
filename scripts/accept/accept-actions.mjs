@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile } from "./harness.mjs";
+import { readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 11.19 验收：消息操作栏的六个动作**全部真的能用**。
@@ -99,7 +99,7 @@ try {
   report.shareHasRoleLabels = shared.includes("**我：**") && shared.includes("**豆包工作：**");
   report.shareLength = shared.length;
 
-  await page.screenshot({ path: path.join(shots, "wb-22-actions.png") });
+  await shot(page, path.join(shots, "wb-22-actions.png"));
 
   /* ---------- 重新生成 ---------- */
   await page.locator(`[data-testid="wb-act-retry-${id}"]`).click();

@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile } from "./harness.mjs";
+import { readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 插件安装（11.7）与项目分组（11.8）的验收。
@@ -132,7 +132,7 @@ await page.locator('[data-testid="wb-navmenu-置顶"]').click();
 await page.waitForTimeout(1000);
 report.libAfterPin = readLib();
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/wb-15-library.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-15-library.png");
 
 /* ---------- 重启：库应完整保留 ---------- */
 await browser.close();

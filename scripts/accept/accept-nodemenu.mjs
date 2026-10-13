@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 11.28 验收：画布节点右键菜单。
@@ -126,7 +127,7 @@ try {
   report.menuItems = await page.$$eval('[data-testid^="cv-ctx-"]', (els) =>
     els.map((e) => ({ t: e.textContent.trim(), off: e.disabled })),
   );
-  await page.screenshot({ path: path.join(shots, "wb-25-nodemenu.png") });
+  await shot(page, path.join(shots, "wb-25-nodemenu.png"));
 
   /* ---------- 复制 ---------- */
   await reset();

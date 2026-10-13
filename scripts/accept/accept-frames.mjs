@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 画框节点端到端验收（阶段 8.4，对标 `moveFrameWithChildren`）。
@@ -98,7 +99,7 @@ const report = {};
     frameMoved: Math.abs((await page.locator(".frame-node").boundingBox()).x - frameEl.x) > 40,
   };
 
-  await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/frames.png" });
+  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/frames.png");
 
   /*
    * ── 底部工具条那三颗（2026-10-13 补）──

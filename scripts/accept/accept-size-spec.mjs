@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { shot } from "./harness.mjs";
 
 /**
  * 图像尺寸规格端到端验收（Lunora 规格落地）。
@@ -112,7 +113,7 @@ report.generatedSize = await page.evaluate(() => {
   const img = document.querySelector('.react-flow__node-image img[src^="dshasset://"]');
   return img instanceof HTMLImageElement ? { w: img.naturalWidth, h: img.naturalHeight } : null;
 });
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-final/gen-size.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/gen-size.png");
 
 console.log(JSON.stringify(report, null, 2));
 

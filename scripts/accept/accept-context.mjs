@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile, verdict } from "./harness.mjs";
+import { readStoreFile, shot, verdict } from "./harness.mjs";
 
 /**
  * 11.14 验收：云盘行右键菜单 + 插件「管理」子页。
@@ -69,7 +69,7 @@ report.menuItems = await page.$$eval(".wb-ctx-item", (els) =>
     reason: e.getAttribute("title") ?? "",
   })),
 );
-await page.screenshot({ path: path.join(shots, "wb-19-ctx.png") });
+await shot(page, path.join(shots, "wb-19-ctx.png"));
 
 // 复制链接 —— 剪贴板里应是 dshasset://file/...
 await page.locator('[data-testid="wb-drive-menu-复制链接"]').click();
@@ -149,7 +149,7 @@ await page.locator('[data-testid="wb-manage-tab-连接器"]').click();
 await page.waitForTimeout(700);
 report.connectorEmpty = await page.locator('[data-testid="wb-manage-empty"]').textContent().catch(() => null);
 
-await page.screenshot({ path: path.join(shots, "wb-20-manage.png") });
+await shot(page, path.join(shots, "wb-20-manage.png"));
 
 // 面包屑回市场
 await page.locator('[data-testid="wb-crumb-market"]').click();

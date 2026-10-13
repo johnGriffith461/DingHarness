@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { shot } from "./harness.mjs";
 
 /**
  * 画布剪贴板端到端验收（PLAN 4.6）。
@@ -97,7 +98,7 @@ await page.waitForTimeout(900);
 report.toastForeign = await page.locator(".canvas-toast").textContent().catch(() => null);
 report.nodesAfterForeign = (await ids()).length;
 
-await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-p5/08-clipboard.png" });
+await shot(page, "D:/DoubaoWorkClone/.verify/shots-p5/08-clipboard.png");
 console.log(JSON.stringify(report, null, 2));
 
 await browser.close();

@@ -166,6 +166,16 @@ const CASES = [
   ["accept-export.mjs", "画布导出（视图 / 画框各一张真 PNG，画框更小）"],
   ["accept-voice.mjs", "设置·声音选择（真音色列表 / 选了就生效并记住）"],
   /*
+   * 2026-10-14 新写/重写的三条（都**不连模型、不看 DEV 探针**）：
+   *   · `accept-p5-ref` 重写：原来断的是 `window.__lastChatPayload`（DEV 才有），
+   *     打包产物里永远跑不到 —— 现在断的是界面这一路（@ → 候选 → 芯片 → 断链）
+   *   · `accept-retry`：聊天失败后的「重试」（用空凭据文件制造确定性失败）
+   *   · `accept-codecopy`：代码节点的「复制」真写剪贴板 + 2 秒反馈
+   */
+  ["accept-p5-ref.mjs", "节点引用芯片（@ 候选 / 芯片 / 断链标注）"],
+  ["accept-retry.mjs", "聊天重试（失败有出路 / 撤旧问答重发 / 不卡忙碌态）"],
+  ["accept-codecopy.mjs", "代码节点复制（真进剪贴板 / 反馈 2 秒后复位）"],
+  /*
    * ⚠️ `accept-writing` **2026-10-14 摘出批跑并改名** → `accept-writing-model.mjs`。
    *
    * 它名字看不出，但它**真的连模型**：点「写短一点」然后等 15 秒看节点文字变没变。
