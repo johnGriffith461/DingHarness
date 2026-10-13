@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shot } from "./harness.mjs";
+import { openCanvas, shot } from "./harness.mjs";
 
 /**
  * 画布重渲染**测量**工具（不是验收 —— 它没有判定，只出数字）。
@@ -75,7 +75,7 @@ await sleep(1500);
 
 /* 打开画布（没开就点开关）。 */
 if ((await page.locator('[data-testid="wb-canvas"]').count()) === 0) {
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await sleep(2500);
 }
 await page.waitForSelector(".react-flow__node", { timeout: 20000 });

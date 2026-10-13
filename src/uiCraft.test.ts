@@ -31,8 +31,18 @@ function allCss(): string {
   return files.map((f) => readFileSync(path.join(ROOT, "src", f), "utf8")).join("\n");
 }
 
-describe("手感守卫（UI 做工的四条规矩）", () => {
+describe("手感守卫（UI 做工的几条规矩）", () => {
   const css = allCss();
+  /*
+   * 手感那一节现在在自己的文件里（`craft.css`）—— 它从 `workbench.css` 分出来，
+   * 是因为结构守卫（C6-5：.css ≤ 1500）在我把它追加进 `workbench.css` 时当场拦下。
+   * 取**最后一处**同名规则：覆盖块追加在文件末尾，`indexOf` 会拿到开头那条旧规则。
+   */
+  const craft = readFileSync(path.join(STYLE_DIR, "craft.css"), "utf8");
+  const lastBlock = (selector: string) => {
+    const at = craft.lastIndexOf(`${selector} {`);
+    return at < 0 ? "" : craft.slice(at, craft.indexOf("}", at) + 1);
+  };
 
   it("① 不许 `transition: all`（它会连带布局属性一起动）", () => {
     /*
@@ -63,15 +73,7 @@ describe("手感守卫（UI 做工的四条规矩）", () => {
   it("③ 关键基础件真的用了令牌（不是裸写 ms）——推荐卡与发送键", () => {
     // ⚠️ 手感那一节现在在自己的文件里（craft.css）—— 它从 workbench.css 分出来，是因为
     // 结构守卫（C6-5：.css ≤ 1500）在我把它追加进 workbench.css 时当场拦下。
-    const wb = readFileSync(path.join(STYLE_DIR, "craft.css"), "utf8");
-    /*
-     * ⚠️ 取**最后一处**同名规则：手感收口那一节是追加在文件末尾的覆盖块，
-     * `indexOf` 拿到的是文件开头的旧规则（第一版就是这么误报的）。
-     */
-    const lastBlock = (selector: string) => {
-      const at = wb.lastIndexOf(`${selector} {`);
-      return at < 0 ? "" : wb.slice(at, wb.indexOf("}", at) + 1);
-    };
+    /* 共用 describe 作用域里那个 `lastBlock`（它读的正是 craft.css）。 */
     expect(lastBlock(".wb-suggestion"), "推荐卡没走动效令牌").toContain("var(--dur-quick)");
     expect(lastBlock(".wb-send"), "发送键没走动效令牌").toContain("var(--dur-quick)");
   });
@@ -90,12 +92,6 @@ describe("手感守卫（UI 做工的四条规矩）", () => {
    * 只有人看着别扭）。所以在这里钉住"存在、走令牌、两个主题都有"。
    */
   it("⑤ 四个板块之间真的有边界阴影，且走主题令牌", () => {
-    /** 取某个选择器**最后一次**出现的规则块（后者覆盖前者，所以看最后那条才算数）。 */
-    const blocks = readFileSync(path.join(STYLE_DIR, "craft.css"), "utf8");
-    const lastBlock = (selector: string) => {
-      const at = blocks.lastIndexOf(`${selector} {`);
-      return at < 0 ? "" : blocks.slice(at, blocks.indexOf("}", at) + 1);
-    };
     const right = css.match(/--edge-shadow-right:\s*[^;]+;/);
     const left = css.match(/--edge-shadow-left:\s*[^;]+;/);
     expect(right, "没有 --edge-shadow-right 令牌").not.toBeNull();
@@ -114,5 +110,49 @@ describe("手感守卫（UI 做工的四条规矩）", () => {
     for (const sel of [".wb-nav", ".wb-canvas", ".wb-summary", ".wb-composer"]) {
       expect(lastBlock(sel), `${sel} 把阴影写成了硬编码颜色`).not.toMatch(/box-shadow:[^;]*rgba\(/);
     }
+  });
+
+  /*
+   * ⑥ 焦点环只准有一条，且不许用品牌蓝（2026-10-14 主人的原话：
+   * 「雷霆大描边…我不要描边，我也不要突兀的蓝色」）。
+   *
+   * 当时的样子是三层叠：全局 `2px solid var(--accent)` +
+   * 输入区容器"边框变蓝 + 3px 蓝光" + 内层 textarea 自己那圈 outline ——
+   * 鼠标一点进输入区，三圈蓝色一起亮。`better-accessibility` 的取向是
+   * **一个指示够了**：容器亮，内层就别再套。
+   *
+   * 这条守的是"别退回去"：焦点环必须走 `--focus-ring`（中性墨色），
+   * 且不许在 `:focus-within` 上加发光。
+   */
+  it("⑥ 焦点环走中性令牌、只有一条、且不带发光", () => {
+    /* ⚠️ 必须锚在行首：`craft.css` 里还有 `.wb-composer-input:focus-visible`，
+       不锚就会匹配到那一条（第一版就是这么错的）。 */
+    const global = css.match(/^:focus-visible\s*\{[^}]*\}/m);
+    expect(global, "找不到全局 :focus-visible 规则").not.toBeNull();
+    expect(global![0], "焦点环用了品牌蓝（主人明确不要）").not.toContain("var(--accent)");
+    expect(global![0], "焦点环没走 --focus-ring 令牌").toContain("var(--focus-ring)");
+    /* 容器级焦点反馈不许带发光（`box-shadow: 0 0 0 3px …` 那一类） */
+    /*
+     * 容器级焦点反馈：**只准在键盘聚焦时出现**，且不许带发光。
+     *
+     * 为什么必须是 `:has(:focus-visible)`：`textarea` 被**鼠标**点中时浏览器也算它
+     * `:focus-visible`，只写 `:focus-within` 就会"鼠标一点就描一圈" ——
+     * 那正是主人说的"雷霆大描边"第二次复发的原因。
+     */
+    for (const sel of [".wb-composer:has(:focus-visible)", ".wb-searchbox:has(:focus-visible)"]) {
+      const block = lastBlock(sel);
+      expect(block, `${sel} 不见了（焦点反馈被删了？）`).not.toBe("");
+      expect(block, `${sel} 又加上了发光`).not.toMatch(/box-shadow/);
+    }
+    /* 鼠标态：`composer` / `searchbox` 的 `:focus-within` 规则不许再存在 */
+    expect(css, "鼠标点进输入区又开始描边了（`:focus-within` 又回来了）").not.toMatch(
+      /^\s*\.wb-(composer|searchbox):focus-within/m,
+    );
+    /* 内层输入框不许再套第二圈：必须显式写掉 */
+    expect(css, "输入区里的 textarea 没有取消第二圈焦点环").toContain(".wb-composer-input:focus-visible");
+    /* 焦点环取值必须中性（rgba 的黑/白），不能用彩色 */
+    const token = css.match(/--focus-ring:\s*([^;]+);/);
+    expect(token, "没有 --focus-ring 令牌").not.toBeNull();
+    expect(token![1], `焦点环颜色不是中性的：${token![1]}`).toMatch(/rgba\(\s*(16,\s*24,\s*40|255,\s*255,\s*255)/);
   });
 });

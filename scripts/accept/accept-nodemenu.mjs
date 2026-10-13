@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shot } from "./harness.mjs";
+import { openCanvas, shot } from "./harness.mjs";
 
 /**
  * 11.28 验收：画布节点右键菜单。
@@ -46,7 +46,7 @@ const reset = async () => {
   await page.waitForTimeout(1200);
   const open = await page.locator('[data-testid="wb-canvas"]').count();
   if (open === 0) {
-    await page.locator('[data-testid="wb-canvas-toggle"]').click();
+    await openCanvas(page);
     await page.waitForTimeout(2200);
   }
 };

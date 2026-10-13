@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, killLeftovers, killTree, shot } from "./harness.mjs";
+import { bootApp, killLeftovers, killTree, openCanvas, shot } from "./harness.mjs";
 
 /**
  * 持久化端到端验收（PLAN 4.2 / 4.3 / 4.5）。
@@ -57,7 +57,7 @@ async function boot(port) {
   const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
   await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
   await page.waitForTimeout(1800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
   
   await page.waitForSelector(".react-flow__node", { state: "attached" });

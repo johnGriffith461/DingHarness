@@ -533,9 +533,15 @@
  * ============================================================ */
 .wb-cloud-drop { position: relative; }
 .wb-cloud-drop.is-over {
+  /*
+   * 拖拽落点：原来是一圈 **2px 蓝色虚线** —— 横跨整个云盘区，又粗又蓝。
+   * 现在改成"整块轻轻亮一下"（柔和底色）+ 一条 1px 中性虚线边界：
+   * 落点是**大面积**元素，信号应该来自面，不是来自一圈粗线。
+   */
   border-radius: 10px;
-  outline: 2px dashed var(--accent);
-  outline-offset: -6px;
+  background: var(--surface-hover);
+  outline: 1px dashed var(--line-strong);
+  outline-offset: -4px;
 }
 .wb-cloud-drop-hint {
   position: absolute;

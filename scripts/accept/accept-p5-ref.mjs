@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { shot, verdict } from "./harness.mjs";
+import { openCanvas, shot, verdict } from "./harness.mjs";
 
 /**
  * 节点引用芯片端到端验收（阶段 5.4）。
@@ -42,7 +42,7 @@ const report = {};
 try {
   report.step = "打开画布与聊天";
   if ((await page.locator('[data-testid="wb-canvas"]').count()) === 0) {
-    await page.locator('[data-testid="wb-canvas-toggle"]').click();
+    await openCanvas(page);
     await page.waitForTimeout(2200);
   }
   if ((await page.locator('[data-testid="chat-input"]').count()) === 0) {

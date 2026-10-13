@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shot, verdict } from "./harness.mjs";
+import { closeCanvas, openCanvas, shot, verdict } from "./harness.mjs";
 
 /**
  * 11.21 验收：点产物卡片 = **在画布里打开**（不是记事本）。
@@ -75,10 +75,10 @@ try {
    * 画布自带示例节点，直接数节点会被它们混进去。
    * 所以：先开画布数一遍，关掉，再点卡片数一遍，看**增量**。
    */
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
   const nodesBefore = await page.locator(".react-flow__node").count();
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
   report.nodesBefore = nodesBefore;
 
@@ -129,7 +129,7 @@ try {
   /* 关掉对话，再关画布 */
   await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
   await page.waitForTimeout(800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await closeCanvas(page);
   await page.waitForTimeout(1500);
   report.canvasClosed = await page.locator('[data-testid="wb-canvas"]').count();
 } finally {

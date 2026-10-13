@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shot, verdict } from "./harness.mjs";
+import { openCanvas, shot, verdict } from "./harness.mjs";
 
 /**
  * 代码节点的「复制」（§187 界面体检 P1 第 14 条点名的那一项）。
@@ -41,7 +41,7 @@ const report = {};
 try {
   report.step = "打开画布";
   if ((await page.locator('[data-testid="wb-canvas"]').count()) === 0) {
-    await page.locator('[data-testid="wb-canvas-toggle"]').click();
+    await openCanvas(page);
     await page.waitForTimeout(2500);
   }
   await page.waitForSelector(".react-flow__node", { timeout: 20000 });

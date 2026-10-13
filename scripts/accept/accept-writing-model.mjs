@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { shot } from "./harness.mjs";
+import { openCanvas, shot } from "./harness.mjs";
 
 /**
  * 写作助手**端到端**验收（对标原版 `canvas_writing_shortcuts_*`）。
@@ -44,7 +44,7 @@ const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
 await page.waitForTimeout(1800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 
 await page.waitForSelector(".react-flow__node", { state: "attached" });

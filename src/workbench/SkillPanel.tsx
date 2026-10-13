@@ -28,20 +28,45 @@ import {
  */
 
 /** 命令区的一项。 */
-type Command = { icon: typeof Folder; label: string; hint?: string };
+type Command = {
+  icon: typeof Folder;
+  label: string;
+  hint?: string;
+  /** 是不是"画布开关"那一条（它的 testid 固定，不随文案变）。 */
+  isCanvas?: boolean;
+};
 
 /** 推荐区的一项。`name` 会加粗，`hint` 是后面的说明。 */
 type Suggestion = { icon: typeof Folder; name: string; hint: string };
 
-/** 命令区 —— 照抄本体截图里的 6 条。 */
-const COMMANDS: Command[] = [
-  { icon: Folder, label: "选择项目" },
-  { icon: Sparkles, label: "用量" },
-  { icon: Settings, label: "工作模式设置" },
-  { icon: ListTodo, label: "技能管理" },
-  { icon: PenLine, label: "创建画布", hint: "在无限画布中自由创建图片与视频" },
-  { icon: HelpCircle, label: "反馈", hint: "发送有关此聊天的反馈" },
-];
+/**
+ * 命令区 —— 照抄本体截图里的 6 条。
+ *
+ * ⚠️ 是**函数**不是常量：画布那一条要按"现在开着没有"换文案
+ * （模块级常量读不到 props，第一版写成常量直接编译不过）。
+ *
+ * @param canvasOpen 画布当前是否打开
+ */
+function commandsFor(canvasOpen: boolean): Command[] {
+  return [
+    { icon: Folder, label: "选择项目" },
+    { icon: Sparkles, label: "用量" },
+    { icon: Settings, label: "工作模式设置" },
+    { icon: ListTodo, label: "技能管理" },
+    /*
+     * 关着 = 「创建画布」（与本体命令区逐字一致）；
+     * 开着 = 「收起画布」（同一位置反向动作）——画布工具条里没有关闭键，
+     * 所以**这一条就是唯一的退路**，不能只有"创建"。
+     */
+    {
+      icon: PenLine,
+      isCanvas: true,
+      label: canvasOpen ? "收起画布" : "创建画布",
+      hint: canvasOpen ? "回到对话与任务" : "在无限画布中自由创建图片与视频",
+    },
+    { icon: HelpCircle, label: "反馈", hint: "发送有关此聊天的反馈" },
+  ];
+}
 
 /** 推荐区 —— 照抄本体截图里的 5 条（名字与说明都来自截图）。 */
 const SUGGESTIONS: Suggestion[] = [
@@ -57,9 +82,18 @@ export type SkillPanelProps = {
   onClose: () => void;
   /** 点某条命令 / 推荐时的回调（本机版多数没有后端，由调用方决定怎么如实呈现）。 */
   onPick?: (label: string) => void;
+  /**
+   * 画布现在开着没有（2026-10-14）。
+   *
+   * 画布唯一的入口/出口就是这里的「创建画布」那一条 —— 右下角那颗浮动键已经撤了
+   * （主人：本体是放在技能里的）。
+   * 开着的时候这一条读作「收起画布」：**必须有退路**，否则用户进了画布就出不来
+   * （画布自己的工具条里没有关闭键）。
+   */
+  canvasOpen?: boolean;
 };
 
-export default function SkillPanel({ onClose, onPick }: SkillPanelProps) {
+export default function SkillPanel({ onClose, onPick, canvasOpen = false }: SkillPanelProps) {
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -90,7 +124,7 @@ export default function SkillPanel({ onClose, onPick }: SkillPanelProps) {
    */
   const hit = (text: string): boolean => (query ? text.toLowerCase().includes(query.toLowerCase()) : true);
 
-  const commands = COMMANDS.filter((c) => hit(c.label + (c.hint ?? "")));
+  const commands = commandsFor(canvasOpen).filter((c) => hit(c.label + (c.hint ?? "")));
   const suggestions = SUGGESTIONS.filter((s) => hit(s.name + s.hint));
 
   return (
@@ -102,7 +136,11 @@ export default function SkillPanel({ onClose, onPick }: SkillPanelProps) {
               <button
                 key={c.label}
                 className={`wb-cmd-item${i === 0 ? " is-first" : ""}`}
-                data-testid={`wb-cmd-${c.label}`}
+                /*
+                 * 画布那一条的 testid **不随文案变**：关着是「创建画布」、开着是「收起画布」，
+                 * 但脚本与用户找的都是"画布那个开关"，所以给它一个稳定名字。
+                 */
+                data-testid={c.isCanvas ? "wb-canvas-toggle" : `wb-cmd-${c.label}`}
                 onClick={() => {
                   onPick?.(c.label);
                   onClose();

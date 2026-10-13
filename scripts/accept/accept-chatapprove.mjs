@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, openCanvas, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**聊天里被闸门拦下的工具也能就地批准**（§185）。⚠️ **这条调模型**（1 次调用）。
@@ -83,7 +83,7 @@ try {
   await page.waitForTimeout(300);
 
   /* 打开画布 → 展开画布对话 */
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1200);
   await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
   await page.waitForTimeout(900);

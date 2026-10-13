@@ -28,7 +28,12 @@
   flex: 0 0 270px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--line);
+  /*
+   * ⚠️ 这里**故意没有** `border-right`（2026-10-14）：
+   * 边界由 `--edge-shadow-right` 交代，而它的**第一层就是一条发丝环** ——
+   * 再叠一根 1px 实线就是 `impeccable/craft-floor.md` 点名的「**幽灵卡片**」：
+   * "高度只声明一次，描边或阴影"。两套一起上只会显得脏。
+   */
   min-height: 0;
 }
 
@@ -506,7 +511,7 @@
 .wb-summary {
   width: 225px;
   flex: 0 0 225px;
-  border-left: 1px solid var(--line);
+  /* 同 `.wb-nav`：边界交给 `--edge-shadow-left` 的发丝环，不再叠一根实线。 */
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -752,7 +757,10 @@
   flex: 1.15;
   display: flex;
   min-width: 0;
-  border-left: 1px solid #eceef1;
+  /*
+   * 同 `.wb-nav` / `.wb-summary`：边界交给 `--edge-shadow-left`。
+   * （原来这里还有一条硬编码的 `#eceef1` —— 深色主题下那是一条白缝。）
+   */
 }
 .wb-canvas-stage { flex: 1; position: relative; min-width: 0; }
 .wb-canvas-chat-toggle {

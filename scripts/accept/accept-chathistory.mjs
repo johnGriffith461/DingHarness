@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, openCanvas, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**聊天历史活过重启**（F3）+ **谁批的能查证**（C2 / INV-3）。
@@ -56,7 +56,7 @@ async function openChat() {
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(1200);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1200);
   await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
   await page.waitForTimeout(1000);

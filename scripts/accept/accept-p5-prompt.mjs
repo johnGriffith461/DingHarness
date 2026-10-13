@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { openCanvas } from "./harness.mjs";
 
 /* ══════════════════════════════════════════════════════════════════════
  * ⚠️ **退役（2026-10-14）—— 保留供开发期手工排查，不再维护、不在任何清单里。**
@@ -47,7 +48,7 @@ const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
 await page.waitForTimeout(1800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 
 await page.waitForSelector(".react-flow__node", { state: "attached" });

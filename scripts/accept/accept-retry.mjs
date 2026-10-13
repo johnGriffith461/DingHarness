@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shot, verdict } from "./harness.mjs";
+import { openCanvas, shot, verdict } from "./harness.mjs";
 
 /**
  * 聊天失败后的「重试」（§187 界面体检 P1 点名的两处接线之一）。
@@ -59,7 +59,7 @@ try {
    * 先开画布，再点它。没开画布就点 → 那个按钮根本不存在（会静默失败）。
    */
   if ((await page.locator('[data-testid="wb-canvas"]').count()) === 0) {
-    await page.locator('[data-testid="wb-canvas-toggle"]').click();
+    await openCanvas(page);
     await page.waitForTimeout(2200);
   }
   if ((await page.locator('[data-testid="chat-input"]').count()) === 0) {

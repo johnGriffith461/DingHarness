@@ -40,6 +40,8 @@ export function Composer({
   /** 正在跑一轮（流式）—— 决定发送键是「发送」还是「停止」（补完⑤）。 */
   const running = useWorkbenchStore((st) => Boolean(st.runningRequestId));
   const createTask = useWorkbenchStore((s) => s.createTask);
+  const canvasOpen = useWorkbenchStore((s) => s.canvasOpen);
+  const setCanvasOpen = useWorkbenchStore((s) => s.setCanvasOpen);
   const [text, setText] = useState("");
 
   /**
@@ -493,7 +495,20 @@ export function Composer({
             原来这里列的是「已装条目 + 勾选」，与本体不是一回事。
           */}
           {openPop === "skill" ? (
-            <SkillPanel onClose={() => setOpenPop(null)} />
+            <SkillPanel
+              onClose={() => setOpenPop(null)}
+              canvasOpen={canvasOpen}
+              onPick={(label) => {
+                /*
+                 * 「创建画布」/「收起画布」：把画布开起来/收起来（2026-10-14）。
+                 * 本机版多数命令没有后端（用量 / 反馈 那几条），**如实什么都不做**，
+                 * 不假装成功 —— 与 SkillPanel 里那句注释同一条规矩。
+                 */
+                if (label === "创建画布") setCanvasOpen(true);
+                if (label === "收起画布") setCanvasOpen(false);
+                if (label === "创建画布" || label === "收起画布") setOpenPop(null);
+              }}
+            />
           ) : null}
         </div>
 

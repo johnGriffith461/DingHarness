@@ -102,6 +102,13 @@ export type WorkbenchState = {
 
   setView: (view: WorkbenchView) => void;
   toggleCanvas: () => void;
+  /**
+   * 明确地把画布设为开/关（2026-10-14）。
+   *
+   * 为什么不能只有 `toggleCanvas`：技能面板点「创建画布」的语义是**打开**，
+   * 用 toggle 的话"已经开着时再点"会把它关掉 —— 用户按的是"创建"，看到的却是"消失"。
+   */
+  setCanvasOpen: (open: boolean) => void;
   /** 打开悬浮助手窗；给了 `seed` 就带着这个问题打开。 */
   openFloat: (seed?: string) => void;
   closeFloat: () => void;
@@ -186,6 +193,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
    */
   canvasOpen: false,
   toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
+  setCanvasOpen: (open) => set((s) => (s.canvasOpen === open ? s : { canvasOpen: open })),
+
   floatOpen: false,
   floatSeed: "",
   openFloat: (seed) => set({ floatOpen: true, floatSeed: seed ?? "" }),

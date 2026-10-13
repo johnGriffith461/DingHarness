@@ -158,7 +158,12 @@
  */
 .wb-nav-item.is-on {
   background: var(--surface-active);
-  box-shadow: inset 2px 0 0 var(--accent), inset 0 0 0 1px var(--line-strong);
+  /*
+   * 指示条用**中性墨色**，不用品牌蓝（2026-10-14，主人："我不要突兀的蓝色"）。
+   * 它存在的理由是 WCAG 1.4.1「不能只靠颜色传达信息」—— 要的是**形状**信号，
+   * 那这个形状本身不需要是蓝的。1px 的浅灰内描边同时退掉：那也是"描边"。
+   */
+  box-shadow: inset 2px 0 0 var(--fg-3);
 }
 
 .wb-nav-item svg {
@@ -198,9 +203,24 @@
     box-shadow var(--dur-quick) var(--ease-out);
 }
 
-.wb-composer:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+/*
+ * 输入区的焦点反馈：**只在键盘聚焦时出现**，鼠标点进去什么都不变。
+ *
+ * 走过的弯路（主人两次点名的"雷霆大描边"）：
+ *   第一版：`:focus-within` → 边框变蓝 + 3px 蓝光，再叠 textarea 自己那圈 outline（三层蓝）；
+ *   第二版：改成中性墨色，但**鼠标点进去照样**把整圈边框压成深灰 —— 还是一圈描边。
+ * 关键在于：`textarea` 被鼠标点中时**也算 `:focus-visible`**（浏览器就这样），
+ * 所以只靠 `:focus-visible` 分不开。用 `:has()` 判"里面那个是不是键盘焦点"才分得开：
+ *   鼠标点 → 什么都不亮（用户自己知道刚刚点了哪儿）；
+ *   键盘 Tab → 一条中性环（键盘用户没有它就是不知道焦点在哪）。
+ * 依据：`better-accessibility/focus-and-keyboard.md`（键盘必须有环、鼠标通常不要）。
+ */
+.wb-composer:has(:focus-visible) {
+  border-color: var(--focus-ring);
+}
+.wb-composer-input:focus-visible {
+  /* 有替代指示（上面那条容器环），所以这里不画第二圈 */
+  outline: none;
 }
 
 /* 输入区里的 chip：悬停/按下都要有回应 */
@@ -363,15 +383,21 @@
 .wb-searchbox {
   transition: border-color var(--dur-quick) var(--ease-out), box-shadow var(--dur-quick) var(--ease-out);
 }
-.wb-searchbox:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+/* 同输入区：鼠标点进去不亮，键盘进来给一条中性环 */
+.wb-searchbox:has(:focus-visible) {
+  border-color: var(--focus-ring);
+}
+/* 同上：容器已经亮了，输入框不再套第二圈 */
+.wb-searchbox input:focus-visible,
+.wb-cmd-search input:focus-visible {
+  outline: none;
 }
 .wb-cmd-search {
   transition: box-shadow var(--dur-quick) var(--ease-out);
 }
 .wb-cmd-search:focus-within {
-  box-shadow: inset 0 1px 0 0 var(--accent);
+  /* 一条中性下划线，不用品牌蓝（命令面板本来就浮在暗底上） */
+  box-shadow: inset 0 1px 0 0 var(--focus-ring);
 }
 
 /* 搜索历史 chip：约 20px → 24px（桌面 AA 底线）。 */

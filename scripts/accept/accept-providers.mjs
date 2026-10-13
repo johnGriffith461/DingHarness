@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { openCanvas } from "./harness.mjs";
 
 /**
  * provider 可用性诚实度验收。
@@ -33,7 +34,7 @@ const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
 await page.waitForTimeout(1800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 
 await page.waitForSelector(".react-flow__node", { state: "attached" });
@@ -49,7 +50,7 @@ await page.waitForTimeout(2500);
  */
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
 await page.waitForTimeout(1800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
 await page.waitForTimeout(2000);

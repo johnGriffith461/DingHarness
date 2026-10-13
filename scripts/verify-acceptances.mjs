@@ -175,6 +175,7 @@ const CASES = [
   ["accept-p5-ref.mjs", "节点引用芯片（@ 候选 / 芯片 / 断链标注）"],
   ["accept-retry.mjs", "聊天重试（失败有出路 / 撤旧问答重发 / 不卡忙碌态）"],
   ["accept-codecopy.mjs", "代码节点复制（真进剪贴板 / 反馈 2 秒后复位）"],
+  ["accept-material.mjs", "@ 添加资料（文件内容真的进了请求 / 发完即摘 / 不污染气泡）"],
   /*
    * ⚠️ `accept-writing` **2026-10-14 摘出批跑并改名** → `accept-writing-model.mjs`。
    *

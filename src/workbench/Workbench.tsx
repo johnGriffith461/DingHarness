@@ -47,7 +47,6 @@ export default function Workbench() {
   const view = useWorkbenchStore((s) => s.view);
   const setView = useWorkbenchStore((s) => s.setView);
   const canvasOpen = useWorkbenchStore((s) => s.canvasOpen);
-  const toggleCanvas = useWorkbenchStore((s) => s.toggleCanvas);
   const floatOpen = useWorkbenchStore((s) => s.floatOpen);
   const floatSeed = useWorkbenchStore((s) => s.floatSeed);
   const closeFloat = useWorkbenchStore((s) => s.closeFloat);
@@ -218,9 +217,11 @@ export default function Workbench() {
       <SummaryPanel />
       {/* 悬浮助手窗挂应用级：云盘文件行的「问问豆包」也要能调起它 */}
       {floatOpen ? <FloatingAssistant onClose={closeFloat} seed={floatSeed} /> : null}
-      <button className="wb-canvas-toggle" data-testid="wb-canvas-toggle" onClick={toggleCanvas} title="显示/隐藏画布">
-        {canvasOpen ? "收起画布" : "打开画布"}
-      </button>
+      {/*
+        ⚠️ 右下角那颗浮动「打开画布」**撤掉了**（2026-10-14，主人的话：
+        「那个打开画布 你不要放在右下角干嘛呀 人家豆包工作人是放在这个技能里面的」）。
+        入口改到技能面板的「创建画布」那一条 —— 本体截图里的命令区本来就有它。
+      */}
     </div>
   );
 }

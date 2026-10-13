@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
-import { shot } from "./harness.mjs";
+import { openCanvas, shot } from "./harness.mjs";
 
 const OUT = "D:/DoubaoWorkClone/.verify/shots-final";
 mkdirSync(OUT, { recursive: true });
@@ -20,7 +20,7 @@ page.on("pageerror", (e) => problems.push(`[pageerror] ${e.message}`));
 await page.goto("http://localhost:5173", { waitUntil: "networkidle" });
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
 await page.waitForTimeout(1800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 
 await page.waitForSelector(".react-flow__node");

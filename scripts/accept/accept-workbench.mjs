@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shot } from "./harness.mjs";
+import { openCanvas, shot } from "./harness.mjs";
 
 /**
  * 工作台外壳验收（阶段 10）。
@@ -124,10 +124,10 @@ await page.waitForTimeout(400);
 
 // 5) 画布产物面板开合
 report.canvasBefore = await page.locator('[data-testid="wb-canvas"]').count();
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 report.canvasAfterToggle = await page.locator('[data-testid="wb-canvas"]').count();
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 
 // 5b) 右侧面板是四个 tab（上位 sidePanel_summary_tab_*）

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, verdict, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, openCanvas, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**两条对话路径看到的东西一样**（C2-4 的落点）。
@@ -90,7 +90,7 @@ try {
   out.shotWorkbench = await shot(page, "bothpaths-workbench.png");
 
   /* ── ② 聊天侧栏问一次（同一个问题） ── */
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1200);
   await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
   await page.waitForTimeout(1000);

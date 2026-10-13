@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
-import { shot } from "./harness.mjs";
+import { openCanvas, shot } from "./harness.mjs";
 
 const OUT = "D:/DoubaoWorkClone/.verify/shots-p3";
 mkdirSync(OUT, { recursive: true });
@@ -39,7 +39,7 @@ const pages = contexts[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
 await page.waitForTimeout(1800);
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 
 await page.waitForSelector(".react-flow__node", { timeout: 30000, state: "attached" });
@@ -77,7 +77,7 @@ await page.evaluate(() => {
  */
 const __canvasAlreadyOpen = (await page.locator('[data-testid="wb-canvas"]').count()) > 0;
 if (!__canvasAlreadyOpen) {
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(1500);
 }
 await page.waitForSelector('[data-testid="wb-canvas-chat-toggle"]', { timeout: 10000 });

@@ -216,6 +216,44 @@ export async function bootApp({ port, dataDir, extraEnv = {}, cwd = "D:/DoubaoWo
   return { child, port, ok, getLog: () => log };
 }
 
+/**
+ * 确保画布是**打开**的（幂等）。
+ *
+ * ## 为什么要有这个助手（2026-10-14）
+ * 画布的入口原来是我自己在右下角加的浮动键；主人指出**本体是把它放在技能面板里**，
+ * 于是键撤了、入口改到技能面板的「创建画布」那一条（它在面板里的 testid 仍是
+ * `wb-canvas-toggle`，名字不随文案变）。
+ *
+ * 41 处脚本原来直接点那颗浮动键 —— 现在**必须先开技能面板**。
+ * 收敛成这一个助手，比在每个脚本里各写一遍"开面板、等、点"更不容易漂。
+ *
+ * @param page 页面
+ * @returns 画布是否真的开了（调用方据此断言/记录）
+ */
+export async function openCanvas(page) {
+  if ((await page.locator('[data-testid="wb-canvas"]').count()) > 0) return true;
+  if ((await page.locator('[data-testid="wb-skill-panel"]').count()) === 0) {
+    await page.locator('[data-testid="wb-skills"]').click();
+    await page.waitForTimeout(600);
+  }
+  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  /* 画布是条件渲染的重组件，起来要一会儿（原来那颗浮动键也是等 ~2.2s）。 */
+  await page.waitForTimeout(2400);
+  return (await page.locator('[data-testid="wb-canvas"]').count()) > 0;
+}
+
+/** 确保画布是**收起**的（幂等）；已经收起就直接返回。 */
+export async function closeCanvas(page) {
+  if ((await page.locator('[data-testid="wb-canvas"]').count()) === 0) return true;
+  if ((await page.locator('[data-testid="wb-skill-panel"]').count()) === 0) {
+    await page.locator('[data-testid="wb-skills"]').click();
+    await page.waitForTimeout(600);
+  }
+  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await page.waitForTimeout(1200);
+  return (await page.locator('[data-testid="wb-canvas"]').count()) === 0;
+}
+
 /** 一条验收的标准判定：把 bad 列表收敛成退出码与判词。 */
 export function verdict(bad, okText) {
   if (bad.length) {

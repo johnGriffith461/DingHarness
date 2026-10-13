@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, openCanvas, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**坏掉的画布文档不许把画布弄崩**（§181）。
@@ -83,7 +83,7 @@ try {
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
 
   /* 打开画布（照已有验收：`wb-canvas-toggle`） */
-  await page.locator('[data-testid="wb-canvas-toggle"]').click();
+  await openCanvas(page);
   await page.waitForTimeout(2500);
 
   out.canvasShown = (await page.locator(".react-flow").count()) > 0;
