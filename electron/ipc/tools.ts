@@ -50,11 +50,15 @@ import { runSubagent } from "./subagent";
  * 落盘走 `writeMemory`（与 IPC 同一条路径）—— 两处必须一致，
  * 否则"工具写的"与"界面读的"会不一样。
  *
+ * ⚠️ C1：`readMemory` / `writeMemory` 现在是**异步**的（落盘要重试就不可能同步，
+ * 同步重试会把主进程连同界面一起卡住）。`EXECUTORS` 本来就允许返回 Promise，
+ * 所以这里跟着改成 async 即可。
+ *
  * @param text 要记住的内容
  * @returns 给模型看的结果（含当前条数，方便它判断要不要继续）
  */
-function saveToMemory(text: string): { ok: boolean; count: number; note?: string } {
-  const before = readMemory();
+async function saveToMemory(text: string): Promise<{ ok: boolean; count: number; note?: string }> {
+  const before = await readMemory();
   const next = addMemory(before, text, { source: "conversation" });
   if (next === before) {
     // addMemory 在"空文本"或"已经有一模一样的"时原样返回
@@ -63,13 +67,13 @@ function saveToMemory(text: string): { ok: boolean; count: number; note?: string
   if (before.entries.length >= MEMORY_MAX && next.entries.length >= MEMORY_MAX) {
     return { ok: true, count: next.entries.length, note: `记忆已满（上限 ${MEMORY_MAX} 条），这条没有存进去` };
   }
-  writeMemory(next);
+  await writeMemory(next);
   return { ok: true, count: next.entries.length };
 }
 
 /** 列出全部记忆条目。 */
-function listMemory(): { count: number; entries: string[] } {
-  const lib = readMemory();
+async function listMemory(): Promise<{ count: number; entries: string[] }> {
+  const lib = await readMemory();
   return { count: lib.entries.length, entries: lib.entries.map((e) => e.text) };
 }
 

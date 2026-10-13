@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readStoreFile } from "./harness.mjs";
 
 /**
  * 11.14 验收：云盘行右键菜单 + 插件「管理」子页。
@@ -131,7 +132,7 @@ await page.waitForTimeout(800);
 report.manageTabOnReentry = await page.locator('[data-testid="wb-manage-tab-插件"]').getAttribute("class");
 await page.locator('[data-testid="wb-remove-feishu"]').click();
 await page.waitForTimeout(1200);
-const lib = JSON.parse(fs.readFileSync(path.join(DATA, "library.json"), "utf8"));
+const lib = readStoreFile(path.join(DATA, "library.json"));
 report.installedAfterRemove = lib.installed;
 
 } finally {

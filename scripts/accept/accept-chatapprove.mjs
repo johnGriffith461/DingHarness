@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**聊天里被闸门拦下的工具也能就地批准**（§185）。⚠️ **这条调模型**（1 次调用）。
@@ -36,7 +36,7 @@ const readMemory = () => {
   const f = path.join(DATA, "memory.json");
   if (!fs.existsSync(f)) return null;
   try {
-    return (JSON.parse(fs.readFileSync(f, "utf8"))?.entries ?? []).map((e) => e.text);
+    return (readStoreFile(f)?.entries ?? []).map((e) => e.text);
   } catch {
     return null;
   }

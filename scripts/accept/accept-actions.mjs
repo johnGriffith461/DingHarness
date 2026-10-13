@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readStoreFile } from "./harness.mjs";
 
 /**
  * 11.19 验收：消息操作栏的六个动作**全部真的能用**。
@@ -76,7 +77,7 @@ try {
   report.downClass = await page.locator(`[data-testid="wb-act-down-${id}"]`).getAttribute("class");
   report.upClassAfterDown = await page.locator(`[data-testid="wb-act-up-${id}"]`).getAttribute("class");
   const tasksFile = path.join(DATA, "tasks.json");
-  const saved = JSON.parse(fs.readFileSync(tasksFile, "utf8"));
+  const saved = readStoreFile(tasksFile);
   const savedStep = saved[0].steps.find((s) => s.id === id);
   report.ratingPersisted = savedStep?.rating;
   report.askedWithPersisted = typeof savedStep?.askedWith === "string" && savedStep.askedWith.length > 0;
@@ -120,7 +121,7 @@ try {
 
   // 重生成后的步骤仍在磁盘上（且 askedWith 保住）
   await page.waitForTimeout(1500);
-  const saved2 = JSON.parse(fs.readFileSync(tasksFile, "utf8"));
+  const saved2 = readStoreFile(tasksFile);
   const step2 = saved2[0].steps.find((s) => s.id === id);
   report.afterRetryStillSameStepId = Boolean(step2);
   report.afterRetryAskedWith = typeof step2?.askedWith === "string" && step2.askedWith.length > 0;

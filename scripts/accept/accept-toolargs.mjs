@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**工具参数真的出现在留痕里**（§175）。
@@ -64,7 +64,7 @@ try {
   /* 记忆库真的存下来了吗 */
   await page.waitForTimeout(1500);
   const mem = path.join(DATA, "memory.json");
-  out.memory = fs.existsSync(mem) ? JSON.parse(fs.readFileSync(mem, "utf8")) : null;
+  out.memory = fs.existsSync(mem) ? readStoreFile(mem) : null;
   out.shot = await shot(page, "toolargs.png");
 
   await b.close();

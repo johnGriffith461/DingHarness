@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readStoreFile } from "./harness.mjs";
 
 /**
  * 定时任务真调度的验收（阶段 11.6）。
@@ -84,7 +85,7 @@ report.statusLabel = report.jobId
 const file = path.join(DATA, "schedules.json");
 report.fileExists = fs.existsSync(file);
 if (report.fileExists) {
-  const jobs = JSON.parse(fs.readFileSync(file, "utf8"));
+  const jobs = readStoreFile(file);
   report.onDisk = jobs.map((j) => ({
     title: j.title,
     repeat: j.repeat,
@@ -117,7 +118,7 @@ report.afterRunStatus = await page.locator(`[data-testid="wb-job-status-${report
 report.afterRunText = await page.locator(".wb-sched-item").first().textContent().catch(() => null);
 
 await page.waitForTimeout(4000);
-const jobsAfterRun = JSON.parse(fs.readFileSync(file, "utf8"));
+const jobsAfterRun = readStoreFile(file);
 report.runsOnDisk = jobsAfterRun.map((j) => ({ title: j.title, runs: j.runs.length, ok: j.runs[0]?.ok ?? null }));
 
 // 暂停 / 继续

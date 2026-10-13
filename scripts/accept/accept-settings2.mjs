@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**设置里新增的「通用」与「关于」两页**（§182）。
@@ -78,7 +78,7 @@ try {
   await page.waitForTimeout(900);
   out.memoryAfter = await txt(page, '[data-testid="wb-setpage-memory"]');
   const mem = path.join(DATA, "memory.json");
-  out.diskEnabled = fs.existsSync(mem) ? JSON.parse(fs.readFileSync(mem, "utf8"))?.enabled : "（没有文件）";
+  out.diskEnabled = fs.existsSync(mem) ? readStoreFile(mem)?.enabled : "（没有文件）";
 
   /* ⑤ 开启新话题 */
   await page.locator('[data-testid="wb-setpage-newtopic"]').click();

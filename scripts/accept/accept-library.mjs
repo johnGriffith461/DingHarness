@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readStoreFile } from "./harness.mjs";
 
 /**
  * 插件安装（11.7）与项目分组（11.8）的验收。
@@ -37,7 +38,7 @@ async function launch(port) {
 
 const report = {};
 const libFile = path.join(DATA, "library.json");
-const readLib = () => (fs.existsSync(libFile) ? JSON.parse(fs.readFileSync(libFile, "utf8")) : null);
+const readLib = () => (fs.existsSync(libFile) ? readStoreFile(libFile) : null);
 
 let { child, browser, page } = await launch(9570);
 

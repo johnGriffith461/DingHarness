@@ -1,7 +1,6 @@
 import { chromium } from "playwright";
-import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**调整语气真的改了文风**（§168）。
@@ -76,7 +75,7 @@ try {
     Array.from(document.querySelectorAll(".wb-doc-version-reason")).map((e) => (e.textContent ?? "").trim()),
   );
   await page.waitForTimeout(1200);
-  out.diskBody = (JSON.parse(fs.readFileSync(path.join(DATA, "docs.json"), "utf8"))?.[0]?.body ?? "").slice(0, 40);
+  out.diskBody = (readStoreFile(path.join(DATA, "docs.json"))?.[0]?.body ?? "").slice(0, 40);
   out.shot = await shot(page, "doctone.png");
 
   await b.close();

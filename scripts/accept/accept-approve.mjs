@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**子智能体上交的调用能被就地批准**（§176）+ 放行真的执行（§144 那套）。
@@ -106,7 +106,7 @@ const memoryTexts = () => {
   const file = path.join(DATA, "memory.json");
   if (!fs.existsSync(file)) return [];
   try {
-    return (JSON.parse(fs.readFileSync(file, "utf8"))?.entries ?? []).map((e) => e.text);
+    return (readStoreFile(file)?.entries ?? []).map((e) => e.text);
   } catch {
     return [];
   }

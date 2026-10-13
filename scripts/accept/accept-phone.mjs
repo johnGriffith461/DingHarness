@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { NO_PAGE_HINT, bootApp, freshDir, readStoreFile, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 11.26 验收：手机遥控电脑页的两个开关是**真状态**。
@@ -12,24 +12,35 @@ import path from "node:path";
  *     `powerSaveBlocker` 持有，重启后应回到"关"（没有人在阻止休眠了）。
  *
  * 原来两个都是渲染进程里的 useState —— 重启回到默认值，用户会以为"设了没用"。
+ *
+ * ── 2026-10-13 两处修正 ──
+ *
+ * ① **起应用改用 `bootApp`（等真端口）**，不再"固定等 8 秒然后连"。
+ *    原来固定 9660/9661：这台机器上 **9660 绑不上**（`bind()` 报 WSAEACCES，
+ *    端口没开 → `ECONNREFUSED` → 脚本崩，而真因是端口不是产品）。
+ *    现在换用 9680/9681，并且"端口真开了才往下走"；起不来就直说端口没开。
+ * ② **加了判定**（`verdict`）。原来它只 `console.log` 一个报告就退，**从不判定** ——
+ *    于是"开关没写盘"这种真问题它永远是绿的（§109 那条"只点按钮不验证后果"的形态）。
  */
 const DATA = "D:/DoubaoWorkClone/.verify/phone-data";
-fs.rmSync(DATA, { recursive: true, force: true });
-const env = { ...process.env };
-delete env.ELECTRON_RUN_AS_NODE;
-env.DSH_CANVAS_DATA_DIR = DATA;
-
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+/* 先杀掉上一轮残留再删目录：Windows 上被句柄占着的目录会报 EPERM（§135 撞过）。 */
+if (!(await freshDir(DATA))) {
+  console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
+  process.exit(1);
+}
 
 async function launch(port) {
-  const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
-    cwd: "D:/DoubaoWorkClone",
-    env,
-    stdio: ["ignore", "ignore", "ignore"],
-  });
-  await new Promise((r) => setTimeout(r, 8000));
+  const { child, ok, getLog } = await bootApp({ port, dataDir: DATA });
+  if (!ok) {
+    console.error(`✗ 应用起了但调试端口 ${port} 没开 —— 看下面这段日志：\n${getLog()}`.slice(0, 1200));
+    process.exit(1);
+  }
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
+  const page = await waitForPage(browser);
+  if (!page) {
+    console.error("✗ " + NO_PAGE_HINT);
+    process.exit(1);
+  }
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(1500);
   return { child, browser, page };
@@ -37,7 +48,7 @@ async function launch(port) {
 
 const report = {};
 const shots = "D:/DoubaoWorkClone/.verify/shots-final";
-let { child, browser, page } = await launch(9660);
+let { child, browser, page } = await launch(9680);
 
 try {
   await page.locator('[data-testid="wb-nav-phone"]').click();
@@ -68,14 +79,14 @@ try {
   await page.waitForTimeout(1200);
   report.connectAfterClick = await page.locator('[data-testid="wb-switch-connect"]').getAttribute("aria-pressed");
   const remoteFile = path.join(DATA, "remote.json");
-  report.remoteJson = fs.existsSync(remoteFile) ? JSON.parse(fs.readFileSync(remoteFile, "utf8")) : null;
+  report.remoteJson = fs.existsSync(remoteFile) ? readStoreFile(remoteFile) : null;
 
   /* ---------- 重启：许可保持关、唤醒回到关 ---------- */
   await browser.close();
   child.kill();
   await new Promise((r) => setTimeout(r, 2500));
 
-  ({ child, browser, page } = await launch(9661));
+  ({ child, browser, page } = await launch(9681));
   await page.locator('[data-testid="wb-nav-phone"]').click();
   await page.waitForTimeout(2000);
   report.afterRestartConnect = await page.locator('[data-testid="wb-switch-connect"]').getAttribute("aria-pressed");
@@ -86,3 +97,23 @@ try {
   await browser.close().catch(() => undefined);
   child.kill();
 }
+
+/*
+ * 判定（2026-10-13 补）。
+ *
+ * 这几条正是这个页面的**存在理由**：两个开关都得是"真状态"而不是渲染进程里的 useState。
+ * 特别注意第 ② 条 —— 它同时钉住了 C1 的落盘信封：`remote.json` 现在长这样
+ * `{ "__schema": 1, "data": { "allowConnect": … } }`，脱掉信封之后 `allowConnect` 必须是**真的 false**
+ * （而不是"文件里有这个字就算过"）。
+ */
+const bad = [];
+if (report.defaultConnect !== "true") bad.push(`默认许可应为开，实际 ${report.defaultConnect}`);
+if (report.defaultAwake !== "false") bad.push(`默认唤醒应为关，实际 ${report.defaultAwake}`);
+/* ② 许可真的写进磁盘了（脱信封之后看 allowConnect） */
+if (report.remoteJson?.allowConnect !== false) {
+  bad.push(`关掉的许可没落盘：remote.json 里 allowConnect = ${JSON.stringify(report.remoteJson)}`);
+}
+/* ③ 跨重启：许可是许可（保持关），唤醒是机器真实状态（回到关） */
+if (report.afterRestartConnect !== "false") bad.push(`重启后许可应仍是关，实际 ${report.afterRestartConnect}`);
+if (report.afterRestartAwake !== "false") bad.push(`重启后唤醒应回到关，实际 ${report.afterRestartAwake}`);
+verdict(bad, "手机遥控成立：默认态对齐实机 / 许可真的写盘 / 重启后许可是关、唤醒回到关");

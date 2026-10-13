@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readStoreFile } from "./harness.mjs";
 
 /**
  * 11.18 验收：左栏行的悬停 ⋯ 菜单 + 任务标题点击重命名。
@@ -71,7 +72,7 @@ try {
   await page.waitForTimeout(1200);
   report.pinnedAfterMenu = await page.locator('[data-testid^="wb-pinned-"]').count();
   const libPath = path.join(DATA, "library.json");
-  report.libPinned = fs.existsSync(libPath) ? JSON.parse(fs.readFileSync(libPath, "utf8")).pinned.length : null;
+  report.libPinned = fs.existsSync(libPath) ? readStoreFile(libPath).pinned.length : null;
 
   // 取消置顶（菜单项应变成「取消置顶」）
   await page.locator('[data-testid^="wb-recent-"]').first().hover();

@@ -1,7 +1,6 @@
 import { chromium } from "playwright";
-import fs from "node:fs";
 import path from "node:path";
-import { bootApp, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 验收：**AI 文档的操作条**（§153）—— 缩写 / 扩写 / 润色 / 总结概括。
@@ -76,7 +75,7 @@ try {
     Array.from(document.querySelectorAll(".wb-doc-version-reason")).map((e) => (e.textContent ?? "").trim()),
   );
   await page.waitForTimeout(1200);
-  const onDisk = JSON.parse(fs.readFileSync(path.join(DATA, "docs.json"), "utf8"));
+  const onDisk = readStoreFile(path.join(DATA, "docs.json"));
   out.diskBody = (onDisk?.[0]?.body ?? "").slice(0, 40);
   out.diskVersions = onDisk?.[0]?.versions?.length ?? 0;
   out.shot = await shot(page, "doc-refine.png");

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**应用详情 + 喜欢（含重启后还在）**（§180）。
@@ -90,7 +90,7 @@ try {
   await page.waitForTimeout(900);
   out.likeAfter = await likeText(page);
   out.fileAfterLike = fs.existsSync(path.join(DATA, "coding-likes.json"))
-    ? JSON.parse(fs.readFileSync(path.join(DATA, "coding-likes.json"), "utf8"))
+    ? readStoreFile(path.join(DATA, "coding-likes.json"))
     : null;
 
   /* ⑥ 界面上不许出现编出来的点赞数 */

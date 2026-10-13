@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**新对话默认模型**（§183，`settings_defaultNewChatModel`）。
@@ -37,7 +37,7 @@ const openSettings = async (page) => {
 
 const readSettingsFile = () => {
   const f = path.join(DATA, "settings.json");
-  return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null;
+  return fs.existsSync(f) ? readStoreFile(f) : null;
 };
 
 try {

@@ -225,3 +225,36 @@ export function verdict(bad, okText) {
   }
   console.log("✓ " + okText);
 }
+
+/**
+ * 读一个"落盘实体"文件（`memory.json` / `docs.json` / `tasks.json` …）并**脱掉信封**。
+ *
+ * ## 为什么需要它（C1，2026-10-13）
+ *
+ * 这些文件原来是**裸 JSON**（`JSON.stringify(业务数据)`），各模块自己读自己写，
+ * 于是同一条保证在每个模块里的强度都不一样：内存库连原子写都没有、**一处都不重试**、
+ * 只有画布有版本号而那是个装饰品。C1 把落盘收成一份（`electron/ipc/jsonStore.ts`），
+ * 顺带加上**信封 + 版本 + 前向迁移**：
+ *
+ * ```json
+ * { "__schema": 1, "data": { ...原来那些东西... } }
+ * ```
+ *
+ * ⚠️ 于是**验收脚本必须脱信封之后再断言**。断言的对象是"用户的东西有没有真的存下来"，
+ * 不是"它躺在 JSON 的第几层"——把断言绑在层数上，等于以后每加一个信封就红一片。
+ *
+ * 同时兼容**没有信封的旧文件**（裸数据），所以同一段代码对两种磁盘格式都成立 ——
+ * 这也是产品侧那条硬要求（旧数据必须能读）在验收侧的对偶。
+ *
+ * ⚠️ **不要**拿它读画布快照（`canvas.json` / `rev-N.json`）：那些文件**没有信封**，
+ * 它们的 `version` 是画布文档自己的格式版本（见 `shared/canvas.ts` 的 `migrateCanvasDoc`）。
+ *
+ * @param {string} file 文件路径
+ * @returns 里面的业务数据（信封拆掉之后）
+ */
+export function readStoreFile(file) {
+  const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  const enveloped =
+    raw !== null && typeof raw === "object" && !Array.isArray(raw) && typeof raw.__schema === "number" && "data" in raw;
+  return enveloped ? raw.data : raw;
+}

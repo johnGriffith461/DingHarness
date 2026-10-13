@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**搜索历史**（§162，对应 `search_history` / `清空全部搜索记录`）。
@@ -65,7 +65,7 @@ const historyWords = (page, scope) =>
 const readFile = () => {
   const f = path.join(DATA, "search-history.json");
   try {
-    return JSON.parse(fs.readFileSync(f, "utf8"));
+    return readStoreFile(f);
   } catch {
     return null;
   }

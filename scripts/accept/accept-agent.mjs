@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 验收：**创建 AI 智能体**（§156，对应 `chat/bot/create`）。
@@ -46,7 +46,7 @@ const boot = async () => {
 const readFile = () => {
   const f = path.join(DATA, "agents.json");
   try {
-    return JSON.parse(fs.readFileSync(f, "utf8"));
+    return readStoreFile(f);
   } catch {
     return null;
   }

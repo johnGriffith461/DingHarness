@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readStoreFile } from "./harness.mjs";
 
 /**
  * 11.27 验收：定时任务的编辑。
@@ -33,7 +34,7 @@ await page.waitForTimeout(1500);
 
 const report = {};
 const jobsFile = path.join(DATA, "schedules.json");
-const readJobs = () => (fs.existsSync(jobsFile) ? JSON.parse(fs.readFileSync(jobsFile, "utf8")) : []);
+const readJobs = () => (fs.existsSync(jobsFile) ? readStoreFile(jobsFile) : []);
 
 try {
   await page.locator('[data-testid="wb-nav-scheduled"]').click();

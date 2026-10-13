@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 验收：**工具协议端到端**（§141）。
@@ -88,7 +88,7 @@ await page.locator('[data-testid="wb-composer-input"]').fill(`请调用 memory_s
   out.memoryFileExists = fs.existsSync(memFile);
   if (out.memoryFileExists) {
     const raw = fs.readFileSync(memFile, "utf8");
-    out.memoryOnDisk = JSON.parse(raw);
+    out.memoryOnDisk = readStoreFile(memFile);
     /*
      * ⚠️ 判据是**语义锚点**（那个关键名词），不是逐字比对。
      *
@@ -129,7 +129,7 @@ await page.locator('[data-testid="wb-composer-input"]').fill(`请调用 memory_s
   /* 发之前先数一次条数 —— 这样"多出来的那条"归谁就一目了然（诊断用，§143）。 */
   const readEntries = () => {
     try {
-      return JSON.parse(fs.readFileSync(path.join(DATA, "memory.json"), "utf8")).entries ?? [];
+      return readStoreFile(path.join(DATA, "memory.json")).entries ?? [];
     } catch {
       return [];
     }
@@ -165,7 +165,7 @@ await page.locator('[data-testid="wb-composer-input"]').fill(`请调用 memory_s
     ? fs.readFileSync(path.join(DATA, "memory.json"), "utf8")
     : "";
   out.gateWroteNothing = !gateMem.includes(GATE_KEY);
-  out.gateEntries = JSON.parse(gateMem || '{"entries":[]}').entries?.length ?? 0;
+  out.gateEntries = gateMem ? (readStoreFile(path.join(DATA, "memory.json")).entries?.length ?? 0) : 0;
 
   out.gateShot = await shot(page, "tools-gate.png");
 
@@ -245,7 +245,7 @@ await page.locator('[data-testid="wb-composer-input"]').fill(`请调用 memory_s
 
   const schedFile = path.join(DATA, "schedules.json");
   out.schedulesFileExists = fs.existsSync(schedFile);
-  out.schedulesOnDisk = out.schedulesFileExists ? JSON.parse(fs.readFileSync(schedFile, "utf8")) : [];
+  out.schedulesOnDisk = out.schedulesFileExists ? readStoreFile(schedFile) : [];
   out.jobOnDisk = out.schedulesOnDisk.some((j) => String(j?.title ?? "").includes(JOB_TITLE));
 
   /* 界面：进定时任务页，应当能看见刚建的那条（页面挂载时会 load） */

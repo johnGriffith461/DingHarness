@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**「创建文档」——把对话里的一条消息变成一篇文档**（§172）。
@@ -135,7 +135,7 @@ try {
   /* ⑤⑥ 落盘与留痕 */
   await page.waitForTimeout(900);
   const file = path.join(DATA, "docs.json");
-  out.docsOnDisk = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+  out.docsOnDisk = fs.existsSync(file) ? readStoreFile(file) : null;
   out.shot = await shot(page, "createdoc.png");
 
   await b.close();

@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readStoreFile } from "./harness.mjs";
 
 /**
  * 11.34 验收：添加自定义能力，并确认它**真的走到任务侧**。
@@ -56,7 +57,7 @@ try {
   await page.waitForTimeout(1500);
   report.formClosedAfterSave = (await page.locator('[data-testid="wb-add-form"]').count()) === 0;
 
-  const lib = JSON.parse(fs.readFileSync(path.join(DATA, "library.json"), "utf8"));
+  const lib = readStoreFile(path.join(DATA, "library.json"));
   report.custom = lib.custom;
   report.autoInstalled = lib.installed.includes(lib.custom[0]?.id);
   report.autoEnabled = lib.enabled.includes(lib.custom[0]?.id);

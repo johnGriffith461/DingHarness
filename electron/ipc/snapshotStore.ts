@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
-import type { CanvasDocument, CanvasSnapshotFile } from "../../shared/canvas";
+import { CANVAS_VERSION, migrateCanvasDoc, type CanvasDocument, type CanvasSnapshotFile } from "../../shared/canvas";
 /**
  * 快照落盘（PLAN 4.2 / 4.3 / 4.5）。
  *
@@ -49,7 +49,7 @@ function readJson<T>(file: string): T | null {
 /** 空文档（首次启动）。 */
 export function emptyDocument(): CanvasDocument {
   return {
-    version: 2,
+    version: CANVAS_VERSION,
     revision: 0,
     confirmedRevision: 0,
     updatedAt: new Date().toISOString(),
@@ -73,8 +73,22 @@ export function saveDocument(doc: CanvasDocument): SaveResult {
     if (current && doc.revision < current.revision && doc.revision !== 0) {
       return { ok: false, error: `revision 倒退被拒绝：${doc.revision} < ${current.revision}` };
     }
+    /*
+     * ⚠️ C1：磁盘上的**格式版本比本代码新**时拒绝覆盖。
+     *
+     * 情形是"降级运行"（装了新版本、又换回旧版本）：旧程序不认识新格式，
+     * 但它照旧会自动保存 —— 一写就把用户的新画布**降级销毁**。
+     * 这一条的取舍与本项目 `§178.6 / §179.6 / §181.6` 一致：**不改用户文件，更保守**。
+     */
+    if (current && typeof current.version === "number" && current.version > CANVAS_VERSION) {
+      return {
+        ok: false,
+        error: `磁盘上的画布是第 ${current.version} 版，本程序只认识到第 ${CANVAS_VERSION} 版，已拒绝覆盖`,
+      };
+    }
     const savedAt = new Date().toISOString();
-    const next: CanvasDocument = { ...doc, updatedAt: savedAt };
+    // 写出去的一律盖上当前版本号（渲染侧给的 version 不作为事实来源，这里才是）
+    const next: CanvasDocument = { ...doc, version: CANVAS_VERSION, updatedAt: savedAt };
     writeJsonAtomic(docPath(), next);
     // 同时留一份"按 revision 命名"的历史，便于版本回溯与人工排查
     try {
@@ -124,8 +138,28 @@ export type LoadResult = {
  * 界面卡在"保存失败"。回写之后就地和磁盘对齐了。
  */
 export function loadDocument(): LoadResult {
-  const doc = readJson<CanvasDocument>(docPath());
-  if (!doc) return { doc: emptyDocument(), recovered: false };
+  const loaded = readJson<CanvasDocument>(docPath());
+  if (!loaded) return { doc: emptyDocument(), recovered: false };
+
+  /*
+   * ⚠️ C1：**先过前向迁移**，再谈别的。
+   *
+   * 以前 `version` 是个装饰品（写出去是 2，读回来没人看）。现在缺 `version` 的旧文件
+   * 会被当成第 1 版补上标记层（`markers`）；**迁移要回写**，否则下一次自动保存
+   * 又会把旧结构写回磁盘 —— 那就变成"每次启动都迁一遍"。
+   */
+  const migration = migrateCanvasDoc(loaded, emptyDocument);
+  const doc = migration.doc;
+  if (migration.migrated) {
+    try {
+      writeJsonAtomic(docPath(), doc);
+      console.log("[canvas]", migration.note);
+    } catch (error) {
+      // 迁移写不回去不算失败：内容已经在内存里升上来了，下次再说
+      console.error("[canvas] 迁移回写失败：", error instanceof Error ? error.message : error);
+    }
+  }
+  if (migration.foreign) console.error("[canvas]", migration.note);
 
   // 正常关闭：revision 已被 ack
   if (doc.confirmedRevision >= doc.revision) return { doc, recovered: false };
