@@ -1,4 +1,17 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+
+/*
+ * ⚠️ C6-3 把 `src/styles.css`（6015 行）按区域拆成了 `src/styles/*.css` + 一串 `@import`。
+ * 这条守卫原来**只读那一个文件** —— 拆分之后它扫了个空，于是"看起来还在检查"其实什么都没查
+ * （`themeRatchet` 甚至直接报"两类都要非平凡"，那正是"检查在空转"的自白）。
+ *
+ * 现在读**整个样式树**：入口 + `src/styles/` 下全部 css（按文件名排序，顺序无关紧要，
+ * 因为这些守卫是在"找某条规则/某个变量在不在"，不是在比层叠顺序）。
+ */
+function readAllCss(dir = "src"): string {
+  const files = [`${dir}/styles.css`, ...readdirSync(`${dir}/styles`).filter((f) => f.endsWith(".css")).sort().map((f) => `${dir}/styles/${f}`)];
+  return files.map((f) => readFileSync(f, "utf8")).join("\n");
+}
 import { describe, expect, it } from "vitest";
 
 /**
@@ -23,7 +36,6 @@ import { describe, expect, it } from "vitest";
 /** 当前基线：不许超过这个数（改小了就把这里也改小）。 */
 const MAX_HARDCODED_RULES = 1;
 
-const CSS = "src/styles.css";
 
 /** 粗略切规则：`选择器 { 声明 }`。 */
 function rules(text: string): Array<{ selector: string; body: string }> {
@@ -47,7 +59,7 @@ const RGB = /rgba?\(/;
  * @returns 各计数
  */
 function count(): { wbRules: number; hardRules: number; varRules: number } {
-  const all = rules(readFileSync(CSS, "utf8"));
+  const all = rules(readAllCss());
   let wbRules = 0;
   let hardRules = 0;
   let varRules = 0;

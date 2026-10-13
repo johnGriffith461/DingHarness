@@ -1,4 +1,17 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+
+/*
+ * ⚠️ C6-3 把 `src/styles.css`（6015 行）按区域拆成了 `src/styles/*.css` + 一串 `@import`。
+ * 这条守卫原来**只读那一个文件** —— 拆分之后它扫了个空，于是"看起来还在检查"其实什么都没查
+ * （`themeRatchet` 甚至直接报"两类都要非平凡"，那正是"检查在空转"的自白）。
+ *
+ * 现在读**整个样式树**：入口 + `src/styles/` 下全部 css（按文件名排序，顺序无关紧要，
+ * 因为这些守卫是在"找某条规则/某个变量在不在"，不是在比层叠顺序）。
+ */
+function readAllCss(dir = "src"): string {
+  const files = [`${dir}/styles.css`, ...readdirSync(`${dir}/styles`).filter((f) => f.endsWith(".css")).sort().map((f) => `${dir}/styles/${f}`)];
+  return files.map((f) => readFileSync(f, "utf8")).join("\n");
+}
 import { describe, expect, it } from "vitest";
 
 /**
@@ -27,7 +40,6 @@ import { describe, expect, it } from "vitest";
  * 单改一档会让"次要/更淡/占位"分不出来），并同时更新本节与下面的期望值。
  */
 
-const CSS = "src/styles.css";
 
 /** 参考取值（改这里 = 显式选择偏离参考）。 */
 const REFERENCE = {
@@ -57,7 +69,7 @@ function readInk(text: string): Record<string, string> {
 
 describe("保真锁定：三档低对比度文字色与参考一致", () => {
   it("**取值没有被改动**（改动它等于显式选择偏离参考）", () => {
-    const actual = readInk(readFileSync(CSS, "utf8"));
+    const actual = readInk(readAllCss());
     const diff = Object.entries(REFERENCE)
       .filter(([name, value]) => actual[name] !== value)
       .map(([name, value]) => `${name}: 期望 ${value}，实际 ${actual[name] ?? "(未声明)"}`);
@@ -75,7 +87,7 @@ describe("保真锁定：三档低对比度文字色与参考一致", () => {
   });
 
   it("三档确实都还在（少了任何一档，层次体系就断了）", () => {
-    const actual = readInk(readFileSync(CSS, "utf8"));
+    const actual = readInk(readAllCss());
     expect(Object.keys(actual).sort()).toEqual(Object.keys(REFERENCE).sort());
   });
 });

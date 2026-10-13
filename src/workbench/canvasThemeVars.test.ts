@@ -1,4 +1,17 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+
+/*
+ * ⚠️ C6-3 把 `src/styles.css`（6015 行）按区域拆成了 `src/styles/*.css` + 一串 `@import`。
+ * 这条守卫原来**只读那一个文件** —— 拆分之后它扫了个空，于是"看起来还在检查"其实什么都没查
+ * （`themeRatchet` 甚至直接报"两类都要非平凡"，那正是"检查在空转"的自白）。
+ *
+ * 现在读**整个样式树**：入口 + `src/styles/` 下全部 css（按文件名排序，顺序无关紧要，
+ * 因为这些守卫是在"找某条规则/某个变量在不在"，不是在比层叠顺序）。
+ */
+function readAllCss(dir = "src"): string {
+  const files = [`${dir}/styles.css`, ...readdirSync(`${dir}/styles`).filter((f) => f.endsWith(".css")).sort().map((f) => `${dir}/styles/${f}`)];
+  return files.map((f) => readFileSync(f, "utf8")).join("\n");
+}
 import { describe, expect, it } from "vitest";
 
 /**
@@ -21,7 +34,6 @@ import { describe, expect, it } from "vitest";
  * 所以这条守卫的正确形态是**配对检查**，不是禁止。
  */
 
-const CSS = "src/styles.css";
 
 /** 从一段声明文本里取出变量名。 */
 function declaredIn(body: string): string[] {
@@ -56,7 +68,7 @@ function readCanvas(text: string): { declared: Set<string>; used: Set<string> } 
 
 describe("画布变量必须自给自足", () => {
   it("**画布引用的每个 var(--X)，.wb-canvas 都要自己声明**", () => {
-    const { declared, used } = readCanvas(readFileSync(CSS, "utf8"));
+    const { declared, used } = readCanvas(readAllCss());
     const missing = [...used].filter((name) => !declared.has(name));
     expect(
       missing,
@@ -69,7 +81,7 @@ describe("画布变量必须自给自足", () => {
   });
 
   it("这条检查确实作用在画布上（.wb-canvas 的变量块被找到了）", () => {
-    const { declared } = readCanvas(readFileSync(CSS, "utf8"));
+    const { declared } = readCanvas(readAllCss());
     // 画布块至少有它原有的 6 个，否则说明选择器解析坏了、这条守卫是假的
     expect(declared.size).toBeGreaterThanOrEqual(6);
     expect(declared.has("--bg")).toBe(true);
@@ -77,7 +89,7 @@ describe("画布变量必须自给自足", () => {
   });
 
   it("现在画布还没有引用任何变量（这条记录的是**当前实况**，变了就该改这里）", () => {
-    const { used } = readCanvas(readFileSync(CSS, "utf8"));
+    const { used } = readCanvas(readAllCss());
     expect(used.size).toBe(0);
   });
 });
