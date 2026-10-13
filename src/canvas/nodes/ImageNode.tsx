@@ -229,7 +229,7 @@ export default function ImageNodeView({ id, data, selected }: NodeProps<ImageNod
             </button>
           ) : null}
           {cropped ? (
-            <button className="nv-btn" onClick={resetCrop} title="复原为原图">
+            <button className="nv-btn" onClick={resetCrop} aria-label="复原为原图" title="复原为原图">
               <RotateCcw size={11} />
             </button>
           ) : null}

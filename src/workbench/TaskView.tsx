@@ -55,7 +55,7 @@ export function TaskView() {
           按本项目标准"如实呈现，不装作能用"，没实现的就不该可点 ——
           所以标 disabled，并把它记进待做（R5 视觉/体验收口）。
         */}
-        <button className="wb-icon" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
+        <button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
           <PanelLeft size={15} />
         </button>
         {/*
@@ -65,7 +65,7 @@ export function TaskView() {
         */}
         <button
           className="wb-icon"
-          title="重命名"
+          aria-label="重命名" title="重命名"
           data-testid="wb-task-rename"
           onClick={() => setRenaming(true)}
         >
@@ -110,7 +110,7 @@ export function TaskView() {
           顶栏右侧那一排图标。实机第 3 个是**弹出悬浮助手窗**（独立可拖拽的快速问答面板）。
           其余几个（电话/定时/设备）是远端能力，这里只做图标占位，不做假功能。
         */}
-        <button className="wb-icon" title="语音通话（未接入）" disabled>
+        <button className="wb-icon" aria-label="语音通话" title="语音通话（未接入）" disabled>
           <Phone size={15} />
         </button>
         {/*
@@ -120,7 +120,7 @@ export function TaskView() {
         */}
         <button
           className="wb-icon"
-          title="用这个任务建一个定时任务"
+          aria-label="用这个任务建一个定时任务" title="用这个任务建一个定时任务"
           data-testid="wb-task-schedule"
           onClick={() => scheduleFromTask(task.title, task.brief)}
         >
@@ -128,7 +128,7 @@ export function TaskView() {
         </button>
         <button
           className="wb-icon"
-          title="打开悬浮助手窗（随手问，不建任务）"
+          aria-label="打开悬浮助手窗" title="打开悬浮助手窗（随手问，不建任务）"
           data-testid="wb-float-open"
           onClick={() => openFloat()}
         >

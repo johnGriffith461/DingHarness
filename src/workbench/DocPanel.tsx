@@ -100,7 +100,7 @@ export function DocPanel() {
       <aside className="wb-doc-list" data-testid="wb-doc-list">
         <header>
           <span>文档</span>
-          <button className="wb-doc-icon" title="新建文档" data-testid="wb-doc-new" onClick={() => void create()}>
+          <button className="wb-doc-icon" aria-label="新建文档" title="新建文档" data-testid="wb-doc-new" onClick={() => void create()}>
             <Plus size={14} />
           </button>
         </header>
@@ -147,7 +147,7 @@ export function DocPanel() {
           <span className="wb-doc-actions">
             <button
               className="wb-doc-icon"
-              title="历史记录"
+              aria-label="历史记录" title="历史记录"
               data-testid="wb-doc-history-btn"
               onClick={() => setShowHistory((v) => !v)}
             >
@@ -166,7 +166,7 @@ export function DocPanel() {
             </button>
             <button
               className="wb-doc-icon"
-              title="导出文件"
+              aria-label="导出文件" title="导出文件"
               data-testid="wb-doc-export"
               onClick={() => void exportDoc(doc.id)}
             >
@@ -174,7 +174,7 @@ export function DocPanel() {
             </button>
             <button
               className="wb-doc-icon"
-              title="删除"
+              aria-label="删除" title="删除"
               data-testid="wb-doc-delete"
               onClick={() => void remove(doc.id)}
             >

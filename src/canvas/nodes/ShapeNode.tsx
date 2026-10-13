@@ -75,7 +75,7 @@ export default function ShapeNodeView({ id, type, data, selected }: NodeProps<Re
         <button
           className="shape-edit nodrag"
           data-testid={`shape-edit-${id}`}
-          title="编辑形状里的文字（双击形状也可以）"
+          aria-label="编辑形状里的文字" title="编辑形状里的文字（双击形状也可以）"
           onClick={(e) => {
             e.stopPropagation();
             setEditing(true);

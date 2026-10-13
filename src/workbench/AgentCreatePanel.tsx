@@ -157,7 +157,7 @@ export function AgentCreatePanel() {
               </button>
               <button
                 className="wb-agent-del"
-                title="删除"
+                aria-label="删除" title="删除"
                 data-testid={`wb-agent-del-${a.id}`}
                 onClick={() => void remove(a.id)}
               >

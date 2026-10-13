@@ -43,7 +43,7 @@ export default function MarkerToolbar({
         type="button"
         className={`marker-tool${tool === null ? " is-active" : ""}`}
         data-marker-tool="select"
-        title="退出标记模式，回到选择"
+        aria-label="退出标记模式" title="退出标记模式，回到选择"
         onClick={() => onToolChange(null)}
       >
         <MousePointer2 size={13} />
@@ -95,7 +95,7 @@ export default function MarkerToolbar({
         type="button"
         className="marker-tool"
         data-testid="marker-undo"
-        title="撤销上一笔"
+        aria-label="撤销上一笔" title="撤销上一笔"
         disabled={count === 0}
         onClick={onUndo}
       >
@@ -105,7 +105,7 @@ export default function MarkerToolbar({
         type="button"
         className="marker-tool"
         data-testid="marker-clear"
-        title="清空全部标记"
+        aria-label="清空全部标记" title="清空全部标记"
         disabled={count === 0}
         onClick={onClearAll}
       >

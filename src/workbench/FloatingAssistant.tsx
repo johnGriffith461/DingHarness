@@ -188,7 +188,7 @@ ${block}` : value;
         onPointerMove={onDragMove}
         onPointerUp={onDragEnd}
       >
-        <button className="wb-icon" title="最小化" onClick={() => setMinimized((v) => !v)}>
+        <button className="wb-icon" aria-label="最小化" title="最小化" onClick={() => setMinimized((v) => !v)}>
           <Minus size={14} />
         </button>
         <button className="wb-icon" title="回到默认位置" onClick={() => setPos(DEFAULT_POS)}>
@@ -198,7 +198,7 @@ ${block}` : value;
         <span className="wb-float-user" data-testid="wb-float-user">
           按时吃饭450 ›
         </span>
-        <button className="wb-icon" title="语音通话（按用户口径不做）" disabled>
+        <button className="wb-icon" aria-label="语音通话" title="语音通话（按用户口径不做）" disabled>
           <Phone size={14} />
         </button>
         <button
@@ -211,7 +211,7 @@ ${block}` : value;
         >
           <Volume2 size={14} />
         </button>
-        <button className="wb-icon" title="更多（本机版没有更多菜单）" disabled>
+        <button className="wb-icon" aria-label="更多" title="更多（本机版没有更多菜单）" disabled>
           <MoreHorizontal size={14} />
         </button>
         <button className="wb-icon" title="关闭" data-testid="wb-float-close" onClick={onClose}>
@@ -258,13 +258,13 @@ ${block}` : value;
               }}
             />
             <div className="wb-float-bar">
-              <button className="wb-icon" title="添加附件（本机版还没接原生文件对话框）" disabled>
+              <button className="wb-icon" aria-label="添加附件" title="添加附件（本机版还没接原生文件对话框）" disabled>
                 <Plus size={15} />
               </button>
               <button className="wb-chip">
                 <Sparkles size={12} /> 本地电脑
               </button>
-              <button className="wb-icon" title="更多（本机版没有更多菜单）" disabled>
+              <button className="wb-icon" aria-label="更多" title="更多（本机版没有更多菜单）" disabled>
                 <MoreHorizontal size={15} />
               </button>
               <span className="wb-spacer" />

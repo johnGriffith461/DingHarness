@@ -215,7 +215,13 @@
  *   键盘 Tab → 一条中性环（键盘用户没有它就是不知道焦点在哪）。
  * 依据：`better-accessibility/focus-and-keyboard.md`（键盘必须有环、鼠标通常不要）。
  */
-.wb-composer:has(:focus-visible) {
+/*
+ * ⚠️ 判据是 `<html data-kb>`（**输入模态**）而不是 `:focus-visible`：
+ * 文本输入框被鼠标点中时浏览器也算它 `:focus-visible`，所以那一路分不开
+ * （`inputModality.ts` 里有完整说明）。
+ * 鼠标点进来 → 属性不在 → 边框一动不动；键盘 Tab 进来 → 才亮这一条。
+ */
+html[data-kb="1"] .wb-composer:focus-within {
   border-color: var(--focus-ring);
 }
 .wb-composer-input:focus-visible {
@@ -383,8 +389,8 @@
 .wb-searchbox {
   transition: border-color var(--dur-quick) var(--ease-out), box-shadow var(--dur-quick) var(--ease-out);
 }
-/* 同输入区：鼠标点进去不亮，键盘进来给一条中性环 */
-.wb-searchbox:has(:focus-visible) {
+/* 同输入区：鼠标点进去不亮，键盘进来才给一条中性环 */
+html[data-kb="1"] .wb-searchbox:focus-within {
   border-color: var(--focus-ring);
 }
 /* 同上：容器已经亮了，输入框不再套第二圈 */

@@ -26,7 +26,7 @@ export function QuestionCard({ task }: { task: WorkTask }) {
         <span className="wb-question-text">{question.text}</span>
         <span className="wb-question-page">
           <span data-testid="wb-question-progress">‹ {questionProgress(task)} ›</span>
-          <button className="wb-icon" title="关闭" onClick={() => useWorkbenchStore.getState().abort()}>
+          <button className="wb-icon" aria-label="关闭" title="关闭" onClick={() => useWorkbenchStore.getState().abort()}>
             <X size={14} />
           </button>
         </span>
@@ -65,12 +65,12 @@ export function QuestionCard({ task }: { task: WorkTask }) {
           className="wb-icon"
           data-testid="wb-custom-send"
           disabled={!custom.trim()}
-          title="用这段描述回答"
+          aria-label="用这段描述回答" title="用这段描述回答"
           onClick={() => void answer(undefined, custom)}
         >
           <Plus size={15} />
         </button>
-        <button className="wb-icon" title="语音输入（本机版还没做）" disabled>
+        <button className="wb-icon" aria-label="语音输入" title="语音输入（本机版还没做）" disabled>
           <Volume2 size={15} />
         </button>
       </div>

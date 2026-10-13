@@ -63,7 +63,7 @@ export default function SettingsPages({
   return (
     <div className="wb-setpage" data-testid={`wb-setpage-${page}`}>
       <div className="wb-setpage-head">
-        <button className="wb-icon" title="返回" data-testid="wb-setpage-back" onClick={onBack}>
+        <button className="wb-icon" aria-label="返回" title="返回" data-testid="wb-setpage-back" onClick={onBack}>
           <ChevronLeft size={15} />
         </button>
         <span>{meta.title}</span>

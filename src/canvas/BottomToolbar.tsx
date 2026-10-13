@@ -67,7 +67,11 @@ export default function BottomToolbar({
         <button
           className="bottom-btn is-primary"
           data-testid="bottom-select"
-          title="选择方式"
+          /*
+           * ⚠️ 可见文字是**当前模式名**，所以名字里要带上它（WCAG 2.5.3：
+           * 可访问名要包含可见标签，否则"语音操控时说「选择」"会对不上）。
+           */
+          aria-label={`选择方式：${MODE_META[mode].label}`} title="选择方式"
           onClick={() => setModeOpen((v) => !v)}
         >
           {(() => {
@@ -134,10 +138,10 @@ export default function BottomToolbar({
 
       <span className="bottom-sep" />
 
-      <button className="bottom-btn is-icon" data-testid="bottom-undo" disabled={!canUndo} onClick={onUndo} title="撤销 Ctrl+Z">
+      <button className="bottom-btn is-icon" data-testid="bottom-undo" disabled={!canUndo} onClick={onUndo} aria-label="撤销 Ctrl+Z" title="撤销 Ctrl+Z">
         <Undo2 size={14} />
       </button>
-      <button className="bottom-btn is-icon" data-testid="bottom-redo" disabled={!canRedo} onClick={onRedo} title="重做 Ctrl+Shift+Z">
+      <button className="bottom-btn is-icon" data-testid="bottom-redo" disabled={!canRedo} onClick={onRedo} aria-label="重做 Ctrl+Shift+Z" title="重做 Ctrl+Shift+Z">
         <Redo2 size={14} />
       </button>
 

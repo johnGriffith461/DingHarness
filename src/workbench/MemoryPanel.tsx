@@ -47,7 +47,7 @@ export default function MemoryPanel() {
           placeholder="例如：回答尽量简短，别用客套话"
           onChange={(e) => setDraft(e.target.value)}
         />
-        <button type="submit" className="wb-icon" data-testid="wb-memory-add" title="添加" disabled={!draft.trim()}>
+        <button type="submit" className="wb-icon" data-testid="wb-memory-add" aria-label="添加" title="添加" disabled={!draft.trim()}>
           <Plus size={15} />
         </button>
       </form>
@@ -72,7 +72,7 @@ export default function MemoryPanel() {
                 <button
                   className="wb-icon"
                   data-testid={`wb-memory-drop-${e.id}`}
-                  title="删除这条记忆"
+                  aria-label="删除这条记忆" title="删除这条记忆"
                   onClick={() => void drop(e.id)}
                 >
                   <Trash2 size={14} />

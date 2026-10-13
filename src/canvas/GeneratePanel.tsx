@@ -111,7 +111,7 @@ export default function GeneratePanel({
           {isVideo ? <Clapperboard size={13} /> : <ImagePlus size={13} />}
           {isVideo ? "视频生成" : "图片生成"}
         </span>
-        <button className="gen-panel-close" onClick={onClose} title="收起">
+        <button className="gen-panel-close" onClick={onClose} aria-label="收起" title="收起">
           <X size={13} />
         </button>
       </div>

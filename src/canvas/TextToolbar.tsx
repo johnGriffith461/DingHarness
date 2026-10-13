@@ -185,7 +185,7 @@ export default function TextToolbar() {
       <button
         className="text-tool-btn"
         data-testid="text-reset"
-        title="恢复默认排版"
+        aria-label="恢复默认排版" title="恢复默认排版"
         onClick={() =>
           patchTextStyle({
             align: "left",

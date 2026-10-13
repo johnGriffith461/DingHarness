@@ -113,7 +113,7 @@ export default function VersionHistoryPanel({
         <span className="versions-title">
           <History size={13} /> 版本历史
         </span>
-        <button className="versions-icon" onClick={onClose} title="关闭">
+        <button className="versions-icon" onClick={onClose} aria-label="关闭" title="关闭">
           <X size={13} />
         </button>
       </div>

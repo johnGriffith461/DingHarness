@@ -256,6 +256,7 @@ export function CodingPage() {
                 <span className="wb-coding-rank-cat">{app.category}</span>
                 <button
                   className="wb-coding-act"
+                  aria-label={CODING_LABELS.detail}
                   title={CODING_LABELS.detail}
                   data-testid={`wb-coding-open-${app.name}`}
                   onClick={() => openApp(app)}

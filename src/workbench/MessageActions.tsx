@@ -93,6 +93,7 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
       </button>
       <button
         className={`wb-icon${speaking ? " is-on" : ""}`}
+        aria-label={speaking ? "停止朗读" : "朗读"}
         title={speaking ? "停止朗读" : "朗读"}
         data-testid={`wb-act-speak-${step.id}`}
         onClick={speak}
@@ -101,7 +102,7 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
       </button>
       <button
         className={`wb-icon${step.rating === "up" ? " is-on" : ""}`}
-        title="有帮助"
+        aria-label="有帮助" title="有帮助"
         data-testid={`wb-act-up-${step.id}`}
         onClick={() => rate(step.id, "up")}
       >
@@ -109,7 +110,7 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
       </button>
       <button
         className={`wb-icon${step.rating === "down" ? " is-on" : ""}`}
-        title="没帮助"
+        aria-label="没帮助" title="没帮助"
         data-testid={`wb-act-down-${step.id}`}
         onClick={() => rate(step.id, "down")}
       >
@@ -138,6 +139,7 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
       </button>
       <button
         className="wb-icon"
+        aria-label={DOC_CREATE_LABELS.create}
         title={DOC_CREATE_LABELS.create}
         data-testid={`wb-act-createdoc-${step.id}`}
         onClick={() => void createDoc()}

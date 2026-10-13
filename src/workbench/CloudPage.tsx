@@ -138,7 +138,7 @@ export function CloudPage() {
     <section className="wb-page" data-testid="wb-page-cloud">
       <header className="wb-page-head">
         {/* 侧栏折叠：本机版还没做（参考实现里有）—— 标 disabled，不装作能用（§125/§126） */}
-<button className="wb-icon" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
+<button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
           <List size={15} />
         </button>
         <div className="wb-tabs">
@@ -406,7 +406,7 @@ export function CloudPage() {
                   </button>
                   <button
                     className="wb-icon"
-                    title="在文件夹里定位"
+                    aria-label="在文件夹里定位" title="在文件夹里定位"
                     onClick={() => void bridge?.drive?.reveal(entry.path)}
                   >
                     <FolderOpen size={12} />

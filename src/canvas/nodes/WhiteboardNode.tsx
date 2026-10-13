@@ -282,7 +282,7 @@ export default function WhiteboardNodeView({ id, data, selected }: NodeProps<Whi
           >
             <Eraser size={11} />
           </button>
-          <button className="nv-btn" onClick={clearAll} title="清空画布">
+          <button className="nv-btn" onClick={clearAll} aria-label="清空画布" title="清空画布">
             <Trash2 size={11} />
           </button>
         </>

@@ -204,10 +204,10 @@ export default function CanvasToolbar({
 
       <span className="canvas-toolbar-sep" />
 
-      <button onClick={onFitView} title="适配视图（一键全览） Ctrl+0">
+      <button onClick={onFitView} aria-label="适配视图" title="适配视图（一键全览） Ctrl+0">
         <Maximize2 size={15} />
       </button>
-      <button onClick={onReset} title="回到示例画布">
+      <button onClick={onReset} aria-label="回到示例画布" title="回到示例画布">
         <RotateCcw size={15} />
       </button>
 
@@ -217,7 +217,7 @@ export default function CanvasToolbar({
         <button
           className={cheatsheetOpen ? "is-open" : ""}
           data-testid="shortcut-help"
-          title="看全部快捷键"
+          aria-label="看全部快捷键" title="看全部快捷键"
           onClick={() => setCheatsheetOpen((prev) => !prev)}
         >
           <Keyboard size={15} />
@@ -242,7 +242,7 @@ export default function CanvasToolbar({
         <button
           className={open === "export" ? "on" : ""}
           data-testid="export-menu"
-          title="导出（走主进程截屏，所见即所得；想要更清晰先把画布放大）"
+          aria-label="导出" title="导出（走主进程截屏，所见即所得；想要更清晰先把画布放大）"
           onClick={() => setOpen((v) => (v === "export" ? null : "export"))}
         >
           <Download size={15} />
@@ -296,7 +296,7 @@ export default function CanvasToolbar({
       <button
         data-testid="open-layers"
         className={layersOpen ? "is-open" : ""}
-        title="图层面板（按顺序管理画布上的每一层）"
+        aria-label="图层面板" title="图层面板（按顺序管理画布上的每一层）"
         onClick={onToggleLayers}
       >
         <Layers size={15} />
@@ -305,7 +305,7 @@ export default function CanvasToolbar({
       <button
         data-testid="open-versions"
         className={versionsOpen ? "is-open" : ""}
-        title="版本历史（每次变更自动存一版，可恢复）"
+        aria-label="版本历史" title="版本历史（每次变更自动存一版，可恢复）"
         onClick={onToggleVersions}
       >
         <History size={15} />

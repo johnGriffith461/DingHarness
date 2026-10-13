@@ -139,14 +139,24 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
      * `:focus-visible`，只写 `:focus-within` 就会"鼠标一点就描一圈" ——
      * 那正是主人说的"雷霆大描边"第二次复发的原因。
      */
-    for (const sel of [".wb-composer:has(:focus-visible)", ".wb-searchbox:has(:focus-visible)"]) {
+    for (const sel of ['.wb-composer:focus-within', '.wb-searchbox:focus-within']) {
       const block = lastBlock(sel);
       expect(block, `${sel} 不见了（焦点反馈被删了？）`).not.toBe("");
       expect(block, `${sel} 又加上了发光`).not.toMatch(/box-shadow/);
     }
-    /* 鼠标态：`composer` / `searchbox` 的 `:focus-within` 规则不许再存在 */
-    expect(css, "鼠标点进输入区又开始描边了（`:focus-within` 又回来了）").not.toMatch(
-      /^\s*\.wb-(composer|searchbox):focus-within/m,
+    /*
+     * ⚠️ 真根因（第三次才找到）：文本输入框被**鼠标**点中时浏览器**也算它
+     * `:focus-visible`** —— 所以"用 `:focus-visible` 区分鼠标/键盘"这条路对输入框无效
+     * （`:has(:focus-visible)` 同样无效，我试过）。现在的判据是**输入模态**：
+     * `<html data-kb="1">`（Tab/方向键置位，鼠标/触摸清掉）。
+     * 下面两条钉住这件事：焦点反馈必须挂在 `html[data-kb="1"]` 之下，
+     * 且不许再出现"裸 `:focus-within` 就描边"的写法。
+     */
+    for (const sel of [".wb-composer:focus-within", ".wb-searchbox:focus-within"]) {
+      expect(lastBlock("html[data-kb=\"1\"] " + sel), `${sel} 没有挂在输入模态下（鼠标点进去会描边）`).not.toBe("");
+    }
+    expect(css, "又出现裸 `:focus-within` 描边了（鼠标点进去就会亮）").not.toMatch(
+      /^\s*\.wb-(composer|searchbox):focus-within\s*\{/m,
     );
     /* 内层输入框不许再套第二圈：必须显式写掉 */
     expect(css, "输入区里的 textarea 没有取消第二圈焦点环").toContain(".wb-composer-input:focus-visible");
@@ -184,5 +194,52 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
     };
     walk(path.join(ROOT, "src"));
     expect(offenders, "这些文件里还在用字符当图标（换成 lucide 组件）").toEqual([]);
+  });
+
+  /*
+   * ⑧ 只有图标的按钮必须有可访问名（2026-10-14 补了 67 处）。
+   *
+   * 依据 `baseline-ui`（"MUST add an `aria-label` to icon-only buttons"）与
+   * `better-accessibility`（"Icon-only buttons need a descriptive `aria-label`"）。
+   * 我们原来**只挂了 `title`**：浏览器确实会拿 title 兜底当可访问名，
+   * 但它同时还是"鼠标悬停提示"，两者职责不同 —— 而且全仓 `aria-label` 只有 2 处。
+   *
+   * 判定：按钮内**没有中文可见文字**、却含图标组件、又没有 aria-label → 报出来。
+   */
+  it("⑧ 图标按钮都有 `aria-label`", () => {
+    const offenders: string[] = [];
+    const cjk = /[一-龥]/;
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+          const text = readFileSync(full, "utf8");
+          const re = /<button[^>]*>/g;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(text))) {
+            const tag = m[0];
+            if (tag.includes("aria-label")) continue;
+            const end = text.indexOf("</button>", m.index + tag.length);
+            if (end < 0) continue;
+            const body = text.slice(m.index + tag.length, end);
+            /*
+             * ⚠️ 判据要**可判定**：可见文字常常写在 JSX 表达式里（`{CODING_LABELS.preview}`），
+             * 源码里没有中文字面量 —— 第一版就是这么误报的（把一堆"有文字的按钮"报成缺名字）。
+             * 做法：先把标签属性里的 `{...}` 去掉，剩下的如果还有 `{`，就说明有**表达式内容**
+             * （可能是可见文字）→ 判不了，跳过；否则剩下的只有标签 → 确定是纯图标按钮。
+             */
+            const stripped = body.replace(/[A-Za-z-]+=\{[^}]*\}/g, "");
+            if (cjk.test(stripped)) continue;
+            if (stripped.includes("{")) continue;
+            if (!/<[A-Z][A-Za-z0-9]*/.test(stripped)) continue;
+            const line = text.slice(0, m.index).split("\n").length;
+            offenders.push(`${path.relative(ROOT, full).split(path.sep).join("/")}:${line}`);
+          }
+        }
+      }
+    };
+    walk(path.join(ROOT, "src"));
+    expect(offenders, "这些图标按钮没有可访问名（补 aria-label）").toEqual([]);
   });
 });

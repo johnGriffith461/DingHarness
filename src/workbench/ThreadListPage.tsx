@@ -50,14 +50,14 @@ export default function ThreadListPage() {
   return (
     <div className="wb-threads" data-testid="wb-threads">
       <div className="wb-threads-head">
-        <button className="wb-icon" title="收起侧栏（本机版还没做折叠）" disabled>
+        <button className="wb-icon" aria-label="收起侧栏" title="收起侧栏（本机版还没做折叠）" disabled>
           <PanelLeft size={15} />
         </button>
-        <button className="wb-icon" title="新工作任务" data-testid="wb-threads-new" onClick={() => setView("home")}>
+        <button className="wb-icon" aria-label="新工作任务" title="新工作任务" data-testid="wb-threads-new" onClick={() => setView("home")}>
           <Plus size={15} />
         </button>
         <span className="wb-threads-title">管理历史对话</span>
-        <button className="wb-icon" title="本机版还没做批量操作" data-testid="wb-threads-more" disabled>
+        <button className="wb-icon" aria-label="本机版还没做批量操作" title="本机版还没做批量操作" data-testid="wb-threads-more" disabled>
           <MoreHorizontal size={15} />
         </button>
       </div>
@@ -101,7 +101,7 @@ export default function ThreadListPage() {
                 )}
                 <button
                   className="wb-threads-rowmore"
-                  title="更多"
+                  aria-label="更多" title="更多"
                   data-testid={`wb-threads-menu-${task.id}`}
                   onClick={(e) => {
                     e.stopPropagation();

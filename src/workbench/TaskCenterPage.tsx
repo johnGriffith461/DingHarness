@@ -92,6 +92,7 @@ export function TaskCenterPage() {
               {t.stage === "awaiting" ? <em className="wb-pending">待确认</em> : null}
               <button
                 className="wb-center-act"
+                aria-label={CENTER_LABELS.stopDeleteDesc}
                 title={CENTER_LABELS.stopDeleteDesc}
                 data-testid={`wb-center-remove-${t.id}`}
                 onClick={() => requestRemove(t.id)}
@@ -130,7 +131,7 @@ export function TaskCenterPage() {
                 </button>
                 <button
                   className="wb-center-act"
-                  title="移除"
+                  aria-label="移除" title="移除"
                   data-testid={`wb-center-remove-${t.id}`}
                   onClick={() => requestRemove(t.id)}
                 >

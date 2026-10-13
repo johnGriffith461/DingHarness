@@ -324,7 +324,7 @@ export function Composer({
         <div className="wb-chip-wrap">
           <button
             className="wb-icon"
-            title="更多"
+            aria-label="更多" title="更多"
             data-testid="wb-composer-add"
             onClick={() => togglePop("add")}
           >
@@ -450,7 +450,8 @@ export function Composer({
           <button
             className="wb-chip"
             data-testid="wb-confirm"
-            title="执行前的确认策略"
+            /* 同底部"选择方式"：可见文字是当前档位，名字里带上它 */
+            aria-label={`执行前的确认策略：${confirmMode}`} title="执行前的确认策略"
             onClick={() => togglePop("confirm")}
           >
             <Check size={13} /> {confirmMode} <ChevronDown size={12} />
@@ -581,7 +582,7 @@ export function Composer({
           <button
             className="wb-send is-stop"
             data-testid="wb-send-stop"
-            title="停止"
+            aria-label="停止" title="停止"
             onClick={() => useWorkbenchStore.getState().abort()}
           >
             <Square size={14} />
@@ -591,6 +592,7 @@ export function Composer({
             className="wb-send"
             data-testid="wb-send"
             disabled={!text.trim()}
+            aria-label={sendLabel ?? "发送（Enter）"}
             title={sendLabel ?? "发送（Enter）"}
             onClick={submit}
           >

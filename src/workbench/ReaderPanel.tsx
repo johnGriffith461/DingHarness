@@ -61,6 +61,7 @@ export function ReaderPanel() {
         ) : null}
         <button
           className="wb-reader-icon"
+          aria-label={sidebar ? READER_LABELS.hideSidebar : READER_LABELS.showSidebar}
           title={sidebar ? READER_LABELS.hideSidebar : READER_LABELS.showSidebar}
           data-testid="wb-reader-sidebar-toggle"
           onClick={toggleSidebar}
@@ -69,7 +70,7 @@ export function ReaderPanel() {
         </button>
         <button
           className="wb-reader-icon"
-          title="收进最近阅读"
+          aria-label="收进最近阅读" title="收进最近阅读"
           data-testid="wb-reader-save"
           disabled={!text.trim()}
           onClick={() => {
@@ -208,7 +209,7 @@ export function ReaderPanel() {
                     </button>
                     <button
                       className="wb-reader-icon"
-                      title="移除"
+                      aria-label="移除" title="移除"
                       data-testid={`wb-reader-forget-${r.id}`}
                       onClick={() => void removeReading(r.id)}
                     >

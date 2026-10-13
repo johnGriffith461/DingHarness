@@ -124,7 +124,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="wb-modal-mask" onClick={onClose} data-testid="wb-settings">
       <div className="wb-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="wb-modal-close" onClick={onClose} title="关闭">
+        <button className="wb-modal-close" onClick={onClose} aria-label="关闭" title="关闭">
           <X size={15} />
         </button>
         <div className="wb-modal-avatar" />

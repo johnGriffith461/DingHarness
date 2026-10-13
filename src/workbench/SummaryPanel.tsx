@@ -26,10 +26,10 @@ export function SummaryPanel() {
     <aside className="wb-summary" data-testid="wb-summary">
       <header className="wb-summary-head">
         <span>对话摘要</span>
-        <button className="wb-icon" title="摘要设置（本机版没有后端）" disabled>
+        <button className="wb-icon" aria-label="摘要设置" title="摘要设置（本机版没有后端）" disabled>
           <Settings size={14} />
         </button>
-        <button className="wb-icon" title="收起（本机版还没做面板折叠）" disabled>
+        <button className="wb-icon" aria-label="收起" title="收起（本机版还没做面板折叠）" disabled>
           <MoreHorizontal size={14} />
         </button>
       </header>
@@ -101,7 +101,7 @@ export function SummaryPanel() {
                   </button>
                   <button
                     className="wb-icon"
-                    title="在文件夹里定位"
+                    aria-label="在文件夹里定位" title="在文件夹里定位"
                     data-testid={`wb-artifact-reveal-${artifact.id}`}
                     onClick={() => {
                       if (artifact.filePath) void revealArtifact(artifact.filePath);

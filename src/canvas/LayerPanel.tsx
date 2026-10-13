@@ -113,7 +113,7 @@ export default function LayerPanel({
           <Layers size={13} /> 图层
           <em>{rows.length}</em>
         </span>
-        <button className="layer-icon" onClick={onClose} title="关闭图层面板">
+        <button className="layer-icon" onClick={onClose} aria-label="关闭图层面板" title="关闭图层面板">
           <X size={13} />
         </button>
       </div>

@@ -171,7 +171,7 @@ export function PluginsPage() {
     <section className="wb-page" data-testid="wb-page-plugins">
       <header className="wb-page-head">
         {/* 侧栏折叠：本机版还没做（参考实现里有）—— 标 disabled，不装作能用（§125/§126） */}
-<button className="wb-icon" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
+<button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
           <List size={15} />
         </button>
         <div className="wb-tabs" data-testid="wb-plugin-tabs">

@@ -118,7 +118,7 @@ export function ScheduledPage() {
     <section className="wb-page" data-testid="wb-page-scheduled">
       <header className="wb-page-head">
         {/* 侧栏折叠：本机版还没做（参考实现里有）—— 标 disabled，不装作能用（§125/§126） */}
-<button className="wb-icon" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
+<button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
           <List size={15} />
         </button>
         <span className="wb-page-title" />
@@ -333,26 +333,33 @@ export function ScheduledPage() {
         </div>
       </div>
 
-      <div className="wb-composer wb-composer-slim">
+      {/*
+        ⚠️ 这一条输入区是**照本体截图摆的样子**，但本机版没有"用一句话安排任务"的后端
+        （定时任务的创建在上面那个表单里）——
+        所以里面这几颗按钮**没有一个是能点的**。原来它们既不 disabled、也没有 title：
+        点了毫无反应，用户只会以为坏了（§124 "死按钮"审计报的就是这类）。
+        现在如实标注：整条标 `aria-disabled` + 逐颗给可访问名与说明，鼠标悬停能读到原因。
+      */}
+      <div className="wb-composer wb-composer-slim" aria-disabled="true">
         <div className="wb-composer-input wb-composer-placeholder">{SCHEDULE_COMPOSER_PLACEHOLDER}</div>
         <div className="wb-composer-bar">
-          <button className="wb-icon">
+          <button className="wb-chip" disabled aria-label="添加附件（本机版还没做）" title="添加附件（本机版还没做）">
             <Plus size={16} />
           </button>
-          <button className="wb-chip">
+          <button className="wb-chip" disabled aria-label="云电脑（本机版没有）" title="云电脑（本机版没有）">
             <Cloud size={13} /> 云电脑 <ChevronDown size={12} />
           </button>
-          <button className="wb-chip">
+          <button className="wb-chip" disabled aria-label="项目（本机版还没做）" title="项目（本机版还没做）">
             <FolderOpen size={13} /> 项目
           </button>
-          <button className="wb-chip">
+          <button className="wb-chip" disabled aria-label="技能（本机版还没做）" title="技能（本机版还没做）">
             <Sparkles size={13} /> 技能
           </button>
-          <button className="wb-chip">
+          <button className="wb-chip" disabled aria-label="插件（本机版还没做）" title="插件（本机版还没做）">
             <Blocks size={13} /> 插件
           </button>
           <span className="wb-spacer" />
-          <button className="wb-chip">
+          <button className="wb-chip" disabled aria-label="执行档位（本机版还没做）" title="执行档位（本机版还没做）">
             自动 <ChevronDown size={12} /> 低
           </button>
         </div>

@@ -354,7 +354,7 @@ export default function ChatSidebar() {
           <button
             className="chat-ref-btn"
             data-testid="chat-ref-add"
-            title="引用画布节点（也可以直接打 @）"
+            aria-label="引用画布节点" title="引用画布节点（也可以直接打 @）"
             onClick={() => {
               setDraft((prev) => `${prev}@`);
               setMentionQuery("");
@@ -363,11 +363,11 @@ export default function ChatSidebar() {
             <AtSign size={14} />
           </button>
           {busy ? (
-            <button className="chat-send is-stop" data-testid="chat-send-stop" onClick={abort} title="中止">
+            <button className="chat-send is-stop" data-testid="chat-send-stop" onClick={abort} aria-label="中止" title="中止">
               <Square size={14} />
             </button>
           ) : (
-            <button className="chat-send" data-testid="chat-send" onClick={submit} disabled={!draft.trim()} title="发送（Enter）">
+            <button className="chat-send" data-testid="chat-send" onClick={submit} disabled={!draft.trim()} aria-label="发送" title="发送（Enter）">
               <Send size={14} />
             </button>
           )}

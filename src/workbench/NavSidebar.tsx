@@ -119,13 +119,13 @@ export function NavSidebar() {
     <aside className="wb-nav" data-testid="wb-nav">
       <div className="wb-nav-head">
         <span className="wb-brand">豆包工作</span>
-        <button className="wb-icon" title="后退" disabled>
+        <button className="wb-icon" aria-label="后退" title="后退" disabled>
           <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
         </button>
-        <button className="wb-icon" title="前进" disabled>
+        <button className="wb-icon" aria-label="前进" title="前进" disabled>
           <ChevronRight size={14} />
         </button>
-        <button className="wb-icon" title="搜索（本机版是装饰：仿浏览器工具条）" data-testid="wb-search" disabled>
+        <button className="wb-icon" aria-label="搜索" title="搜索（本机版是装饰：仿浏览器工具条）" data-testid="wb-search" disabled>
           <MoreHorizontal size={14} />
         </button>
       </div>
