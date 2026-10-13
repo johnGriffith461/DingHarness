@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeTask } from "./store";
+import { normalizeTask } from "./taskPersist";
 
 /**
  * 恢复一个任务的口径（§179）。

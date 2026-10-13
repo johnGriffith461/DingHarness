@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { create, type StoreApi } from "zustand";
 import type { ChatMessage, ShellBridge } from "@shared/ipc";
 import { streamChat, runToolOnce, completeOnce } from "../ai/aiClient";
 import { buildAskPrompt, buildDoPrompt, buildFollowUpPrompt, describeAnswer, parseAskReply } from "./agent";
@@ -32,15 +32,16 @@ import {
 import { readConfirmMode } from "./confirmMode";
 import { pickSuggestions, SUGGESTION_POOL } from "./copy";
 import {
+  restoreTasks as restoreTasksIn,
+  startTaskPersistence as startTaskPersistenceIn,
+} from "./taskPersist";
+import {
   acceptQuestions,
   answerQuestion,
   autoTaskTitle,
   cleanTitle,
   current,
   makeStepId,
-  normalizeStep,
-  normalizeQuestions,
-  normalizeArtifacts,
   upsertTask,
   type TaskOption,
   type TaskStep,
@@ -62,7 +63,7 @@ import {
 /** 工作台里的一个"页面"。 */
 export type WorkbenchView = "home" | "task" | "scheduled" | "plugins" | "cloud" | "phone" | "threads" | "doc" | "center" | "reader" | "agent" | "coding" | "image" | "video";
 
-type WorkbenchState = {
+export type WorkbenchState = {
   view: WorkbenchView;
   tasks: WorkTask[];
   activeTaskId: string | null;
@@ -158,6 +159,28 @@ type WorkbenchState = {
   transcript: () => string;
   /** 中止当前任务。 */
   abort: () => void;
+};
+
+/**
+ * 交给 `taskRuntime` / `taskPersist` 的那一小块 store 能力。
+ *
+ * 那两个模块**只**用 `import type` 引这个类型（编译后完全擦除），运行期的读写靠参数注入 ——
+ * 于是"store ↔ 运行时"这个环在**结构上**不可能成立，而不是靠"约定别成环"。
+ * 本仓同一手法的先例：`src/workbench/scheduleStore.ts` 的 `execute(id, get, set)`。
+ *
+ * 类型直接引 zustand 的 `StoreApi`：`setState` 是重载（`replace: true` 那条），自己写会窄。
+ */
+export type StorePort = {
+  getState: () => WorkbenchState;
+  setState: StoreApi<WorkbenchState>["setState"];
+  subscribe: StoreApi<WorkbenchState>["subscribe"];
+};
+
+/** ⚠️ 用箭头包一层：`{ getState: useWorkbenchStore.getState }` 会在模块初始化期取值，早于 create() 就炸。 */
+const port: StorePort = {
+  getState: () => useWorkbenchStore.getState(),
+  setState: (partial) => useWorkbenchStore.setState(partial),
+  subscribe: (listener) => useWorkbenchStore.subscribe(listener),
 };
 
 let seq = 0;
@@ -686,72 +709,16 @@ const resolveRoute = resolveChatRoute;
 
 
 /* ============================================================
- * 任务持久化（阶段 11.9）
+ * 任务持久化（阶段 11.9）—— 实现搬去 `taskPersist.ts`（C6-4 Step 2）
  * ============================================================ */
 
-/** 恢复时把盘上的数据收窄成合法任务（磁盘内容按不可信处理）。 */
-/**
- * 恢复一个任务（§179 起导出，供单测直接钉住恢复口径）。
+/*
+ * 下面两个是**薄转发**：实现整套在 `taskPersist.ts`，这里只把 `port`（本 store 的
+ * 那一小块读写能力，见上面 `StorePort`）注入进去 —— 新模块因此不静态 import store。
  *
- * @param raw 落盘的一条（不可信）
- * @returns 合法任务；连 id 都没有就给 null
+ * ⚠️ 签名逐字不变（`(): Promise<string[]>` / `(): () => void`）：
+ * `Workbench.tsx:127/129` 是调用方，一行都不用改。
  */
-export function normalizeTask(raw: unknown): WorkTask | null {
-  if (!raw || typeof raw !== "object") return null;
-  const t = raw as Record<string, unknown>;
-  if (typeof t.id !== "string" || !t.id) return null;
-  const steps = Array.isArray(t.steps)
-    ? t.steps
-        .filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === "object")
-        /*
-         * 逐条交给 `normalizeStep`（§177 抽出来的纯函数）——
-         * 这一段原来内联在这里，于是**没法单测**，而它恰恰最容易漏字段
-         * （§176 漏了 `tools`、§177 漏了 `note`）。现在每个字段都有断言守着。
-         */
-        .map((s, i) => normalizeStep(s, i))
-    : [];
-  /*
-   * 产物与澄清卡也要收窄（§179）：原来这两句是**裸断言**
-   * （`as TaskQuestion[]` / `as Artifact[]`）。忽視澄清卡的 `options` 时
-   * 界面上的 `question.options.map(...)` 会直接抛异常 —— **那一整段对话打不开**。
-   */
-  const questions = normalizeQuestions(t.questions);
-  const artifacts = normalizeArtifacts(t.artifacts);
-
-  const stage = t.stage;
-  /*
-   * ⚠️ 只有 `running` 算"中断"（§179）。
-   *
-   * `awaiting` **不是**进行中 —— 它等的是**用户回答**，不是某个请求。
-   * 原来把两者一起标成 `failed`，后果很具体：
-   * 界面上澄清卡只在 `stage === "awaiting"` 时渲染 →
-   * **重启之后那张卡永远不出现，用户再也回答不了那个问题**，
-   * 而那一次对话就卡在那里了（它不是坏了，是在等人）。
-   *
-   * 这与本项目"闸门/审批的意义就是用户看得见并决定"是同一条：
-   * **在等人的状态不该被系统自己判死。**
-   */
-  const wasRunning = stage === "running";
-  return {
-    id: t.id,
-    title: typeof t.title === "string" && t.title ? t.title : "未命名任务",
-    brief: typeof t.brief === "string" ? t.brief : "",
-    createdAt: typeof t.createdAt === "number" ? t.createdAt : 0,
-    /*
-     * 上次关窗口时还在跑/还在等回答的任务，恢复时标成 `failed` 并写清原因。
-     * 原样留成 running 的话，界面会显示一个**永远转下去**的任务，
-     * 而它其实早就没有请求在跑了 —— 那比标成失败更让人困惑。
-     */
-    stage: wasRunning ? "failed" : (stage as WorkTask["stage"]),
-    startedAt: typeof t.startedAt === "number" ? t.startedAt : null,
-    finishedAt: typeof t.finishedAt === "number" ? t.finishedAt : wasRunning ? Date.now() : null,
-    steps,
-    questions,
-    questionIndex: typeof t.questionIndex === "number" ? t.questionIndex : 0,
-    activity: wasRunning ? "上次关闭时被中断" : typeof t.activity === "string" ? t.activity : "",
-    artifacts,
-  };
-}
 
 /**
  * 从磁盘恢复任务历史。
@@ -762,37 +729,7 @@ export function normalizeTask(raw: unknown): WorkTask | null {
  * @returns 恢复到的任务 id（供库载入时做收窄）
  */
 export async function restoreTasks(): Promise<string[]> {
-  const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
-  if (!bridge?.tasks) return [];
-  const raw = await bridge.tasks.load();
-  const tasks = raw.map(normalizeTask).filter((t): t is WorkTask => t !== null);
-  if (tasks.length === 0) return [];
-  useWorkbenchStore.setState({
-    tasks,
-    activeTaskId: tasks[0]?.id ?? null,
-  });
-  return tasks.map((t) => t.id);
-}
-
-/** 写盘队列：串行化，避免并发写互相覆盖。 */
-let saveQueue: Promise<unknown> = Promise.resolve();
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * 落盘当前任务列表（防抖）。
- *
- * 防抖是必要的：流式回复时 steps 每个片段都在变，不防抖会**每几十毫秒写一次盘**。
- */
-function schedulePersist(): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    if (!saveTimer) return;
-    saveTimer = null;
-    const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
-    if (!bridge?.tasks) return;
-    const tasks = useWorkbenchStore.getState().tasks;
-    saveQueue = saveQueue.then(() => bridge.tasks.save(tasks)).catch(() => undefined);
-  }, 600);
+  return restoreTasksIn(port);
 }
 
 /**
@@ -800,14 +737,7 @@ function schedulePersist(): void {
  * @returns 停止函数
  */
 export function startTaskPersistence(): () => void {
-  const unsubscribe = useWorkbenchStore.subscribe((state, prev) => {
-    if (state.tasks !== prev.tasks) schedulePersist();
-  });
-  return () => {
-    unsubscribe();
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = null;
-  };
+  return startTaskPersistenceIn(port);
 }
 
 /** 造一个步骤 id（对外暴露给需要稳定 id 的地方）。 */
