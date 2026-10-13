@@ -241,8 +241,12 @@ try {
    */
   const bad = [];
   /*
-   * ⚠️ 比对必须用**子串**：菜单项文案带图标前缀（实测是「⧉复制」「🗑删除」「🔒锁定」…），
-   * 数组全等（`labels.includes("复制")`）永远对不上 —— 第一版就是这么全红的（假红）。
+   * ⚠️ 比对必须用**子串**：菜单项文案可能带前后缀，数组全等
+   * （`labels.includes("复制")`）对不上 —— 第一版就是这么全红的（假红）。
+   *
+   * （2026-10-14 补：图标已经从"字符前缀"换成 lucide 的 SVG 了，
+   * 所以 `textContent` 里**没有**「⧉」「🗑」这类前缀了；子串比对照旧更稳 ——
+   * 文案本身还可能带数量、快捷键之类的后缀。）
    */
   const labels = (report.menuItems ?? []).map((i) => i.t);
   const hasLabel = (word) => labels.some((t) => t.includes(word));
