@@ -67,6 +67,17 @@ describe("applyEvent · 正文与收尾", () => {
   });
 });
 
+describe("applyEvent · 不认识的事件", () => {
+  it("⭐⭐ 未知类型**忽略**，不许当报错（「不是 text/done 就当 error」那个坑不能再犯）", () => {
+    // 以后会加新事件类型（比如 reasoning）；那时若沿用兜底，用户会看到「出错了」而其实什么都没坏
+    const unknown = { requestId: "r1", type: "reasoning", text: "想一下" } as unknown as AiStreamEvent;
+    const view = projectTurn([ev({ type: "text", text: "好" }), unknown]);
+    expect(view.error).toBeUndefined();
+    expect(view.done).toBe(false); // 它也不是"结束"
+    expect(view.text).toBe("好");
+  });
+});
+
 describe("applyEvent · 工具调用（参数配对 + pending）", () => {
   it("⭐ 参数按 toolCallId 配上，留痕那一行由 describeToolResult 生成", () => {
     const view = projectTurn([

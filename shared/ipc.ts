@@ -45,6 +45,16 @@ export type ChatRequest = {
    */
   system?: string;
   temperature?: number;
+  /**
+   * 输出上限（**有管道没水源**，2026-10-13 如实标注）。
+   *
+   * 主进程确实把它接到了 `maxOutputTokens`（`electron/ipc/ai.ts:198`），
+   * 但**渲染层没有任何一处传它**（`src/` 全仓 grep `maxTokens` 零命中）——
+   * 也就是说这条管道端到端**没有生效过**。
+   *
+   * 按施工手册：**与 C5 一起定**（C5 正在真接用量；那时要么给它一个来源
+   * ——比如"按剩余上下文算"——要么删掉这条管道）。别继续留着不解释。
+   */
   maxTokens?: number;
   /**
    * 审批档位（§143）。

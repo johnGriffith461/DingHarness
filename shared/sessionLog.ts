@@ -215,8 +215,20 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
     return { ...state, done: true, ...(event.usage ? { usage: event.usage } : {}) };
   }
 
-  // error
-  return { ...state, done: true, error: event.message };
+  if (event.type === "error") return { ...state, done: true, error: event.message };
+
+  /*
+   * ⚠️ **其余类型一律忽略**，不许落进"error"那一支。
+   *
+   * 这是本项目已经踩过一次的坑（`chatStore.ts` 里那段注释留着记录）：
+   * 原来那句兜底是"不是 text / done 就当 error"，于是**加了工具事件之后**，
+   * 每次调工具都被记成一次报错。同样的形状会再犯 ——
+   * 以后给 `AiStreamEvent` 加一种事件（比如 reasoning），这里若沿用兜底，
+   * 用户就会看到"出错了"而其实什么都没坏。
+   *
+   * 代价是"未知事件被静默忽略"。这是刻意的取舍：**不认识 ≠ 失败**。
+   */
+  return state;
 }
 
 /**

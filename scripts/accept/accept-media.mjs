@@ -75,6 +75,18 @@ report.browserEmpty = await page.locator('[data-testid="wb-summary-empty-browser
 await page.locator('[data-testid="wb-summary-tab-subtasks"]').click();
 await page.waitForTimeout(600);
 report.subtasksEmpty = await page.locator('[data-testid="wb-summary-empty-subtasks"]').textContent().catch(() => null);
+/*
+ * ⚠️ 不实陈述守卫（2026-10-13 加）。
+ *
+ * 这一句以前写着「本次实现不含子智能体调度」—— 而子智能体**早就落地了**
+ * （§150 端到端验过、§176 补了"上交父级就地批准"）。文案与代码相反时，
+ * 用户会以为这个能力不存在。改成如实说法之后，这里钉一条：**那半句不许回来**。
+ */
+report.subtasksCopyHonest = !(report.subtasksEmpty ?? "").includes("不含子智能体调度");
+if (!report.subtasksCopyHonest) {
+  console.error("✗ 子智能体 tab 又写成「不含子智能体调度」—— 那是与代码相反的文案");
+  process.exitCode = 1;
+}
 
 /* ---------- 视频接口：真接上了，只是没模型 ---------- */
 report.video = await page.evaluate(async () => {

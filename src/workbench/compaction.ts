@@ -28,7 +28,18 @@ import type { ChatMessage } from "@shared/ipc";
 /** 最近多少 token 原样保留（pi 的 `keep`）。 */
 export const KEEP_TOKENS = 20000;
 
-/** 给模型输出留的额度（pi 的 `reserve`）。历史超过 `KEEP_TOKENS` 才压。 */
+/**
+ * 给模型输出留的额度（pi 的 `reserve`）。历史超过 `KEEP_TOKENS` 才压。
+ *
+ * ⚠️ **未接线（2026-10-13 如实标注）**：全仓零引用 —— 判定用的是
+ * `shouldCompact(messages, keepTokens)`（`store.ts:874-887`），只看 `KEEP_TOKENS`。
+ * 也就是说"给输出留额度"这件事**现在没有发生**：历史恰好顶到上限时，
+ * 真正能发给模型的输入额度会被输出额度挤掉。
+ *
+ * 按施工手册：**C2 阶段只标注、不删** —— 它的归宿在 C3（"上下文窗口单一负责人"：
+ * 单一 token 计量 + 单一压缩缝，那时才谈得上"留多少给输出"）。
+ * 删了等 C3 又要加回来，而"悄悄留着不说"正是 `RESERVE_TOKENS` 这段时间的状态。
+ */
 export const RESERVE_TOKENS = 16384;
 
 /** 摘要块在系统提示词里的标头。 */
