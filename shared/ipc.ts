@@ -65,6 +65,17 @@ export type ChatRequest = {
    * 压根不该有动作能力 —— 它们不是 agent 回合。
    */
   useTools?: boolean;
+  /**
+   * 会话 id（C2）：主进程据此把这一轮写进**会话事件日志**（`userData/sessions/<id>.jsonl`）。
+   *
+   * 为什么要由发起方给：只有它知道"这一轮属于哪段对话/哪个任务"。
+   * 工作台给**任务 id**、聊天给**对话 id**；起标题这类附带请求**不给**
+   * （它们不是 agent 回合，记进去只会让日志里多出一堆无主的请求）。
+   *
+   * ⚠️ 它是**渲染进程给的**，主进程会先收窄成 `[A-Za-z0-9._-]` 才当文件名用
+   * （见 `electron/ipc/sessionStore.ts` 的 `safeSessionId`）；不合法就当没给。
+   */
+  sessionId?: string;
 };
 
 /** 输入区那个 chip 的档位（定义在 `permissions.ts`，这里只引用，避免两处各写一份）。 */

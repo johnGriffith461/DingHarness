@@ -281,6 +281,29 @@ export function normalizeToolTraces(raw: unknown): ToolTrace[] {
     .filter((x): x is ToolTrace => x !== null);
 }
 
+/**
+ * 把**新算出来的**待批准留痕并入**界面上已有的**那一份，并且**已有优先**。
+ *
+ * ## 为什么必须"已有优先"（C2 撞到的一个真回归）
+ *
+ * 留痕现在由投影算出来（`shared/sessionLog.ts`）。流式过程中每来一条 `tool-result`
+ * 都会重算一次投影 —— 如果界面直接**用投影覆盖**列表，那么：
+ * 用户点了「允许」→ 那条留痕被标成已执行（这是**渲染进程的状态**）→
+ * 但投影里它仍然是 `pending: true`（主进程不知道谁批过）→ 下一次覆盖
+ * **把「允许」抹掉、按钮又冒出来**。
+ *
+ * 所以合并规则是：**按 `toolCallId` 认人，界面已有的那条说了算**（它带着用户的决定），
+ * 投影只负责补上"这一轮新出现的"那些。
+ *
+ * @param existing 界面上已有的（可能含用户已处置的）
+ * @param incoming 投影刚算出来的
+ * @returns 合并后的列表（顺序沿用 existing，新项追加在后）
+ */
+export function mergeToolTraces(existing: readonly ToolTrace[], incoming: readonly ToolTrace[]): ToolTrace[] {
+  const seen = new Set(existing.map((t) => t.toolCallId));
+  return [...existing, ...incoming.filter((t) => !seen.has(t.toolCallId))];
+}
+
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: MEMORY_SAVE_TOOL, description: MEMORY_SAVE_DESC, schema: MEMORY_SAVE_INPUT },
   { name: MEMORY_LIST_TOOL, description: MEMORY_LIST_DESC, schema: MEMORY_LIST_INPUT },

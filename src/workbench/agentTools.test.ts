@@ -10,6 +10,7 @@ import {
   MAX_SUBAGENT_DEPTH,
   SPAWN_AGENT_INPUT,
   SPAWN_AGENT_TOOL,
+  mergeToolTraces,
   subagentPrompt,
   MEMORY_SAVE_TOOL,
   REPEAT_VALUES,
@@ -24,6 +25,7 @@ import {
   toolLine,
   toolSpec,
   unknownToolNotice,
+  type ToolTrace,
 } from "@shared/agentTools";
 import { MEMORY_TEXT_LIMIT } from "@shared/memory";
 
@@ -410,5 +412,31 @@ describe("子智能体被拦下的调用上交父级（§176）", () => {
       { ok: true, steps: 2, blocked: [{ toolCallId: "a", name: "memory_save" }] },
     );
     expect(line).toContain("1 项等你确认");
+  });
+});
+
+describe("mergeToolTraces（C2 期间逮到的一个真回归）", () => {
+  const pending = (id: string): ToolTrace => ({
+    toolCallId: id,
+    name: MEMORY_SAVE_TOOL,
+    ok: true,
+    pending: true,
+    line: "⚙ 记忆：等你确认（还没执行）",
+  });
+
+  it("⭐ 已经有、且用户处置过的那条**不被投影覆盖**（否则「允许」被抹回待确认）", () => {
+    // 界面上的：用户点了「允许」，那条已经变成结果
+    const existing: ToolTrace[] = [{ ...pending("a"), pending: false, line: "⚙ 记忆：已保存，当前 1 条" }];
+    // 投影重算出来的：它不知道谁批过，仍是 pending
+    expect(mergeToolTraces(existing, [pending("a")])).toEqual(existing);
+  });
+
+  it("新出现的那些按顺序补在后面（不丢）", () => {
+    const merged = mergeToolTraces([pending("a")], [pending("a"), pending("b")]);
+    expect(merged.map((t) => t.toolCallId)).toEqual(["a", "b"]);
+  });
+
+  it("界面为空时就是投影那一份", () => {
+    expect(mergeToolTraces([], [pending("a")])).toEqual([pending("a")]);
   });
 });

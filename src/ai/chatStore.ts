@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AiStreamEvent, ChatMessage, ProviderInfo } from "@shared/ipc";
-import { describeToolResult, rejectedLine, type ToolTrace } from "@shared/agentTools";
+import { mergeToolTraces, rejectedLine, type ToolTrace } from "@shared/agentTools";
+import { applyEvent, emptyTurn, finishTurn } from "@shared/sessionLog";
 import { artifactFileName, extractArtifacts, type Artifact } from "@/workbench/artifact";
 import { enabledPromptBlock } from "@shared/library";
 import type { ShellBridge } from "@shared/ipc";
@@ -396,16 +397,27 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // 增量节流写回
     let pending = "";
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
-    /** 本次回答里工具调用的参数（按调用 id 存，§175）。 */
-    const pendingInputs = new Map<string, unknown>();
 
-    /**
-     * 这一轮回复的**全文**（§186）。
+    /*
+     * ── 这一轮的**投影**（C2）──────────────────────────────────────
      *
-     * ⚠️ 不能事后去读消息的 `content` —— `flush` 是按 80ms 分片写的，
-     * 收尾时未必已经落进 state。单独累积一份最稳。
+     * 原来这段是个手写状态机：`acc` 攒正文、`pendingInputs` 这个 Map 自己配对参数、
+     * 每个分支自己判 `pending`。同样的状态机在**工作台**里还有一份（`store.ts`），
+     * 于是两边慢慢答得不一样（实测：工作台不接 `usage`、聊天不展开子智能体上交的调用）。
+     *
+     * 现在只有一份：`applyEvent`（`shared/sessionLog.ts`）。它同时是
+     * "流式增量"与"日志投影"—— 日志落盘走的是同一个函数，所以
+     * **界面看到的与日志记下的不可能不一致**。
+     *
+     * ⚠️ 正文不再单独攒一份（原来那个 `acc`）：`state.text` 就是它，
+     * 而且它同时能作为日志投影用 —— 两份的根本风险是它们会不一样。
      */
-    let acc = "";
+    let turn = emptyTurn();
+    /**
+     * 聊天侧**不展开**子智能体上交的调用（`expandBlocked` 默认关）—— 那是现状。
+     * 统一它会让聊天多出可放行的按钮（行为变更），单独决定（见 C2 方案的差异清单）。
+     */
+    const project = () => finishTurn(turn);
 
     const flush = () => {
       if (flushTimer) {
@@ -443,6 +455,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         useTools: true,
         // 审批档位随请求过界（§143）：模式选择在这边，工具执行在那边
         toolPolicy: readConfirmMode(),
+        // 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）
+        sessionId: conversationId,
         /*
          * 能力说明（§185）。
          *
@@ -455,8 +469,16 @@ export const useChatStore = create<ChatState>()((set, get) => ({
          */
         system: await abilityBlock(),
       },
-      (event: AiStreamEvent) => {        if (event.type === "text") {
-          acc += event.text;
+      (event: AiStreamEvent) => {
+        /*
+         * ⭐ **先过投影，再管界面**（C2）。
+         *
+         * 顺序很重要：投影是"这一轮发生了什么"的事实，界面只是它的一种呈现。
+         * 反过来的话（先写界面、再补一句"顺便记一下"），两边迟早会漂移。
+         */
+        turn = applyEvent(turn, event);
+
+        if (event.type === "text") {
           pending += event.text;
           if (!flushTimer) flushTimer = setTimeout(flush, 80);
           return;
@@ -468,9 +490,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
            *
            * 只在 done 这一步做（不做在流式过程中）：标签是边流边出现的，
            * 半截标签被切掉反而更难看；收尾时一次性换成卡片。
+           *
+           * 正文取自**投影**（不再单独攒 `acc`）：两边正是"同一个东西的两份拷贝"，
+           * 而它们一旦不一致，产物提取的结果就会跟日志对不上。
            */
           const extracted = extractArtifacts(
-            acc,
+            project().text,
             `chat-${conversationId}`,
             Date.now(),
             (i) => `chat-${conversationId}-${assistantMessage.id}-a${i + 1}`,
@@ -498,7 +523,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               ...prev.messages,
               [conversationId]: (prev.messages[conversationId] ?? []).map((m) =>
                 m.id === assistantMessage.id
-                  ? { ...m, status: "done" as const, usage: event.usage }
+                  ? // 用量取自投影（主进程给多少就是多少，拿不到就是 undefined —— 不编）
+                    { ...m, status: "done" as const, usage: project().usage }
                   : m,
               ),
             },
@@ -518,29 +544,28 @@ export const useChatStore = create<ChatState>()((set, get) => ({
          */
         if (event.type === "tool-call") {
           /*
-           * 参数先存下来（§175）：`tool-result` 到的时候要把它并进留痕那一行。
-           *
-           * 原来这里是直接 `return`（什么都不做）—— 于是聊天这条路上参数整个丢了，
-           * 用户只能看到「记忆：已保存」，看不到**存了什么**。
+           * 参数**不用在这里自己存**了（C2）：投影里已经按 `toolCallId` 配好对
+           * （`shared/sessionLog.ts` 的 `waiting`）。原来这里有个 `pendingInputs` Map，
+           * 工作台那份状态机里有**另一个一模一样的** Map —— 两个 Map 就是两份真相。
            */
-          pendingInputs.set(event.toolCallId, event.input);
           return;
         }
         if (event.type === "tool-result") {
           flush();
-          const line = describeToolResult(
-            event.toolName,
-            !event.error,
-            event.output,
-            event.error,
-            pendingInputs.get(event.toolCallId),
-          );
+          /*
+           * 那一行与那条留痕都**取自投影**：`line` 由 `describeToolResult` 在投影里生成，
+           * `pending` 也是投影判的。界面不再自己算一遍 —— 算第二遍就是第二个答案。
+           */
+          const trace = project().traces.find((t) => t.toolCallId === event.toolCallId);
+          const line = trace?.line ?? "";
           /*
            * 被拦下的那一条还要**挂成可处置的留痕**（§185）：
            * 只写「等你确认」而没有按钮，就是一条无法处置的通知
            * （§176 为子智能体修过同款问题）。
+           *
+           * 聊天侧只放 `pending` 的那些（已经执行完的仍只进正文那一行，§185 的口径）。
            */
-          const pendingCall = Boolean((event.output as { pending?: boolean } | undefined)?.pending);
+          const pendingTraces = project().traces.filter((t) => t.pending);
           set((prev) => ({
             messages: {
               ...prev.messages,
@@ -548,21 +573,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
                 m.id === assistantMessage.id
                   ? {
                       ...m,
-                      content: m.content ? `${m.content}\n\n${line}` : line,
-                      ...(pendingCall
-                        ? {
-                            tools: [
-                              ...(m.tools ?? []),
-                              {
-                                toolCallId: event.toolCallId,
-                                name: event.toolName,
-                                ok: true,
-                                pending: true,
-                                line,
-                                input: pendingInputs.get(event.toolCallId),
-                              },
-                            ],
-                          }
+                      content: line ? (m.content ? `${m.content}\n\n${line}` : line) : m.content,
+                      /*
+                       * ⚠️ **合并、不是覆盖**（C2 期间逮到的一个真回归）：
+                       * 投影每来一条 `tool-result` 就重算一次；若直接用它覆盖列表，
+                       * 用户刚点过的「允许」会被抹回 `pending`（主进程并不知道谁批过），
+                       * 于是按钮又冒出来、用户以为没生效。**界面已有的那条说了算。**
+                       */
+                      ...(pendingTraces.length
+                        ? { tools: mergeToolTraces(m.tools ?? [], pendingTraces) }
                         : {}),
                     }
                   : m,

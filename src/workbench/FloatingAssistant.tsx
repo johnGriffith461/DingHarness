@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Minus, MoreHorizontal, Phone, Plus, Sparkles, Volume2 } from "lucide-react";
 import { abortStream, streamChat } from "@/ai/aiClient";
+import { applyEvent, emptyTurn, finishTurn } from "@shared/sessionLog";
 
 /**
  * 悬浮助手窗（对标实机：任务顶栏第 3 个图标弹出的浮动面板）。
@@ -109,7 +110,13 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
     setStreaming(true);
     setBubbles((prev) => [...prev, { id: replyId, role: "assistant", text: "" }]);
 
-    let acc = "";
+    /*
+     * 这一轮**也走投影**（C2）。悬浮助手原来是**第三份**解析（只处理 text/error）——
+     * 它现在只拿 text/error 是"碰巧够用"，不是"设计如此"：主进程照样会发
+     * tool-call / tool-result（这一条路没带工具，所以现在收不到，但那是**请求参数**决定的，
+     * 不是这里决定的）。走投影之后，"以后它带了工具"不需要再改这一段。
+     */
+    let turn = emptyTurn();
     try {
       const { listProviders } = await import("@/ai/aiClient");
       let { provider, model } = route();
@@ -126,14 +133,11 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
       const handle = await streamChat(
         { provider, model, messages: [{ role: "user", content: value }] },
         (event) => {
-          if (event.type === "text") {
-            acc += event.text;
-            setBubbles((prev) => prev.map((b) => (b.id === replyId ? { ...b, text: acc } : b)));
-          }
-          if (event.type === "error") {
-            acc = `（出错了）${event.message}`;
-            setBubbles((prev) => prev.map((b) => (b.id === replyId ? { ...b, text: acc } : b)));
-          }
+          turn = applyEvent(turn, event);
+          if (event.type !== "text" && event.type !== "error") return;
+          const view = finishTurn(turn);
+          const shown = view.error ? `（出错了）${view.error}` : view.text;
+          setBubbles((prev) => prev.map((b) => (b.id === replyId ? { ...b, text: shown } : b)));
         },
       );
       requestRef.current = handle.requestId;

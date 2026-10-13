@@ -6,14 +6,11 @@ import { artifactFileName, extractArtifacts, type Artifact } from "./artifact";
 import { enabledPromptBlock } from "@shared/library";
 import { fallbackNote } from "@shared/settings";
 import {
-  blockedToTraces,
-  describeToolResult,
   rejectedLine,
   toolLabel,
-  SPAWN_AGENT_TOOL,
-  type SubagentBlocked,
   type ToolTrace,
 } from "@shared/agentTools";
+import { applyEvent, emptyTurn, finishTurn } from "@shared/sessionLog";
 import { buildHistory } from "./history";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
@@ -272,7 +269,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      */
     const background = task.steps.filter((s) => s.role === "user" && s.text.includes(" → ")).map((s) => s.text);
     const { system } = buildDoPrompt(task.brief, background);
-    const raw = await runStream(user, system, patch);
+    const raw = await runStream(user, system, patch, [], task.id);
     const ask = parseAskReply(raw.text);
     const { text, artifacts } = extractArtifacts(
       ask.text,
@@ -536,9 +533,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     void refineTitle(task.id, text);
 
     const { system, user } = buildAskPrompt(text);
-    const reply = await runStream(user, system, (patch) => {
-      set((s) => ({ tasks: upsertTask(s.tasks, { ...current(s.tasks, task.id), ...patch }) }));
-    });
+    const reply = await runStream(
+      user,
+      system,
+      (patch) => {
+        set((s) => ({ tasks: upsertTask(s.tasks, { ...current(s.tasks, task.id), ...patch }) }));
+      },
+      [],
+      task.id,
+    );
 
     nextStep(task.id, reply.text, false, user, reply.tools);
   },
@@ -561,9 +564,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       .filter((s) => s.role === "user" && s.text.includes(" → "))
       .map((s) => s.text);
     const { system, user } = buildDoPrompt(advanced.brief, background);
-    const reply = await runStream(user, system, (patch) => {
-      set((s) => ({ tasks: upsertTask(s.tasks, { ...current(s.tasks, advanced.id), ...patch }) }));
-    });
+    const reply = await runStream(
+      user,
+      system,
+      (patch) => {
+        set((s) => ({ tasks: upsertTask(s.tasks, { ...current(s.tasks, advanced.id), ...patch }) }));
+      },
+      [],
+      advanced.id,
+    );
 
     // 第二段如果又吐了提问块，也照收（模型有时会追问，原版也允许）
     nextStep(advanced.id, reply.text, true, user, reply.tools);
@@ -895,6 +904,7 @@ async function answerTurn(taskId: string, history: TaskStep[], text: string, ext
       useWorkbenchStore.setState((s) => ({ tasks: upsertTask(s.tasks, { ...current(s.tasks, taskId), ...patch }) }));
     },
     effective,
+    taskId,
   );
 
   /*
@@ -926,6 +936,13 @@ async function runStream(
    * 传了历史就是多轮：**旧消息在前、这次的新消息在后** —— 顺序反了模型会把因果读反。
    */
   history: ChatMessage[] = [],
+  /**
+   * 这一轮属于哪个会话（C2）：主进程据此把请求与事件写进会话日志。
+   *
+   * 工作台用**任务 id**（一段任务就是一段会话）；不给就不记日志 ——
+   * 起标题这类附带请求走的是别的函数，压根不到这里。
+   */
+  sessionId = "",
 ): Promise<{ text: string; tools: ToolTrace[]; note?: string }> {
   const messages: ChatMessage[] = [...history, { role: "user", content: user }];
   /*
@@ -958,19 +975,29 @@ async function runStream(
    */
   const remembered = memoryPromptBlock(useMemoryStore.getState().lib);
   const fullSystem = [system, persona, remembered, extra].filter(Boolean).join("\n\n");
-  let acc = "";
-  /** 这一步用过的工具（§141）：按 tool-result 落，成败都记。 */
-  const tools: ToolTrace[] = [];
   /**
-   * 模型给的参数，按 toolCallId 暂存（§144）。
+   * 这一轮的**投影**（C2）：正文、工具留痕、用量只有一份算法。
    *
-   * 为什么必须配对存：`tool-call` 事件带参数、`tool-result` 事件带结果，
-   * 两者靠 `toolCallId` 对应。**放行时要原样执行那份参数**，
-   * 所以不能在 result 那一步才去找（那时已经拿不到了）。
+   * ⚠️ 这里原来是**第二份**手写状态机（`acc` + `tools` + `inputs` 那个 Map），
+   * 与聊天侧那份各写一遍，于是两边慢慢答得不一样 —— 这一侧最刺眼的一条是：
+   * `onEvent` **没有 `done` 分支**，主进程发来的真实 `usage` 落到这里就没了
+   * （界面上的「消耗」因此一直是按字数估的）。
+   *
+   * 现在与聊天侧共用 `applyEvent`（`shared/sessionLog.ts`）。
+   * ⚠️ 界面显示的那个数**本轮不动**（仍按原口径估）—— 换成真实用量是 C5 的事，
+   * 这里只保证"真实用量不再被丢掉"（`view.usage`）。
    */
-  const inputs = new Map<string, unknown>();
+  let turn = emptyTurn();
+  /**
+   * 工作台**展开**子智能体上交的调用（`expandBlocked`，§176）：
+   * 它们挂成这一步上的待批准项，用户能就地放行 —— 这是原有行为。
+   */
+  const project = () => finishTurn(turn, { expandBlocked: true });
 
   onPatch({ activity: "正在思考", stage: "running" });
+
+  /** `catch` 里抛出来的错误。与投影里的 `error` 事件是两条路，按"后者发生者优先"合。 */
+  let failure = "";
 
   try {
     const handle = await streamChat(
@@ -983,70 +1010,54 @@ async function runStream(
         toolPolicy: readConfirmMode(),
         // 只有"回答用户"这条路径才带工具；起标题等附带请求不带（§143）
         useTools: true,
+        // 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）
+        ...(sessionId ? { sessionId } : {}),
       },
       (event) => {
+        /*
+         * ⭐ **先过投影，再管界面**（C2）：界面只是投影的一种呈现。
+         * 反过来的话（先写界面、再"顺便记一下"），两边迟早会漂移 ——
+         * 这一侧原来就是这么漂掉的（`done` 里的 usage 没人接）。
+         */
+        turn = applyEvent(turn, event);
+
         if (event.type === "text") {
-          acc += event.text;
           onPatch({ activity: "正在回复" });
         }
         if (event.type === "tool-call") {
           /*
            * 让用户**当场看见**模型在调工具 —— 否则"记忆被写进去了"是暗箱操作。
            * 文案只说"正在使用"，具体结果等 tool-result 到手再落。
+           *
+           * 参数不用自己存了：投影里已按 `toolCallId` 配好对（原来这里有个 `inputs` Map）。
            */
-          inputs.set(event.toolCallId, event.input);
           onPatch({ activity: `正在使用${toolLabel(event.toolName)}` });
         }
         if (event.type === "tool-result") {
-          const ok = !event.error;
-          const pending = Boolean((event.output as { pending?: boolean } | undefined)?.pending);
-          tools.push({
-            toolCallId: event.toolCallId,
-            name: event.toolName,
-            ok,
-            /*
-             * 参数一起进那一行（§175）：不然看的人只能问「它到底传了什么」。
-             * `inputs` 本来就存着（§144 放行时要原样执行），这里只是顺手说出来。
-             */
-            line: describeToolResult(
-              event.toolName,
-              ok,
-              event.output,
-              event.error,
-              inputs.get(event.toolCallId),
-            ),
-            ...(pending ? { pending: true } : {}),
-            // 参数按 id 取回来（放行时要原样执行它，§144）
-            input: inputs.get(event.toolCallId),
-            output: event.output,
-            ...(event.error ? { error: event.error } : {}),
-          });
-          /*
-           * 子智能体上交的调用（§176）：挂成**这一步上的待批准项**。
-           *
-           * 它们发生在子智能体里（那里的闸门只拦不批），但用户该有办法处置 ——
-           * 否则那条「N 项等你确认」就成了一句无法执行的通知。
-           * 挂在这一步上之后，§144 那套「允许 / 拒绝」按钮直接就能用。
-           */
-          if (event.toolName === SPAWN_AGENT_TOOL && !event.error) {
-            const report = event.output as { blocked?: SubagentBlocked[] } | undefined;
-            tools.push(...blockedToTraces(report?.blocked));
-          }
-          onPatch({ activity: pending ? "等你确认" : "正在回复" });
+          /* 「等你确认」还是「正在回复」也取自投影（`pending` 只判一次） */
+          const trace = project().traces.find((t) => t.toolCallId === event.toolCallId);
+          onPatch({ activity: trace?.pending ? "等你确认" : "正在回复" });
         }
-        if (event.type === "error") {
-          acc = `（出错了）${event.message}`;
-        }
+        // error 不在这里处理：投影里记着，收尾时统一取（见下）
       },
     );
     useWorkbenchStore.setState({ runningRequestId: handle.requestId });
     await handle.done;
   } catch (error) {
-    acc = `（出错了）${error instanceof Error ? error.message : String(error)}`;
+    failure = error instanceof Error ? error.message : String(error);
   }
   useWorkbenchStore.setState({ runningRequestId: null });
+
+  /*
+   * 收尾：正文与工具留痕都从投影取。
+   *
+   * 错误那句话的优先级与原来一致：`catch` 里抛出来的（后发生）盖过 `error` 事件里的。
+   */
+  const view = project();
+  const errorText = failure || view.error || "";
+  const text = errorText ? `（出错了）${errorText}` : view.text;
   // 「默认模型失效、先退回上次」那句跟着返回值出去，由 `answerTurn` 挂到这一步上（§184）
-  return { text: acc, tools, ...(fellBackNote ? { note: fellBackNote } : {}) };
+  return { text, tools: view.traces, ...(fellBackNote ? { note: fellBackNote } : {}) };
 }
 
 /**

@@ -4,6 +4,7 @@ import { stepCountIs, streamText } from "ai";
 import { resolveSecret } from "./credentials";
 import { getProvider } from "./aiProviders";
 import { listProvidersWithProbe, markProviderFailed, markProviderOk, probeProviders } from "./aiProbe";
+import { createSessionLogger } from "./sessionStore";
 import { agentTools, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult } from "../../shared/agentTools";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
@@ -118,17 +119,46 @@ export function registerAiIpc(): void {
     const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const sender = event.sender;
 
+    /*
+     * ── 会话日志（C2）──────────────────────────────────────────────
+     *
+     * 主进程是**唯一**知道"这一轮完整发生了什么"的地方：请求体、每一次工具调用、
+     * 真实用量、中止与错误。原来这些发完即丢，事后只能靠渲染层那份"渲染后的样子"去猜。
+     *
+     * 所以：**发与记在同一处**（下面的 `emit`）—— 两处各写一份必然会漂移，
+     * 而"日志说调了工具、界面没显示"这种不一致最难查。
+     *
+     * `sessionId` 由发起方给（工作台是任务 id、聊天是对话 id）；
+     * 不给就不记（`refineTitle` 这类附带请求不是 agent 回合）。
+     */
+    const sessionLog = createSessionLogger(request.sessionId);
+    sessionLog?.log({
+      requestId,
+      type: "request",
+      provider: request.provider,
+      model: request.model ?? "",
+      ...(request.system ? { system: request.system } : {}),
+      messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(request.toolPolicy ? { toolPolicy: request.toolPolicy } : {}),
+      ...(request.useTools ? { useTools: true } : {}),
+    });
+    /** 发给渲染进程的同时记进日志（**唯一**的事件出口）。 */
+    const emit = (e: AiStreamEvent): void => {
+      sessionLog?.log(e);
+      safeSend(sender, e);
+    };
+
     const provider = getProvider(request.provider);
     if (!provider) {
       const message = `未知 provider：${request.provider}`;
-      safeSend(sender, { requestId, type: "error", message });
+      emit({ requestId, type: "error", message });
       return { requestId, ok: false, error: message };
     }
 
     const apiKey = resolveSecret(provider.keyRef);
     if (!apiKey) {
       const message = `${provider.label} 没有可用密钥（需要 ${provider.keyRef}）`;
-      safeSend(sender, { requestId, type: "error", message });
+      emit({ requestId, type: "error", message });
       return { requestId, ok: false, error: message };
     }
 
@@ -149,7 +179,7 @@ export function registerAiIpc(): void {
           flushTimer = null;
         }
         if (buffered) {
-          safeSend(sender, { requestId, type: "text", text: buffered });
+          emit({ requestId, type: "text", text: buffered });
           buffered = "";
         }
       };
@@ -215,7 +245,7 @@ export function registerAiIpc(): void {
              * "模型说了一半 → 工具执行 → 后半句"，而那半句还压在缓冲里没发。
              */
             flush();
-            safeSend(sender, {
+            emit({
               requestId,
               type: "tool-call",
               toolCallId: part.toolCallId,
@@ -227,7 +257,7 @@ export function registerAiIpc(): void {
           if (part.type === "tool-result" || part.type === "tool-error") {
             flush();
             const failed = part.type === "tool-error";
-            safeSend(sender, {
+            emit({
               requestId,
               type: "tool-result",
               toolCallId: part.toolCallId,
@@ -254,14 +284,21 @@ export function registerAiIpc(): void {
           }
           // 真的跑通了 —— 把这家 provider 标成"已验证"（界面上才敢说可用）
           markProviderOk(provider.id);
-          safeSend(sender, { requestId, type: "done", usage });
+          emit({ requestId, type: "done", usage });
+        } else {
+          /*
+           * 被用户中止：主进程**不发**事件（渲染层那边的 `abort()` 已经本地收尾了），
+           * 但**日志里要留下终止记录** —— 否则读日志的人分不清"这一轮断了"
+           * 还是"这一轮还在跑"。所以这里只记不发。
+           */
+          sessionLog?.log({ requestId, type: "error", message: "已中止" });
         }
       } catch (error) {
         flush();
         const message = humanError(error);
         // 不是"中止"才算失败：中止是用户意图，不该把 provider 判死
         if (!controller.signal.aborted) markProviderFailed(provider.id, message);
-        safeSend(sender, { requestId, type: "error", message });
+        emit({ requestId, type: "error", message });
       } finally {
         liveStreams.delete(requestId);
       }
