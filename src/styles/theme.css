@@ -50,6 +50,23 @@
   --line-soft: #e9ebee;
   --fg-slate: #475569;
 
+  /*
+   * ── 动效与焦点（2026-10-14 手感收口）────────────────────────────
+   *
+   * 规矩来自 transitions.dev 那两条（扒下来最硬的两条）：
+   *   · **`transition: all` 会触发不需要的属性（含布局属性）** → 一律写具名属性；
+   *   · 动的是 **transform / opacity / box-shadow / 颜色**这几类**合成友好**的属性。
+   * 时长与曲线**必须走令牌**（不许在规则里裸写 ms/曲线）—— 这样"整体快一点/慢一点"
+   * 只要改这里一处，而不是满仓 grep。
+   */
+  --dur-quick: 140ms;
+  --dur: 200ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  /** 主色之上的前景色（按钮压在 accent 上时用）——**不写死白色**：主题棘轮盯着硬编码颜色。 */
+  --on-accent: #fff;
+  /** 键盘焦点环（`:focus-visible` 用；不是每个浏览器默认都给得出可见的那一圈）。 */
+  --focus-ring: rgba(59, 130, 246, 0.22);
   --shadow-card: 0 6px 20px rgba(20, 30, 60, 0.05);
   --shadow-chip: 0 2px 8px rgba(12, 20, 40, 0.08);
   --shadow-popover: 0 8px 24px rgba(20, 30, 60, 0.12);
@@ -724,3 +741,29 @@
 .wb-setpage-label { width: 88px; flex: none; color: var(--fg-dim); }
 .wb-setpage-row em { font-style: normal; color: var(--fg); }
 
+
+/*
+ * 全局动效保护（2026-10-14）：系统里开了"减少动态效果"就**一律几乎瞬变**。
+ * 这是 transitions.dev 那段示例里的第三条，也是无障碍的底线 ——
+ * 前庭敏感的用户看到缩放/位移动画会真的难受。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * 键盘焦点环（2026-10-14）：全站一份。
+ * 用 `:focus-visible`（只给键盘/辅助设备用，鼠标点不出现）——
+ * 鼠标点按钮也冒出蓝框会很吵，而键盘用户没有它就是**根本不知道焦点在哪**。
+ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}

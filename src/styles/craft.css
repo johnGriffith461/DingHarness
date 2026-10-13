@@ -1,0 +1,191 @@
+/*
+ * 手感收口（2026-10-14）—— 从 `workbench.css` 里**分出来**的独立一节。
+ *
+ * ⚠️ 分出来的原因很具体：这一节把 `workbench.css` 顶到 1562 行，**被结构守卫当场拦下**
+ * （C6-5：`.css ≤ 1500`）。守卫拦得对 —— 它要的就是"再长出一个巨石"变成一件会失败的事。
+ *
+ * 位置：入口 `src/styles.css` 里**排在最后**（这里是覆盖块，必须压在被覆盖的规则之后）。
+ * 参考：transitions.dev 的两条硬规矩（`transition: all` 会连带布局属性、
+ * 动合成友好的属性）+ 一套动效令牌。
+ * ⚠️ 只改"手艺"（间距/层级/状态/过渡），**不动结构与文案**：那些是"像不像本体"的依据。
+ */
+/* ============================================================
+ * 手感收口（2026-10-14）
+ *
+ * 用户当面说"这些 UI 和组件太丑" —— 这一节按 transitions.dev 的两条硬规矩
+ * （具名属性过渡、动合成友好的属性）+ 一套令牌，把**最显眼的几个基础件**做扎实：
+ * 推荐卡 / 发送键 / 侧栏行 / 右侧面板分区 / 输入区聚焦态。
+ *
+ * ⚠️ 只改"手艺"（间距、层级、状态、过渡），**不动结构与文案**：
+ * 那些是"像不像本体"的依据（手册 §0.5：功能一个不能少、体验向它靠）。
+ * ============================================================ */
+
+/* ---------- 推荐卡：从"四根扁胶囊"做成真卡片 ---------- */
+
+/*
+ * ⚠️ 我第一版把它改成"宽屏两列"，**被批跑里的 `accept-suggestions` 当场拦下**：
+ * 那条验收写着本体的形态是「**一列竖排** + 与标签左边缘对齐」—— 改两列是**偏离本体**，
+ * 不是"更漂亮"。所以这里保留原来的排布（一列、左边距 12%、与标签对齐），
+ * 只把**卡片的做工**做好（图标块 / 边框 / 投影 / 悬停与按下）。
+ *
+ * 这条值得记：**"我觉得更好看"不是理由**；有验收钉着的形态，要改先改验收并说明依据。
+ */
+.wb-suggestions {
+  gap: 8px;
+}
+
+.wb-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  /* 卡片要先"浮起来"：浅底 + 小投影，而不是和背景一个平面 */
+  background: var(--surface);
+  box-shadow: var(--shadow-chip);
+  transition:
+    transform var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out);
+}
+
+.wb-suggestion:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
+  border-color: var(--line-strong);
+}
+
+.wb-suggestion:active {
+  transform: scale(0.985);
+}
+
+/* 图标装进一个浅色方块里：一行里就有"图形 + 标题 + 说明"三层，比纯文字好认 */
+.wb-suggestion > svg:first-child,
+.wb-suggestion .wb-suggestion-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border-radius: 9px;
+  background: var(--surface-soft);
+  color: var(--accent);
+}
+
+/* ---------- 发送键：主色圆钮（原来几乎看不见） ---------- */
+
+.wb-send {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--shadow-chip);
+  transition:
+    transform var(--dur-quick) var(--ease-spring),
+    filter var(--dur-quick) var(--ease-out),
+    background-color var(--dur-quick) var(--ease-out);
+}
+
+.wb-send:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.wb-send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/*
+ * 空输入时的发送键：**别做成"幽灵圆"**。
+ * 第一版用 `background: var(--surface-hover)`（几乎与底同色）→ 截图里它基本看不见，
+ * 而那是整个界面的**主操作位**。禁用 ≠ 消失：留一圈发丝边框 + 图标降调，
+ * 用户一眼知道"这里能发、只是现在还没输入"。
+ */
+.wb-send:disabled {
+  background: var(--surface-soft);
+  color: var(--fg-ghost);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: default;
+}
+
+/* 停止键：同一颗按钮，语义不同（红一点点，一眼看出"点它会中断"） */
+.wb-send.is-stop {
+  background: var(--warn-strong);
+}
+
+/* ---------- 侧栏行：悬停/选中有层次，图标跟着亮 ---------- */
+
+.wb-nav-item {
+  transition:
+    background-color var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out);
+}
+
+.wb-nav-item:hover {
+  background: var(--surface-hover);
+}
+
+.wb-nav-item:hover svg {
+  color: var(--fg-2);
+}
+
+.wb-nav-item.is-on {
+  background: var(--surface-active);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.wb-nav-item svg {
+  transition: color var(--dur-quick) var(--ease-out);
+}
+
+/* ---------- 右侧面板：分区之间真正分开（原来只有一根极浅的分隔线） ---------- */
+
+.wb-summary-section {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.wb-summary-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+}
+
+/* 面板里的"可点行"要有悬停反馈 —— 否则用户不知道它能不能点 */
+.wb-summary-row,
+.wb-summary-section .wb-row {
+  transition: background-color var(--dur-quick) var(--ease-out);
+}
+
+.wb-summary-row:hover,
+.wb-summary-section .wb-row:hover {
+  background: var(--surface-hover);
+}
+
+/* ---------- 输入区：聚焦时给一圈焦点环（和键盘焦点环同一套观感） ---------- */
+
+.wb-composer {
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out);
+}
+
+.wb-composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* 输入区里的 chip：悬停/按下都要有回应 */
+.wb-chip {
+  transition:
+    background-color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out),
+    transform var(--dur-quick) var(--ease-out);
+}
+
+.wb-chip:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--line-strong);
+}
+
+.wb-chip:active:not(:disabled) {
+  transform: scale(0.97);
+}
