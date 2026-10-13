@@ -408,8 +408,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   },
 
   abort: () => {
-    const id = get().runningRequestId;
-    if (id) void import("../ai/aiClient").then((m) => m.abortStream(id));
+    /*
+     * ⚠️ 走**流自己的** `abort()`，不是只发 `abortStream(id)`（补完⑤时逮到的真 bug）。
+     *
+     * 两者的区别是实打实的：`abortStream(id)` 只让**主进程**断开 provider 连接，
+     * 渲染层这条 `handle.done` **永远不会 resolve** —— 于是 `runStream` 卡在 await 上、
+     * `nextStep` 不执行：**那一步不落盘、任务永远停在"正在回复"**（实测：点停止之后
+     * 界面上什么都没有，`tasks.json` 里也没有那一步，而日志里已经有「已中止」——那正是
+     * `accept-abort.mjs` 把两边分开断言才看出来的）。
+     *
+     * `handle.abort()` 一次做两件：断主进程的连接 + **本地 settle**（抛一条「已中止」事件），
+     * 于是收尾逻辑照常跑，那一步照常落盘并如实写着「已中止」。
+     */
+    activeHandle?.abort();
+    if (!activeHandle) {
+      const id = get().runningRequestId;
+      if (id) void import("../ai/aiClient").then((m) => m.abortStream(id));
+    }
     set({ runningRequestId: null });
   },
 
@@ -611,6 +626,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
  * ⚠️ 只放内存：系数是"这台机器 + 这个 provider"的当期口径，重启后重新学即可 ——
  * 落盘反而要担心"换了模型还在用旧系数"。
  */
+/** 当前这条流（补完⑤）：中止要调它的本地 `abort()`，否则这一步永远不落盘。 */
+let activeHandle: { abort: () => void } | null = null;
+
 let calibrationFactor = 1;
 /** 上一轮"发出去的东西"的估算量（收尾时与真实 usage 一起算系数）。 */
 let lastRequestEstimate = 0;
@@ -1091,7 +1109,10 @@ async function runStream(
       },
     );
     useWorkbenchStore.setState({ runningRequestId: handle.requestId });
+    // 记下这条流：`abort()` 要能调它的本地 settle（见那里关于两个 abort 的说明）
+    activeHandle = handle;
     await handle.done;
+    activeHandle = null;
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   }

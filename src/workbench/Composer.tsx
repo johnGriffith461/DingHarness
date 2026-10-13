@@ -14,6 +14,7 @@ import { findItemIn } from "./libraryStore";
 import { type ConfirmMode } from "@shared/permissions";
 import { useDocStore } from "./docStore";
 import { readConfirmMode, saveConfirmMode } from "./confirmMode";
+import { Square } from "lucide-react";
 import SkillPanel from "./SkillPanel";
 
 import { CONFIRM_MODES } from "./uiUtil";
@@ -34,6 +35,8 @@ export function Composer({
    */
   onSend?: (text: string) => void;
 }) {
+  /** 正在跑一轮（流式）—— 决定发送键是「发送」还是「停止」（补完⑤）。 */
+  const running = useWorkbenchStore((st) => Boolean(st.runningRequestId));
   const createTask = useWorkbenchStore((s) => s.createTask);
   const [text, setText] = useState("");
 
@@ -458,15 +461,36 @@ export function Composer({
         <button className="wb-chip" title="模型档位（本机版还没做档位选择）" disabled>
           自动 <ChevronDown size={12} /> 低
         </button>
-        <button
-          className="wb-send"
-          data-testid="wb-send"
-          disabled={!text.trim()}
-          title={sendLabel ?? "发送（Enter）"}
-          onClick={submit}
-        >
-          <Send size={15} />
-        </button>
+        {/*
+          ⚠️ **流式过程中这里是「停止」**（补完⑤）。
+          在此之前，工作台**没有任何停止入口**：`store.abort()` 实现了却只有提问卡的"关闭"
+          在调它 —— 用户发出去一条要跑一分钟的任务，就只能干看着（聊天侧早有 `chat-send-stop`，
+          两边不一致）。
+          这里点下去走的是 store 的 `abort()` → `abortStream(requestId)` → 主进程
+          `controller.abort()`（**连 provider 侧的连接一起断**，不是只停界面）。
+
+          文案取自本体证据：`button_stop` = 「停止」。
+        */}
+        {running ? (
+          <button
+            className="wb-send is-stop"
+            data-testid="wb-send-stop"
+            title="停止"
+            onClick={() => useWorkbenchStore.getState().abort()}
+          >
+            <Square size={14} />
+          </button>
+        ) : (
+          <button
+            className="wb-send"
+            data-testid="wb-send"
+            disabled={!text.trim()}
+            title={sendLabel ?? "发送（Enter）"}
+            onClick={submit}
+          >
+            <Send size={15} />
+          </button>
+        )}
       </div>
 
       {enabledNames.length > 0 ? (
