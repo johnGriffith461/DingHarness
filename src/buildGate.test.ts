@@ -27,6 +27,13 @@ import { describe, expect, it } from "vitest";
  * ⚠️ 反过来说：这道守卫以前是"包含式"断言（只检查三个字符串在不在），
  * 所以"**新加的门没写进来**"它一次都拦不住 —— 那正是 A2 交付时发生的事。
  * 现在改成**整条步骤表逐字全等**。见 `EXPECTED_STEPS`。
+ *
+ * ── B3（2026-10-13）补的第三道门 ──
+ *
+ * `pnpm lint`（oxlint，**只开 `no-unused-vars` / `no-undef` 两条**，见 `.oxlintrc.json`）
+ * 插在 `typecheck` 之后。两条规则都做过**证伪**：探针里放一个未使用的局部变量
+ * 与一个未定义标识符时，`oxlint` 分别报出这两条并退出码 1；删掉探针回到 0/0。
+ * 一个只会返回 0 的检查等于没有，所以它必须能红。
  */
 const ROOT = path.resolve(__dirname, "..");
 const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
@@ -49,8 +56,9 @@ function steps(build: string): string[] {
  * 谁改了 `build`，这一条就红，逼他把意图写下来。
  */
 const EXPECTED_STEPS = [
-  // ① 自洽性：类型与用例（A2 新增）
+  // ① 自洽性：类型 / lint / 用例（A2 加前两道，B3 加 lint）
   "pnpm typecheck",
+  "pnpm lint",
   "pnpm test",
   // ② 出产物
   "pnpm build:web",
@@ -70,8 +78,9 @@ describe("pnpm build 的门禁链", () => {
     expect(got).toEqual(EXPECTED_STEPS);
   });
 
-  it("五道门都在（类型 / 用例 / 新鲜度 / 打包后可用 / 行为验收）", () => {
+  it("六道门都在（类型 / lint / 用例 / 新鲜度 / 打包后可用 / 行为验收）", () => {
     expect(build, "缺少类型门禁").toContain("pnpm typecheck");
+    expect(build, "缺少 lint 门禁").toContain("pnpm lint");
     expect(build, "缺少用例门禁").toContain("pnpm test");
     expect(build, "缺少新鲜度门禁").toContain("scripts/verify-artifacts.mjs");
     expect(build, "缺少打包后可用性门禁").toContain("scripts/verify-packaged.mjs");
@@ -82,6 +91,7 @@ describe("pnpm build 的门禁链", () => {
     const at = (needle: string) => build.indexOf(needle);
     // 自洽性必须在出产物之前 —— 反过来的话，几分钟的打包时间换不来任何信息
     expect(at("pnpm typecheck"), "typecheck 必须在打包之前").toBeLessThan(at("electron-builder"));
+    expect(at("pnpm lint"), "lint 必须在打包之前").toBeLessThan(at("electron-builder"));
     expect(at("pnpm test"), "test 必须在打包之前").toBeLessThan(at("electron-builder"));
     // 产物先出来，再拿产物去验
     expect(at("electron-builder"), "打包必须在三道门之前").toBeGreaterThan(-1);
@@ -95,13 +105,18 @@ describe("pnpm build 的门禁链", () => {
     expect(got.length).toBeGreaterThanOrEqual(6);
   });
 
-  it("引用的脚本与 npm script 真的存在（清单指向不存在的东西 = 假门禁）", () => {
+  it("引用的脚本、npm script 与 lint 配置都真的存在（清单指向不存在的东西 = 假门禁）", () => {
     for (const f of ["scripts/verify-artifacts.mjs", "scripts/verify-packaged.mjs", "scripts/verify-acceptances.mjs"]) {
       expect(() => readFileSync(path.join(ROOT, f), "utf8"), `${f} 不存在`).not.toThrow();
     }
-    // 两道新门引的是 npm script，不是文件 —— 所以这里查 scripts 表
-    for (const name of ["typecheck", "test", "build:web", "electron:build"]) {
+    // 新门引的是 npm script，不是文件 —— 所以这里查 scripts 表
+    for (const name of ["typecheck", "lint", "test", "build:web", "electron:build"]) {
       expect(pkg.scripts[name], `package.json 里没有 ${name} 这个 script`).toBeTruthy();
     }
+    // lint 的规则集写在配置文件里，缺了它就退回默认那一大坨（B3 明确只开两条）
+    const rc = JSON.parse(readFileSync(path.join(ROOT, ".oxlintrc.json"), "utf8")) as {
+      rules?: Record<string, string>;
+    };
+    expect(Object.keys(rc.rules ?? {}).sort(), "lint 规则集被改动了").toEqual(["no-undef", "no-unused-vars"]);
   });
 });

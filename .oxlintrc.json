@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2024": true,
+    "builtin": true
+  },
+  "categories": {
+    "correctness": "off"
+  },
+  "rules": {
+    "no-unused-vars": "error",
+    "no-undef": "error"
+  },
+  "globals": {
+    "fetch": "readonly",
+    "Blob": "readonly",
+    "File": "readonly",
+    "FormData": "readonly",
+    "Response": "readonly",
+    "Request": "readonly",
+    "Headers": "readonly",
+    "AbortSignal": "readonly",
+    "structuredClone": "readonly",
+    "queueMicrotask": "readonly",
+    "NodeJS": "readonly"
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "dist-electron/**",
+    "release/**",
+    "data/**",
+    ".verify/**",
+    "node_modules/**"
+  ]
+}

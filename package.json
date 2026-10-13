@@ -10,13 +10,14 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",
-    "build": "pnpm typecheck && pnpm test && pnpm build:web && pnpm electron:build && electron-builder --win nsis && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
+    "build": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:web && pnpm electron:build && electron-builder --win nsis && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:packaged": "node scripts/verify-packaged.mjs",
-    "verify:accept": "node scripts/verify-acceptances.mjs"
+    "verify:accept": "node scripts/verify-acceptances.mjs",
+    "lint": "oxlint"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -50,6 +51,7 @@
     "markmap-lib": "0.18.12",
     "markmap-view": "0.18.12",
     "mermaid": "12.1.0",
+    "oxlint": "1.87.0",
     "pangu": "^7.2.0",
     "playwright": "^1.56.0",
     "prismjs": "1.30.0",
