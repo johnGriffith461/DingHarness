@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  HISTORY_LIMIT,
   TOOL_OUTPUT_LIMIT,
   buildHistory,
   outputText,
@@ -54,25 +53,61 @@ describe("buildHistory", () => {
     expect(buildHistory([]).messages).toEqual([]);
   });
 
-  it(`超过 ${HISTORY_LIMIT} 条只留最近的那些，并标记 truncated`, () => {
-    const many = Array.from({ length: HISTORY_LIMIT + 5 }, (_, i) => step(i % 2 ? "assistant" : "user", `第${i}条`, `s${i}`));
+  /*
+   * ⚠️ C3 改过：**条数不再是判据**。
+   *
+   * 原来这里断言"超过 20 条只留最近 20 条"——那道硬截断把压缩阈值架空了
+   * （20 条短消息远不到 2 万 token，"该压就压"于是几乎永远不触发）。
+   * 现在留多少由 `shared/contextWindow.ts` 的 `planContext` **按 token 额度**决定，
+   * 那条规矩本身在 `src/contextWindow.test.ts` 里被测。
+   *
+   * 这里只测**本文件该负责的那段**：把步骤拼成消息、空步骤跳过、折叠工具行、
+   * 以及"切了就给 truncated"这个信号。
+   */
+  it("额度够大时全都留下（本机版常见情形：一段对话远不到额度）", () => {
+    const many = Array.from({ length: 60 }, (_, i) => step(i % 2 ? "assistant" : "user", `第${i}条`, `s${i}`));
     const got = buildHistory(many);
-    expect(got.messages).toHaveLength(HISTORY_LIMIT);
-    expect(got.truncated).toBe(true);
-    // 留的是**最新**的那批
-    expect(got.messages[got.messages.length - 1]?.content).toBe(`第${HISTORY_LIMIT + 4}条`);
-    expect(got.messages[0]?.content).toBe(`第5条`);
+    expect(got.messages).toHaveLength(60);
+    expect(got.truncated).toBe(false);
   });
 
-  it("刚好等于上限时不算截断", () => {
-    const exact = Array.from({ length: HISTORY_LIMIT }, (_, i) => step("user", `第${i}条`, `e${i}`));
-    expect(buildHistory(exact).truncated).toBe(false);
+  it("⭐ 超出额度时切掉更早的那批，并如实标记 truncated（判据是 token，不是条数）", () => {
+    // 单条就很长 → 几十条必然超额度（不必依赖具体数字：额度由 shared 层管）
+    const long = "很长的内容".repeat(4000);
+    const many = Array.from({ length: 6 }, (_, i) => step(i % 2 ? "assistant" : "user", `${long}第${i}条`, `L${i}`));
+    const got = buildHistory(many);
+    expect(got.truncated).toBe(true);
+    expect(got.messages.length).toBeLessThan(many.length);
+    // 留的是**最新**的：最后一条一定在，最早那条一定不在
+    expect(got.messages[got.messages.length - 1]?.content).toContain(`第${many.length - 1}条`);
+    expect(got.messages[0]?.content).not.toContain("第0条");
   });
 
-  it("可以按调用方给的上限裁（便于测试与将来的压缩）", () => {
-    const got = buildHistory([step("user", "1"), step("assistant", "2"), step("user", "3")], 2);
-    expect(got.messages.map((m) => m.content)).toEqual(["2", "3"]);
+  it("⭐ 保留段尽量以 user 开头（否则模型以为自己没头没脑说了那句）", () => {
+    // 每条约 6000 token：额度两万 → 能留三条，四条留不下
+    const mid = "很长的内容".repeat(1200);
+    const many = [
+      step("user", `${mid}A`),
+      step("assistant", `${mid}B`),
+      step("user", `${mid}C`),
+      step("assistant", `${mid}D`),
+    ];
+    const got = buildHistory(many);
     expect(got.truncated).toBe(true);
+    expect(got.messages[0]?.role).toBe("user");
+    expect(got.messages.map((m) => m.content.slice(-1))).toEqual(["C", "D"]);
+  });
+
+  it("⭐⭐ 窗口**永不清空**：只有一条超长助手回复时也发得出去（发空历史更坏）", () => {
+    /*
+     * 这条是把 `recent.length > 0` 写出来的第一版踩出来的：
+     * 那时"一条助手消息就吃满额度"会被挪进 older，于是这一轮**什么历史都不发**——
+     * 模型以为这是全新对话。而用户的下一句紧跟在它后面，因果本来是顺的。
+     */
+    const huge = "很长的内容".repeat(4000);
+    const got = buildHistory([step("assistant", huge)]);
+    expect(got.messages).toHaveLength(1);
+    expect(got.messages[0]?.content).toContain("很长的内容");
   });
 });
 
@@ -122,9 +157,14 @@ describe("工具留痕折进历史（§148）", () => {
 describe("截断时的说明", () => {
   it("⭐ 必须让模型知道「你看不到全部」 —— 否则它会把「没在上下文里」当成「没发生过」", () => {
     const note = truncatedNote();
-    expect(note).toContain(String(HISTORY_LIMIT));
+    /*
+     * ⚠️ C3 改过措辞：不再写"你只能看到最近 20 条消息"。
+     * 那个数字是硬截断留下的，而切分现在按**额度**走 —— 条数不是判据，
+     * 写一个条数反而会让模型误判（同样 20 条，短消息与长消息差几十倍）。
+     */
     expect(note).toContain("更早的对话已省略");
     expect(note).toContain("不要猜");
+    expect(note).not.toContain("条消息");
   });
 });
 

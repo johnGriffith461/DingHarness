@@ -6,6 +6,7 @@ import { artifactFileName, extractArtifacts, type Artifact } from "@/workbench/a
 import { enabledPromptBlock } from "@shared/library";
 import { memoryPromptBlock } from "@shared/memory";
 import { assembleSystem } from "@shared/turnAssembly";
+import { omittedNote, planContext } from "@shared/contextWindow";
 import type { SessionSummary, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "./aiClient";
 import { readConfirmMode } from "@/workbench/confirmMode";
@@ -226,7 +227,7 @@ const shellBridge = (): ShellBridge | undefined =>
  * ⚠️ 动态 import 工作台那两个 store：避免顶层循环依赖
  * （与下面 `abilityBlock` 对 `libraryStore` 的做法一致）。
  */
-async function systemBlocks(): Promise<string> {
+async function systemBlocks(extra?: string): Promise<string> {
   const [abilities, persona, memory] = await Promise.all([
     abilityBlock(),
     (async () => {
@@ -246,7 +247,7 @@ async function systemBlocks(): Promise<string> {
       }
     })(),
   ]);
-  return assembleSystem({ persona, memory, abilities });
+  return assembleSystem({ persona, memory, abilities, ...(extra ? { extra } : {}) });
 }
 
 async function abilityBlock(): Promise<string> {
@@ -581,10 +582,20 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     };
 
     const history = state.messages[conversationId] ?? [];
+    const prior: ChatMessage[] = history
+      .filter((m) => m.status !== "error")
+      .map((m) => ({ role: m.role, content: m.content }) as ChatMessage);
+    /*
+     * ⚠️ 历史**不再全量发**（C3）：留多少由 `shared/contextWindow.ts` 一处说了算。
+     *
+     * 这条路上原来一个上限都没有 —— 而 F3 之后聊天历史会一直涨，迟早把上下文顶爆
+     * （表现是"聊到一半突然报错"）。现在与工作台用同一条缝、同一套规矩。
+     *
+     * 当前这句**永远保留**：切分只作用于历史，新消息是切完之后追加的。
+     */
+    const { older, recent } = planContext(prior);
     const payload: ChatMessage[] = [
-      ...history
-        .filter((m) => m.status !== "error")
-        .map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
+      ...recent,
       { role: "user", content: contextBlock ? `${contextBlock}\n\n${trimmed}` : trimmed },
     ];
 
@@ -689,7 +700,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
          * 这一段与工作台**同一来源**（`enabledPromptBlock`）：用户
          * 在插件·技能·伙伴里开了什么，聊天里就有什么 —— 两处口径一致。
          */
-        system: await systemBlocks(),
+        /*
+         * 系统提示词 = 装配（C2-4：人设 + 记忆 + 能力）+ 省略说明（C3）。
+         *
+         * 历史被切过就如实告诉模型"你看不到全部" —— 与工作台**同一句话**
+         * （`omittedNote`，定义在 `shared/contextWindow.ts`）。
+         */
+        system: await systemBlocks(older.length ? omittedNote("trimmed") : undefined),
       },
       (event: AiStreamEvent) => {
         /*

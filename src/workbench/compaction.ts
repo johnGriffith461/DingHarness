@@ -25,97 +25,27 @@ import type { ChatMessage } from "@shared/ipc";
  * 用户回头翻对话，必须还是原文。
  */
 
-/** 最近多少 token 原样保留（pi 的 `keep`）。 */
-export const KEEP_TOKENS = 20000;
-
-/**
- * 给模型输出留的额度（pi 的 `reserve`）。历史超过 `KEEP_TOKENS` 才压。
+/*
+ * ⚠️ `RESERVE_TOKENS = 16384` **已在 C3 删除**（手册给的裁定时机："要么被用要么被删"）。
  *
- * ⚠️ **未接线（2026-10-13 如实标注）**：全仓零引用 —— 判定用的是
- * `shouldCompact(messages, keepTokens)`（`store.ts:874-887`），只看 `KEEP_TOKENS`。
- * 也就是说"给输出留额度"这件事**现在没有发生**：历史恰好顶到上限时，
- * 真正能发给模型的输入额度会被输出额度挤掉。
- *
- * 按施工手册：**C2 阶段只标注、不删** —— 它的归宿在 C3（"上下文窗口单一负责人"：
- * 单一 token 计量 + 单一压缩缝，那时才谈得上"留多少给输出"）。
- * 删了等 C3 又要加回来，而"悄悄留着不说"正是 `RESERVE_TOKENS` 这段时间的状态。
+ * 为什么是删而不是接上：留额度要先知道**每个模型的上下文上限**，而
+ * `electron/ipc/aiProviders.ts` 里没有这个字段 —— 我们只知道有哪几个模型，
+ * 不知道它们能装多少。硬编一个数就是编数据。
+ * 等 provider 带上真实上限，`shared/contextWindow.ts` 的 `planContext` 加一个
+ * `reserveTokens` 参数即可（**那时**它是"上限减去保留"，而不是凭空定的 16384）。
  */
-export const RESERVE_TOKENS = 16384;
 
 /** 摘要块在系统提示词里的标头。 */
 export const SUMMARY_MARKER = "【更早对话的摘要】";
 
-/**
- * 粗糙但**方向保守**的 token 估算。
+/*
+ * 计量与切分（`estimateTokens` / `totalTokens` / `shouldCompact` / `planContext`）
+ * **搬去了 `shared/contextWindow.ts`**（C3）—— 那是"上下文窗口的唯一负责人"：
+ * 聊天与工作台两条路都调它，免得同一条规矩在两处各长一份。
  *
- * 中英混排：CJK 一字算 1，其余按 4 字符 1 个算。
- * 只用来判断"该不该压"，不追求精确 —— 所以宁可**估多**（早压一点没坏处，
- * 估少了则会真的超）。
- *
- * @param text 文本
- * @returns 估算的 token 数
+ * 这里只留**压缩本身**：怎么把要压的那些拼成一段、摘要怎么挂回系统提示词。
  */
-export function estimateTokens(text: string): number {
-  let cjk = 0;
-  let other = 0;
-  for (const ch of text) {
-    // 中日韩统一表意文字 + 全角标点 + 中文标点
-    if (/[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/.test(ch)) cjk += 1;
-    else other += 1;
-  }
-  return cjk + Math.ceil(other / 4);
-}
-
-/** 一组消息的估算总量。 */
-export function totalTokens(messages: readonly ChatMessage[]): number {
-  return messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-}
-
-/**
- * 该不该压。
- *
- * @param messages 这次准备发的历史
- * @param keepTokens 保留额度
- * @returns 总量超过额度就该压
- */
-export function shouldCompact(messages: readonly ChatMessage[], keepTokens = KEEP_TOKENS): boolean {
-  return totalTokens(messages) > keepTokens;
-}
-
-/**
- * 把历史切成"要压的"与"原样保留的"。
- *
- * ⚠️ `recent` 的第一条**必须是 user** —— 否则它会以"助手的一句话"开头，
- * 模型会以为自己刚才说过那句。必要时把开头那几条 assistant 挪去 `older`。
- *
- * @param messages 历史（旧 → 新）
- * @param keepTokens 保留额度
- * @returns `older` 要压的；`recent` 原样保留的
- */
-export function splitForCompaction(
-  messages: readonly ChatMessage[],
-  keepTokens = KEEP_TOKENS,
-): { older: ChatMessage[]; recent: ChatMessage[] } {
-  const recent: ChatMessage[] = [];
-  let used = 0;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg) continue;
-    const cost = estimateTokens(msg.content);
-    // `recent.length` 这个前置条件保证"最后一条无论多大都会留下"
-    if (recent.length > 0 && used + cost > keepTokens) break;
-    recent.unshift(msg);
-    used += cost;
-  }
-
-  const older = messages.slice(0, messages.length - recent.length);
-  // 以 assistant 开头的 recent 不合法（见上面注释）：挪进 older
-  while (recent.length > 0 && recent[0]?.role !== "user") {
-    const moved = recent.shift();
-    if (moved) older.push(moved);
-  }
-  return { older, recent };
-}
+export { KEEP_RECENT_TOKENS as KEEP_TOKENS, estimateTokens, totalTokens, shouldCompact, planContext } from "@shared/contextWindow";
 
 /**
  * 造"把这段对话压成要点"的请求。

@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@shared/ipc";
+import { omittedNote, planContext } from "@shared/contextWindow";
 import type { ToolTrace } from "@shared/agentTools";
 import type { TaskStep } from "./task";
 
@@ -13,22 +14,17 @@ import type { TaskStep } from "./task";
  *
  * 这与本体不一样（它的「主对话」是多轮的、历史对话页里每行是一整段对话的摘要）。
  *
- * ## 上限
+ * ## 上限（C3 改过）
  *
- * 只保留最近 `HISTORY_LIMIT` 条。**这是一个诚实的截断，不是压缩** ——
- * 更早的内容会被丢掉，所以调用方在 `truncated` 为真时要在系统提示词里**说明**
- * "更早的对话已省略"，让模型知道自己看到的不完整。
+ * **不再按条数截断**。原来这里是"只保留最近 `HISTORY_LIMIT = 20` 条"，
+ * 后果是那段硬截断**把压缩阈值架空了**：20 条消息通常远不到 2 万 token，
+ * 于是"该压就压"这个判定**几乎永远不会触发**（压了个寂寞）。
  *
- * （真正的压缩要按 pi 的参数做：`reserve 16384` / `keep 20000`、
- *   切割点不许落在 tool result 上 —— 那是批次 4。）
+ * 现在：**额度由 `shared/contextWindow.ts` 一处说了算**
+ * （`planContext`：按 token 保留最近的一段，只在消息边界切）。
+ * 截断仍然**是诚实的截断**：切掉的部分会被丢掉，所以调用方在 `truncated` 为真时
+ * 要在系统提示词里说明"更早的对话已省略"。
  */
-
-/**
- * 一次请求最多回看多少条历史消息。
- *
- * 取值理由：本机版一次对话通常十来轮，20 条够连续；再多就该走压缩而不是硬塞。
- */
-export const HISTORY_LIMIT = 20;
 
 /**
  * 一次工具调用的**输出**最多带多少字进历史。
@@ -125,7 +121,7 @@ export function withToolLines(text: string, tools?: ToolTrace[]): string {
  * @param limit 最多回看几条
  * @returns `messages` 按原顺序（旧 → 新）；`truncated` 表示是否丢过更早的
  */
-export function buildHistory(steps: TaskStep[], limit = HISTORY_LIMIT): { messages: ChatMessage[]; truncated: boolean } {
+export function buildHistory(steps: TaskStep[]): { messages: ChatMessage[]; truncated: boolean } {
   const all: ChatMessage[] = [];
   for (const step of steps) {
     const text = withToolLines((step.text ?? "").trim(), step.tools);
@@ -133,8 +129,15 @@ export function buildHistory(steps: TaskStep[], limit = HISTORY_LIMIT): { messag
     if (!text.trim()) continue;
     all.push({ role: step.role, content: text });
   }
-  const truncated = all.length > limit;
-  return { messages: truncated ? all.slice(-limit) : all, truncated };
+  /*
+   * 留多少**由额度说了算**（C3）：`planContext` 按 token 从最新往回留，
+   * 只在消息边界切、最后一条必留、保留段以 user 开头。
+   *
+   * 原来这里还有一道"最多 20 条"的硬截断 —— 它把压缩阈值架空（见文件头）。
+   * 现在条数不再是判据：同样 20 条，短消息与长消息能差几十倍。
+   */
+  const { older, recent } = planContext(all);
+  return { messages: recent, truncated: older.length > 0 };
 }
 
 /**
@@ -143,6 +146,11 @@ export function buildHistory(steps: TaskStep[], limit = HISTORY_LIMIT): { messag
  * 必须让模型知道"你看不到全部" —— 否则它会把"没在上下文里"当成"没发生过"，
  * 于是重复问用户已经回答过的事。
  */
-export function truncatedNote(limit = HISTORY_LIMIT): string {
-  return `【说明】更早的对话已省略，你只能看到最近 ${limit} 条消息。如果缺关键信息，直接说不确定，不要猜。`;
+export function truncatedNote(): string {
+  /*
+   * 文案搬去 `shared/contextWindow.ts`（C3）：聊天侧也要说同样的话。
+   * ⚠️ 措辞随之变了：不再写"你只能看到最近 20 条消息" ——
+   * 那个"20 条"是硬截断留下的数字，而切分现在按**额度**走，条数不是判据。
+   */
+  return omittedNote("trimmed");
 }

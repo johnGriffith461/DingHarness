@@ -24,7 +24,7 @@ import {
   compactPrompt,
   shouldCompact,
   signatureOf,
-  splitForCompaction,
+  planContext,
   withSummary,
 } from "./compaction";
 import { readConfirmMode } from "./confirmMode";
@@ -903,7 +903,7 @@ async function answerTurn(taskId: string, history: TaskStep[], text: string, ext
   let summary = "";
   let olderCount = 0;
   if (shouldCompact(messages, keepTokens)) {
-    const { older, recent } = splitForCompaction(messages, keepTokens);
+    const { older, recent } = planContext(messages, keepTokens);
     if (older.length > 0) {
       summary = await summaryFor(taskId, older);
       if (summary) {

@@ -7,7 +7,7 @@ import {
   estimateTokens,
   shouldCompact,
   signatureOf,
-  splitForCompaction,
+  planContext,
   totalTokens,
   withSummary,
 } from "./compaction";
@@ -68,16 +68,16 @@ describe("shouldCompact", () => {
   });
 });
 
-describe("splitForCompaction", () => {
+describe("planContext", () => {
   it("短历史全留在 recent，没有要压的", () => {
-    const got = splitForCompaction([msg("user", "你好"), msg("assistant", "好")], 100);
+    const got = planContext([msg("user", "你好"), msg("assistant", "好")], 100);
     expect(got.recent).toHaveLength(2);
     expect(got.older).toHaveLength(0);
   });
 
   it("⭐ 切完两端拼起来不丢不重", () => {
     const all = Array.from({ length: 10 }, (_, i) => msg(i % 2 ? "assistant" : "user", "字".repeat(10)));
-    const { older, recent } = splitForCompaction(all, 30);
+    const { older, recent } = planContext(all, 30);
     expect(older.length + recent.length).toBe(all.length);
     expect([...older, ...recent]).toEqual(all);
   });
@@ -90,25 +90,25 @@ describe("splitForCompaction", () => {
       msg("assistant", "字".repeat(10)),
       msg("user", "字".repeat(10)),
     ];
-    const { recent } = splitForCompaction(all, 25);
+    const { recent } = planContext(all, 25);
     expect(recent[0]?.role).toBe("user");
   });
 
   it("最后一条无论多大都留下（不能出现 recent 为空）", () => {
-    const { recent } = splitForCompaction([msg("user", "字".repeat(500))], 10);
+    const { recent } = planContext([msg("user", "字".repeat(500))], 10);
     expect(recent).toHaveLength(1);
     expect(estimateTokens(recent[0]?.content ?? "")).toBe(500);
   });
 
   it("空历史给两个空数组", () => {
-    const got = splitForCompaction([], 10);
+    const got = planContext([], 10);
     expect(got.older).toEqual([]);
     expect(got.recent).toEqual([]);
   });
 
   it("留下来的那批是最新的（不是最旧的）", () => {
     const all = [msg("user", "最早"), msg("assistant", "中"), msg("user", "最新")];
-    const { older, recent } = splitForCompaction(all, 2);
+    const { older, recent } = planContext(all, 2);
     expect(recent[recent.length - 1]?.content).toBe("最新");
     expect(older[0]?.content).toBe("最早");
   });
