@@ -1,0 +1,12 @@
+node_modules/
+node_modules.bak/
+dist/
+dist-electron/
+release/
+data/
+*.log
+.env
+.env.local
+.DS_Store
+# 本地验收脚本与截图（浏览器自动化用，不属于产品代码）
+.verify/

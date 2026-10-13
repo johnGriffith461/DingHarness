@@ -1,0 +1,122 @@
+import type { ArtifactKind } from "../src/workbench/artifact";
+
+/**
+ * 产物类型与状态的**协议层**定义（阶段 11.29）。
+ *
+ * ## 为什么要对这套东西
+ * 上位那边产物的类型不是前端自己编的字符串，而是协议里的枚举
+ * （`ArtifactResourceType` 0–17）。我们本地只用得到其中几种，
+ * **但编号对不上就是另一套东西了** —— 将来要跟这套协议对接时，
+ * 「本地叫 docx、协议里 Docx 是 10」这种散落在各处的对应关系迟早出错。
+ *
+ * 把编号集中在这里，好处有两个：
+ *   1. 本地类型与协议类型是**一处映射**，不是散的；
+ *   2. 协议里那些本地用不到的档位也**如实列出来** ——
+ *      它们的存在本身是信息（比如 Miaoda 13 / Wiki 14 / Base 15
+ *      是"服务端生成的其它产物形态"，本机版不做，但要知道有这些坑）。
+ *
+ * ## 两套状态，别混
+ * 协议里有**两层**状态，早期容易当成一层：
+ *   · 产物级 `ArtifactStatus` —— 这个产物整体什么情况（初始/生成中/已生成/已删/终止/不支持）
+ *   · 操作级 `ArtifactOpStatus` —— **某一次写操作**的进展（开始/完成/更新/回滚）
+ * 一次产物生成里可以有多次写操作（Start → Updated → Updated → Finish），
+ * 所以两层不能合并成一个字段。
+ */
+
+/** 协议里的产物类型编号（`ArtifactResourceType`）。 */
+export const ARTIFACT_RESOURCE_TYPE = {
+  Undefined: 0,
+  WriteDoc: 1,
+  Pages: 2,
+  CanvasPage: 3,
+  StepWritingPage: 4,
+  Code: 5,
+  StepWritingOtterPage: 6,
+  CodeBlock: 7,
+  CodeDevelopMode: 8,
+  Slides: 9,
+  Docx: 10,
+  StepDocx: 11,
+  Excel: 12,
+  Miaoda: 13,
+  Wiki: 14,
+  Base: 15,
+  CanvasWorkspace: 16,
+  Markdown: 17,
+} as const;
+
+/** 本地产物类型 → 协议编号。**只列本地真的会产出、且能明确对应的那些**。 */
+const KIND_TO_TYPE: Record<ArtifactKind, number> = {
+  markdown: ARTIFACT_RESOURCE_TYPE.Markdown,
+  docx: ARTIFACT_RESOURCE_TYPE.Docx,
+  pptx: ARTIFACT_RESOURCE_TYPE.Slides,
+  xlsx: ARTIFACT_RESOURCE_TYPE.Excel,
+  code: ARTIFACT_RESOURCE_TYPE.CodeBlock,
+  html: ARTIFACT_RESOURCE_TYPE.Pages,
+  // 下面两个在协议里没有一一对应的档位：图片与画布都归到工作区范畴
+  image: ARTIFACT_RESOURCE_TYPE.CanvasWorkspace,
+  canvas: ARTIFACT_RESOURCE_TYPE.CanvasPage,
+};
+
+/**
+ * 取某个本地类型对应的协议编号。
+ *
+ * @param kind 本地类型
+ * @returns 协议编号；本地类型不在映射里时给 `Undefined`
+ */
+export function resourceTypeOf(kind: ArtifactKind): number {
+  return KIND_TO_TYPE[kind] ?? ARTIFACT_RESOURCE_TYPE.Undefined;
+}
+
+/**
+ * 反查：协议编号 → 本地类型。
+ *
+ * 同一个编号可能对应多个本地类型（比如若干"服务端文档形态"都落到 markdown），
+ * 所以这里给**第一个**匹配，够用了 —— 本机版没有从协议反推产物的场景。
+ *
+ * @param type 协议编号
+ * @returns 本地类型；对不上时给 null（**不瞎猜**）
+ */
+export function kindOfResourceType(type: number): ArtifactKind | null {
+  for (const [kind, value] of Object.entries(KIND_TO_TYPE) as Array<[ArtifactKind, number]>) {
+    if (value === type) return kind;
+  }
+  return null;
+}
+
+/** 协议里的**产物级**状态（`ArtifactStatus`）。 */
+export const ARTIFACT_STATUS = {
+  Init: 0,
+  Generating: 1,
+  Generated: 2,
+  Deleted: 3,
+  Terminal: 4,
+  UnSupport: 5,
+} as const;
+
+/** 协议里的**操作级**状态（`ArtifactOpStatus`）—— 某一次写操作的进展。 */
+export const ARTIFACT_OP_STATUS = {
+  Start: 1,
+  Finish: 2,
+  Updated: 3,
+  Rollbacked: 4,
+} as const;
+
+/**
+ * 本地产物状态 → 协议编号。
+ *
+ * 本地只有三个态（生成中 / 已生成 / 已删除），映射到协议里对应的那几个。
+ */
+export function artifactStatusOf(status: "generating" | "ready" | "removed" | undefined): number {
+  switch (status) {
+    case "generating":
+      return ARTIFACT_STATUS.Generating;
+    case "ready":
+      return ARTIFACT_STATUS.Generated;
+    case "removed":
+      return ARTIFACT_STATUS.Deleted;
+    default:
+      // 没标状态 = 已经拿到手的东西，按"已生成"算（协议里 Init 是"还没开始"）
+      return ARTIFACT_STATUS.Generated;
+  }
+}

@@ -1,0 +1,472 @@
+import { app, dialog, shell } from "electron";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { kindOf, type DriveEntry, type DriveKind } from "../../shared/drive";
+import { isUnsupported, type ImportItem } from "../../shared/upload";
+// 生成图落的目录（与 imageGen 同一处，不另写一份路径）
+import { assetsDir } from "./imageGen";
+
+/**
+ * 云盘（阶段 11.5）。
+ *
+ * ## 为什么不是"再写一份假数据"
+ * 云盘页原来是**遍历原版时的截图里那几行文件名** —— 那等于把"当时看到的东西"
+ * 当成了实现，换个账号一行都不对。这里接**真实目录**，看到的每一条都是磁盘上真有的文件。
+ *
+ * ## 三个来源目录
+ * - `artifacts/` —— 任务产出的产物（阶段 11.1/11.2 落的那批）
+ * - `exports/` —— 画布导出的 PNG
+ * - `drive/` —— 用户从外面导进云盘的文件
+ *
+ * 三个来源都列在一起、用 `origin` 区分来源，因为用户视角里它们都是"我的文件"。
+ */
+
+/** 通道名。 */
+/** 一份文件读成文本的上限（§158）。 */
+export const READ_MAX_BYTES = 200 * 1024;
+
+export const DRIVE_CHANNEL = {
+  list: "drive:list",
+  import: "drive:import",
+  importPaths: "drive:importPaths",
+  importData: "drive:importData",
+  remove: "drive:remove",
+  reveal: "drive:reveal",
+  open: "drive:open",
+  duplicate: "drive:duplicate",
+  create: "drive:create",
+  mkdir: "drive:mkdir",
+  rename: "drive:rename",
+  download: "drive:download",
+  read: "drive:read",
+} as const;
+
+/** 云盘本体目录（用户导进来的文件）。 */
+export function driveDir(): string {
+  return path.join(app.getPath("userData"), "drive");
+}
+
+/** 产物目录。 */
+function artifactsDir(): string {
+  return path.join(app.getPath("userData"), "artifacts");
+}
+
+/** 画布导出目录。 */
+function exportsDir(): string {
+  return path.join(app.getPath("userData"), "exports");
+}
+
+/** 三个来源目录与它们的 origin 标签。 */
+function sources(): Array<{ dir: string; origin: DriveEntry["origin"] }> {
+  return [
+    { dir: artifactsDir(), origin: "artifact" },
+    { dir: exportsDir(), origin: "export" },
+    { dir: driveDir(), origin: "drive" },
+    /*
+     * `assets/` —— **生成的图片**落在这里（§166）。
+     *
+     * 原来只扫前三个目录，于是"生成了一张图"在云盘里**根本看不到**：
+     * 它只存在于生成页那一份内存列表里，关掉就没了。
+     * 加进来之后：生成的东西在云盘里能看、能筛、能重命名、能删。
+     */
+    { dir: assetsDir(), origin: "asset" },
+  ];
+}
+
+/**
+ * 列出一个目录里的文件。
+ *
+ * @param dir 目录
+ * @param origin 来源标签
+ * @returns 条目；目录不存在时返回空数组（**不是错误** —— 还没产出过东西时目录就是没有）
+ */
+async function listDir(dir: string, origin: DriveEntry["origin"]): Promise<DriveEntry[]> {
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  const out: DriveEntry[] = [];
+  for (const name of names) {
+    const full = path.join(dir, name);
+    try {
+      const stat = await fs.stat(full);
+      if (!stat.isFile()) continue;
+      // 隐藏文件不列（.DS_Store 之类）
+      if (name.startsWith(".")) continue;
+      out.push({
+        name,
+        path: full,
+        bytes: stat.size,
+        createdAt: stat.birthtimeMs || stat.ctimeMs,
+        modifiedAt: stat.mtimeMs,
+        kind: kindOf(name) as DriveKind,
+        origin,
+      });
+    } catch {
+      // 单个文件读不到就跳过，不影响整个列表
+    }
+  }
+  return out;
+}
+
+/**
+ * 列出全部云盘文件。
+ *
+ * **同名去重**：产物与导出目录里可能有同名文件（例如两次导出都叫 `画布.png`）。
+ * 名字是界面上唯一的标识（也是收藏的依据），所以同名时靠前的来源优先。
+ *
+ * @returns 去重后的条目
+ */
+export async function listDrive(): Promise<DriveEntry[]> {
+  const groups = await Promise.all(sources().map(({ dir, origin }) => listDir(dir, origin)));
+  const seen = new Set<string>();
+  const out: DriveEntry[] = [];
+  for (const group of groups) {
+    for (const entry of group) {
+      if (seen.has(entry.name)) continue;
+      seen.add(entry.name);
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+/**
+ * 校验路径确实在我们自己的三个目录里。
+ *
+ * 跨进程边界上必须挡一手：不校验的话渲染进程传任意路径就能让主进程删它 / 打开它。
+ *
+ * @param raw 渲染进程给的路径
+ * @returns 通过校验的绝对路径；不通过返回 null
+ */
+function insideOwnedDirs(raw: string): string | null {
+  const resolved = path.resolve(String(raw ?? ""));
+  for (const { dir } of sources()) {
+    const rel = path.relative(path.resolve(dir), resolved);
+    if (!rel.startsWith("..") && !path.isAbsolute(rel)) return resolved;
+  }
+  return null;
+}
+
+/**
+ * 注册云盘 IPC。
+ *
+ * @param ipcMain Electron 的 ipcMain
+ * @param getWindow 取主窗口（导入用的对话框要挂在它上面）
+ */
+/** 一次导入的结果（**按文件**回报，不只是数量）。 */
+export type ImportOutcome = { imported: number; dir: string; items: ImportItem[] };
+
+/**
+ * 把一批路径导入云盘（§170）。
+ *
+ * ⚠️ 与原来只回一个数字的版本相比，这里**按文件回报**：
+ * 哪几个进来了、哪几个没进来、为什么 —— 上传状态面板要靠它。
+ *
+ * 两条失败原因（都是证据里的词）：
+ * - `formatUnsupported`：可执行 / 安装包那一类（见 `shared/upload.ts` 的拒绝清单）；
+ * - `parseFail`：读不了或拷不过去。
+ *
+ * 单个文件失败**不会**让整批失败（原来也是这个口径）。
+ *
+ * @param sources 源文件路径
+ * @returns 结果（`items` 与 `sources` 一一对应）
+ */
+/**
+ * 往云盘里放一份字节（§171）。
+ *
+ * @param dir 云盘目录
+ * @param name 想要的文件名（重名会加序号）
+ * @param write 真正落盘的动作
+ * @returns 结果条目
+ */
+async function putIntoDrive(
+  dir: string,
+  name: string,
+  write: (target: string) => Promise<void>,
+): Promise<ImportItem> {
+  if (isUnsupported(name)) return { name, ok: false, reason: "formatUnsupported" };
+  try {
+    const target = await uniqueName(dir, name);
+    await write(path.join(dir, target));
+    return { name, ok: true, savedAs: target };
+  } catch {
+    return { name, ok: false, reason: "parseFail" };
+  }
+}
+
+export async function importPaths(sources: readonly string[]): Promise<ImportOutcome> {
+  const dir = driveDir();
+  await fs.mkdir(dir, { recursive: true });
+  const items: ImportItem[] = [];
+  let imported = 0;
+  for (const source of sources) {
+    const item = await putIntoDrive(dir, path.basename(source), (target) => fs.copyFile(source, target));
+    if (item.ok) imported += 1;
+    items.push(item);
+  }
+  return { imported, dir, items };
+}
+
+/**
+ * 按**内容**导入（§171，拖拽走这条）。
+ *
+ * 为什么需要它：拖进来的文件在渲染进程那边是 `File` 对象，
+ * **不一定拿得到磁盘路径**（Electron 里也能拿，但路径拿不到时不该就没办法了）。
+ * 有内容就够了 —— 而且这条路**能被自动化验**（造一个真 `File` 就能走完）。
+ *
+ * @param items 名字 + 字节
+ * @returns 与 `importPaths` 同一形状的结果
+ */
+export async function importData(
+  items: Array<{ name: string; data: Uint8Array }>,
+): Promise<ImportOutcome> {
+  const dir = driveDir();
+  await fs.mkdir(dir, { recursive: true });
+  const out: ImportItem[] = [];
+  let imported = 0;
+  for (const item of items) {
+    const got = await putIntoDrive(dir, path.basename(String(item?.name ?? "")), (target) =>
+      fs.writeFile(target, Buffer.from(item.data)),
+    );
+    if (got.ok) imported += 1;
+    out.push(got);
+  }
+  return { imported, dir, items: out };
+}
+
+export function registerDriveIpc(
+  ipcMain: Electron.IpcMain,
+  getWindow: () => Electron.BrowserWindow | null,
+): void {
+  ipcMain.handle(DRIVE_CHANNEL.list, (): Promise<DriveEntry[]> => listDrive());
+
+  ipcMain.handle(DRIVE_CHANNEL.import, async (): Promise<ImportOutcome> => {
+    const win = getWindow();
+    const picked = win
+      ? await dialog.showOpenDialog(win, {
+          title: "导入到云盘",
+          properties: ["openFile", "multiSelections"],
+        })
+      : await dialog.showOpenDialog({ properties: ["openFile", "multiSelections"] });
+    if (picked.canceled || picked.filePaths.length === 0) return { imported: 0, dir: driveDir(), items: [] };
+    return importPaths(picked.filePaths);
+  });
+
+  /*
+   * 程序化导入（§170）：拖拽、批量、以及**验收**都走这条路 ——
+   * 它与上面那个对话框入口**共用同一段实现**（不是两套）。
+   */
+  ipcMain.handle(DRIVE_CHANNEL.importPaths, async (_event, paths: unknown): Promise<ImportOutcome> =>
+    importPaths(Array.isArray(paths) ? paths.filter((x): x is string => typeof x === "string") : []),
+  );
+
+  ipcMain.handle(DRIVE_CHANNEL.importData, async (_event, items: unknown): Promise<ImportOutcome> => {
+    const list = Array.isArray(items) ? items : [];
+    return importData(
+      list
+        .filter((x): x is { name: string; data: Uint8Array } => Boolean(x) && typeof x.name === "string")
+        .map((x) => ({ name: x.name, data: new Uint8Array(x.data as unknown as ArrayBufferLike) })),
+    );
+  });
+
+  /*
+   * 新建文件夹（§157）。本体云盘的「新建文件夹」是个真目录；
+   * 本机版的云盘目录是**平的**（不建层级），所以这里建目录只用于"有个地方放东西"，
+   * 界面上如实说明不显示层级。
+   */
+  /*
+   * 重命名（§158，`drive_menuOption_rename`）。
+   * 只在同一目录内改名 —— 传进来的名字里带分隔符、或目标已存在，都直接拒掉。
+   */
+  /*
+   * 下载 / 另存为（§169，`drive_menuOption_download`）。
+   *
+   * 两种用法：
+   * - **给了目标目录** → 静默复制过去（批量下载、以及验收里能确定性验的那条路）；
+   * - **没给** → 弹系统"另存为"框，让用户挑地方。
+   *
+   * ⚠️ 源文件**必须落在白名单目录里**（与 `dshasset://file/<origin>/<名字>` 同一条边界）——
+   * 渲染进程给的东西一律按不可信处理，否则这里就成了"任意文件读出"。
+   */
+  ipcMain.handle(
+    DRIVE_CHANNEL.download,
+    async (
+      _event,
+      filePath: string,
+      targetDir?: string,
+    ): Promise<{ ok: boolean; savedTo?: string; canceled?: boolean }> => {
+      try {
+        const src = path.resolve(String(filePath ?? ""));
+        const inside = sources().some((s) => {
+          const rel = path.relative(path.resolve(s.dir), src);
+          return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+        });
+        if (!inside) return { ok: false };
+        const stat = await fs.stat(src);
+        if (!stat.isFile()) return { ok: false };
+
+        let dest = String(targetDir ?? "").trim();
+        if (dest) {
+          await fs.mkdir(dest, { recursive: true });
+          dest = path.join(dest, path.basename(src));
+        } else {
+          const picked = await dialog.showSaveDialog({
+            title: "另存为",
+            defaultPath: path.basename(src),
+            buttonLabel: "保存",
+          });
+          // 用户点了取消：这不是失败，界面上要说"下载已取消"
+          if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+          dest = picked.filePath;
+        }
+        await fs.copyFile(src, dest);
+        return { ok: true, savedTo: dest };
+      } catch {
+        return { ok: false };
+      }
+    },
+  );
+
+  ipcMain.handle(DRIVE_CHANNEL.rename, async (_event, filePath: string, newName: string): Promise<string | null> => {
+    const clean = String(newName ?? "").trim();
+    if (!clean || /[\\/]/.test(clean)) return null;
+    try {
+      const from = path.resolve(String(filePath));
+      const dir = path.dirname(from);
+      const to = path.join(dir, clean);
+      // 目标已存在就不动（**不覆盖**）
+      try {
+        await fs.access(to);
+        return null;
+      } catch {
+        /* 不存在才是正常的 */
+      }
+      await fs.rename(from, to);
+      return clean;
+    } catch {
+      return null;
+    }
+  });
+
+  /*
+   * 读文本（§158，右键菜单里的「AI 阅读」要用）。
+   * 超上限就返回 null —— 把几兆的东西塞进阅读面板只会把界面卡住。
+   */
+  ipcMain.handle(DRIVE_CHANNEL.read, async (_event, filePath: string): Promise<string | null> => {
+    try {
+      const stat = await fs.stat(String(filePath));
+      if (!stat.isFile() || stat.size > READ_MAX_BYTES) return null;
+      return await fs.readFile(String(filePath), "utf8");
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle(DRIVE_CHANNEL.mkdir, async (_event, name: string): Promise<string | null> => {
+    const clean = String(name ?? "").trim();
+    if (!clean || /[\\/]/.test(clean)) return null;
+    try {
+      await fs.mkdir(path.join(driveDir(), clean), { recursive: false });
+      return clean;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle(DRIVE_CHANNEL.remove, async (_event, filePath: string): Promise<boolean> => {
+    const target = insideOwnedDirs(filePath);
+    if (!target) return false;
+    try {
+      await fs.unlink(target);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  /**
+   * 新建一个文件（对标云盘「＋新建」）。
+   *
+   * 建的是**真的空 Markdown 文件**，不是只弹一句话 ——
+   * 原来那个按钮点了只给个提示，等于死按钮。
+   *
+   * 只允许建文本类：名称里带路径分隔符的一律拒掉（渲染进程给的东西按不可信处理）。
+   */
+  ipcMain.handle(
+    DRIVE_CHANNEL.create,
+    async (_event, rawName: string, rawContent: string): Promise<string | null> => {
+      const name = String(rawName ?? "").trim();
+      if (!name) return null;
+      // 名字里不能有路径成分，也不能是 . 或 ..
+      if (name !== path.basename(name) || name === "." || name === "..") return null;
+      const finalName = /\.[A-Za-z0-9]{1,8}$/.test(name) ? name : `${name}.md`;
+      const dir = driveDir();
+      try {
+        const unique = await uniqueName(dir, finalName);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(path.join(dir, unique), String(rawContent ?? ""), "utf8");
+        return unique;
+      } catch {
+        return null;
+      }
+    },
+  );
+
+  /**
+   * 创建副本（对标云盘行右键菜单里的「创建副本」）。
+   *
+   * 复制到**同一个目录**、名字加「-副本」；同名时再加序号。
+   * 不做「复制到别的目录」—— 那需要一个目录选择器，属于另一个功能。
+   */
+  ipcMain.handle(DRIVE_CHANNEL.duplicate, async (_event, filePath: string): Promise<string | null> => {
+    const target = insideOwnedDirs(filePath);
+    if (!target) return null;
+    const dir = path.dirname(target);
+    const ext = path.extname(target);
+    const stem = path.basename(target, ext);
+    try {
+      const name = await uniqueName(dir, `${stem}-副本${ext}`);
+      await fs.copyFile(target, path.join(dir, name));
+      return name;
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle(DRIVE_CHANNEL.reveal, (_event, filePath: string): boolean => {
+    const target = insideOwnedDirs(filePath);
+    if (!target) return false;
+    shell.showItemInFolder(target);
+    return true;
+  });
+
+  ipcMain.handle(DRIVE_CHANNEL.open, async (_event, filePath: string): Promise<string> => {
+    const target = insideOwnedDirs(filePath);
+    if (!target) return "这个文件不在云盘目录里";
+    return (await shell.openPath(target)) || "";
+  });
+}
+
+/**
+ * 目录内不重名。同名时追加 `-2`、`-3`…
+ *
+ * @param dir 目录
+ * @param name 期望文件名
+ * @returns 可用的文件名
+ */
+async function uniqueName(dir: string, name: string): Promise<string> {
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  let candidate = name;
+  for (let i = 2; i < 500; i += 1) {
+    try {
+      await fs.access(path.join(dir, candidate));
+    } catch {
+      return candidate;
+    }
+    candidate = `${stem}-${i}${ext}`;
+  }
+  return `${stem}-${Date.now()}${ext}`;
+}

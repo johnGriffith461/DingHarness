@@ -1,0 +1,500 @@
+/**
+ * 工作台的任务模型（阶段 10，依据 `.verify\tour\` 的实机遍历，见 HANDOFF §25）。
+ *
+ * 原版不是"聊天窗口"，是**任务工作台**：发一句话就开出一个任务，
+ * 它自己起标题、自己问清关键信息、跑完给你产物。这几个机制里有三件事
+ * 必须用纯逻辑做对、且能离线验证：
+ *
+ *   1. **任务自动命名** —— 列表里显示的是「产品周报撰写」，不是用户发的原文
+ *   2. **进度计时文案** —— 「已处理 31 秒」→「已处理 2 分 35 秒」→ 完成后「共用时 3 分 41 秒 ›」
+ *   3. **澄清提问卡的推进** —— 同一张卡逐题走，最多 3 题，走完才继续干活
+ */
+
+/** 任务在生命周期里的位置。 */
+export type TaskStage = "running" | "awaiting" | "done" | "failed";
+
+import { ARTIFACT_FORMATS, type Artifact, type ArtifactKind } from "./artifact";
+import { normalizeToolTraces, type ToolTrace } from "@shared/agentTools";
+
+/** 对话里的一条。 */
+export type TaskStep = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  at: number;
+  /** AI 消息的额度消耗（原版显示「消耗 0.48」）。 */
+  cost?: number;
+  /**
+   * 产出这条 AI 回复时**实际发出去的用户内容**。
+   *
+   * 「重新生成」要能原样再问一遍。光靠"上一条用户消息"重建是不够的：
+   * 那一轮可能已经带着前面积累的问答，重建会得到不同的上下文、也就不是"重新生成"了。
+   */
+  askedWith?: string;
+  /** 用户对这条回复的评价（有帮助 / 没帮助）；原版也是本地留痕。 */
+  rating?: "up" | "down";
+  /**
+   * 产出这条回复时**用过的工具**（§141 step 事件化）。
+   *
+   * 一次模型调用 + 该步工具执行 = 一个 step；工具留痕挂在 step 上，
+   * 而不是挂在任务上 —— 因为"哪一步用了什么工具"才会被后面用到
+   * （回滚到某一步、按步压缩上下文、重放）。
+   */
+  tools?: ToolTrace[];
+  /**
+   * 这一步额外要告诉用户的一件事（§149）。
+   *
+   * 现在只用于**"更早的对话已压缩为摘要"**：压缩改变了模型看到的上下文，
+   * 用户有权知道。放在步骤上而不是飘一个 toast —— 飘提示刷新就没了，
+   * 回头翻这段对话会不知道当时发生了什么。
+   */
+  note?: string;
+};
+
+/** 澄清提问卡里的一个选项。 */
+export type TaskOption = {
+  /** 主文案，例如「拼多多家纺/母婴店」。 */
+  label: string;
+  /** 一行的补充说明，例如「围绕你经营的拼多多店铺写店铺/产品运营周报」。 */
+  hint: string;
+};
+
+/** 一张澄清提问卡。 */
+export type TaskQuestion = {
+  id: string;
+  /** 问句本身。 */
+  text: string;
+  options: TaskOption[];
+};
+
+/** 一个问题连同它的选项；对齐原版"最多 3 题、逐题推进"。 */
+export const MAX_QUESTIONS = 3;
+
+/** 一个任务。 */
+export type WorkTask = {
+  id: string;
+  /** 自动归纳出来的标题（不是用户原文）。 */
+  title: string;
+  /** 用户发的第一句，留作副信息。 */
+  brief: string;
+  createdAt: number;
+  stage: TaskStage;
+  /** 开始计时的时间点；null 表示还没开始。 */
+  startedAt: number | null;
+  /** 结束时间点；有值时进度文案切成「共用时」。 */
+  finishedAt: number | null;
+  steps: TaskStep[];
+  /** 待回答的问题队列。 */
+  questions: TaskQuestion[];
+  /** 当前问到第几题（0 基）。 */
+  questionIndex: number;
+  /** 正在跑的话术，例如「正在询问用户」。 */
+  activity: string;
+  /** 这个任务产出的文件（阶段 11.1）。 */
+  artifacts: Artifact[];
+};
+
+/* ============================================================
+ * 1. 任务自动命名
+ * ============================================================ */
+
+/** 开头的客气/填充词，归纳标题时要去掉。 */
+const LEADING_FILLER = /^(帮我|请|麻烦|我想要|我需要|我要|能不能|可以|帮忙|给我|想让你|希望你)+/;
+/**
+ * 开头的「动作 + 量词」，例如「写一份」「整理一下」「生成一张」。
+ *
+ * 必须去掉：实测原版把「帮我写一份简短的产品周报，…」命名为「产品周报撰写」，
+ * 而不是把动作词也留在标题里。早期实现漏了这一条，产出
+ * 「写一份简短的产品周报撰写」这种又长又别扭的标题。
+ */
+const LEADING_ACTION =
+  /^(?:制作|写|做|生成|整理|制定|拟定|起草|撰写|编写|翻译|汇总|梳理|排版|出|来|搞|准备|弄|创作|设计)\s*(?:一份|一个|一张|一段|一条|一篇|一下|个|份|张|段|条|篇|次)?\s*/;
+/** 开头的修饰语，例如「简短的」「详细的」「正式的」。 */
+const LEADING_MODIFIER =
+  /^(?:简短的|详细的|正式的|完整的|大致的|规范的|简单的|粗略的|一份|一个|一张|一段|一条|一篇|简单|粗略)\s*/;
+/**
+ * 开头的**产物格式词**，例如「Word 写一份总结汇报」里的 `Word `。
+ *
+ * 原版的推荐卡就是这种写法（「Word 写一份总结汇报」「PPT 制作一份 TED 风格演讲」），
+ * 用户直接点就用这句话当任务。格式词是**要什么格式**、不是**做什么**，
+ * 留在标题里会变成「Word 写一份总结汇报：本撰写」这种怪东西。
+ */
+const LEADING_FORMAT = /^(?:word|excel|ppt|pptx|xlsx|docx|markdown|html|表格|文档|幻灯片)\s+/i;
+/** 结尾的礼貌尾巴。 */
+const TRAILING_FILLER = /(吧|好吗|谢谢|，谢谢|。谢谢)?[。．.!！?？~～\s]*$/;
+
+/** 产物类型 → 更贴切的动词后缀（对标原版「产品周报**撰写**」）。 */
+const ARTIFACT_SUFFIX: Array<[RegExp, string]> = [
+  [/(周报|日报|月报|报告|总结|汇报)/, "撰写"],
+  [/(PPT|幻灯片|演示|演讲)/i, "制作"],
+  // `表$` 是必要的：「销售表」「统计表」这类以「表」结尾的很常见，
+  // 只认「表格」两个字会漏掉它们（实测漏过一次）
+  [/(报表|表格|清单|Excel|统计|表$)/i, "整理"],
+  [/(画布|脑图|导图|可视化)/, "绘制"],
+  [/(方案|计划|规划)/, "拟定"],
+  [/(代码|脚本|程序)/, "编写"],
+  [/(翻译|译成|英文|日文)/, "翻译"],
+  [/(审核|检查|校对|润色)/, "润色"],
+];
+
+/**
+ * 从用户第一句话里归纳出一个任务标题（**本地启发式**，确定性、可离线验证）。
+ *
+ * 原版的标题看着是模型归纳的。这里先用规则拿到一个不差的标题，
+ * 立即显示、不用等网络；模型可用时再由调用方异步换成更贴切的一版
+ * （`refineTitle` 的职责留给上层，本函数只保证"离线也有标题"）。
+ *
+ * @param message 用户发的第一句
+ * @returns 归纳出的标题；实在提不出东西就退成「新工作任务」
+ */
+export function autoTaskTitle(message: string): string {
+  let text = String(message ?? "").trim();
+  if (!text) return "新工作任务";
+
+  // 去掉开头的客气词与结尾的礼貌尾巴
+  text = text.replace(LEADING_FILLER, "").replace(TRAILING_FILLER, "").trim();
+  // 产物格式词（Word / PPT…）不是任务内容
+  text = text.replace(LEADING_FORMAT, "").trim();
+
+  // 只取首个分句 —— 后面通常是补充说明，塞进标题会又长又杂。
+  // **冒号也要切**：中文里冒号后面基本都是补充（「总结汇报：本周做了…」）。
+  const head = text.split(/[，,；;。.！!？?：:\n]/)[0]?.trim() ?? "";
+  if (head) text = head;
+
+  // 反复剥掉开头的动作词与修饰语，直到不再变化（「写一份简短的产品周报」要剥两层）
+  for (let i = 0; i < 4; i += 1) {
+    const before = text;
+    text = text.replace(LEADING_ACTION, "").replace(LEADING_MODIFIER, "").trim();
+    if (text === before || !text) break;
+  }
+
+  // 还太长就截断（列表项放不下）
+  const MAX = 14;
+  if (text.length > MAX) text = text.slice(0, MAX);
+
+  if (!text) return "新工作任务";
+
+  // 按产物类型补一个动词后缀。已经带了动词就不重复加。
+  for (const [pattern, suffix] of ARTIFACT_SUFFIX) {
+    if (pattern.test(text)) {
+      if (text.endsWith(suffix)) return text;
+      return `${text}${suffix}`;
+    }
+  }
+  return text;
+}
+
+/* ============================================================
+ * 2. 进度计时文案
+ * ============================================================ */
+
+/**
+ * 把毫秒数说成人话。
+ *
+ * **四档**，不是两档 —— 从上位源码的 i18n 表里读到原版的口径：
+ * ```
+ * infra_cot_working_dayHourMinSec  已处理 {s_day} 天 {s_hour} 小时 {s_minute} 分 {s_second} 秒
+ * infra_cot_working_hourMinSec     已处理 {s_hour} 小时 {s_minute} 分 {s_second} 秒
+ * infra_cot_working_minSec         已处理 {s_minute} 分 {s_second} 秒
+ * infra_cot_working_sec            已处理 {s_second} 秒
+ * ```
+ * 规则是**只显示最高位那一档**：有天才报天，有小时只报「时/分/秒」，依次退。
+ * 我最初只做了「分/秒」两档，跑两小时的录制会显示成「已处理 120 分 0 秒」。
+ *
+ * @param ms 已经过的毫秒数
+ * @returns 时长片段，例如 `31 秒` / `2 分 35 秒` / `1 小时 2 分 3 秒`
+ */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000));
+  const day = Math.floor(total / 86400);
+  const hour = Math.floor((total % 86400) / 3600);
+  const minute = Math.floor((total % 3600) / 60);
+  const second = total % 60;
+  if (day > 0) return `${day} 天 ${hour} 小时 ${minute} 分 ${second} 秒`;
+  if (hour > 0) return `${hour} 小时 ${minute} 分 ${second} 秒`;
+  if (minute > 0) return `${minute} 分 ${second} 秒`;
+  return `${second} 秒`;
+}
+
+/** 未结束时（拿不到结束时间）的占位文案，与上位一致。 */
+export const ELAPSED_PLACEHOLDER = "共用时 —";
+
+/**
+ * 进度行的完整文案。
+ *
+ * @param task 任务
+ * @param now 当前时间（调用方传入，便于测试）
+ * @returns 例如 `已处理 31 秒`；任务结束后是 `共用时 3 分 41 秒`
+ */
+export function progressLabel(task: WorkTask, now: number): string {
+  if (task.startedAt === null) return "";
+  if (task.finishedAt !== null) {
+    return `共用时 ${formatDuration(task.finishedAt - task.startedAt)}`;
+  }
+  if (task.stage === "awaiting") return ""; // 在等用户回答，不计时（原版此时不显示进度行）
+  return `已处理 ${formatDuration(now - task.startedAt)}`;
+}
+
+/* ============================================================
+ * 3. 澄清提问卡的推进
+ * ============================================================ */
+
+/**
+ * 当前该问的问题。
+ * @returns 没有问题、或已经问完时返回 null（调用方据此继续干活）
+ */
+export function currentQuestion(task: WorkTask): TaskQuestion | null {
+  if (task.stage !== "awaiting") return null;
+  return task.questions[task.questionIndex] ?? null;
+}
+
+/** 分页文案，例如 `1/3`。没有问题时返回空串。 */
+export function questionProgress(task: WorkTask): string {
+  const total = task.questions.length;
+  if (total === 0) return "";
+  return `${Math.min(task.questionIndex + 1, total)}/${total}`;
+}
+
+/**
+ * 回答当前问题，推进到下一题。
+ *
+ * @param task 当前任务
+ * @param answer 用户选的/填的答案（要记进对话流）
+ * @param stepId 新步骤的 id（由调用方生成，避免这里依赖随机数）
+ * @param now 当前时间
+ * @returns 推进后的任务；若已是最后一题，stage 切回 `running`
+ */
+export function answerQuestion(task: WorkTask, answer: string, stepId: string, now: number): WorkTask {
+  if (task.stage !== "awaiting") return task;
+  const nextIndex = task.questionIndex + 1;
+  const more = nextIndex < task.questions.length;
+  const steps: TaskStep[] = [
+    ...task.steps,
+    { id: stepId, role: "user", text: answer, at: now },
+  ];
+  if (more) {
+    return { ...task, steps, questionIndex: nextIndex };
+  }
+  return {
+    ...task,
+    steps,
+    questionIndex: nextIndex,
+    stage: "running",
+    activity: "正在处理",
+    // 从"等待"回到"干活"时重新开始计时，否则「已处理」里会算上用户思考的时间
+    startedAt: now,
+  };
+}
+
+/** 问题队列最多 3 题（原版实测 1/3 → 2/3，没有超过 3）。 */
+export function acceptQuestions(list: TaskQuestion[]): TaskQuestion[] {
+  return list.slice(0, MAX_QUESTIONS);
+}
+
+/* ============================================================
+ * 4. 列表与命名
+ * ============================================================ */
+
+/** 左侧「最近」列表项的显示信息。 */
+export type RecentRow = {
+  id: string;
+  title: string;
+  /** 带「待确认」角标（原版在等用户回答时显示脉冲点 + 待确认）。 */
+  pending: boolean;
+  /** 已完成的任务显示时长。 */
+  subtitle?: string;
+};
+
+/**
+ * 把一个任务映射成左侧列表行。
+ * @param task 任务
+ * @returns 列表行
+ */
+export function toRecentRow(task: WorkTask): RecentRow {
+  const duration =
+    task.finishedAt !== null && task.startedAt !== null
+      ? formatDuration(task.finishedAt - task.startedAt)
+      : undefined;
+  return {
+    id: task.id,
+    title: task.title,
+    pending: task.stage === "awaiting",
+    subtitle: duration,
+  };
+}
+
+/** 生成一个步骤 id（不用渲染层的东西，主进程/测试里也能用）。 */
+export function makeStepId(seq: number): string {
+  return `s${seq}`;
+}
+
+/** 任务标题的字数口径（上位 `moa_comms_taskTitleLimit` =「任务标题，不超过16个字。」）。 */
+export const TASK_TITLE_LIMIT = 16;
+
+/**
+ * 清洗模型起的标题。
+ *
+ * 模型很少只回一个干净的标题，实测常见的几种脏法都要处理：
+ * 带引号/书名号、结尾带句号、前面写「标题：」、后面另起一行加解释。
+ * 直接塞进列表会很难看。洗不出来就返回空串，调用方保留原标题。
+ *
+ * @param raw 模型输出
+ * @returns 干净的标题；洗不出东西时返回空串
+ */
+export function cleanTitle(raw: string): string {
+  let text = String(raw ?? "").trim();
+  // 只取第一行（模型爱在后面加解释）
+  text = text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+  // 去掉「标题：」这类前缀
+  text = text.replace(/^(?:标题|任务标题|title)\s*[：:]\s*/i, "");
+  // 去掉包裹的引号 / 书名号 / 括号
+  text = text.replace(/^["'“”‘’《》「」【】()（）]+/, "").replace(/["'“”‘’《》「」【】()（）]+$/, "");
+  // 去掉结尾标点
+  text = text.replace(/[。．.!！?？~～\s]+$/, "");
+  text = text.trim();
+  if (!text) return "";
+  // 超长截断到口径上限
+  return text.length > TASK_TITLE_LIMIT ? text.slice(0, TASK_TITLE_LIMIT) : text;
+}
+
+/* ───────────────────────── 恢复一步（§177） ───────────────────────── */
+
+/**
+ * 步骤上那一句额外说明的字数上限（§177）。
+ *
+ * 留痕是**一行**：磁盘上的东西不可信，超长的直接截断，
+ * 而不是把一整段塞进界面。
+ */
+export const STEP_NOTE_LIMIT = 200;
+
+/**
+ * 从落盘的（不可信）数据里恢复**一步**（§177）。
+ *
+ * ## 为什么把它从 `store.ts` 里抽出来
+ *
+ * 原来这段映射写在 `normalizeTask` 里，是**私有内联**的 —— 于是它**没法单测**，
+ * 而它恰恰是最容易漏字段的地方（§176 发现了 `tools` 被丢，§177 发现 `note` 也被丢）。
+ * 抽成纯函数之后，`TaskStep` 声明的每个字段都能有断言守着。
+ *
+ * ## 规矩
+ *
+ * 磁盘上的东西一律当不可信处理：**逐项类型检查**，坏的丢掉而不是整条失败；
+ * 缺 id 就按序号补一个（历史数据里可能真没有）。
+ *
+ * @param raw 落盘的一条
+ * @param index 它在 steps 里的序号（补 id 用）
+ * @returns 干净的步骤
+ */
+export function normalizeStep(raw: unknown, index: number): TaskStep {
+  const s = (raw ?? {}) as Record<string, unknown>;
+  const note = typeof s.note === "string" ? s.note.trim().slice(0, STEP_NOTE_LIMIT) : "";
+  const tools = normalizeToolTraces(s.tools);
+  return {
+    id: typeof s.id === "string" && s.id ? s.id : makeStepId(index),
+    role: s.role === "user" ? "user" : "assistant",
+    text: typeof s.text === "string" ? s.text : "",
+    at: typeof s.at === "number" ? s.at : 0,
+    ...(typeof s.cost === "number" ? { cost: s.cost } : {}),
+    // 这两项要一起恢复：askedWith 是「重新生成」的依据，rating 是评价留痕
+    ...(typeof s.askedWith === "string" ? { askedWith: s.askedWith } : {}),
+    ...(s.rating === "up" || s.rating === "down" ? { rating: s.rating as "up" | "down" } : {}),
+    ...(tools.length > 0 ? { tools } : {}),
+    /*
+     * ⚠️ `note` 也要恢复（§177）：它是**"更早的对话已压缩为摘要"**那条。
+     *
+     * §149 写这条时说得明明白白："挂在步骤上而不是飘一个 toast ——
+     * 飘提示刷新就没了，回头翻这段对话会不知道当时上下文被压过。"
+     * 而恢复时原来把它丢了 —— **等于又变回了"刷新就没"**。
+     */
+    ...(note ? { note } : {}),
+  };
+}
+
+/* ────────────────── 恢复产物 / 澄清卡（§179） ────────────────── */
+
+/**
+ * 从落盘的（不可信）数据里恢复产物（§179）。
+ *
+ * ## 为什么必须收窄
+ *
+ * 原来这里是一句 `t.artifacts as Artifact[]` —— **裸断言**。
+ * 产物卡要按 `kind` 决定怎么显示、按 `status` 决定显示哪个中间态，
+ * 一个 `kind` 不认识的产物会让卡片渲染出空白或直接报错。
+ *
+ * ## 规矩
+ *
+ * - 缺 `id` 或 `kind` 不认识的 → **丢掉**（认不出来的东西没法正确显示）；
+ * - `kind` 认不认识用 `ARTIFACT_FORMATS` 的键来判断 —— **不另写一张表**，
+ *   以后加了新的产物类型这里自动跟上（这是"一处实现"在数据层的用法）。
+ *
+ * @param raw 落盘的数组
+ * @returns 干净的产物列表
+ */
+export function normalizeArtifacts(raw: unknown): Artifact[] {
+  if (!Array.isArray(raw)) return [];
+  const kinds = Object.keys(ARTIFACT_FORMATS) as ArtifactKind[];
+  const out: Artifact[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Record<string, unknown>;
+    const id = typeof a.id === "string" ? a.id : "";
+    const kind = a.kind as ArtifactKind;
+    if (!id || !kinds.includes(kind)) continue;
+    out.push({
+      id,
+      taskId: typeof a.taskId === "string" ? a.taskId : "",
+      title: typeof a.title === "string" ? a.title : "",
+      kind,
+      createdAt: typeof a.createdAt === "number" && Number.isFinite(a.createdAt) ? a.createdAt : 0,
+      ...(typeof a.stepId === "string" ? { stepId: a.stepId } : {}),
+      ...(a.status === "generating" || a.status === "generated" || a.status === "failed"
+        ? { status: a.status }
+        : {}),
+      ...(typeof a.content === "string" ? { content: a.content } : {}),
+      ...(typeof a.filePath === "string" ? { filePath: a.filePath } : {}),
+      ...(typeof a.bytes === "number" && Number.isFinite(a.bytes) ? { bytes: a.bytes } : {}),
+      ...(typeof a.note === "string" ? { note: a.note } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * 从落盘的（不可信）数据里恢复澄清卡（§179）。
+ *
+ * ## 这条修的是**一个真崩溃**
+ *
+ * 界面上是 `question.options.map(...)` ——
+ * 落盘的 `options` 丢了或不是数组时，**那一整段对话直接打不开**（渲染抛异常）。
+ *
+ * 所以口径定得严一点：
+ *
+ * - 没有 `id` → 丢掉；
+ * - 选项里**一个合法的都没有** → **整张卡丢掉**（一张没有选项的选择卡是死路，
+ *   不如不显示；原来会给用户一个点不动的卡片）；
+ * - 超过 `MAX_QUESTIONS` 的截断（口径同创建时）。
+ *
+ * @param raw 落盘的数组
+ * @returns 干净的澄清卡
+ */
+export function normalizeQuestions(raw: unknown): TaskQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TaskQuestion[] = [];
+  for (const item of raw) {
+    if (out.length >= MAX_QUESTIONS) break;
+    if (!item || typeof item !== "object") continue;
+    const q = item as Record<string, unknown>;
+    const id = typeof q.id === "string" ? q.id : "";
+    if (!id) continue;
+    const options = (Array.isArray(q.options) ? q.options : [])
+      .filter((o): o is Record<string, unknown> => Boolean(o) && typeof o === "object")
+      .map((o) => ({
+        label: typeof o.label === "string" ? o.label : "",
+        hint: typeof o.hint === "string" ? o.hint : "",
+      }))
+      .filter((o) => o.label.trim().length > 0);
+    if (options.length === 0) continue;
+    out.push({ id, text: typeof q.text === "string" ? q.text : "", options });
+  }
+  return out;
+}

@@ -1,0 +1,327 @@
+/**
+ * 定时任务的调度模型（阶段 11.6）。
+ *
+ * 口径照上位：**调度字段不是 cron 表达式**，而是枚举 `repeat_type`。
+ * 上位的枚举是（从它前端包里读到的）：
+ * ```
+ * repeatType { Unspecified:0, NoRepeat:1, Hourly:2, Daily:3, Weekly:4, Custom:5 }
+ * runEnv     { Unspecified:0, Cloud:1, LocalDevice:2 }
+ * jobStatus  { Unspecified:0, Running:1, Paused:2, Finished:3, Deleted:4 }
+ * ```
+ * 上位把自然语言（「每周四 16 点」）交给服务端解析（`job_cron/schedule/parse`）。
+ * 这里是单机版，没有那个解析服务，所以 **Custom 档退化成"每 N 分钟"** ——
+ * 这是**有意降级**，不是假装能做自然语言解析。
+ */
+
+/** 重复方式。 */
+export type RepeatType = "noRepeat" | "hourly" | "daily" | "weekly" | "custom";
+
+/**
+ * 重复方式的**运行时值表**（§178）。
+ *
+ * 类型只在编译期存在；磁盘上读回来的是字符串，判断它合不合法只能用值表。
+ * （这两个必须一起改 —— 加了新的档位而忘了这里，归一化就会把新数据丢掉。）
+ */
+export const REPEAT_VALUES = ["noRepeat", "hourly", "daily", "weekly", "custom"] as const;
+
+/** 运行环境：云电脑 / 本地设备（上位 `runEnv`）。 */
+export type RunEnv = "cloud" | "localDevice";
+
+/** 运行环境的运行时值表。 */
+export const ENV_VALUES = ["cloud", "localDevice"] as const;
+
+/** 任务状态（上位 `jobStatus`）。 */
+export type JobStatus = "running" | "paused" | "finished" | "deleted";
+
+/** 任务状态的运行时值表。 */
+export const JOB_STATUSES = ["running", "paused", "finished", "deleted"] as const;
+
+/** 一个定时任务。 */
+export type CronJob = {
+  id: string;
+  title: string;
+  /** 到点要执行的那句话。 */
+  prompt: string;
+  repeat: RepeatType;
+  /** `custom` 档用的间隔分钟数（其它档忽略）。 */
+  customMinutes?: number;
+  env: RunEnv;
+  status: JobStatus;
+  createdAt: number;
+  /** 上次执行时间；从未跑过为 null。 */
+  lastRunAt: number | null;
+  /** 下次执行时间；已结束/已暂停为 null。 */
+  nextRunAt: number | null;
+  /** 执行历史（最近的在前，界面上只显示几条）。 */
+  runs: CronRun[];
+};
+
+/** 一次执行记录。 */
+export type CronRun = {
+  at: number;
+  /** 是否成功；失败时 `error` 有说明。 */
+  ok: boolean;
+  error?: string;
+};
+
+/** 各档的固定间隔（毫秒）。`custom` 不在表里，它由 `customMinutes` 决定。 */
+const FIXED_INTERVAL: Partial<Record<RepeatType, number>> = {
+  hourly: 60 * 60 * 1000,
+  daily: 24 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+};
+
+/** custom 档的合法间隔范围（分钟）。太小会把机器打满。 */
+export const MIN_CUSTOM_MINUTES = 5;
+export const MAX_CUSTOM_MINUTES = 60 * 24 * 30;
+
+/** 重复方式的中文名（界面上用）。 */
+export const REPEAT_LABEL: Record<RepeatType, string> = {
+  noRepeat: "不重复",
+  hourly: "每小时",
+  daily: "每天",
+  weekly: "每周",
+  custom: "自定义间隔",
+};
+
+/** 运行环境的中文名。 */
+export const ENV_LABEL: Record<RunEnv, string> = {
+  cloud: "云电脑",
+  localDevice: "本地电脑",
+};
+
+/**
+ * 算下一次该跑的时间。
+ *
+ * @param job 任务
+ * @param from 从哪个时间点往后算（通常是"现在"）
+ * @returns 下次执行的时间戳；不重复任务跑过一次后返回 null
+ */
+export function nextRunAt(job: CronJob, from: number): number | null {
+  if (job.status !== "running") return null;
+
+  if (job.repeat === "noRepeat") {
+    // 没跑过就等第一次；跑过就结束
+    return job.lastRunAt === null ? from : null;
+  }
+
+  if (job.repeat === "custom") {
+    const minutes = clampCustomMinutes(job.customMinutes);
+    return from + minutes * 60 * 1000;
+  }
+
+  const interval = FIXED_INTERVAL[job.repeat];
+  return interval ? from + interval : null;
+}
+
+/**
+ * 把 custom 间隔夹进合法范围。
+ *
+ * 不夹取的话，用户填 0 或负数会让调度器**每帧都在触发**；
+ * 填一个天文数字又等于永不触发。
+ *
+ * @param minutes 用户填的分钟数
+ * @returns 合法间隔
+ */
+export function clampCustomMinutes(minutes: number | undefined): number {
+  const n = Number(minutes);
+  if (!Number.isFinite(n)) return 60;
+  return Math.min(MAX_CUSTOM_MINUTES, Math.max(MIN_CUSTOM_MINUTES, Math.round(n)));
+}
+
+/**
+ * 校验一个任务能不能建。
+ *
+ * @param job 草稿
+ * @returns 错误说明；能建则返回 null
+ */
+export function validateJob(job: Pick<CronJob, "title" | "prompt" | "repeat" | "customMinutes">): string | null {
+  if (!String(job.title ?? "").trim()) return "给这个定时任务起个名字";
+  if (!String(job.prompt ?? "").trim()) return "写清到点要做什么";
+  if (job.repeat === "custom") {
+    const n = Number(job.customMinutes);
+    if (!Number.isFinite(n)) return "自定义间隔要填分钟数";
+    if (n < MIN_CUSTOM_MINUTES) return `间隔不能小于 ${MIN_CUSTOM_MINUTES} 分钟`;
+    if (n > MAX_CUSTOM_MINUTES) return `间隔不能大于 ${MAX_CUSTOM_MINUTES} 分钟`;
+  }
+  return null;
+}
+
+/**
+ * 把一批任务里"该跑了"的挑出来。
+ *
+ * @param jobs 全部任务
+ * @param now 当前时间
+ * @returns 到点的任务（按到期时间从早到晚）
+ */
+export function dueJobs(jobs: CronJob[], now: number): CronJob[] {
+  return jobs
+    .filter((job) => job.status === "running" && job.nextRunAt !== null && job.nextRunAt <= now)
+    .sort((a, b) => (a.nextRunAt ?? 0) - (b.nextRunAt ?? 0));
+}
+
+/**
+ * 跑完之后更新任务。
+ *
+ * @param job 任务
+ * @param now 执行时刻
+ * @param ok 是否成功
+ * @param error 失败说明
+ * @returns 更新后的任务
+ */
+export function afterRun(job: CronJob, now: number, ok: boolean, error?: string): CronJob {
+  const next = nextRunAt({ ...job, lastRunAt: now }, now);
+  return {
+    ...job,
+    lastRunAt: now,
+    nextRunAt: next,
+    // 不重复的任务跑一次就结束
+    status: next === null ? "finished" : job.status,
+    runs: [{ at: now, ok, ...(error ? { error } : {}) }, ...job.runs].slice(0, 20),
+  };
+}
+
+/**
+ * 把下次执行时间说成人话。
+ *
+ * @param nextRunAt 下次执行时间；null 表示不再执行
+ * @param now 当前时间
+ * @returns 例如 `12 分钟后` / `3 小时后` / `已结束`
+ */
+export function describeNextRun(nextRunAt: number | null, now: number): string {
+  if (nextRunAt === null) return "已结束";
+  const delta = nextRunAt - now;
+  if (delta <= 0) return "即将执行";
+  const minutes = Math.round(delta / 60000);
+  if (minutes < 60) return `${minutes} 分钟后`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} 小时后`;
+  return `${Math.round(hours / 24)} 天后`;
+}
+
+/**
+ * 造一个新任务。
+ *
+ * @param id 任务 id
+ * @param title 标题
+ * @param prompt 到点要执行的话
+ * @param repeat 重复方式
+ * @param env 运行环境
+ * @param now 创建时刻
+ * @param customMinutes custom 档的间隔
+ * @returns 新任务
+ */
+export function makeJob(
+  id: string,
+  title: string,
+  prompt: string,
+  repeat: RepeatType,
+  env: RunEnv,
+  now: number,
+  customMinutes?: number,
+): CronJob {
+  const base: CronJob = {
+    id,
+    title: title.trim(),
+    prompt: prompt.trim(),
+    repeat,
+    ...(repeat === "custom" ? { customMinutes: clampCustomMinutes(customMinutes) } : {}),
+    env,
+    status: "running",
+    createdAt: now,
+    lastRunAt: null,
+    nextRunAt: null,
+    runs: [],
+  };
+  return { ...base, nextRunAt: nextRunAt(base, now) };
+}
+
+/* ────────────────────── 从磁盘恢复任务（§178） ────────────────────── */
+
+/** 执行历史最多留几条（界面上只显示几条，多的没必要一直带着）。 */
+export const RUNS_KEPT = 50;
+
+/**
+ * 把落盘的（不可信）数据收窄成合法的定时任务（§178）。
+ *
+ * ## 为什么必须做这件事
+ *
+ * 原来渲染侧是这样读回来的：
+ *
+ * ```ts
+ * const raw = (await shell.schedules.load()) as CronJob[];   // ← 直接断言
+ * const jobs = raw.map((job) => { const next = job.nextRunAt; ... });
+ * ```
+ *
+ * 主进程那边只做了一句最小过滤（`"id" in x`），而主进程的注释写着
+ * 「字段不全会由渲染层的默认值兜」—— **可渲染层根本没有默认值，只有一次断言**。
+ * 于是一个手改过的 / 旧版本的 `schedules.json`（比如 `repeat` 是别的词、
+ * `nextRunAt` 是字符串）会**直接进到界面与 ticker 里**：
+ * 下次运行时间显示成 `Invalid Date`，到点判断全乱。
+ *
+ * ## 取舍（哪三种情况怎么处理）
+ *
+ * | 情况 | 处理 | 为什么 |
+ * |---|---|---|
+ * | 没有 `id` / `id` 重复 | **丢掉** | 管不了的任务留着只会添乱 |
+ * | `repeat` 不认识 | **丢掉** | 算不出下次运行时间，留着就是个永远不响的坑 |
+ * | `status` 不认识 | 当成 `paused` | ⚠️ **坏的不能当 running** —— 否则它会自己跑起来 |
+ * | 其它字段坏了 | 给安全默认值 | 标题空着难看，但比崩了强 |
+ *
+ * @param raw 落盘的原始值
+ * @returns 合法的任务列表（顺序保持）
+ */
+export function normalizeJobs(raw: unknown): CronJob[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: CronJob[] = [];
+
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const j = item as Record<string, unknown>;
+
+    const id = typeof j.id === "string" ? j.id.trim() : "";
+    if (!id || seen.has(id)) continue;
+
+    const repeat = j.repeat as RepeatType;
+    if (!(REPEAT_VALUES as readonly string[]).includes(repeat)) continue;
+
+    // custom 档没有合法间隔就跑不起来 —— 与其留个哑的，不如丢掉
+    const customMinutes = typeof j.customMinutes === "number" ? j.customMinutes : undefined;
+    if (repeat === "custom") {
+      if (customMinutes === undefined) continue;
+      if (customMinutes < MIN_CUSTOM_MINUTES || customMinutes > MAX_CUSTOM_MINUTES) continue;
+    }
+
+    seen.add(id);
+    const status = j.status as JobStatus;
+    out.push({
+      id,
+      title: typeof j.title === "string" ? j.title : "",
+      prompt: typeof j.prompt === "string" ? j.prompt : "",
+      repeat,
+      ...(repeat === "custom" && customMinutes !== undefined ? { customMinutes } : {}),
+      env: (ENV_VALUES as readonly string[]).includes(j.env as string) ? (j.env as RunEnv) : "cloud",
+      /*
+       * ⚠️ 不认识的 status 一律当 `paused`。
+       * 当成 running 的话，一个坏字段就能让任务自己跑起来 —— 那比"少跑一次"严重得多。
+       */
+      status: (JOB_STATUSES as readonly string[]).includes(status) ? status : "paused",
+      createdAt: typeof j.createdAt === "number" && Number.isFinite(j.createdAt) ? j.createdAt : 0,
+      lastRunAt: typeof j.lastRunAt === "number" && Number.isFinite(j.lastRunAt) ? j.lastRunAt : null,
+      nextRunAt: typeof j.nextRunAt === "number" && Number.isFinite(j.nextRunAt) ? j.nextRunAt : null,
+      runs: Array.isArray(j.runs)
+        ? j.runs
+            .filter((r): r is Record<string, unknown> => Boolean(r) && typeof r === "object")
+            .filter((r) => typeof r.at === "number" && Number.isFinite(r.at))
+            .slice(0, RUNS_KEPT)
+            .map((r) => ({
+              at: r.at as number,
+              ok: r.ok !== false,
+              ...(typeof r.error === "string" ? { error: r.error } : {}),
+            }))
+        : [],
+    });
+  }
+  return out;
+}
