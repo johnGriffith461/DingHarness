@@ -1,5 +1,5 @@
 import type { ChatMessage } from "@shared/ipc";
-import { omittedNote, planContext } from "@shared/contextWindow";
+import { KEEP_RECENT_TOKENS as KEEP_TOKENS, omittedNote, planContext } from "@shared/contextWindow";
 import type { ToolTrace } from "@shared/agentTools";
 import type { TaskStep } from "./task";
 
@@ -131,7 +131,14 @@ export function withToolLines(text: string, tools?: ToolTrace[]): string {
  * @param limit 最多回看几条
  * @returns `messages` 按原顺序（旧 → 新）；`truncated` 表示是否丢过更早的
  */
-export function buildHistory(steps: TaskStep[]): { messages: ChatMessage[]; truncated: boolean } {
+export function buildHistory(
+  steps: TaskStep[],
+  /**
+   * 校准系数（补完④）：由调用方用**上一轮真实 usage** 算出来（`calibrationOf`）。
+   * 只影响"留多少"，不影响"发什么"。
+   */
+  opts: { factor?: number } = {},
+): { messages: ChatMessage[]; truncated: boolean } {
   const all: ChatMessage[] = [];
   for (const step of steps) {
     const text = withToolLines((step.text ?? "").trim(), step.tools);
@@ -146,7 +153,7 @@ export function buildHistory(steps: TaskStep[]): { messages: ChatMessage[]; trun
    * 原来这里还有一道"最多 20 条"的硬截断 —— 它把压缩阈值架空（见文件头）。
    * 现在条数不再是判据：同样 20 条，短消息与长消息能差几十倍。
    */
-  const { older, recent } = planContext(all);
+  const { older, recent } = planContext(all, KEEP_TOKENS, { factor: opts.factor ?? 1 });
   return { messages: recent, truncated: older.length > 0 };
 }
 

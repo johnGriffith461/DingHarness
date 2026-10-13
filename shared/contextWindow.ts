@@ -69,6 +69,32 @@ export function estimateTokens(text: string): number {
  * @param messages 消息
  * @returns 估算的 token 数
  */
+/**
+ * 用**真实用量**校准估算（补完④）。
+ *
+ * ## 为什么要它
+ *
+ * `estimateTokens` 是"中文一字、英文 4 字符"的**估算**，与 provider 真实计费口径之间
+ * 有个固定偏差（中文标点、代码、JSON 结构都会偏）。而 provider **每轮都告诉我们真值**
+ * （`usage.inputTokens`）—— 拿它反推一个系数，比死用估算准得多。
+ *
+ * 口径：
+ * - `estimated` 为 0 或 `actual` 拿不到 → 返回 1（**不校准**：不编一个系数）；
+ * - 结果**夹在 0.5–2**：真实的计费口径不该与估算差出一倍以上，
+ *   超出多半是"这一轮估的对象不对"（比如没算进工具 schema），夹住比放任安全。
+ *
+ * ⚠️ 它**只调额度，不改内容**：系数只影响"留多少历史"，不影响发什么。
+ *
+ * @param estimated 我们对"上一轮发出去的东西"的估算
+ * @param actual provider 给的上一轮 `inputTokens`
+ * @returns 校准系数（真实 ÷ 估算）
+ */
+export function calibrationOf(estimated: number, actual: number | undefined): number {
+  if (!Number.isFinite(estimated) || estimated <= 0) return 1;
+  if (typeof actual !== "number" || !Number.isFinite(actual) || actual <= 0) return 1;
+  return Math.min(2, Math.max(0.5, actual / estimated));
+}
+
 export function totalTokens(messages: readonly ChatMessage[]): number {
   return messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
 }
@@ -96,7 +122,15 @@ export function shouldCompact(messages: readonly ChatMessage[], keepTokens = KEE
 export function planContext(
   messages: readonly ChatMessage[],
   keepTokens = KEEP_RECENT_TOKENS,
+  /**
+   * 校准系数（补完④）：**我们估算的单位 → 真实 token 单位**的倍率。
+   * 大于 1 表示"我们低估了" → 实际保留得更少（额度除以它）。
+   */
+  opts: { factor?: number } = {},
 ): { older: ChatMessage[]; recent: ChatMessage[] } {
+  const factor = Number.isFinite(opts.factor) && (opts.factor ?? 0) > 0 ? (opts.factor as number) : 1;
+  /** 额度换算到"我们的估算单位"：估得偏低（factor>1）就少留一点，反之多留。 */
+  const budget = keepTokens / factor;
   const recent: ChatMessage[] = [];
   let used = 0;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -104,7 +138,7 @@ export function planContext(
     if (!msg) continue;
     const cost = estimateTokens(msg.content);
     // `recent.length` 这个前置条件保证"最后一条无论多大都会留下"
-    if (recent.length > 0 && used + cost > keepTokens) break;
+    if (recent.length > 0 && used + cost > budget) break;
     recent.unshift(msg);
     used += cost;
   }

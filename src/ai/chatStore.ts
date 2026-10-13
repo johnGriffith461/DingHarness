@@ -6,7 +6,14 @@ import { artifactFileName, extractArtifacts, type Artifact } from "@/workbench/a
 import { enabledPromptBlock } from "@shared/library";
 import { memoryPromptBlock } from "@shared/memory";
 import { assembleSystem } from "@shared/turnAssembly";
-import { omittedNote, planContext } from "@shared/contextWindow";
+import {
+  KEEP_RECENT_TOKENS,
+  calibrationOf,
+  estimateTokens,
+  omittedNote,
+  planContext,
+  totalTokens,
+} from "@shared/contextWindow";
 import type { SessionSummary, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "./aiClient";
 import { readConfirmMode } from "@/workbench/confirmMode";
@@ -262,6 +269,15 @@ async function abilityBlock(): Promise<string> {
 
 /** 正文里段落之间的分隔（单处定义：恢复历史时与实时路径必须一致）。 */
 const NS = "\n\n";
+
+/*
+ * ── 真实用量校准（补完④）────────────────────────────────────────
+ *
+ * 与工作台同一套口径（`shared/contextWindow.ts` 的 `calibrationOf`）：
+ * 上一轮的 `usage.inputTokens`（真值）÷ 我们对"发出去的东西"的估算 = 系数，
+ * 下一轮用它把额度换算到估算单位。只放内存（换模型就该重新学）。
+ */
+let chatCalibration = 1;
 
 const SETTINGS_KEY = "dsh-canvas.chat-settings";
 
@@ -593,7 +609,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
      *
      * 当前这句**永远保留**：切分只作用于历史，新消息是切完之后追加的。
      */
-    const { older, recent } = planContext(prior);
+    const { older, recent } = planContext(prior, KEEP_RECENT_TOKENS, { factor: chatCalibration });
     const payload: ChatMessage[] = [
       ...recent,
       { role: "user", content: contextBlock ? `${contextBlock}\n\n${trimmed}` : trimmed },
@@ -647,7 +663,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
      */
     const project = () => finishTurn(turn);
 
-    const flush = () => {
+      const flush = () => {
       if (flushTimer) {
         clearTimeout(flushTimer);
         flushTimer = null;
@@ -664,6 +680,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         },
       }));
     };
+
+    /** 这一轮的系统提示词（先求出来：校准要用它一起估，见下面 done 分支）。 */
+    const projectSystem = await systemBlocks(older.length ? omittedNote("trimmed") : undefined);
 
     const started = await streamChat(
       {
@@ -706,7 +725,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
          * 历史被切过就如实告诉模型"你看不到全部" —— 与工作台**同一句话**
          * （`omittedNote`，定义在 `shared/contextWindow.ts`）。
          */
-        system: await systemBlocks(older.length ? omittedNote("trimmed") : undefined),
+        system: projectSystem,
       },
       (event: AiStreamEvent) => {
         /*
@@ -733,6 +752,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
            * 正文取自**投影**（不再单独攒 `acc`）：两边正是"同一个东西的两份拷贝"，
            * 而它们一旦不一致，产物提取的结果就会跟日志对不上。
            */
+          /*
+           * 收尾时更新校准系数（补完④）：估的是"system + 这一轮 payload"，
+           * 与 provider 的 usage.inputTokens 同一口径。拿不到 usage 就保持原值（**不编**）。
+           */
+          chatCalibration = calibrationOf(
+            estimateTokens(projectSystem) + totalTokens(payload),
+            project().usage?.inputTokens,
+          );
           const extracted = extractArtifacts(
             project().text,
             `chat-${conversationId}`,

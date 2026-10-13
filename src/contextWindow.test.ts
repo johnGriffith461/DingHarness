@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "@shared/ipc";
 import {
   KEEP_RECENT_TOKENS,
+  calibrationOf,
   estimateTokens,
   omittedNote,
   planContext,
@@ -104,5 +105,43 @@ describe("切掉时的说明（两条路共用同一句）", () => {
   it("⭐ 都不许写条数（条数不是判据 —— 同样 20 条，短消息与长消息差几十倍）", () => {
     expect(omittedNote("trimmed")).not.toContain("条消息");
     expect(omittedNote("summarized")).not.toContain("条消息");
+  });
+});
+
+describe("真实用量校准（补完④）", () => {
+  const msg = (role: "user" | "assistant", content: string): ChatMessage => ({ role, content });
+
+  it("系数 = 真实 ÷ 估算；拿不到真值/估不出来时给 1（**不编**）", () => {
+    expect(calibrationOf(100, 150)).toBeCloseTo(1.5);
+    expect(calibrationOf(100, 50)).toBeCloseTo(0.5);
+    expect(calibrationOf(100, undefined)).toBe(1);
+    expect(calibrationOf(100, 0)).toBe(1);
+    expect(calibrationOf(0, 100)).toBe(1);
+    expect(calibrationOf(Number.NaN, 100)).toBe(1);
+  });
+
+  it("⭐ 夹在 0.5–2：真实口径不该与估算差出一倍以上（差太多说明估错对象了）", () => {
+    expect(calibrationOf(100, 1000)).toBe(2); // 想给 10 也不给
+    expect(calibrationOf(100, 1)).toBe(0.5);
+  });
+
+  it("⭐⭐ 低估（factor>1）就少留历史、高估（factor<1）就多留 —— 只调额度，不改内容", () => {
+    const messages = Array.from({ length: 4 }, (_, i) => msg(i % 2 ? "assistant" : "user", "字".repeat(60)));
+    // 额度 100：不校准时留一条（后两条 120 超了）
+    const plain = planContext(messages, 100);
+    expect(plain.recent).toHaveLength(1);
+    // 我们低估了一半（真实是估算的 2 倍）→ 实际只该留半额度的东西
+    const low = planContext(messages, 100, { factor: 2 });
+    expect(low.recent).toHaveLength(1);
+    // 我们高估了（真实只有估算的一半）→ 可以多留
+    const high = planContext(messages, 100, { factor: 0.5 });
+    expect(high.recent.length).toBeGreaterThan(plain.recent.length);
+  });
+
+  it("系数非法（0/负数/NaN）时按 1 处理（不许把额度算成 0 或负数）", () => {
+    const messages = [msg("user", "甲"), msg("assistant", "乙")];
+    expect(planContext(messages, 100, { factor: 0 }).recent).toHaveLength(2);
+    expect(planContext(messages, 100, { factor: -3 }).recent).toHaveLength(2);
+    expect(planContext(messages, 100, { factor: Number.NaN }).recent).toHaveLength(2);
   });
 });

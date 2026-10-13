@@ -13,6 +13,7 @@ import {
 import { applyEvent, emptyTurn, finishTurn, taskSessionId } from "@shared/sessionLog";
 import { assembleSystem } from "@shared/turnAssembly";
 import { fabricatedCost, type StepUsage } from "@shared/cost";
+import { calibrationOf, estimateTokens, totalTokens } from "@shared/contextWindow";
 import { buildHistory } from "./history";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
@@ -600,6 +601,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   },
 }));
 
+/*
+ * ── 真实用量校准（补完④）────────────────────────────────────────
+ *
+ * provider 每轮给 `usage.inputTokens`（真值），我们对"这一轮发出去的东西"也有个估算
+ * （system + messages）。两者一比就是系数，**下一轮**用它把额度换算到估算单位
+ * （见 `shared/contextWindow.ts` 的 `calibrationOf`）。
+ *
+ * ⚠️ 只放内存：系数是"这台机器 + 这个 provider"的当期口径，重启后重新学即可 ——
+ * 落盘反而要担心"换了模型还在用旧系数"。
+ */
+let calibrationFactor = 1;
+/** 上一轮"发出去的东西"的估算量（收尾时与真实 usage 一起算系数）。 */
+let lastRequestEstimate = 0;
+
 /** 取当前任务（找不到时用传入的兜底，避免闭包里拿到旧对象）。 */
 function current(tasks: WorkTask[], id: string): WorkTask {
   return tasks.find((t) => t.id === id) ?? tasks[0];
@@ -892,7 +907,7 @@ async function summaryFor(taskId: string, older: ChatMessage[]): Promise<string>
  * @param text 这次要发的那句
  */
 async function answerTurn(taskId: string, history: TaskStep[], text: string, extraNote?: string): Promise<void> {
-  const { messages, truncated } = buildHistory(history);
+  const { messages, truncated } = buildHistory(history, { factor: calibrationFactor });
 
   /*
    * 上下文压缩（§149）。
@@ -996,6 +1011,7 @@ async function runStream(
    * 放在能力说明**之前**：人设是"你是谁"，能力是"你能用什么"。
    */
   const persona = agentPromptBlock();
+  // 记下"这一轮发出去的东西"的估算量（补完④），收尾时与真实 usage 一起算系数
   const extra = await enabledBlock();
   /*
    * 长期记忆（§164）：工具描述里一直写着"之后每次对话都会自动带上"，
@@ -1087,6 +1103,12 @@ async function runStream(
    * 错误那句话的优先级与原来一致：`catch` 里抛出来的（后发生）盖过 `error` 事件里的。
    */
   const view = project();
+  /*
+   * 收尾时更新校准系数（补完④）：估的是"system + messages"，与 provider 的
+   * `usage.inputTokens` 同一口径。拿不到 usage（中止/报错）就保持原系数 —— **不编**。
+   */
+  lastRequestEstimate = estimateTokens(fullSystem) + totalTokens(messages);
+  calibrationFactor = calibrationOf(lastRequestEstimate, view.usage?.inputTokens);
   const errorText = failure || view.error || "";
   const text = errorText ? `（出错了）${errorText}` : view.text;
   /*
