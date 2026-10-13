@@ -74,11 +74,42 @@
   --on-accent: #fff;
   /** 键盘焦点环（`:focus-visible` 用；不是每个浏览器默认都给得出可见的那一圈）。 */
   --focus-ring: rgba(59, 130, 246, 0.22);
-  --shadow-card: 0 6px 20px rgba(20, 30, 60, 0.05);
-  --shadow-chip: 0 2px 8px rgba(12, 20, 40, 0.08);
-  --shadow-popover: 0 8px 24px rgba(20, 30, 60, 0.12);
-  --shadow-menu: 0 12px 32px rgba(12, 20, 40, 0.18);
-  --shadow-mock: 0 10px 26px rgba(12, 20, 40, 0.18);
+  /*
+   * ── 阴影：**分层**，不是一团糊（2026-10-14，照本地设计 skill 改）──
+   *
+   * 依据（`~/.agents/skills/`）：
+   * · `beautiful-shadows`：好阴影是**多层低透明度叠出来的**
+   *   （一层发丝 + 一层贴身的 + 若干层越大越淡的），不是单一 blur 拉大；
+   * · `better-ui/surfaces.md`：**"阴影负责高度、描边负责结构"** ——
+   *   只为深度存在的描边该换成分层透明阴影，而分隔线（列表项之间那种）仍留描边；
+   * · `high-end-visual-design`："生硬的黑投影"是明确的反面（`rgba(0,0,0,0.3)` 那种）。
+   *
+   * 之前的写法是 `0 6px 20px rgba(...,0.05)` 这种**单层大模糊** ——
+   * 结果是"要么看不见、要么一团灰"，所以只能靠调 alpha，越调越脏。
+   * 现在按"近处深一点、远处淡一点"分层：贴边那道负责"看得见边界"，
+   * 外面几道负责"它是浮起来的"。
+   */
+  --shadow-chip:
+    0 1px 1px -0.5px rgba(16, 24, 40, 0.08),
+    0 2px 3px -1.5px rgba(16, 24, 40, 0.07),
+    0 4px 6px -3px rgba(16, 24, 40, 0.06);
+  --shadow-card:
+    0 1px 2px -1px rgba(16, 24, 40, 0.08),
+    0 2px 4px -2px rgba(16, 24, 40, 0.07),
+    0 6px 12px -6px rgba(16, 24, 40, 0.08),
+    0 14px 24px -12px rgba(16, 24, 40, 0.08);
+  --shadow-popover:
+    0 1px 2px -1px rgba(16, 24, 40, 0.08),
+    0 4px 8px -3px rgba(16, 24, 40, 0.08),
+    0 12px 24px -10px rgba(16, 24, 40, 0.12),
+    0 24px 40px -20px rgba(16, 24, 40, 0.12);
+  --shadow-menu:
+    0 2px 4px -2px rgba(16, 24, 40, 0.10),
+    0 8px 16px -6px rgba(16, 24, 40, 0.12),
+    0 20px 36px -16px rgba(16, 24, 40, 0.14);
+  --shadow-mock:
+    0 2px 4px -2px rgba(16, 24, 40, 0.10),
+    0 10px 22px -8px rgba(16, 24, 40, 0.12);
   --shadow-modal: 0 24px 60px rgba(10, 20, 40, 0.28);
   --shadow-float: 0 20px 56px rgba(12, 20, 40, 0.28);
   --shadow-blob: inset -6px -8px 18px rgba(0, 0, 0, 0.28), 0 10px 30px rgba(30, 64, 255, 0.28);
@@ -90,8 +121,18 @@
     ⚠️ 用变量而不是就地写 rgba：`themeRatchet` 把"工作台里硬编码颜色"钉死在 223 条，
     这里一写死就会红（那条规矩的本意正是"每加一处硬编码，以后做深色主题就多改一处"）。
   */
-  --edge-shadow-right: 3px 0 14px -4px rgba(16, 24, 40, 0.22);
-  --edge-shadow-left: -3px 0 14px -4px rgba(16, 24, 40, 0.22);
+  --edge-shadow-right:
+    1px 0 0 0 rgba(0, 0, 0, 0.05),
+    1px 0 2px -1px rgba(16, 24, 40, 0.10),
+    3px 0 6px -2px rgba(16, 24, 40, 0.10),
+    6px 0 14px -4px rgba(16, 24, 40, 0.10),
+    10px 0 26px -8px rgba(16, 24, 40, 0.10);
+  --edge-shadow-left:
+    -1px 0 0 0 rgba(0, 0, 0, 0.05),
+    -1px 0 2px -1px rgba(16, 24, 40, 0.10),
+    -3px 0 6px -2px rgba(16, 24, 40, 0.10),
+    -6px 0 14px -4px rgba(16, 24, 40, 0.10),
+    -10px 0 26px -8px rgba(16, 24, 40, 0.10);
 
   --ok: #16a34a;
   --ok-strong: #15803d;
@@ -144,8 +185,17 @@
     边界阴影也不例外：借 `.wb` 的浅色值会在深底上糊成一片灰。
     （守卫 `canvasThemeVars.test.ts` 会盯着这件事。）
   */
-  --edge-shadow-left: -2px 0 12px -4px rgba(0, 0, 0, 0.55);
-  --edge-shadow-right: 2px 0 12px -4px rgba(0, 0, 0, 0.55);
+  /*
+   * 深色底上"层次阴影基本看不见"（`better-ui/surfaces.md` 明说），
+   * 所以边界靠**一条浅发丝环**交代，抬升只留一层柔和的（不用生硬的大黑投影 ——
+   * 那是 `high-end-visual-design` 点名的反面）。
+   */
+  --edge-shadow-left:
+    0 0 0 1px rgba(255, 255, 255, 0.055),
+    -2px 0 14px -6px rgba(0, 0, 0, 0.5);
+  --edge-shadow-right:
+    0 0 0 1px rgba(255, 255, 255, 0.055),
+    2px 0 14px -6px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }
 
@@ -530,18 +580,37 @@
   --teal: #74b0ab;
   --kind-icon-html: #73cbf2;
   --scrim: rgba(6, 8, 12, 0.45);
-  --shadow-card: 0 6px 20px rgba(0, 0, 0, 0.45);
-  --shadow-chip: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --shadow-mock: 0 10px 26px rgba(0, 0, 0, 0.5);
+  /* 深色：分层照旧，只是每层更实（黑底上浅阴影本来就弱） */
+  --shadow-chip:
+    0 1px 1px -0.5px rgba(0, 0, 0, 0.4),
+    0 2px 4px -2px rgba(0, 0, 0, 0.35);
+  --shadow-card:
+    0 1px 2px -1px rgba(0, 0, 0, 0.42),
+    0 3px 6px -3px rgba(0, 0, 0, 0.36),
+    0 10px 20px -10px rgba(0, 0, 0, 0.36);
+  --shadow-popover:
+    0 2px 4px -2px rgba(0, 0, 0, 0.45),
+    0 8px 16px -8px rgba(0, 0, 0, 0.4),
+    0 20px 36px -18px rgba(0, 0, 0, 0.4);
+  --shadow-menu:
+    0 2px 4px -2px rgba(0, 0, 0, 0.5),
+    0 10px 20px -8px rgba(0, 0, 0, 0.45),
+    0 24px 44px -20px rgba(0, 0, 0, 0.45);
+  --shadow-mock:
+    0 2px 6px -2px rgba(0, 0, 0, 0.45),
+    0 12px 26px -10px rgba(0, 0, 0, 0.4);
   --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
   --shadow-float: 0 20px 56px rgba(0, 0, 0, 0.6);
   --shadow-blob: inset -6px -8px 18px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(30, 64, 255, 0.35);
 
   /* 深色底上浅阴影等于没有 —— 换更强的黑，方向不变。 */
-  --edge-shadow-right: 2px 0 12px -4px rgba(0, 0, 0, 0.55);
-  --edge-shadow-left: -2px 0 12px -4px rgba(0, 0, 0, 0.55);
+  /* 深色底：层次阴影看不见 → 浅发丝环 + 一层柔和抬升（同画布那套口径） */
+  --edge-shadow-right:
+    0 0 0 1px rgba(255, 255, 255, 0.055),
+    2px 0 14px -6px rgba(0, 0, 0, 0.5);
+  --edge-shadow-left:
+    0 0 0 1px rgba(255, 255, 255, 0.055),
+    -2px 0 14px -6px rgba(0, 0, 0, 0.5);
 }
 
 /* 渐变的深色版：压暗保色相（先定义变量，再让上面的块取用） */

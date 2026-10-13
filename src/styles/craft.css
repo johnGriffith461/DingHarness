@@ -56,6 +56,11 @@
   border-color: var(--line-strong);
 }
 
+/*
+ * 推荐卡：**大面积元素不套 0.96**。
+ * skill 那条"按下一律 0.96"针对的是按钮 —— 一整块卡片按 0.96 会像整块弹了一下，
+ * 高频点选时很吵（`better-ui` 也说"动效会分心的地方就关掉"）。所以这里留很轻的一档。
+ */
 .wb-suggestion:active {
   transform: scale(0.985);
 }
@@ -100,7 +105,9 @@
 }
 
 .wb-send:active:not(:disabled) {
-  transform: scale(0.94);
+  /* 按下缩放**一律 0.96**（`~/.agents/skills/better-ui`：小于 0.95 就夸张了）。
+     原来是 0.94 —— 它确实"太弹"，而这是全站最高频的一颗键。 */
+  transform: scale(0.96);
 }
 
 /*
@@ -210,7 +217,8 @@
 }
 
 .wb-chip:active:not(:disabled) {
-  transform: scale(0.97);
+  /* 同上：按下一律 0.96（原来 0.97，几乎看不出来 —— 等于没有触感） */
+  transform: scale(0.96);
 }
 
 /* ---------- 流式光标（2026-10-14）：正文末尾那根闪动的竖条 ---------- */
