@@ -1,0 +1,511 @@
+/*
+ * 历史对话页 / 工具留痕行 / AI 文档面板 / 任务中心 / AI 阅读
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+/* ============================================================
+ * 「管理历史对话」页（本体路由 chat/thread/list）
+ *
+ * 依据：app-triage/dynamic-ui/shot-route-thread-list.png。
+ * 版式照它：顶部一行（左两个图标 / 中标题 / 右更多），下面按时间分档，
+ * 每行是「标题 + 摘要（单行截断）」+ 悬停露出的 ⋯。
+ *
+ * 颜色一律走主题变量（不写死色值）—— 深色主题下这一页才不会"漏白"。
+ * ============================================================ */
+.wb-threads { flex: 1; min-width: 0; overflow: auto; padding: 14px 0 40px; }
+
+.wb-threads-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 18px 14px;
+  border-bottom: 1px solid var(--bg-2);
+}
+.wb-threads-title { flex: 1; text-align: center; font-size: 14px; color: var(--fg); }
+
+.wb-threads-empty { margin: 48px 24px; text-align: center; font-size: 13px; color: var(--fg-dim); }
+
+.wb-threads-group { margin-top: 18px; }
+.wb-threads-label { padding: 0 18px 8px; font-size: 12.5px; color: var(--fg-dim); }
+
+.wb-threads-rowwrap { position: relative; display: flex; align-items: center; }
+.wb-threads-rowwrap:hover { background: var(--surface-hover); }
+
+.wb-threads-row {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  text-align: left;
+  padding: 9px 18px 11px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.wb-threads-row-top { display: flex; align-items: center; gap: 8px; }
+.wb-threads-row-title {
+  font-size: 13.5px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-threads-pin { flex: none; color: var(--fg-dim); }
+/* 摘要单行截断 —— 本体那一行就是被截断的（末尾直接断掉） */
+.wb-threads-sum {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 行内 ⋯ 平时不出现，悬停才露 —— 与左栏「最近」同一套做法 */
+.wb-threads-rowmore {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-right: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-dim);
+  opacity: 0;
+  cursor: pointer;
+}
+.wb-threads-rowwrap:hover .wb-threads-rowmore { opacity: 1; }
+.wb-threads-rowmore:hover { background: var(--bg-2); }
+
+.wb-threads-rename {
+  flex: 1;
+  margin: 8px 18px;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  color: var(--fg);
+  background: var(--bg-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  outline: none;
+}
+
+
+/* ============================================================
+ * 这一步用过的工具（§141）
+ *
+ * 一行小字，跟着助手消息走 —— 比正文弱、比正文小，但要看得清。
+ * 失败的那条用警示色，免得"失败了"和"成功了"看起来一样。
+ * ============================================================ */
+.wb-assistant-tools { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+
+.wb-tool-line {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--tint-blue);
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.wb-tool-line.is-bad { background: var(--warn-soft); color: var(--warn-strong); }
+
+/* 被闸门拦下时那一条上的两个按钮（§144） */
+.wb-tool-actions { display: inline-flex; gap: 6px; margin-left: 8px; }
+
+.wb-tool-btn {
+  padding: 2px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.wb-tool-btn:hover { background: var(--bg-2); }
+.wb-tool-btn.is-primary { border-color: var(--accent); color: var(--accent); }
+
+/* 步骤上的一行额外提示（§149：目前用于"更早的对话已压缩为摘要"） */
+.wb-step-note {
+  margin-top: 6px;
+  padding-left: 2px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* ============================================================
+ * AI 文档面板（§153）—— 文案与结构照本体 `aiDoc_*` 那一组
+ * ============================================================ */
+.wb-doc { display: flex; flex: 1; min-height: 0; }
+
+.wb-doc-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--fg-3);
+}
+.wb-doc-empty p { margin: 0; font-size: 14px; }
+
+.wb-doc-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wb-doc-list {
+  width: 208px;
+  flex: 0 0 auto;
+  border-right: 1px solid var(--line-soft);
+  padding: 12px 8px;
+  overflow-y: auto;
+}
+.wb-doc-list header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 8px;
+  color: var(--fg-3);
+  font-size: 12px;
+}
+.wb-doc-list-empty { margin: 0; padding: 6px; color: var(--fg-3); font-size: 12px; }
+.wb-doc-list-item {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-doc-list-item:hover { background: var(--bg-2); }
+.wb-doc-list-item.is-on { background: var(--bg-2); }
+
+.wb-doc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 14px 22px 10px; }
+.wb-doc-head { display: flex; align-items: center; gap: 10px; }
+.wb-doc-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 17px;
+  font-weight: 600;
+  outline: none;
+}
+.wb-doc-status { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-3); font-size: 11.5px; }
+.wb-doc-actions { display: inline-flex; gap: 2px; }
+.wb-doc-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.wb-doc-icon:hover { background: var(--bg-2); color: var(--fg); }
+
+.wb-doc-body {
+  flex: 1;
+  min-height: 0;
+  margin-top: 12px;
+  padding: 12px 2px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.75;
+  resize: none;
+  outline: none;
+}
+
+.wb-doc-bar { display: flex; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.wb-doc-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-doc-chip:hover:not(:disabled) { background: var(--bg-2); }
+.wb-doc-chip:disabled { opacity: 0.45; cursor: default; }
+.wb-doc-note { margin-left: 4px; color: var(--fg-3); font-size: 11.5px; }
+
+.wb-doc-history {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+.wb-doc-history-head { color: var(--fg-3); font-size: 12px; margin-bottom: 6px; }
+.wb-doc-version { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+.wb-doc-version-name { color: var(--fg); }
+.wb-doc-version-reason { flex: 1; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-doc-restore {
+  padding: 2px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.wb-chip-hint { display: block; padding: 4px 10px 6px; color: var(--fg-3); font-size: 11.5px; }
+
+/* ============================================================
+ * 任务中心（§154）—— 三块：进行中的任务 / 最近访问 / 发现更多服务
+ * ============================================================ */
+.wb-center { flex: 1; min-width: 0; padding: 18px 26px; overflow-y: auto; }
+.wb-center-head { display: flex; align-items: baseline; gap: 12px; }
+.wb-center-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--fg); }
+.wb-center-toast { color: var(--accent); font-size: 12px; }
+
+.wb-center-empty { margin: 18px 0 0; color: var(--fg-3); font-size: 13px; }
+
+.wb-center-section { margin-top: 20px; }
+.wb-center-section h3 {
+  margin: 0 0 8px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+.wb-center-none { margin: 0; color: var(--fg-3); font-size: 12.5px; }
+
+.wb-center-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+}
+.wb-center-row:hover { background: var(--bg-2); }
+.wb-center-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-center-pinned { color: var(--accent); font-size: 11px; }
+.wb-center-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.wb-center-act:hover { background: var(--bg); color: var(--fg); }
+
+.wb-center-more {
+  margin-top: 4px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.wb-center-services { display: flex; flex-wrap: wrap; gap: 8px; }
+.wb-center-service {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.wb-center-service:hover { background: var(--bg-2); }
+
+.wb-center-confirm {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  min-width: 300px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg);
+  /* 用主题变量，不写死颜色 —— 棘轮守卫会数硬编码颜色（§154 被它抓过一次） */
+  box-shadow: var(--shadow-modal);
+}
+.wb-center-confirm p { margin: 0 0 14px; font-size: 13px; color: var(--fg); }
+.wb-center-confirm-bar { display: flex; justify-content: flex-end; gap: 8px; }
+.wb-center-act-text {
+  padding: 5px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.wb-center-act-text.is-danger { border-color: var(--accent); color: var(--accent); }
+
+/* ============================================================
+ * AI 阅读（§155）—— 文案照本体 `copilot_*` 那一组
+ * ============================================================ */
+.wb-reader { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.wb-reader-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.wb-reader-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--fg); }
+.wb-reader-stats { color: var(--fg-3); font-size: 11.5px; }
+.wb-reader-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.wb-reader-icon:hover:not(:disabled) { background: var(--bg-2); color: var(--fg); }
+.wb-reader-icon:disabled { opacity: 0.4; cursor: default; }
+
+.wb-reader-body { flex: 1; min-height: 0; display: flex; }
+.wb-reader-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 16px 22px; }
+.wb-reader-text {
+  flex: 1;
+  margin: 0;
+  overflow-y: auto;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wb-reader-empty { margin: 0 0 12px; color: var(--fg-3); font-size: 13px; }
+.wb-reader-input {
+  flex: 1;
+  min-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  resize: none;
+  outline: none;
+}
+.wb-reader-enter {
+  align-self: flex-start;
+  margin-top: 10px;
+  padding: 7px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+.wb-reader-enter:disabled { opacity: 0.45; cursor: default; }
+
+.wb-reader-side {
+  width: 268px;
+  flex: 0 0 auto;
+  border-left: 1px solid var(--line-soft);
+  padding: 12px 12px 16px;
+  overflow-y: auto;
+}
+.wb-reader-tabs { display: flex; gap: 4px; }
+.wb-reader-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--fg-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-reader-tab.is-on { border-color: var(--accent); color: var(--accent); }
+.wb-reader-desc { margin: 8px 0 10px; color: var(--fg-3); font-size: 11.5px; }
+.wb-reader-list { margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--fg); }
+.wb-reader-list li { padding: 4px 0; line-height: 1.5; }
+.wb-reader-line { color: var(--fg-3); font-size: 11px; margin-right: 4px; }
+.wb-reader-none { margin: 6px 0; color: var(--fg-3); font-size: 12px; }
+.wb-reader-search {
+  width: 100%;
+  padding: 6px 9px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+.wb-reader-recent { margin-top: 18px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.wb-reader-recent-head { display: flex; align-items: baseline; gap: 6px; color: var(--fg-3); font-size: 12px; }
+.wb-reader-recent-head em { color: var(--accent); font-size: 11px; font-style: normal; }
+.wb-reader-recent-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+.wb-reader-recent-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-reader-recent-title:hover { color: var(--accent); }
+

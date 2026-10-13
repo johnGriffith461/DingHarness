@@ -1,0 +1,81 @@
+/*
+ * 应用外壳（三栏骨架）与窗口控制按钮区
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+/* ---------- 外壳 ---------- */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.titlebar {
+  height: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 12px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  /* 让 Electron 的窗口控制按钮区域可点 */
+  -webkit-app-region: drag;
+}
+.titlebar button,
+.titlebar-actions {
+  -webkit-app-region: no-drag;
+}
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.titlebar-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.side {
+  flex: 0 0 300px;
+  background: var(--bg-1);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.side.left {
+  border-right: 1px solid var(--line);
+}
+.side.right {
+  border-left: 1px solid var(--line);
+}
+.side-head {
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.side-head > span:first-child {
+  flex: 1 1 auto;
+}
+.side-icon {
+  padding: 3px 6px;
+  color: var(--fg-dim);
+}
+.side-icon:hover {
+  color: var(--fg);
+}
+

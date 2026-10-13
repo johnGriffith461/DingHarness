@@ -1,0 +1,181 @@
+/*
+ * 侧栏对话 + provider 探测提示
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+/* ---------- 侧栏对话 ---------- */
+.chat-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 0;
+  overflow-x: auto;
+}
+.chat-tabs button {
+  flex: 0 0 auto;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.chat-tabs button.on {
+  color: #fff;
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.16);
+}
+.chat-provider {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.chat-provider select {
+  flex: 1 1 0;
+  min-width: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 5px;
+}
+.chat-warn {
+  font-size: 11px;
+  color: #fbbf24;
+}
+
+.chat-list {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 100%;
+}
+.chat-msg.user {
+  align-items: flex-end;
+}
+.chat-bubble {
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.chat-msg.user .chat-bubble {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+.chat-msg.assistant .chat-bubble {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+.chat-msg.is-error .chat-bubble {
+  border-color: rgba(248, 113, 113, 0.5);
+}
+.chat-msg-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #ffb4a8;
+}
+.chat-meta {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.chat-cursor {
+  width: 7px;
+  height: 7px;
+  margin-left: 3px;
+  margin-bottom: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: chat-pulse 1s ease-in-out infinite;
+  align-self: flex-start;
+}
+@keyframes chat-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.chat-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 6px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: #ffb4a8;
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chat-compose {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* 探测按钮 + 「还没验证过」提示（provider 可用性不能只看有没有密钥） */
+.chat-probe {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.chat-probe:hover:not(:disabled) {
+  color: #cfe1ff;
+  border-color: rgba(59, 130, 246, 0.55);
+}
+
+.chat-probe:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-note {
+  flex: 1 1 auto;
+  font-size: 10.5px;
+  color: #fbbf24;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-compose .side-input {
+  resize: none;
+  font-size: 12.5px;
+  flex: 1 1 auto;
+}
+

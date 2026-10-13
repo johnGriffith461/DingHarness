@@ -1,0 +1,711 @@
+/*
+ * 主题分区（工作台浅色 / 画布深色）与深色主题覆盖
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+/* ============================================================
+   主题分区：工作台浅色 / 画布深色
+   ============================================================
+   原来这套变量是**全局深色**的，于是全局那条 `button:hover { background: var(--bg-2) }`
+   在工作台里也生效 —— 凡是没显式写 hover 的按钮，一悬停就变成深底深字，**看不清**。
+   实测抓到的是插件「管理」页的 tab（悬停时 background 算成 rgb(27,32,41)、
+   文字色 #1b1d21，两块深色叠在一起）。
+
+   ⚠️ **这套变量的实际作用，只有一条：让全局那条 `button:hover` 在工作台里取到浅色值。**
+   工作台自己的样式**几乎不用变量** —— 实测（`.verify/measure-theme.py`）：
+     工作台相关规则 347 条，其中用主题变量的 **0 条**、含硬编码颜色的 **223 条**。
+
+   所以**不要**把它读成"工作台已经可主题化、做深色主题只要改这几个值"。
+   真要做深色主题，是把那 223 条硬编码颜色逐条改过去，然后重跑那个脚本看数字降没降。
+   这里保留变量块是为了让那条全局 hover 有一个按区域取值的机制，仅此而已。
+   ============================================================ */
+
+.wb {
+  --bg: #ffffff;
+  --bg-1: #fafbfd;
+  --bg-2: #f4f5f7;
+  --line: #eceef1;
+  --fg: #1b1d21;
+  --fg-dim: #9aa1ab;
+  color-scheme: light;
+
+  --line-strong: #e6e8ec;
+  --fg-faint: #b6bcc4;
+  --fg-2: #6b7280;
+  --fg-3: #4b5563;
+  --fg-ghost: #c2c7ce;
+  /* 禁用态专用：弱但可读（不参与 §71 的保真锁定） */
+  --fg-disabled: #6b7280;
+  --accent: #2f6bff;
+  --accent-strong: #1f4fd8;
+  --bg-3: #f2f3f5;
+
+  --surface-active: #eef0f3;
+  --surface-hover: #f6f7f9;
+  --surface-soft: #eef1f8;
+  --surface-tint: #f4f6fb;
+  --line-soft: #e9ebee;
+  --fg-slate: #475569;
+
+  --shadow-card: 0 6px 20px rgba(20, 30, 60, 0.05);
+  --shadow-chip: 0 2px 8px rgba(12, 20, 40, 0.08);
+  --shadow-popover: 0 8px 24px rgba(20, 30, 60, 0.12);
+  --shadow-menu: 0 12px 32px rgba(12, 20, 40, 0.18);
+  --shadow-mock: 0 10px 26px rgba(12, 20, 40, 0.18);
+  --shadow-modal: 0 24px 60px rgba(10, 20, 40, 0.28);
+  --shadow-float: 0 20px 56px rgba(12, 20, 40, 0.28);
+  --shadow-blob: inset -6px -8px 18px rgba(0, 0, 0, 0.28), 0 10px 30px rgba(30, 64, 255, 0.28);
+
+  --ok: #16a34a;
+  --ok-strong: #15803d;
+  --ok-soft: #e4f7ec;
+  --warn: #b45309;
+  --violet: #7c3aed;
+  --teal: #0f766e;
+  --fg-deep: #33383f;
+  --line-mid: #d9dde3;
+  --line-faint: #b9c2d4;
+  --bg-4: #f0f1f3;
+  --bg-5: #f7f8fa;
+  --scrim: rgba(16, 20, 30, 0.28);  /* 模态遮罩：深色主题下要换（深底上黑遮罩会糊成一片） */
+
+  --kind-docx: #e7f0ff;
+  --kind-pptx: #ffeede;
+  --kind-html: #f3e8ff;
+  --kind-canvas: #e6f7f6;
+  --kind-icon-html: #0ea5e9;
+  --tint-blue: #eef4ff;
+  --surface-selected: #f5f8ff;
+  --tint-blue-2: #eaf1ff;
+  --tint-blue-3: #d6e3ff;
+  --warn-soft: #fff4e5;
+  --warn-strong: #f59e0b;
+  --danger: #dc2626;
+  --ok-soft-2: #f0fdf4;
+  --line-faint-2: #c9d2e3;
+  --fg-deep-2: #33363c;
+
+  --grad-avatar: linear-gradient(135deg, #4a6cf7, #7b4cf7 60%, #e8453c);  /* 装饰性渐变：深色主题下需重新配色，不是换值 */
+  --grad-blob: linear-gradient(140deg, var(--accent), #1e40ff 45%, #0a1b6b);  /* 装饰性渐变：深色主题下需重新配色，不是换值 */
+  --grad-feature-art: linear-gradient(135deg, #cfe0ff, #9db9ff);  /* 装饰性渐变：深色主题下需重新配色，不是换值 */
+  --grad-plugin-icon: linear-gradient(135deg, #e6ecf8, #cdd9ee);  /* 装饰性渐变：深色主题下需重新配色，不是换值 */
+  --grad-avatar-xs: linear-gradient(135deg, #4a6cf7, #e8453c);  /* 装饰性渐变：深色主题下需重新配色，不是换值 */
+  --grad-phone-mock: linear-gradient(160deg, #cfe4fb 0%, #b9d8f7 55%, #a9cdf3 100%);  /* 装饰性渐变：深色主题下需重新配色，不是换值 */
+}
+
+/* 画布在 .wb 里面，得把它改回深色 —— 否则节点面板会变成白底 */
+.wb-canvas {
+  --bg: #0f1115;
+  --bg-1: #151922;
+  --bg-2: #1b2029;
+  --line: #262c38;
+  --fg: #c9d1d9;
+  --fg-dim: #7d8794;
+  color-scheme: dark;
+}
+
+/*
+ * ⚠️ 给做深色主题的人（也可能是以后的我）：
+ *
+ * `.wb` 里后来**又加了 8 个变量**（--line-strong / --fg-faint / --fg-2 / --fg-3 /
+ * --fg-ghost / --accent / --accent-strong / --bg-3），这个块**没有**它们，
+ * 所以画布会从 `.wb` 继承到**浅色值**。
+ *
+ * 今天没问题 —— 实测画布相关规则 7 条，含 `var(--…)` 的是 **0 条**
+ * （两批等值替换只动 `.wb` 作用域，画布一个字没碰）。
+ *
+ * 但**开始把画布规则也改成用变量时，必须先把这 8 个在这里补上深色值**，
+ * 否则那些规则会拿到浅色 —— 那是"改一处影响另一处"，
+ * 这个项目里已经犯过几次同类（§43 / §49 / §52 / §63）。
+ *
+ * 查这件事的脚本：`.verify/check-canvas-vars.py`
+ */
+
+/* 管理页的 tab 是「文字 + 计数」形态，悬停给一层浅底就够 */
+.wb-manage-tab:hover { background: var(--bg-2); border-radius: 6px; }
+
+/* ---------- 左栏行的悬停 ⋯ 与任务标题重命名（阶段 11.18） ---------- */
+
+.wb-nav-rowwrap { position: relative; }
+
+/* 实机是悬停才露出 ⋯ —— 常显会让整列看起来都是按钮，反而更乱 */
+.wb-nav-rowmore {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.wb-nav-rowwrap:hover .wb-nav-rowmore { opacity: 1; }
+.wb-nav-rowmore:hover { background: var(--line-soft); }
+
+/* 悬停时给标题留出 ⋯ 的位置，避免文字压在按钮下面 */
+.wb-nav-rowwrap:hover .wb-nav-row-title { padding-right: 22px; }
+
+.wb-task-title-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-task-title-btn:hover { color: var(--accent-strong); }
+
+.wb-task-title-tail { color: var(--fg-ghost); font-weight: 400; }
+
+.wb-task-rename {
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  outline: none;
+  text-align: center;
+  min-width: 200px;
+}
+
+/* ---------- 消息操作栏的六个动作（阶段 11.19） ---------- */
+
+.wb-icon.is-on { color: var(--accent-strong); background: var(--tint-blue); }
+
+/* 重新生成时转一下，让"正在跑"这件事有反馈 —— 否则点了像没反应 */
+.wb-icon.is-spin svg { animation: wb-spin 1s linear infinite; }
+
+@keyframes wb-spin { to { transform: rotate(360deg); } }
+
+.wb-act-hint {
+  font-size: 11.5px;
+  color: var(--ok);
+  background: var(--ok-soft-2);
+  border-radius: 5px;
+  padding: 1px 7px;
+  margin-left: 2px;
+}
+
+/* 卡片本体是个按钮（点它 = 在画布里打开）；外面那圈仍是卡片容器 */
+.wb-artcard-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-artcard-main:hover .wb-artcard-text b { color: var(--accent-strong); }
+
+/* ---------- 手机遥控电脑页（阶段 11.26） ---------- */
+
+.wb-phone-body { display: flex; gap: 28px; align-items: flex-start; }
+.wb-phone-left { flex: 1; min-width: 0; max-width: 460px; }
+.wb-phone-loading { font-style: normal; font-size: 12px; color: var(--fg-dim); }
+
+/* 二维码位：本机版没有手机端，所以不留一个"看起来能扫"的空格子 */
+.wb-qr-none {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--fg-faint);
+  border-style: dashed;
+}
+
+.wb-qr-none em { font-style: normal; font-size: 10.5px; }
+.wb-qr-cap { font-style: normal; font-size: 10.5px; color: var(--fg-dim); }
+
+/* 右侧样机：用 DOM 画，不塞一张来源不明的截图 */
+.wb-phone-mock {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px;
+  border-radius: 16px;
+  background: var(--grad-phone-mock);
+}
+
+.wb-mock-screen {
+  width: 210px;
+  border-radius: 22px;
+  border: 8px solid var(--fg);
+  background: var(--bg);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  box-shadow: var(--shadow-mock);
+}
+
+.wb-mock-menu {
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  font-size: 10.5px;
+}
+
+.wb-mock-menu-head { padding: 5px 8px; color: var(--fg-dim); border-bottom: 1px solid var(--bg-2); }
+
+.wb-mock-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  color: var(--fg-3);
+}
+
+.wb-mock-menu-row.is-on { background: var(--tint-blue); color: var(--accent-strong); }
+
+.wb-mock-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.wb-mock-chip {
+  font-size: 9.5px;
+  color: var(--accent-strong);
+  border: 1px solid var(--tint-blue-3);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.wb-mock-input {
+  font-size: 10px;
+  color: var(--fg-ghost);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+}
+
+.wb-mock-prompt {
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 5px 12px;
+  box-shadow: var(--shadow-chip);
+}
+
+/* ---------- 定时任务编辑（阶段 11.27） ---------- */
+
+.wb-page-btn-primary {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+
+.wb-page-btn-primary:hover { background: var(--fg-deep-2); }
+
+.wb-sched-editing {
+  font-size: 12px;
+  color: var(--accent-strong);
+  background: var(--tint-blue);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+
+/* ---------- 画布节点右键菜单（阶段 11.28） ---------- */
+
+.cv-ctx {
+  position: fixed;
+  z-index: 400;
+  min-width: 178px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #1b2029;
+  border: 1px solid #2b3240;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+.cv-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 12.5px;
+  color: #c9d1d9;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cv-ctx-item:hover { background: #262c38; }
+.cv-ctx-item.is-danger { color: #f87171; }
+.cv-ctx-item.is-danger:hover { background: #3a2226; }
+
+.cv-ctx-icon { width: 16px; text-align: center; font-size: 12px; }
+
+.cv-ctx-item.is-off { color: #6b7280; cursor: default; }
+.cv-ctx-item.is-off:hover { background: transparent; }
+
+/* ---------- 声音选择（阶段 11.31） ---------- */
+
+.wb-modal-row.is-todo { color: var(--fg-disabled); cursor: default; }
+.wb-modal-row.is-todo:hover { background: transparent; }
+
+.wb-voice-list {
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 4px 0 6px 12px;
+}
+
+.wb-voice-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--fg-3);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wb-voice-item:hover { background: var(--bg-2); }
+.wb-voice-item.is-on { background: var(--tint-blue); color: var(--accent-strong); font-weight: 600; }
+.wb-voice-item em { font-style: normal; font-size: 10.5px; color: var(--fg-dim); }
+.wb-voice-empty { padding: 8px 10px; font-size: 12px; color: var(--fg-dim); }
+
+/* ---------- 添加自定义能力（阶段 11.34） ---------- */
+
+.wb-addform {
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--bg-1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-addform-row { display: flex; gap: 8px; }
+.wb-addform-row .wb-sched-select { width: 96px; flex: 0 0 auto; }
+.wb-addform-row .wb-sched-input { flex: 1; }
+
+.wb-addform-foot { display: flex; align-items: center; gap: 6px; }
+.wb-addform-tip { font-style: normal; font-size: 11.5px; color: var(--fg-dim); }
+.wb-addform-err { font-style: normal; font-size: 11.5px; color: var(--danger); }
+
+/* ============================================================
+   深色主题（.wb.is-dark）
+   ------------------------------------------------------------
+   纯**加成**：只在深色作用域里覆盖变量值，浅色主题一个字节不动。
+   删掉这个块就回到原状 —— 所以它不会给浅色带来任何风险。
+
+   值是**推导**出来的（.verify/gen-dark-theme2.py），原则：
+     · 面：以 --bg 为原点算相对明度差，深色基准上还原（保色调区分）
+     · 字：集合内归一化后映射，保住层次顺序
+     · 语义色：保色相往白拉（深底不提亮会糊）
+     · 渐变：压暗保色相
+   推导时撞过两次「看着对其实坏了」（面塌平、字塌黑），教训写在 §85.2。
+
+   ⚠️ 尚未在真机上复核观感 —— 接线与复核见 §85.5。
+   要改对比度时先跑 .verify/measure-theme.py 与 WCAG 对比度计算，不要凭眼估。
+   ============================================================ */
+
+[data-theme="dark"] .wb {
+  --fg-disabled: #8b8f94;
+  --bg: #11141a;
+  --fg: #dfe2e6;
+  --bg-1: #191e27;
+  --bg-2: #272b34;
+  --bg-3: #2b3039;
+  --bg-4: #2f343d;
+  --bg-5: #20252e;
+  --line: #343b45;
+  --line-soft: #3a414b;
+  --line-strong: #404653;
+  --line-mid: #525b6b;
+  --line-faint: #7182a5;
+  --line-faint-2: #5c6d8f;
+  --surface-selected: #1d2536;
+  --surface-active: #303641;
+  --surface-hover: #222730;
+  --surface-soft: #2c3445;
+  --surface-tint: #232937;
+  --tint-blue: #222f46;
+  --tint-blue-2: #273552;
+  --tint-blue-3: #395184;
+  --kind-docx: #273856;
+  --kind-pptx: #48301c;
+  --kind-html: #463762;
+  --kind-canvas: #163438;
+  --warn-soft: #372816;
+  --ok-soft: #17382d;
+  --ok-soft-2: #0e261d;
+  --fg-2: #b8bbbe;
+  --fg-3: #cccfd2;
+  --fg-dim: #8a8c8f;
+  --fg-faint: #666769;
+  --fg-ghost: #555657;
+  --fg-slate: #cccfd2;
+  --fg-deep: #d8dbdf;
+  --fg-deep-2: #d9dce0;
+  --accent: #86a9ff;
+  --accent-strong: #7d99e8;
+  --ok: #78ca96;
+  --ok-strong: #77b58e;
+  --warn: #d49b70;
+  --warn-strong: #f9c771;
+  --danger: #eb8181;
+  --violet: #b38df5;
+  --teal: #74b0ab;
+  --kind-icon-html: #73cbf2;
+  --scrim: rgba(6, 8, 12, 0.45);
+  --shadow-card: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-chip: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-mock: 0 10px 26px rgba(0, 0, 0, 0.5);
+  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 20px 56px rgba(0, 0, 0, 0.6);
+  --shadow-blob: inset -6px -8px 18px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(30, 64, 255, 0.35);
+}
+
+/* 渐变的深色版：压暗保色相（先定义变量，再让上面的块取用） */
+[data-theme="dark"] .wb {
+  --grad-avatar: linear-gradient(135deg, #24357d, #3d2680 60%, #7a2620);  /* 头像渐变：压暗保色相 */
+  --grad-avatar-xs: linear-gradient(135deg, #24357d, #7a2620);  /* 小头像渐变 */
+  --grad-blob: linear-gradient(140deg, var(--accent), #16277a 45%, #060c33);  /* 首页圆球 */
+  --grad-feature-art: linear-gradient(135deg, #16233d, #20335c);  /* 功能插画底 */
+  --grad-plugin-icon: linear-gradient(135deg, #1c222e, #242c3c);  /* 插件图标底 */
+  --grad-phone-mock: linear-gradient(160deg, #101d2e 0%, #13263b 55%, #162f48 100%);  /* 手机样机 */
+}
+
+
+/* 账号下拉菜单（对齐本体：设置 / 外观设置▸ / 收藏夹 / 官网 / 检查更新 / 帮助 / 额度 / 添加账号 / 退出） */
+.wb-acct-menu {
+  position: absolute;
+  left: 10px;
+  bottom: 58px;
+  z-index: 60;
+  width: 236px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+}
+.wb-acct-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-acct-item:hover:not(:disabled) { background: var(--surface-hover); }
+.wb-acct-item:disabled { color: var(--fg-disabled); cursor: default; }
+.wb-acct-item span { flex: 1; }
+.wb-acct-item.is-sub { padding-left: 26px; }
+.wb-acct-item.is-open { background: var(--surface-selected); }
+.wb-acct-chevron { color: var(--fg-dim); }
+.wb-acct-check { color: var(--accent); }
+.wb-acct-sub {
+  margin: 2px 0 4px;
+  padding: 4px 0;
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+.wb-acct-sep {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--line-soft);
+}
+.wb-acct-quota {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+.wb-acct-quota span:not(.wb-acct-radio) { flex: 1; }
+.wb-acct-quota em { font-style: normal; color: var(--fg-faint); }
+.wb-acct-radio {
+  width: 13px; height: 13px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+}
+
+
+/* 输入区 chip 的下拉（项目 / 按需确认）—— 这两个原来是点了没反应的死按钮 */
+.wb-chip-wrap { position: relative; display: inline-flex; }
+.wb-chip.is-on { border-color: var(--accent); color: var(--accent); }
+.wb-chip-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 40;
+  min-width: 168px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+}
+.wb-chip-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-chip-option:hover { background: var(--surface-hover); }
+.wb-chip-option.is-on { color: var(--accent); }
+.wb-chip-empty { padding: 8px; color: var(--fg-dim); font-size: 12.5px; }
+
+
+/* 输入区「技能」的命令面板 —— 形态对齐本体（锚在输入框左边缘、近全宽、底部搜索） */
+.wb-cmd-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 45;
+  max-height: 380px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+}
+.wb-cmd-scroll { flex: 1; overflow-y: auto; padding: 6px; }
+.wb-cmd-group { display: flex; flex-direction: column; }
+.wb-cmd-head {
+  padding: 10px 10px 6px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+.wb-cmd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-cmd-item:hover { background: var(--surface-hover); }
+.wb-cmd-item.is-first { background: var(--surface-selected); }
+.wb-cmd-item b { font-weight: 500; }
+.wb-cmd-item em {
+  font-style: normal;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-cmd-item.is-rec { align-items: baseline; }
+.wb-cmd-item.is-rec b { flex: none; }
+.wb-cmd-empty { padding: 18px 10px; color: var(--fg-dim); font-size: 13px; text-align: center; }
+.wb-cmd-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--fg-dim);
+}
+.wb-cmd-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+
+
+/* 记忆面板（设置里点「记忆」展开）—— 对应本体 chat/memory/list|clear|delete */
+.wb-memory { padding: 12px 16px 14px; border-top: 1px solid var(--line-soft); background: var(--surface-soft); }
+.wb-memory-intro { margin-bottom: 10px; color: var(--fg-dim); font-size: 12.5px; line-height: 1.6; }
+.wb-memory-add { display: flex; gap: 8px; margin-bottom: 10px; }
+.wb-memory-add input {
+  flex: 1; height: 32px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--fg); font-size: 13px; outline: none;
+}
+.wb-memory-add input:focus { border-color: var(--accent); }
+.wb-memory-empty { padding: 14px 0; color: var(--fg-dim); font-size: 12.5px; }
+.wb-memory-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wb-memory-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-radius: 8px; background: var(--surface);
+  font-size: 13px;
+}
+.wb-memory-text { flex: 1; }
+.wb-memory-from { color: var(--fg-dim); font-style: normal; font-size: 12px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-memory-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; color: var(--fg-dim); font-size: 12.5px; }
+
+
+/* 设置的两个子页（个人资料 / 账号）—— 对应本体 chat/settings/profile|account */
+.wb-setpage { padding: 4px 0 8px; }
+.wb-setpage-head { display: flex; align-items: center; gap: 8px; padding: 0 4px 10px; font-size: 13.5px; color: var(--fg); }
+.wb-setpage-note { margin: 0 4px 12px; color: var(--fg-dim); font-size: 12.5px; line-height: 1.6; }
+.wb-setpage-body { display: flex; flex-direction: column; gap: 2px; }
+.wb-setpage-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-top: 1px solid var(--bg-2); font-size: 13px; }
+.wb-setpage-label { width: 88px; flex: none; color: var(--fg-dim); }
+.wb-setpage-row em { font-style: normal; color: var(--fg); }
+

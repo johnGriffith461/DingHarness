@@ -1,0 +1,578 @@
+/*
+ * 智能体 / 云盘证据层与重命名 / 创作广场 / 搜索与常用语与搜索历史 / 图片页与图片动作 / 语气格式 / 上传与拖拽 / 应用详情
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+/* ============================================================
+ * 创建 AI 智能体（§156）—— 文案照本体 `create_bot_*` 那一组
+ * ============================================================ */
+.wb-agent { flex: 1; min-width: 0; padding: 18px 26px; overflow-y: auto; }
+.wb-agent-head { display: flex; align-items: baseline; gap: 12px; }
+.wb-agent-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--fg); }
+.wb-agent-note { color: var(--accent); font-size: 12px; }
+
+.wb-agent-form { margin-top: 16px; max-width: 720px; }
+.wb-agent-field { display: block; margin-bottom: 14px; }
+.wb-agent-field > span { display: block; margin-bottom: 5px; color: var(--fg-3); font-size: 12px; }
+.wb-agent-field input,
+.wb-agent-desc {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.wb-agent-desc { min-height: 96px; line-height: 1.7; resize: vertical; }
+
+.wb-agent-group { margin-bottom: 12px; }
+.wb-agent-group-title { display: block; margin-bottom: 5px; color: var(--fg-3); font-size: 12px; }
+.wb-agent-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-agent-tag {
+  padding: 4px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.wb-agent-tag.is-on { border-color: var(--accent); color: var(--accent); }
+
+.wb-agent-bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.wb-agent-fill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.wb-agent-fill:disabled { opacity: 0.5; cursor: default; }
+.wb-agent-start {
+  padding: 6px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+.wb-agent-cancel {
+  padding: 6px 13px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--fg-3);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.wb-agent-error { color: var(--accent); font-size: 12px; }
+
+.wb-agent-existing { margin-top: 26px; }
+.wb-agent-existing h3 { margin: 0 0 8px; color: var(--fg-3); font-size: 12px; font-weight: 500; }
+.wb-agent-none { margin: 0; color: var(--fg-3); font-size: 12.5px; }
+.wb-agent-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+.wb-agent-pick {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-agent-pick:hover { background: var(--bg-2); }
+.wb-agent-pick.is-on { border-color: var(--accent); }
+.wb-agent-pick em { color: var(--accent); font-size: 11px; font-style: normal; }
+.wb-agent-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.wb-agent-del:hover { background: var(--bg-2); color: var(--fg); }
+
+/* ============================================================
+ * 云盘的证据层（§157）：筛选 / 排序 / 新建菜单 / 到底了 / 存储
+ * ============================================================ */
+.wb-cloud-filter select {
+  padding: 3px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+
+.wb-cloud-newbox { position: relative; display: inline-flex; }
+.wb-cloud-newmenu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 30;
+  min-width: 140px;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: var(--shadow-popover);
+}
+.wb-cloud-newmenu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-cloud-newmenu-item:hover { background: var(--bg-2); }
+
+.wb-cloud-end {
+  padding: 14px 0 6px;
+  color: var(--fg-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+.wb-cloud-foot { display: flex; align-items: center; gap: 10px; }
+
+/* ============================================================
+ * 云盘的删除确认与重命名（§158）
+ * ============================================================ */
+.wb-cloud-dialog {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  min-width: 320px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: var(--shadow-modal);
+}
+.wb-cloud-dialog p { margin: 0 0 8px; color: var(--fg); font-size: 13px; }
+.wb-cloud-dialog-sub { color: var(--fg-3) !important; font-size: 12px !important; word-break: break-all; }
+.wb-cloud-dialog-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+.wb-cloud-dialog-err { margin: 6px 0 0 !important; color: var(--accent) !important; font-size: 12px !important; }
+.wb-cloud-dialog-bar { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* ============================================================
+ * 创作广场（§159）—— 文案照本体 `coding_launch_page_*` 那一组
+ * ============================================================ */
+.wb-coding { flex: 1; min-width: 0; padding: 18px 26px; overflow-y: auto; }
+.wb-coding-head { display: flex; align-items: center; gap: 12px; }
+.wb-coding-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--fg); }
+.wb-coding-count { color: var(--fg-3); font-size: 12px; }
+
+.wb-coding-tools { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.wb-coding-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  color: var(--fg-3);
+}
+.wb-coding-search input {
+  width: 180px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+.wb-coding-tools select {
+  padding: 4px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+.wb-coding-safetips { margin-left: auto; color: var(--fg-3); font-size: 11.5px; }
+.wb-coding-note { margin: 10px 0 0; color: var(--accent); font-size: 12.5px; }
+.wb-coding-empty { margin: 16px 0 0; color: var(--fg-3); font-size: 13px; }
+
+.wb-coding-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.wb-coding-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.wb-coding-cover { height: 84px; background: var(--bg-2); }
+.wb-coding-body { padding: 9px 11px 11px; }
+.wb-coding-name { display: block; color: var(--fg); font-size: 13px; }
+.wb-coding-meta { display: block; margin-top: 3px; color: var(--fg-3); font-size: 11.5px; }
+.wb-coding-actions { display: flex; gap: 6px; margin-top: 9px; }
+.wb-coding-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-coding-act:hover { background: var(--bg-2); }
+
+.wb-coding-top { margin-top: 26px; }
+.wb-coding-top h3 { margin: 0 0 4px; color: var(--fg); font-size: 13.5px; font-weight: 600; }
+.wb-coding-topnote { margin: 0 0 8px; color: var(--fg-3); font-size: 11.5px; }
+.wb-coding-rank { margin: 0; padding: 0; list-style: none; }
+.wb-coding-rank li { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12.5px; }
+.wb-coding-rank-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--fg-3);
+  font-size: 11px;
+}
+.wb-coding-rank-name { color: var(--fg); }
+.wb-coding-rank-cat { color: var(--fg-3); font-size: 11.5px; }
+
+/* ============================================================
+ * 搜索（§160）：技能搜索与云盘搜索共用一个输入框样式
+ * ============================================================ */
+.wb-searchbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  color: var(--fg-3);
+}
+.wb-searchbox input {
+  width: 200px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+.wb-search-empty { margin: 14px 0 0; color: var(--fg-3); font-size: 13px; }
+
+/* ============================================================
+ * `@` 常用语选单（§161）
+ * ============================================================ */
+.wb-phrase-menu {
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% - 6px);
+  z-index: 30;
+  width: 260px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: var(--shadow-popover);
+}
+.wb-phrase-head {
+  padding: 2px 6px 6px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+.wb-phrase-group { padding: 6px 6px 2px; color: var(--fg-3); font-size: 11px; }
+.wb-phrase-item {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-phrase-item:hover { background: var(--bg-2); }
+.wb-phrase-empty { margin: 4px 0; padding: 0 6px; color: var(--fg-3); font-size: 12px; }
+.wb-composer { position: relative; }
+
+/* ============================================================
+ * 搜索历史（§162）
+ * ============================================================ */
+.wb-history {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 9px 0 12px;
+}
+.wb-history-title { color: var(--fg-3); font-size: 11.5px; }
+.wb-history-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 13px;
+  overflow: hidden;
+}
+.wb-history-word {
+  padding: 3px 4px 3px 10px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-history-x {
+  padding: 3px 8px 3px 4px;
+  border: none;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-history-x:hover { color: var(--accent); }
+.wb-history-clear {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ============================================================
+ * 生成图片独立页（§165）—— 生成面板本身复用画布的 `.gen-panel`
+ * ============================================================ */
+.wb-imagepage { flex: 1; min-width: 0; padding: 18px 26px; overflow-y: auto; }
+.wb-imagepage-head { display: flex; align-items: center; gap: 10px; }
+.wb-imagepage-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--fg); }
+.wb-imagepage-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+
+.wb-imagepage-recent { margin-top: 22px; }
+.wb-imagepage-recent h3 { margin: 0 0 10px; color: var(--fg-3); font-size: 12px; font-weight: 500; }
+.wb-imagepage-empty { margin: 0; color: var(--fg-3); font-size: 12.5px; }
+
+.wb-imagepage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+}
+.wb-imagepage-card {
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.wb-imagepage-card img { display: block; width: 100%; height: 130px; object-fit: cover; background: var(--bg-2); }
+.wb-imagepage-card figcaption { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px 10px; }
+.wb-imagepage-prompt {
+  color: var(--fg);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-imagepage-meta { color: var(--fg-3); font-size: 11px; }
+.wb-imagepage-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.wb-imagepage-act {
+  padding: 3px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11.5px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.wb-imagepage-act:hover { background: var(--bg-2); }
+
+/* ============================================================
+ * 图片动作条（§167）—— 抠图 / 变清晰 / 扩图 / 编辑 / 消除
+ * ============================================================ */
+.wb-imageactions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.wb-imageaction {
+  padding: 3px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.wb-imageaction:hover:not(:disabled) { background: var(--bg-2); }
+.wb-imageaction:disabled { opacity: 0.5; cursor: default; }
+.wb-imageaction-ask { display: inline-flex; align-items: center; gap: 5px; }
+.wb-imageaction-ask input {
+  width: 110px;
+  padding: 3px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11.5px;
+  outline: none;
+}
+.wb-imagepage-note { margin: 12px 0 0; color: var(--accent); font-size: 12px; }
+
+/* ============================================================
+ * 文档的调整语气 / 调整格式菜单（§168）
+ * ============================================================ */
+.wb-doc-menuwrap { position: relative; display: inline-flex; }
+.wb-doc-pop {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  z-index: 30;
+  min-width: 110px;
+  margin-bottom: 5px;
+  padding: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: var(--shadow-popover);
+}
+.wb-doc-pop-item {
+  display: block;
+  width: 100%;
+  padding: 5px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-doc-pop-item:hover { background: var(--bg-2); }
+.wb-doc-bar { flex-wrap: wrap; }
+
+/* ============================================================
+ * 上传任务面板（§170）
+ * ============================================================ */
+.wb-upload {
+  margin-bottom: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.wb-upload-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+.wb-upload-sum { color: var(--fg); font-size: 12.5px; }
+.wb-upload-list { margin: 0; padding: 0 10px 8px; list-style: none; max-height: 160px; overflow-y: auto; }
+.wb-upload-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+.wb-upload-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-upload-ok { color: var(--fg-3); }
+.wb-upload-bad { color: var(--accent); }
+
+/* ============================================================
+ * 拖拽上传（§171）
+ * ============================================================ */
+.wb-cloud-drop { position: relative; }
+.wb-cloud-drop.is-over {
+  border-radius: 10px;
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
+}
+.wb-cloud-drop-hint {
+  position: absolute;
+  right: 10px;
+  top: 8px;
+  z-index: 5;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+
+.wb-doc-pop-empty { display: block; padding: 5px 9px; color: var(--fg-3); font-size: 11.5px; }
+
+.wb-imagepage-card video { display: block; width: 100%; height: 130px; object-fit: cover; background: var(--bg-2); }
+
+/* ============================================================
+ * 应用详情（§180）
+ * ============================================================ */
+.wb-coding-detail {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.wb-coding-detail-head { display: flex; align-items: center; gap: 8px; }
+.wb-coding-detail-tab { color: var(--fg-3); font-size: 12px; }
+.wb-coding-detail-name { margin: 6px 0 4px; font-size: 15px; font-weight: 600; color: var(--fg); }
+.wb-coding-detail-meta { margin: 0 0 2px; color: var(--fg-3); font-size: 12px; }
+.wb-coding-detail-path {
+  margin: 0 0 10px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.wb-coding-detail-note { margin: 10px 0 0; color: var(--fg-3); font-size: 11.5px; }
+

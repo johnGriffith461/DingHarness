@@ -1,0 +1,1491 @@
+/*
+ * 画布节点与面板：形状 / 图层 / 写作 / 版本历史 / 自定义节点 / Markdown·代码·图片·导图·白板 / React Flow 深色适配
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+/* ---------- 形状节点（阶段 8.3，对标 data-shape-kind） ---------- */
+
+.shape-node {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 60px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  /* 形状是"设计元素"，不跟着卡片圆角走 */
+  overflow: hidden;
+}
+
+.shape-node.is-selected {
+  outline: 2px solid rgba(96, 165, 250, 0.85);
+  outline-offset: 2px;
+}
+
+.shape-icon {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  display: inline-flex;
+  color: rgba(230, 237, 243, 0.5);
+  pointer-events: none;
+}
+
+.shape-text {
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.shape-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.55;
+}
+
+/* 形状的「编辑文字」按钮：常显（比只靠双击更可发现），选中时更亮 */
+.shape-edit {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 16, 22, 0.55);
+  color: rgba(230, 237, 243, 0.7);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.12s;
+}
+
+.shape-node:hover .shape-edit,
+.shape-node.is-selected .shape-edit {
+  opacity: 1;
+}
+
+.shape-edit:hover {
+  color: #fff;
+  border-color: rgba(96, 165, 250, 0.7);
+}
+
+.shape-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  resize: none;
+}
+
+/* ---------- 导出时的浮层隐藏（阶段 8.6） ---------- */
+
+/*
+ * 导出 PNG 走的是"截屏"，所以凡是不属于画面本身就都要先藏起来，
+ * 否则导出的是一张带着工具栏、状态栏、缩略图的界面照，而不是作品。
+ * 新增浮层时往这条规则里补一行即可 —— 别在导出代码里逐个记类名。
+ */
+.canvas-root[data-exporting="true"] .canvas-toolbar,
+.canvas-root[data-exporting="true"] .marker-toolbar,
+.canvas-root[data-exporting="true"] .canvas-statusbar,
+.canvas-root[data-exporting="true"] .canvas-toast,
+.canvas-root[data-exporting="true"] .layer-panel,
+.canvas-root[data-exporting="true"] .versions-panel,
+.canvas-root[data-exporting="true"] .react-flow__minimap,
+.canvas-root[data-exporting="true"] .react-flow__attribution,
+.canvas-root[data-exporting="true"] .react-flow__panel,
+.canvas-root[data-exporting="true"] .react-flow__controls {
+  display: none !important;
+}
+
+/* ---------- 图层面板（阶段 8.1 / 8.2，对标 data-canvas-order） ---------- */
+
+.layer-panel {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  bottom: 44px;
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: rgba(20, 24, 32, 0.97);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  z-index: 11;
+  overflow: hidden;
+}
+
+.layer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.layer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.layer-title em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.layer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.layer-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.layer-list {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layer-empty {
+  padding: 14px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+}
+
+.layer-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.layer-row.is-selected {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.layer-row.is-hidden {
+  opacity: 0.45;
+}
+
+.layer-kind {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.layer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-name em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.layer-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 150px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(20, 24, 32, 0.99);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.layer-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layer-menu-item:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.layer-menu-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.layer-menu-item.is-danger {
+  color: #ffb4a8;
+}
+
+.layer-menu-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 3px 2px;
+}
+
+/* ---------- 写作助手（对标原版 canvas_writing_shortcuts_*） ---------- */
+
+.nv-write {
+  position: relative;
+  display: inline-flex;
+}
+
+.nv-write-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 108px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(20, 24, 32, 0.98);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.nv-menu-item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.nv-menu-item:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.nv-write-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  max-width: 220px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(40, 20, 20, 0.96);
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  color: #ffb4a8;
+  font-size: 11px;
+  cursor: pointer;
+  z-index: 20;
+}
+
+/* ---------- 版本历史面板（对标原版 canvas_versions_*） ---------- */
+
+.versions-panel {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  bottom: 44px;
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: rgba(20, 24, 32, 0.97);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  z-index: 12;
+  overflow: hidden;
+}
+
+.versions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.versions-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.versions-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.versions-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.versions-list {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.versions-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.versions-item.is-latest {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.versions-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.versions-item-name {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.versions-item-time {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.versions-badge {
+  font-size: 10px;
+  color: #cfe1ff;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.versions-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.versions-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.versions-mini:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.versions-mini.is-primary {
+  color: #cfe1ff;
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.versions-mini:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.versions-empty {
+  padding: 14px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.versions-preview {
+  border-top: 1px solid var(--line);
+  padding: 6px 8px 8px;
+}
+
+.versions-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #cfe1ff;
+  margin-bottom: 5px;
+}
+
+.versions-preview-body {
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.versions-preview-note {
+  margin-top: 4px;
+  color: #fbbf24;
+  line-height: 1.5;
+}
+
+.versions-note {
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: #cfe1ff;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.canvas-shortcuts {
+  right: 0;
+  left: auto;
+  min-width: 260px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.shortcut-row kbd {
+  flex: 0 0 118px;
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: #0f1319;
+  color: #cfe1ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  text-align: center;
+}
+
+.shortcut-row span {
+  color: var(--muted);
+}
+
+.marker-text-input {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 8px;
+  background: rgba(22, 26, 34, 0.97);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.marker-text-input textarea {
+  width: 220px;
+  resize: both;
+  background: #0f1319;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.marker-text-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.marker-text-actions button {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.marker-text-actions button:first-child {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(59, 130, 246, 0.6);
+}
+.side-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+.side-foot {
+  border-top: 1px solid var(--line);
+  padding: 8px;
+}
+.side-input {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 7px 9px;
+  font: inherit;
+}
+.side-input:disabled {
+  opacity: 0.55;
+}
+.muted {
+  color: var(--fg-dim);
+  margin: 0;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+/* ---------- 画布容器 ---------- */
+.canvas-root {
+  position: absolute;
+  inset: 0;
+  /* 涂抹选时避免浏览器原生文字选择抢走指针 */
+  user-select: none;
+}
+.canvas-flow {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas-toolbar {
+  position: absolute;
+  z-index: 10;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(21, 25, 34, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+  /*
+   * 必须单行：两侧面板都打开时画布区只有 ~946px，一换行高度就从 38px 变 77px，
+   * 会把画布内容顶下去、也会和别的浮层撞上（实测过）。
+   * 空间不够时让里面的按钮自己收缩，而不是换行。
+   */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  max-width: calc(100% - 20px);
+}
+.canvas-toolbar > button,
+.canvas-toolbar .canvas-toolbar-menu > button {
+  flex: 0 0 auto;
+}
+.canvas-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  margin: 0 4px;
+}
+.canvas-mode[data-mode="smear"].on {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* 「新建」下拉：六种节点类型入口 */
+.canvas-add {
+  position: relative;
+}
+.canvas-add-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 210px;
+  padding: 4px;
+  background: rgba(21, 25, 34, 0.98);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+}
+.canvas-add-menu button {
+  display: grid;
+  grid-template-columns: 16px auto;
+  grid-template-rows: auto auto;
+  gap: 0 8px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.canvas-add-menu button > svg {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--fg-dim);
+}
+.canvas-add-label {
+  font-size: 12.5px;
+}
+.canvas-add-hint {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+
+.canvas-statusbar {
+  position: absolute;
+  z-index: 10;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: rgba(21, 25, 34, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  font-variant-numeric: tabular-nums;
+}
+.canvas-statusbar .dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.canvas-statusbar .status-sel {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* ---------- 选择层（框选 / 涂抹选）---------- */
+/* 只画，不接指针：手势由 .canvas-root 在捕获阶段决定归属 */
+.sweep-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+/* 选择模式下的画布光标：十字提示"这里可以拉框/涂抹" */
+.canvas-root[data-selection-mode="box"] .react-flow__pane,
+.canvas-root[data-selection-mode="smear"] .react-flow__pane {
+  cursor: crosshair;
+}
+.canvas-root[data-selection-mode="smear"] {
+  cursor: crosshair;
+}
+.sweep-rect {
+  fill: rgba(59, 130, 246, 0.12);
+  stroke: rgba(96, 165, 250, 0.9);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+.smear-trail {
+  fill: none;
+  stroke: rgba(96, 165, 250, 0.85);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+}
+.smear-head {
+  fill: rgba(59, 130, 246, 0.35);
+  stroke: #60a5fa;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ---------- 自定义节点（对标 data-node-view-wrapper）---------- */
+.nv {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+}
+.nv-auto {
+  max-width: 560px;
+}
+.nv-fixed {
+  overflow: hidden;
+  /* 撑满 React Flow 给的 measured 高度，内部再靠 flex 分配（图表/白板需要确定高度） */
+  height: 100%;
+}
+.nv.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 14px rgba(59, 130, 246, 0.28);
+}
+.nv-head {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nv-icon {
+  display: inline-flex;
+  color: var(--fg-dim);
+}
+.nv-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+.nv-tag {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.18);
+  color: #9cc4ff;
+}
+.nv-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.nv-btn,
+.nv-select {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.nv-btn:hover,
+.nv-select:hover {
+  color: var(--fg);
+  background: var(--bg-2);
+}
+.nv-body {
+  margin: 0;
+  padding: 0;
+  color: var(--fg);
+  font: inherit;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 固定尺寸节点（图表 / 白板）：主体撑满卡片剩余高度。
+   注意不能给子元素加 `min-height: 0` —— 那会把画布压成 0 高；
+   `.nv-board-host` / `.nv-graph-host` 是绝对定位宿主，靠父级高度定位。 */
+.nv-body.nv-grow {
+  overflow: hidden;
+}
+
+.nv-input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 9px;
+  resize: none;
+  user-select: text;
+}
+.nv-input:focus {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* ---------- Markdown 文本节点 ---------- */
+.nv-markdown-body {
+  padding: 10px 12px;
+  user-select: text;
+  overflow: auto;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.nv-markdown-body > :first-child {
+  margin-top: 0;
+}
+.nv-markdown-body > :last-child {
+  margin-bottom: 0;
+}
+.nv-markdown-body h1,
+.nv-markdown-body h2,
+.nv-markdown-body h3,
+.nv-markdown-body h4 {
+  margin: 10px 0 6px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.nv-markdown-body h1 {
+  font-size: 17px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.nv-markdown-body h2 {
+  font-size: 15px;
+}
+.nv-markdown-body h3 {
+  font-size: 13.5px;
+}
+.nv-markdown-body h4 {
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+.nv-markdown-body p {
+  margin: 6px 0;
+}
+.nv-markdown-body ul,
+.nv-markdown-body ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.nv-markdown-body li {
+  margin: 2px 0;
+}
+.nv-markdown-body code {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(110, 118, 129, 0.25);
+}
+.nv-markdown-body pre {
+  margin: 8px 0;
+  padding: 9px 11px;
+  border-radius: 6px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid var(--line);
+}
+.nv-markdown-body pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+.nv-markdown-body blockquote {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--fg-dim);
+}
+.nv-markdown-body a {
+  color: #79b8ff;
+  text-decoration: none;
+}
+.nv-markdown-body a:hover {
+  text-decoration: underline;
+}
+.nv-markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 10px 0;
+}
+.nv-markdown-body mark {
+  background: rgba(251, 191, 36, 0.25);
+  color: #fde68a;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.nv-markdown-body del {
+  color: var(--fg-dim);
+}
+
+/* ---------- 代码节点 ---------- */
+.nv-codebox {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.nv-gutter {
+  flex: 0 0 auto;
+  padding: 9px 6px 9px 9px;
+  text-align: right;
+  color: #55607a;
+  background: rgba(0, 0, 0, 0.18);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  overflow: hidden;
+}
+.nv-gutter-more {
+  color: var(--fg-dim);
+}
+.nv-code-input {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: auto;
+}
+.nv-code-pre {
+  margin: 0;
+  padding: 9px 11px;
+  flex: 1 1 auto;
+  overflow: auto;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  user-select: text;
+}
+.nv-code-pre code {
+  font: inherit;
+  background: transparent;
+}
+.nv-code-more {
+  color: var(--fg-dim);
+}
+/* Prism 深色主题（最小集，不引 prism 的 CSS 主题文件） */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6b7a90;
+  font-style: italic;
+}
+.token.punctuation {
+  color: #8b98a9;
+}
+.token.property,
+.token.tag,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #f07178;
+}
+.token.boolean,
+.token.number {
+  color: #f78c6c;
+}
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #7ee787;
+}
+.token.operator,
+.token.entity,
+.token.url {
+  color: #79b8ff;
+}
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #c792ea;
+}
+.token.function,
+.token.class-name {
+  color: #ffcb6b;
+}
+.token.regex,
+.token.important,
+.token.variable {
+  color: #f78c6c;
+}
+.token.important,
+.token.bold {
+  font-weight: 700;
+}
+.token.italic {
+  font-style: italic;
+}
+
+/* ---------- 图片节点 ---------- */
+.nv-image-frame {
+  position: relative;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.22);
+  min-height: 60px;
+}
+.nv-image-img {
+  display: block;
+  width: 100%;
+  max-height: 460px;
+  object-fit: contain;
+}
+.nv-image-meta {
+  padding: 4px 10px 7px;
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+/* 裁剪：舞台与操作条并列，操作条不会被铺满的选择框盖住 */
+.nv-crop-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.nv-crop {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+  touch-action: none;
+}
+.nv-crop-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0.55;
+}
+.nv-crop-box {
+  position: absolute;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(10, 12, 16, 0.45);
+  cursor: move;
+}
+.nv-crop-h {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.nv-crop-h.nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+.nv-crop-h.ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+.nv-crop-h.sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+.nv-crop-h.se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
+.nv-crop-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: var(--bg-2);
+  border-top: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.nv-crop-size {
+  margin-right: auto;
+}
+.nv-drop {
+  margin: 10px;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--fg-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  cursor: pointer;
+}
+.nv-drop:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+/* ---------- 导图 / 图表节点（主区 + 源码侧栏）---------- */
+.nv-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.nv-split-row {
+  flex-direction: column;
+}
+.nv-split-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* 不给 min-height: 0：这里同时也是 .nv-graph-host 的父级，压成 0 会让图表白屏 */
+  overflow: hidden;
+}
+.nv-split-side {
+  flex: 0 0 auto;
+  height: 38%;
+  border-top: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.22);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow: auto;
+}
+.nv-mindmap .nv-split {
+  flex-direction: row;
+}
+.nv-mindmap .nv-split-side {
+  height: auto;
+  width: 38%;
+  border-top: 0;
+  border-left: 1px solid var(--line);
+}
+.nv-graph-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.nv-graph-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.nv-graph-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: rgba(15, 17, 21, 0.55);
+  pointer-events: none;
+}
+.nv-mermaid-svg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  overflow: auto;
+}
+/* Mermaid 会给 svg 内联 max-width，这里覆盖掉，让图按容器缩放而不是被裁 */
+.nv-mermaid-svg svg {
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  flex: 0 0 auto;
+}
+/* markmap 的文字用画布前景色，避免默认黑字在深色背景上看不见 */
+.nv-graph-svg .markmap-node text,
+.nv-graph-svg text {
+  fill: var(--fg);
+}
+.nv-graph-svg .markmap-link {
+  stroke: #3f4a5c;
+}
+/* markmap 自带 <style> 里用了 var(--markmap-*)，深色下要覆盖几个关键变量 */
+.nv-graph-svg .markmap {
+  --markmap-text-color: var(--fg);
+  --markmap-circle-open-bg: #1b2029;
+  --markmap-a-color: #79b8ff;
+  --markmap-highlight-node-bg: rgba(59, 130, 246, 0.18);
+  --markmap-code-bg: rgba(0, 0, 0, 0.3);
+  --markmap-code-color: var(--fg);
+}
+
+/* ---------- 白板节点 ---------- */
+.nv-board-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.16);
+}
+.nv-swatch {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.nv-swatch.on {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.nv-range {
+  margin-left: auto;
+  width: 84px;
+  accent-color: var(--accent);
+}
+.nv-board-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background:
+    radial-gradient(circle, rgba(120, 130, 150, 0.16) 1px, transparent 1px) 0 0 / 16px 16px,
+    rgba(0, 0, 0, 0.22);
+}
+.nv-board-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+.nv-board-canvas.is-eraser {
+  cursor: cell;
+}
+
+/* ---------- 生成状态条（节点底部）---------- */
+.nv-genbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.22);
+  font-variant-numeric: tabular-nums;
+}
+.nv-gen-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nv-gen-state.is-busy {
+  color: #9cc4ff;
+}
+.nv-gen-state.is-failed {
+  color: #ffb4a8;
+}
+.nv-gen-nav {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.nv-gen-retry {
+  margin-left: auto;
+}
+.nv-gen-nav + .nv-gen-retry {
+  margin-left: 0;
+}
+.nv-spin {
+  animation: nv-rotate 1s linear infinite;
+}
+@keyframes nv-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- 懒加载占位 ---------- */
+.nv-deferred {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.nv-skeleton {
+  height: 100%;
+  min-height: 48px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 25%,
+    rgba(255, 255, 255, 0.07) 37%,
+    rgba(255, 255, 255, 0.03) 63%
+  );
+  background-size: 400% 100%;
+  animation: nv-shimmer 1.4s ease infinite;
+}
+@keyframes nv-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+.nv-warn {
+  padding: 6px 9px;
+  font-size: 11px;
+  color: #ffb4a8;
+  border-top: 1px solid var(--line);
+}
+.hidden-input {
+  display: none;
+}
+
+/* React Flow 深色适配 */
+.react-flow__attribution {
+  background: transparent;
+  color: var(--fg-dim);
+}
+/*
+ * 让"画布空白处"真的是 pane 本身。
+ * React Flow 默认给 .react-flow__background（pointer-events: none）和
+ * .react-flow__viewport（pointer-events: none）做了透明化，但夹在中间的
+ * .react-flow__renderer 没有 —— 它盖在 pane 之上，于是点空白时事件目标是 renderer
+ * 而不是 pane。React Flow 自己的框选与空白点击都判 `event.target === pane`，
+ * 所以必须把 renderer 也透明化，节点/边的交互由它下面的 .react-flow__viewport 提供。
+ */
+.react-flow__renderer {
+  pointer-events: none;
+}
+.react-flow__controls-button {
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  fill: var(--fg);
+}
+.react-flow__controls-button:hover {
+  background: var(--bg-2);
+}
+.react-flow__minimap {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.react-flow__edge-text {
+  fill: var(--fg-dim);
+}
+.react-flow__edge-textbg {
+  fill: var(--bg-1);
+}
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: var(--bg-2);
+  border: 1px solid #4b5563;
+}
+.nv-port {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.nv:hover .nv-port,
+.nv.is-selected .nv-port {
+  opacity: 1;
+}
+.nv-port:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+

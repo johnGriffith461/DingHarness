@@ -1,0 +1,1083 @@
+/*
+ * 画布：节点引用芯片 / 菜单 / 标记层 / 画框 / HTML 节点 / 图片动作 / 底部工具条 / 生成面板 / 尺寸 / 文字工具条
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+/* ---------- 节点引用芯片（阶段 5.4） ---------- */
+
+.chat-ref-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-ref-btn:hover {
+  color: #cfe1ff;
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.chat-refchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 2px 6px;
+}
+
+.chat-refchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #cfe1ff;
+  background: rgba(59, 130, 246, 0.18);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+}
+
+.chat-refchip.is-broken {
+  color: #ffb4a8;
+  background: rgba(248, 113, 113, 0.16);
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.chat-refchip em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.chat-mentions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 6px;
+  padding: 5px;
+  border-radius: 8px;
+  background: rgba(22, 26, 34, 0.96);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  max-height: 180px;
+  overflow: auto;
+}
+
+.chat-mentions-title {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 4px 4px;
+}
+
+.chat-mention-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.chat-mention-item:hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.chat-mention-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-mention-kind {
+  color: var(--muted);
+  font-size: 10px;
+}
+.chat-send {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.chat-send:disabled {
+  opacity: 0.45;
+}
+.chat-send.is-stop {
+  color: #ffb4a8;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+/* ---------- 画布菜单（新建 / AI 生成）---------- */
+.canvas-menu-wrap {
+  position: relative;
+}
+.canvas-badge {
+  min-width: 15px;
+  padding: 0 4px;
+  margin-left: 1px;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+}
+.canvas-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  padding: 4px;
+  background: rgba(21, 25, 34, 0.98);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+}
+.canvas-menu button {
+  display: grid;
+  grid-template-columns: 16px auto;
+  grid-template-rows: auto auto;
+  gap: 0 8px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.canvas-menu button > svg {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--fg-dim);
+}
+.canvas-menu-label {
+  font-size: 12.5px;
+}
+.canvas-menu-hint {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+.canvas-menu-input {
+  margin: 2px 2px 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.canvas-menu-ai {
+  min-width: 260px;
+}
+
+/* ---------- 画布提示（生成中 / 失败）---------- */
+.canvas-toast {
+  position: absolute;
+  z-index: 15;
+  left: 50%;
+  top: 58px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(21, 25, 34, 0.96);
+  max-width: 70%;
+}
+.canvas-toast.is-busy {
+  color: #9cc4ff;
+  border-color: rgba(59, 130, 246, 0.45);
+}
+.canvas-toast.is-error {
+  color: #ffb4a8;
+  border-color: rgba(248, 113, 113, 0.45);
+  cursor: pointer;
+}
+.canvas-toast.is-recover {
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.45);
+  cursor: pointer;
+}
+.status-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.status-save.is-saved {
+  color: #7ee787;
+}
+.status-save.is-saving,
+.status-save.is-dirty {
+  color: #fbbf24;
+}
+.status-save.is-error {
+  color: #ffb4a8;
+}
+
+/* ---------- 标记层（阶段 5） ---------- */
+
+.marker-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  /* 整层不吃指针：标记永远不挡住下面的节点交互，命中测试由几何算 */
+  pointer-events: none;
+}
+
+.marker-shape.is-selected {
+  stroke-dasharray: 6 4;
+}
+
+.canvas-root.is-marking .canvas-flow {
+  cursor: crosshair;
+}
+
+.marker-toolbar {
+  position: absolute;
+  /*
+   * 放**画布左下角**，不放顶部。
+   *
+   * 实测（diag-toolbar.mjs）：两侧面板都打开时画布区只有 ~946px 宽，
+   * 而画布工具条自己居中、宽 ~596px —— 顶部再横一条标记工具条必然重叠
+   * （实测重叠区 586×34 px）。放左下角既躲开工具条，也不挡画布的主要阅读区，
+   * 而且和原版把工具放底部的做法一致（原版底栏就带标记/涂抹）。
+   */
+  bottom: 68px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: rgba(22, 26, 34, 0.94);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  z-index: 7;
+  font-size: 12px;
+  /* 不允许换行：一换行就会压到画布内容上 */
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  max-width: calc(100% - 24px);
+  overflow-x: auto;
+}
+
+.marker-toolbar-label {
+  color: var(--muted);
+  margin-right: 2px;
+  flex: 0 0 auto;
+}
+
+/* 窄一点就把"标记"两个字收掉，把宽度让给工具按钮 */
+@media (max-width: 1560px) {
+  .marker-toolbar-label {
+    display: none;
+  }
+  .marker-width {
+    width: 52px;
+  }
+  /* 画布区被两侧面板压窄时，标记工具条只留最常用的几个，其余横向滚动 */
+  .marker-toolbar {
+    max-width: min(560px, calc(100% - 24px));
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+}
+
+.marker-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.marker-prompt-text {
+  display: inline;
+}
+
+@media (max-width: 1280px) {
+  /* 窄窗口下把"标记当提示词"收成图标，按钮分组不至于被挤到换行 */
+  .marker-prompt-text {
+    display: none;
+  }
+}
+
+.marker-tool:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.marker-tool.is-active {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #cfe1ff;
+}
+
+.marker-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.marker-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  margin: 0 4px;
+}
+
+.marker-colors {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.marker-width {
+  width: 64px;
+  flex: 0 0 auto;
+}
+
+.marker-color {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.marker-color.is-active {
+  border-color: #fff;
+}
+
+.marker-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.marker-prompt.is-on {
+  color: #cfe1ff;
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.marker-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+.status-marker {
+  color: #c084fc;
+}
+
+/* ---------- 画框节点（阶段 8.4，对标 data-canvas-frame-id） ---------- */
+
+.frame-node {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px dashed;
+  border-radius: 12px;
+  /* 画框是容器：它自己不吃指针，否则框住的内容点不到。
+     只有标题按钮和缩放手柄例外（它们各自标了 nodrag）。 */
+  pointer-events: none;
+}
+
+.frame-node.is-selected {
+  border-style: solid;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.35);
+}
+
+.frame-title {
+  position: absolute;
+  top: -24px;
+  left: 0;
+  pointer-events: auto;
+  /* 画框唯一可抓的地方（拖拽把手）—— 见 FrameNode.tsx 里的说明 */
+  cursor: grab;
+}
+
+.frame-title:active {
+  cursor: grabbing;
+}
+
+.frame-title-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(20, 24, 32, 0.92);
+  color: var(--muted);
+  font-size: 11px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.frame-node.is-selected .frame-title-text {
+  color: #cfe1ff;
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+.frame-title-input {
+  height: 20px;
+  width: 160px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(96, 165, 250, 0.6);
+  background: #0f1319;
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+
+.frame-resize-line {
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+.frame-resize-handle {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #0b1220;
+  border: 1px solid rgba(96, 165, 250, 0.9);
+}
+
+/* ---------- HTML 节点（阶段 9.1，对标 data-canvas-html-*） ---------- */
+
+.nv-html-note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  font-size: 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--line);
+}
+
+.nv-html-note b {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.nv-html-stage {
+  /* 沙箱 iframe 的舞台：白底（用户 HTML 默认按浅色写），窄边框 */
+  position: relative;
+  background: #fff;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+}
+
+.nv-html-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  /* 让 iframe 自己收指针 —— 用户 HTML 里的按钮、输入框、滚动都靠它 */
+  background: #fff;
+}
+
+.nv-html-error {
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #ffb4a8;
+  background: rgba(239, 68, 68, 0.12);
+  border-top: 1px solid rgba(239, 68, 68, 0.28);
+}
+
+/* ---------- 图片动作（阶段 9.3，对标 aiCreation_canvas_imageAction_*） ---------- */
+
+.image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.image-action {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.image-action:hover:not(:disabled) {
+  color: #cfe1ff;
+  border-color: rgba(96, 165, 250, 0.55);
+}
+
+.image-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.image-action.is-go {
+  flex: 0 0 auto;
+  color: #cfe1ff;
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.image-action-edit {
+  display: flex;
+  flex: 1 1 100%;
+  gap: 4px;
+}
+
+.image-action-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: #0f1319;
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+
+.image-action-input:focus {
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+.image-action-note {
+  flex: 1 1 100%;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.image-action-busy {
+  padding: 6px 9px;
+  font-size: 11px;
+  color: #cfe1ff;
+  background: rgba(59, 130, 246, 0.12);
+  border-bottom: 1px solid var(--line);
+}
+
+.image-action-error {
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #ffb4a8;
+  background: rgba(239, 68, 68, 0.12);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.28);
+}
+
+/* ---------- 底部工具条（阶段 9.2，对标 data-canvas-bottom-toolbar） ---------- */
+
+/*
+ * 原版把「选择 / 标记 / 图片生成 / 视频生成」和「撤销·重做·缩放%」放在画布底部，
+ * 所以标记工具条要抬到它上面，否则两条会叠在一起（这个坑在 §19.3 踩过一次）。
+ */
+.bottom-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 10px;
+  background: rgba(20, 24, 32, 0.95);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  max-width: calc(100% - 20px);
+}
+
+.bottom-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.bottom-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.bottom-btn.is-active,
+.bottom-btn.is-primary {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #cfe1ff;
+}
+
+.bottom-btn.is-icon {
+  padding: 0 7px;
+}
+
+.bottom-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.bottom-badge {
+  font-style: normal;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.35);
+  color: #e9d5ff;
+}
+
+.bottom-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  flex: 0 0 auto;
+}
+
+.bottom-zoom {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 38px;
+  text-align: right;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.bottom-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.bottom-menu-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 118px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(20, 24, 32, 0.99);
+  border: 1px solid var(--line);
+  box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* ---------- 生成面板（图片 / 视频，挂在底部工具条上方） ---------- */
+
+.gen-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 68px;
+  transform: translateX(-50%);
+  z-index: 13;
+  width: 380px;
+  max-width: calc(100% - 24px);
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: rgba(20, 24, 32, 0.98);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.gen-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gen-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.gen-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.gen-panel-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.gen-panel-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #0f1319;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+.gen-panel-input:focus {
+  border-color: rgba(96, 165, 250, 0.65);
+}
+
+.gen-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gen-panel-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 11px;
+  padding: 0 5px;
+}
+
+.gen-panel-run {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  background: rgba(59, 130, 246, 0.24);
+  color: #cfe1ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gen-panel-run:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gen-panel-note {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+/* ---- 尺寸设置（严格按 Lunora 规格：模式 / 档位 / 比例 / 自定义宽高） ---- */
+
+.gen-size {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+}
+
+.gen-size-modes,
+.gen-size-tiers {
+  display: flex;
+  gap: 3px;
+}
+
+.gen-size-btn {
+  flex: 1 1 auto;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gen-size-btn.is-tiny {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 0 6px;
+}
+
+.gen-size-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.gen-size-btn.on {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #cfe1ff;
+}
+
+.gen-size-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gen-size-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 11px;
+  padding: 0 5px;
+}
+
+.gen-size-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+
+.gen-size-num:focus {
+  border-color: rgba(96, 165, 250, 0.65);
+}
+
+.gen-size-x {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.gen-size-out {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.gen-size-out b {
+  color: #cfe1ff;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.gen-size-bad {
+  color: #ffb4a8;
+}
+
+.gen-size-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #fbbf24;
+}
+
+.gen-panel-error {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #ffb4a8;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  max-height: 90px;
+  overflow: auto;
+}
+
+.gen-panel-empty {
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.gen-panel-empty em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-size: 10.5px;
+  opacity: 0.8;
+}
+
+.gen-panel-empty code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 10.5px;
+}
+
+.is-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- 文字排版工具条（阶段 8.5，对标 text-toolbar-popup） ---------- */
+
+/*
+ * 浮动在选中文字块上方的小面板。位置由 JS 按节点实际矩形算（见 TextToolbar），
+ * 这里只负责样子与 `translateX(-50%)` 的水平居中。
+ */
+.text-toolbar {
+  position: fixed;
+  z-index: 20;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 9px;
+  background: rgba(20, 24, 32, 0.97);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  white-space: nowrap;
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+}
+
+.text-toolbar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.text-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.text-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  flex: 0 0 auto;
+}
+
+.text-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.text-tool-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.text-tool-btn.on {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(59, 130, 246, 0.55);
+  color: #cfe1ff;
+}
+
+.text-tool-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.text-tool-field input[type="range"] {
+  width: 62px;
+  accent-color: #3b82f6;
+}
+
+.text-tool-field em {
+  font-style: normal;
+  min-width: 34px;
+  text-align: right;
+  color: #cfe1ff;
+  font-variant-numeric: tabular-nums;
+}
+

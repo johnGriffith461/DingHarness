@@ -1,0 +1,65 @@
+/*
+ * 设计令牌与基础元素样式（切点前的全部）
+ *
+ * ⚠️ 2026-10-13 从 `src/styles.css`（6015 行）**按区域原样切出来**（C6-3）：
+ * **一条规则都没改**，只是搬了位置 —— 入口 `src/styles.css` 现在只剩一串 `@import`。
+ * `@import` 的**顺序就是原来那一段在文件里的顺序**：CSS 是层叠的，顺序变了样子就会变。
+ * 所以这个文件里**别随手调顺序**；要改样式请在原区域里改。
+ */
+:root {
+  --bg: #0f1115;
+  --bg-1: #151922;
+  --bg-2: #1b2029;
+  --line: #262c38;
+  --fg: #c9d1d9;
+  --fg-dim: #7d8794;
+  --accent: #3b82f6;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+button:hover {
+  background: var(--bg-2);
+}
+button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+button:disabled:hover {
+  background: transparent;
+}
+button.on {
+  background: var(--bg-2);
+  border-color: var(--line);
+  color: #fff;
+}
+
