@@ -203,6 +203,33 @@ export type ShellBridge = {
     versions: { electron: string; node: string; chrome: string };
   }>;
   userDataDir: () => Promise<string>;
+  /**
+   * 「记忆」库的读写（§185 起聊天侧也会用）。
+   *
+   * ⚠️ 它原来**只存在于 preload**，契约里没有 —— 手册点名的两处漂移之一，
+   * 后果是 `src/workbench/memoryStore.ts` 只好自己写一个 `MemoryBridge = ShellBridge & {…}`
+   * 来"打补丁扩展类型"。C4 让 preload `satisfies ShellBridge` 之后，这条立刻被顶出来。
+   *
+   * 三个方法回的都是 `unknown`：**收窄在渲染层做**（记忆库的形状由 `shared/memory.ts` 定义，
+   * 主进程只负责存取与归一化）。
+   */
+  memory: {
+    read: () => Promise<unknown>;
+    write: (lib: unknown) => Promise<unknown>;
+    clear: () => Promise<unknown>;
+  };
+  /**
+   * 让窗口标题栏覆盖层跟随主题（Windows 上的标题栏是自绘的）。
+   *
+   * ⚠️ 它原来**只存在于 preload**（`electron/preload.ts`），契约里没有 ——
+   * 正是手册点名的两处漂移之一（另一处是 `memory`，已补）。漂移不会有任何报错，
+   * 只会表现为"类型说有、实际没有"或反过来。C4 给 preload 加上
+   * `satisfies ShellBridge` 之后，这条立刻被 `tsc` 顶了出来。
+   *
+   * @param payload 覆盖层底色与符号色
+   * @returns 主进程是否设置成功
+   */
+  setTitlebar: (payload: { color: string; symbolColor: string }) => Promise<boolean>;
   ai: {
     listProviders: () => Promise<ProviderInfo[]>;
     /** 主动探测真实连通性（较慢，只在用户触发时跑）。 */

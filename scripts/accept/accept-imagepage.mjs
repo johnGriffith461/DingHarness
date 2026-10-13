@@ -59,7 +59,20 @@ try {
     () => document.querySelector('[data-testid="wb-add-pop"]')?.textContent?.includes("图片生成") ?? false,
   );
   await page.locator('[data-testid="wb-add-image"]').click();
-  await page.waitForTimeout(1500);
+  /*
+   * 等**真条件**（同 accept-videopage 那次修正）：面板挂载时要去列图片模型，
+   * 主进程侧有 15 秒超时、超时给诚实的空态。固定等 1500ms 曾在"上游慢"时报过假案。
+   * 这里等的结果是"两种诚实状态之一出现了"（有 prompt 输入框，或那段说明）。
+   */
+  for (let i = 0; i < 40; i += 1) {
+    const settled = await page.evaluate(
+      () =>
+        Boolean(document.querySelector('[data-testid="gen-prompt"]')) ||
+        Boolean(document.querySelector(".gen-panel-empty")?.textContent?.trim()),
+    );
+    if (settled) break;
+    await page.waitForTimeout(500);
+  }
   out.opened = (await page.locator('[data-testid="wb-imagepage"]').count()) > 0;
   out.title = await page.evaluate(() => document.querySelector(".wb-imagepage-head h2")?.textContent?.trim() ?? "");
   out.tag = await page.evaluate(() => document.querySelector(".wb-imagepage-tag")?.textContent?.trim() ?? "");

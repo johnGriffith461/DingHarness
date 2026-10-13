@@ -187,18 +187,14 @@ export function getSessionLogger(sessionId: unknown): SessionLogger | null {
   return created;
 }
 
-/** 一个会话在列表里的样子（F3：界面的会话列表从日志重建）。 */
-export type SessionSummary = {
-  /** 日志 id（`chat-<对话 id>`）。 */
-  sessionId: string;
-  /** 对话 id（界面用的那个）。 */
-  conversationId: string;
-  /** 标题（取第一条 request 里最后一条用户消息的第一行）。 */
-  title: string;
-  /** 最后写入时间（epoch ms）——列表按它倒序。 */
-  updatedAt: number;
-  bytes: number;
-};
+/*
+ * ⚠️ `SessionSummary` **定义在契约里**（`shared/ipc.ts`）—— 这里只转发。
+ *
+ * 原来这一份是**重复声明**：同一个形状两处各写一遍，改一处不会报错，
+ * 只会表现为"主进程回的东西渲染层认不出"。C4 的口径是**契约只有一份**。
+ */
+import type { SessionSummary } from "../../shared/ipc";
+export type { SessionSummary };
 
 /** 读一个文件并解析（内部共用；坏行只跳过它自己）。 */
 async function readRecords(file: string): Promise<{ records: LogRecord[]; skipped: number }> {

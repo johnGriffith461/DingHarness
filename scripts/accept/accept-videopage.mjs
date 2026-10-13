@@ -60,7 +60,26 @@ try {
     () => document.querySelector('[data-testid="wb-add-pop"]')?.textContent?.includes("视频生成") ?? false,
   );
   await page.locator('[data-testid="wb-add-video"]').click();
-  await page.waitForTimeout(1800);
+  /*
+   * ② 等**真条件**，不等固定秒数（§135/§137 的同一条规矩）。
+   *
+   * ⚠️ 这里原来固定等 1800ms。而面板挂载时会去列视频模型（`video:listModels`），
+   * 主进程那边**有 15 秒超时**（`AbortSignal.timeout(15_000)`，超时给诚实的空态）。
+   * 上游一慢（实测撞到过），1800ms 时页面还停在「正在列出视频模型…」——
+   * 于是这条以"没说明没有模型"的形式**报假案**（产品其实没问题：它只是在等上游）。
+   *
+   * 现在等的结果是"**两种诚实状态之一出现了**"：要么给表单（有模型），
+   * 要么给「没有可用的视频模型」（没模型 / 上游超时）。上限 20 秒（比主进程的 15 秒宽裕）。
+   */
+  for (let i = 0; i < 40; i += 1) {
+    const settled = await page.evaluate(
+      () =>
+        Boolean(document.querySelector('[data-testid="video-prompt"]')) ||
+        Boolean(document.querySelector('[data-testid="video-unavailable"]')),
+    );
+    if (settled) break;
+    await page.waitForTimeout(500);
+  }
 
   out.opened = (await page.locator('[data-testid="wb-videopage"]').count()) > 0;
   out.title = await page.evaluate(() => document.querySelector(".wb-imagepage-head h2")?.textContent?.trim() ?? "");

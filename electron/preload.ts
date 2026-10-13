@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { AiStreamEvent, CanvasCommand, SessionSummary, ShellBridge } from "../shared/ipc";
 import { AI_CHANNEL } from "./ipc/ai";
 import { CLIPBOARD_CHANNEL } from "./ipc/clipboard";
 import { CODING_CHANNEL } from "./ipc/codingStore";
@@ -28,6 +29,17 @@ import { IMAGE_CHANNEL } from "./ipc/imageGen";
  * 后续阶段（文件/数据库/快照）都在这里加方法，并同步 `shared/ipc.ts` 的类型。
  */
 
+/**
+ * ⚠️ **`satisfies ShellBridge`（C4）**：这句话就是"契约只有一份"的落点。
+ *
+ * 在这之前，`shared/ipc.ts` 的 `ShellBridge` 与这里的 `api` 是**两份手写形状**，
+ * 已经漂移过（`ShellBridge` 缺 `memory`/`setTitlebar`，`src/workbench/memoryStore.ts`
+ * 只好自己打补丁扩展类型）。漂移不会有任何报错 —— 只会表现为"渲染层调了一个不存在的方法"
+ * 或者"类型说有、实际没有"。
+ *
+ * 加上 `satisfies` 之后：**这里少一个字段、多一个字段、签名差一点，`tsc` 立刻报错**。
+ * 契约的唯一事实来源是 `ShellBridge`，实现必须与它一致。
+ */
 const api = {
   ping: () => ipcRenderer.invoke("app:ping"),
   /**
@@ -51,10 +63,23 @@ const api = {
      * @param listener 收到事件时调用
      * @returns 取消订阅函数
      */
-    onStream: (listener: (event: unknown) => void) => {
-      const wrapped = (_e: unknown, payload: unknown) => listener(payload);
+    onStream: (listener: (event: AiStreamEvent) => void): (() => void) => {
+      /*
+       * ⚠️ 参数类型写成**契约里的真实类型**（`AiStreamEvent`），不是 `unknown`。
+       * 写成 `unknown` 时 `satisfies ShellBridge` 会报错（C4 照出来的第二处漂移）：
+       * 契约说"监听器收 AiStreamEvent"，实现却只承诺"我什么类型都收" ——
+       * 方向反了（函数参数是逆变的）。运行时载荷就来自主进程，那个通道发什么类型是确定的。
+       */
+      const wrapped = (_e: unknown, payload: unknown) => listener(payload as AiStreamEvent);
       ipcRenderer.on(AI_CHANNEL.stream, wrapped);
-      return () => ipcRenderer.removeListener(AI_CHANNEL.stream, wrapped);
+      /*
+       * ⚠️ 箭头函数体里**先调再返回 undefined**：`removeListener` 返回的是 `IpcRenderer` 自己，
+       * 而契约要求"取消订阅函数"返回 `void` —— 直接把它的返回值交出去会让
+       * `satisfies ShellBridge` 报错（C4 就是这么把漂移照出来的）。
+       */
+      return () => {
+        ipcRenderer.removeListener(AI_CHANNEL.stream, wrapped);
+      };
     },
     /** 主动探测各 provider 真实连通性（不在启动时自动跑）。 */
     probe: () => ipcRenderer.invoke(AI_CHANNEL.probe),
@@ -90,10 +115,14 @@ const api = {
      * @param listener 收到命令时调（执行完要调 commandResult 回执）
      * @returns 取消订阅
      */
-    onCommand: (listener: (cmd: unknown) => void) => {
-      const wrapped = (_e: unknown, payload: unknown) => listener(payload);
+    onCommand: (listener: (cmd: CanvasCommand) => void): (() => void) => {
+      /* 同上：按契约的真实类型标注（不是 unknown） */
+      const wrapped = (_e: unknown, payload: unknown) => listener(payload as CanvasCommand);
       ipcRenderer.on(CANVAS_CHANNEL.command, wrapped);
-      return () => ipcRenderer.removeListener(CANVAS_CHANNEL.command, wrapped);
+      /* 同上：取消订阅只该返回 void，不要把手里的 IpcRenderer 漏出去 */
+      return () => {
+        ipcRenderer.removeListener(CANVAS_CHANNEL.command, wrapped);
+      };
     },
     /** 执行完回执给主进程（工具那边在等）。 */
     commandResult: (result: unknown) => ipcRenderer.invoke(CANVAS_CHANNEL.commandResult, result),
@@ -225,9 +254,10 @@ const api = {
    */
   session: {
     /** 列聊天会话（重启后把对话列表恢复出来）。 */
-    list: (): Promise<unknown[]> => ipcRenderer.invoke(SESSION_CHANNEL.list),
+    list: (): Promise<SessionSummary[]> => ipcRenderer.invoke(SESSION_CHANNEL.list),
     /** 读回一整段会话的记录（投影在渲染层做，主进程不重复算一遍）。 */
-    load: (sessionId: string): Promise<unknown> => ipcRenderer.invoke(SESSION_CHANNEL.load, sessionId),
+    load: (sessionId: string): Promise<{ records: unknown[]; skipped: number }> =>
+      ipcRenderer.invoke(SESSION_CHANNEL.load, sessionId),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */
@@ -242,7 +272,21 @@ const api = {
     /** 列出产物目录里的所有文件。 */
     listArtifacts: () => ipcRenderer.invoke(ARTIFACT_CHANNEL.list),
   },
-};
+/*
+ * ⚠️ **`satisfies ShellBridge`（C4）**：这一句就是"契约只有一份"的落点。
+ *
+ * 在这之前，`shared/ipc.ts` 的 `ShellBridge` 与这里的 `api` 是**两份手写形状**，
+ * 已经漂移过：`ShellBridge` 缺 `memory` / `setTitlebar`，
+ * `src/workbench/memoryStore.ts` 只好自己打补丁扩展类型（`MemoryBridge`）。
+ * 漂移**不会报任何错** —— 只会表现为"类型说有、实际没有"（或反过来）。
+ *
+ * 加上 `satisfies` 之后：这里**少一个字段、多一个字段、签名差一点，`tsc` 立刻报错**。
+ * 契约的唯一事实来源是 `ShellBridge`。
+ *
+ * 用法说明：`satisfies`（而不是 `: ShellBridge`）是刻意的 —— 它既做检查，
+ * 又保留下面这份字面量的精确类型（`ShellApi = typeof api` 还要用它）。
+ */
+} satisfies ShellBridge;
 
 contextBridge.exposeInMainWorld("shell", api);
 

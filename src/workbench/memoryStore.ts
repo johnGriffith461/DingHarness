@@ -10,14 +10,12 @@ import type { ShellBridge } from "@shared/ipc";
  * 让点击立刻有反馈；落盘失败只记 note，不把界面回滚（回滚会让用户以为没点上）。
  */
 
-/** 渲染进程看到的 bridge 形状（`memory` 由 preload 暴露）。 */
-type MemoryBridge = ShellBridge & {
-  memory?: {
-    read: () => Promise<unknown>;
-    write: (lib: unknown) => Promise<unknown>;
-    clear: () => Promise<unknown>;
-  };
-};
+/*
+ * ⚠️ 这里原来有一个 `MemoryBridge = ShellBridge & { memory?: {…} }` 的**补丁类型** ——
+ * 因为 `memory` 只被 preload 暴露、契约 `ShellBridge` 里没有（手册点名的两处漂移之一）。
+ * C4 把 `memory` 补进契约、并让 preload `satisfies ShellBridge` 之后，补丁就不需要了：
+ * **契约是唯一的事实来源**，这边直接用 `ShellBridge["memory"]`。
+ */
 
 type MemoryState = {
   /** 当前记忆库。 */
@@ -67,8 +65,8 @@ type MemoryState = {
  *
  * @returns preload 暴露的 memory，取不到则为 undefined（跑测试时就是这样）
  */
-function bridge(): MemoryBridge["memory"] {
-  return (globalThis as { shell?: MemoryBridge }).shell?.memory;
+function bridge(): ShellBridge["memory"] | undefined {
+  return (globalThis as { shell?: ShellBridge }).shell?.memory;
 }
 
 /**
