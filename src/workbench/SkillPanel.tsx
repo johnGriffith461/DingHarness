@@ -91,8 +91,16 @@ const SUGGESTIONS: Suggestion[] = [
 export type SkillPanelProps = {
   /** 关闭面板。 */
   onClose: () => void;
-  /** 点某条命令 / 推荐时的回调（本机版多数没有后端，由调用方决定怎么如实呈现）。 */
-  onPick?: (label: string) => void;
+  /**
+   * 点某条命令 / 推荐时的回调。
+   *
+   * @returns 返回 **`false`** 表示"这一条我自己处理了面板的开合，你别再关"。
+   *   ⚠️ 为什么需要这个：面板的 onClick 原来是 `onPick(...)` **紧接着** `onClose()` ——
+   *   而「选择项目 / 工作模式设置」这两条要做的恰恰是**把面板换成另一个下拉**
+   *   （开合共用 `openPop` 一个状态），紧跟其后的 `onClose()` 会把刚打开的又关掉。
+   *   第一版就是这么写的，`accept-chips` 当场红（"点「选择项目」没打开项目 chip 的下拉"）。
+   */
+  onPick?: (label: string) => boolean | void;
   /**
    * 画布现在开着没有（2026-10-14）。
    *
@@ -156,8 +164,7 @@ export default function SkillPanel({ onClose, onPick, canvasOpen = false }: Skil
                 title={c.todo ?? ""}
                 disabled={Boolean(c.todo)}
                 onClick={() => {
-                  onPick?.(c.label);
-                  onClose();
+                  if (onPick?.(c.label) !== false) onClose();
                 }}
               >
                 <c.icon size={15} />

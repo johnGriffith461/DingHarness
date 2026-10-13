@@ -118,6 +118,38 @@ try {
   out.recHead = await page.evaluate(
     () => document.querySelector('[data-testid="wb-skill-panel"] .wb-cmd-head')?.textContent?.trim() ?? "",
   );
+  /*
+   * ── 命令区那六条：**能不能点要逐条说清**（2026-10-14）──
+   *
+   * 原来六条全是死按钮（`onPick` 从来没接）：点了没反应，用户只会以为坏了。
+   * 现在有后端的接上（选择项目 / 工作模式设置 / 技能管理 / 创建画布），
+   * 没后端的如实禁用并写明原因（用量 / 反馈）。
+   */
+  out.commands = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="wb-cmd-"]')).map((e) => ({
+      label: (e.getAttribute("data-testid") ?? "").replace("wb-cmd-", ""),
+      disabled: e.disabled,
+      reason: e.getAttribute("title") ?? "",
+    })),
+  );
+  /* 「技能管理」应当**直接落到插件页的管理子页**（不是先落市场） */
+  await page.locator('[data-testid="wb-cmd-技能管理"]').click();
+  await page.waitForTimeout(1200);
+  out.afterManageCmd = await page.evaluate(() => ({
+    managePage: document.querySelectorAll('[data-testid="wb-page-plugins-manage"]').length,
+    crumb: document.querySelector(".wb-crumb")?.textContent?.trim() ?? "",
+  }));
+  /* 回到首页，再验「选择项目」——它该打开输入区那个项目 chip 的下拉 */
+  await page.locator('[data-testid="wb-nav-home"]').click();
+  await page.waitForTimeout(900);
+  await page.locator('[data-testid="wb-skills"]').click();
+  await page.waitForTimeout(600);
+  await page.locator('[data-testid="wb-cmd-选择项目"]').click();
+  await page.waitForTimeout(600);
+  out.afterProjectCmd = await page.evaluate(
+    () => document.querySelectorAll('[data-testid="wb-project-pop"]').length,
+  );
+
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
 
@@ -215,11 +247,34 @@ try {
   if ((out.projectChipAfterClear ?? "").includes("周报项目")) {
     bad.push(`点了「不归入项目」chip 还挂着项目名：${out.projectChipAfterClear}`);
   }
+  /* 命令区：六条都在，没后端的如实禁用且写明原因 */
+  const cmds = out.commands ?? [];
+  for (const need of ["选择项目", "用量", "工作模式设置", "技能管理", "反馈"]) {
+    if (!cmds.some((c) => c.label === need)) bad.push(`命令区少了「${need}」`);
+  }
+  for (const c of cmds) {
+    if (c.disabled && !c.reason) bad.push(`命令「${c.label}」禁用了却没写原因`);
+  }
+  if (!cmds.some((c) => c.label === "用量" && c.disabled && c.reason)) {
+    bad.push("「用量」本该如实禁用并说明（本机版没有账号服务端）");
+  }
+  if (!cmds.some((c) => c.label === "技能管理" && !c.disabled)) {
+    bad.push("「技能管理」本该能点（本机版接得上）");
+  }
+  /* 点了要真有后果 */
+  if (!out.afterManageCmd?.managePage) {
+    bad.push(`点「技能管理」没进管理子页（面包屑：${JSON.stringify(out.afterManageCmd?.crumb)}）`);
+  }
+  if (!String(out.afterManageCmd?.crumb ?? "").includes("管理")) {
+    bad.push(`管理页没出现面包屑：${JSON.stringify(out.afterManageCmd?.crumb)}`);
+  }
+  if (!out.afterProjectCmd) bad.push("点「选择项目」没打开项目 chip 的下拉");
+
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
     console.error("✗ " + bad.join("；"));
     process.exitCode = 1;
   } else {
-    console.log("✓ 三个问题都好了");
+    console.log("✓ 输入区 chip / 技能面板（版面 + 命令区逐条能点）/ 下拉三件都成立");
   }
 }

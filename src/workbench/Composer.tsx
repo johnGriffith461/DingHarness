@@ -510,8 +510,18 @@ export function Composer({
                 if (label === "创建画布") setCanvasOpen(true);
                 if (label === "收起画布") setCanvasOpen(false);
                 /* 选择项目 / 工作模式设置：就是输入区那两个 chip —— 把它的下拉打开 */
-                if (label === "选择项目") setOpenPop("project");
-                if (label === "工作模式设置") setOpenPop("confirm");
+                /*
+                 * 这两条是把技能面板**换成**输入区那个 chip 的下拉（开合共用 `openPop`），
+                 * 所以返回 `false` 让面板别再调 `onClose()` —— 否则刚打开就被关掉。
+                 */
+                if (label === "选择项目") {
+                  setOpenPop("project");
+                  return false;
+                }
+                if (label === "工作模式设置") {
+                  setOpenPop("confirm");
+                  return false;
+                }
                 /* 技能管理：跳到插件页的**管理子页**（本体口径：直接进管理，不是先落市场） */
                 if (label === "技能管理") {
                   setPluginsIntent("manage");
