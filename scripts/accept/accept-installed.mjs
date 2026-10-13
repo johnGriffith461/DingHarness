@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { verdict } from "./harness.mjs";
 
 /**
  * 验证**安装出来的**应用能跑（而不是只验证 unpacked 目录能跑）。
@@ -59,5 +60,27 @@ try {
   report.error = String(error).slice(0, 200);
 } finally {
   console.log(JSON.stringify(report, null, 2));
+
+  /*
+   * ── 判定（2026-10-14 补）────────────────────────────────────────────
+   *
+   * 这条脚本验的是"**装出来的**那份能跑"（§72 列过的缺口）。它原来只打报告，
+   * 于是"装出来的那份起不来 / 起来了个空壳 / 交互全死"三种回归都不会红 ——
+   * 而这三种恰恰是打包最容易出的问题（asar 里少文件、路径写死开发目录）。
+   *
+   * ⚠️ 安装目录不存在时**是跳过不是失败**（上面已经 case 掉了）：本机没装过
+   *    就该说"没装过"，不能说"装出来的坏了"。
+   */
+  const bad = [];
+  if (report.error) bad.push(`装出来的那份起不来或渲染失败：${report.error}`);
+  if (!report.connected) bad.push("调试端口没连上（进程起了但没起来）");
+  if (!report.appShellRendered) bad.push("装出来的那份没有渲染出外壳（wb 根节点缺失）");
+  if ((report.navItems?.length ?? 0) < 5) bad.push(`左侧导航只有 ${report.navItems?.length ?? 0} 项（装机版像是缺资源）`);
+  if (!report.pluginsPageOpened) bad.push("装机版里点「技能」没打开页面");
+  if (!report.addFormOpenedInInstalledApp) bad.push("装机版里「添加技能」弹不出表单（交互死）");
+  if (!report.userDataDir) bad.push("装机版没有写用户数据目录（数据会丢）");
+
+  verdict(bad, "装机版可用：连得上 / 外壳渲染 / 导航齐全 / 两处交互真的能动 / 有写用户数据目录");
+
   child.kill();
 }

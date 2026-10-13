@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile } from "./harness.mjs";
+import { readStoreFile, verdict } from "./harness.mjs";
 
 /**
  * 11.27 验收：定时任务的编辑。
@@ -121,6 +121,59 @@ try {
   report.fileOnDiskAfterExit = readJobs().map((j) => ({ title: j.title, minutes: j.customMinutes, runs: j.runs.length }));
 } finally {
   console.log(JSON.stringify(report, null, 2));
+
+  /*
+   * ── 判定（2026-10-14 补）────────────────────────────────────────────
+   *
+   * 这条脚本开头写了"三条要验的语义"，但一条都没断言 —— 打报告就退，
+   * 于是它守的三件事（重算时间 / 不抹历史 / 结束的拉回 running）坏掉也不会红。
+   */
+  const bad = [];
+
+  /* ① 保存后下次执行时间**重算** */
+  if (report.afterEditTitle !== "行业动态（改后）") {
+    bad.push(`改名没存上：${JSON.stringify(report.afterEditTitle)}`);
+  }
+  if (report.afterEditMinutes !== "300" && report.afterEditMinutes !== 300) {
+    bad.push(`间隔没存上：${JSON.stringify(report.afterEditMinutes)}`);
+  }
+  if (!report.nextRunAtChanged) bad.push("⭐ 改了间隔但下次执行时间没变（界面显示的还是旧设置算出来的）");
+  /*
+   * 差值应约等于 (300-60) 分钟。允许 ±2 分钟：两次计算之间隔了真实的几秒，
+   * 而 `nextRunAt` 是按"现在 + 间隔"算的。
+   */
+  if (Math.abs((report.nextRunDeltaMinutes ?? 0) - 240) > 2) {
+    bad.push(`下次执行时间的位移是 ${report.nextRunDeltaMinutes} 分钟（应约等于 240）`);
+  }
+
+  /* ② 执行历史**不能被抹掉** */
+  if ((report.runsAfterRun ?? 0) < 1) bad.push("前置条件不成立：这次任务压根没有执行记录");
+  if ((report.runsKept ?? 0) !== report.runsAfterRun) {
+    bad.push(`编辑把执行历史改了：${report.runsAfterRun} → ${report.runsKept}`);
+  }
+  if (report.jobCountUnchanged !== 1) bad.push(`编辑任务后任务数变成了 ${report.jobCountUnchanged}（应为 1）`);
+  if (!report.bannerGone) bad.push("保存后「正在编辑」横幅还在（保存没生效）");
+
+  /* ③ 非法间隔不放行，且**不破坏已存的值** */
+  if (String(report.invalidKeptOldValue) !== "300") {
+    bad.push(`非法间隔（1 分钟）把已存的值改成了 ${JSON.stringify(report.invalidKeptOldValue)}（应仍是 300）`);
+  }
+  if (!report.stillEditing) bad.push("校验失败后编辑态消失了（用户得从头再填一遍）");
+
+  /* 取消编辑：不落盘 */
+  if (!report.afterCancelBannerGone) bad.push("点取消后编辑横幅还在");
+  if (String(report.afterCancelValueUnchanged) !== "300") {
+    bad.push(`取消编辑却改了值：${JSON.stringify(report.afterCancelValueUnchanged)}`);
+  }
+
+  /* 关掉之后磁盘上还是改后的值（内存里对、盘上错就是白干） */
+  const onDisk = report.fileOnDiskAfterExit?.[0];
+  if (onDisk?.title !== "行业动态（改后）" || String(onDisk?.minutes) !== "300") {
+    bad.push(`关应用后磁盘上是 ${JSON.stringify(onDisk)}（应为改后的 名称+300）`);
+  }
+
+  verdict(bad, "定时任务编辑成立：重算下次执行时间 / 历史与任务数不动 / 非法间隔不放行也不破坏原值 / 取消不落盘");
+
   await browser.close().catch(() => undefined);
   child.kill();
 }

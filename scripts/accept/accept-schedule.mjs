@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile } from "./harness.mjs";
+import { readStoreFile, verdict } from "./harness.mjs";
 
 /**
  * 定时任务真调度的验收（阶段 11.6）。
@@ -62,6 +62,8 @@ await page.locator('[data-testid="wb-sched-minutes"]').fill("1");
 await page.locator('[data-testid="wb-sched-create"]').click();
 await page.waitForTimeout(400);
 report.intervalError = await page.locator('[data-testid="wb-sched-error"]').textContent().catch(() => null);
+/* 两次非法提交之后**不应该有任务**（拦下 = 真的没建，不只是弹了句话）。 */
+report.rowsAfterInvalid = await page.locator(".wb-sched-item").count();
 
 // 改成合法间隔
 await page.locator('[data-testid="wb-sched-minutes"]').fill("5");
@@ -146,5 +148,56 @@ report.afterRestart = {
 };
 
 console.log(JSON.stringify(report, null, 2));
+
+/*
+ * ── 判定（2026-10-14 补）────────────────────────────────────────────
+ *
+ * 这条脚本原来只把 `report` 打出来就退 —— 于是它在批跑里等于**静默不测**：
+ * 无论界面坏成什么样都 exit 0。下面按它自己开头声明的三件事收口，
+ * 每条都断言**后果**（磁盘上有东西、真的开了任务、重启后状态没丢），
+ * 而不是"界面上出现过那一行"。
+ */
+const bad = [];
+const job = report.onDisk?.[0];
+
+/* ① 建了会落盘 */
+if (!report.fileExists) bad.push("⭐ 磁盘上没有 schedules.json（建了但没落盘）");
+if ((report.onDisk?.length ?? 0) !== 1) bad.push(`磁盘上应有 1 条任务，实际 ${report.onDisk?.length ?? 0} 条`);
+if (job && !job.nextRunAtIsFuture) bad.push("落盘的 nextRunAt 不是将来时间（定时不成立）");
+if (job && !job.hasRuns) bad.push("落盘的任务没有 runs 数组（执行记录无处可放）");
+
+/* ② 拦非法输入：不是"弹了句话"，而是**真的没建** */
+if (!report.validationError) bad.push("空标题提交没有报错说明");
+if ((report.rowsAfterInvalid ?? -1) !== 0) bad.push(`非法提交之后不该有任务，实际有 ${report.rowsAfterInvalid} 条`);
+
+/* ③ 执行是真的：跳到任务页 + 开出任务 + 磁盘上有执行记录 */
+if (!report.viewAfterRunNow) bad.push("「立刻执行」没有把用户带到任务页（点了没反应）");
+if (!report.taskCreated) bad.push("「立刻执行」没有开出工作台任务（只写日志不动手）");
+/*
+ * ⚠️ 执行记录要看**跑完之后**重新读的那份（`runsOnDisk`）：`onDisk` 是点「立刻执行」
+ * 之前读的，那时当然还没有记录 —— 我第一版就是拿它断的，于是必然假红。
+ */
+const runAfter = report.runsOnDisk?.[0];
+if (!(runAfter && runAfter.runs >= 1)) bad.push(`磁盘上的任务没有执行记录：${JSON.stringify(report.runsOnDisk)}`);
+if (runAfter && runAfter.ok !== true) bad.push(`执行记录里 ok=${JSON.stringify(runAfter.ok)}（这次执行没成功）`);
+
+/* ④ 暂停：状态字样要变，且不是还给个"下次执行时间" */
+if (!report.afterPause?.status?.includes("暂停")) {
+  bad.push(`暂停后状态是 ${JSON.stringify(report.afterPause?.status)}（应含「暂停」）`);
+}
+
+/* ⑤ 重启还在，且暂停态没丢 */
+if ((report.afterRestart?.rows ?? 0) < 1) bad.push("重启后定时任务列表是空的（定时不成立）");
+if (report.afterRestart?.text && !report.afterRestart.text.includes("每日新闻推送")) {
+  bad.push("重启后第一条不是刚建的那条任务");
+}
+if (report.afterRestart?.stillPaused !== report.afterPause?.status) {
+  bad.push(`重启后状态从 ${JSON.stringify(report.afterPause?.status)} 变成 ${JSON.stringify(report.afterRestart?.stillPaused)}`);
+}
+
+verdict(
+  bad,
+  "定时任务成立：非法输入真的没建 / 落盘且下次执行是将来 / 立刻执行真开出任务且有记录 / 暂停态跨重启还在",
+);
 await browser.close();
 child.kill();

@@ -1,8 +1,14 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 
 /**
- * 写作助手端到端验收（对标原版 `canvas_writing_shortcuts_*`）。
+ * 写作助手**端到端**验收（对标原版 `canvas_writing_shortcuts_*`）。
+ *
+ * ⚠️ **这条真的连模型**（点「写短一点」然后等 15 秒）。
+ * 文件名里的 `-model` 就是标记：**不要**把它塞进免模型批跑（`verify-acceptances.mjs`），
+ * 也不要在没配通道的机器上指望它绿。原来它叫 `accept-writing.mjs`，
+ * 名字看不出会调模型 —— 按名字挑脚本跑的人会踩这个坑。
  *
  * 真正连模型跑「润色/写短」，断言：
  *   1. 节点头部有「写作」入口，展开有 4 个动作
@@ -11,7 +17,16 @@ import { spawn } from "node:child_process";
  *   4. Ctrl+Z 能撤销回改写前
  */
 
-const DATA = "D:/DoubaoWorkClone/data";
+/*
+ * ⚠️ 数据目录必须是**隔离**的（2026-10-14 改）。
+ *
+ * 这条原来写死 `D:/DoubaoWorkClone/data` —— 那是**开发机真实的数据目录**。
+ * 它真的连模型、真的改写节点，于是每次跑都在主人的真实画布上动刀
+ * （还写进真实会话日志）。验收不许碰真实数据，这条也是手册里
+ * 「DSH_CANVAS_DATA_DIR 必须指到隔离目录」那条规矩的漏网之鱼。
+ */
+const DATA = "D:/DoubaoWorkClone/.verify/writing-data";
+fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;

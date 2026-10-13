@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { verdict } from "./harness.mjs";
 
 /**
  * 验证打包产物（阶段 9.4 / 9.5）。
@@ -77,3 +78,22 @@ console.log("\n结论：");
 console.log("  setup.exe 产出：", report.setup.exists ? "是" : "否");
 console.log("  安装包带图标：", report.setupIcon?.ok ? "是" : `否（${JSON.stringify(report.setupIcon)}）`);
 console.log("  解包 exe 带图标：", report.unpackedIcon?.ok ? "是" : "否");
+
+/*
+ * ── 判定（2026-10-14 补）────────────────────────────────────────────
+ *
+ * 打包这条原来只把数字打出来。危险在于：**产物缺失时它照样 exit 0** ——
+ * 而"这次打包其实没出安装包"正是最该有人喊一声的情形。
+ *
+ * ⚠️ 安装包/asar/main.cjs **必须有**（缺一个就是打废了）；图标是外观要求，
+ *    缺了要红（本体是带图标的）；嵌入式 png 帧数只记录不断言（那是给人工看图用的）。
+ */
+const bad = [];
+if (!report.setup?.exists) bad.push("⭐ 没产出 setup.exe");
+if (!report.asar?.exists) bad.push("⭐ 没产出 app.asar（把源码目录打进去了？）");
+if (!report.unpackedMain?.exists) bad.push("win-unpacked 里没有 dist-electron/electron/main.cjs（打出来的包起不来）");
+if (!report.setupIcon?.ok) bad.push(`安装包没带图标：${JSON.stringify(report.setupIcon)}`);
+if (!report.unpackedIcon?.ok) bad.push("解包 exe 没带图标（任务栏会是个默认白块）");
+if ((report.releaseFiles?.length ?? 0) === 0) bad.push("release 目录里没有 .exe/.blockmap/.yml 任何产物");
+
+verdict(bad, "打包产物成立：setup.exe + app.asar + main.cjs 都在，且两处图标都带上了");

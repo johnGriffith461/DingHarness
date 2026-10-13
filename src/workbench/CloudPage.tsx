@@ -56,20 +56,36 @@ export function CloudPage() {
   };
   const [now] = useState(() => Date.now());
 
-  const refresh = useCallback(async () => {
+  /**
+   * 重新读一遍云盘列表。
+   *
+   * @param keepNote 成功后**保留**提示栏上已有的那句话（默认清空）。
+   *
+   * ── 为什么要有这个参数（2026-10-14）─────────────────────────────
+   * 原来成功分支无条件 `setNote("")`，于是"先报回执、再刷新"的调用方
+   * **回执照样被自己的刷新吃掉**：菜单里点「复制链接」→ `onChanged` 设
+   * 「已复制链接」→ 紧接着 `refresh()` 跑完把它清掉。本地刷新是毫秒级的，
+   * 用户根本看不见那句话 —— 点了没反应（只是恰好剪贴板里真有东西）。
+   * 验收 `accept-context` 里那条「复制完没有任何回执」就是这么红的。
+   *
+   * @returns 这次读取成没成（失败时提示栏已经是错误信息，调用方别再覆盖）
+   */
+  const refresh = useCallback(async (keepNote = false): Promise<boolean> => {
     const bridge = (window as unknown as { shell?: ShellBridge }).shell;
     if (!bridge?.drive) {
       setNote("云盘通道不可用：请用 Electron 启动应用");
-      return;
+      return false;
     }
     setBusy(true);
     try {
       const list = await bridge.drive.list();
       // 主进程给的是字符串型 kind，这里收窄成联合类型（两边共用同一套枚举）
       setEntries(list as DriveEntry[]);
-      setNote("");
+      if (!keepNote) setNote("");
+      return true;
     } catch (error) {
       setNote(`读取云盘失败：${error instanceof Error ? error.message : String(error)}`);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -558,8 +574,14 @@ export function CloudPage() {
           starred={starred.has(menu.entry.name)}
           onClose={() => setMenu(null)}
           onChanged={(text) => {
-            setNote(text);
-            void refresh();
+            /*
+             * 先刷新、再报回执 —— 顺序反过来会被 `refresh()` 结尾的 `setNote("")` 吃掉，
+             * 用户看不到"已复制链接"这类确认（§208 那条验收逮到的）。
+             */
+            void (async () => {
+              const ok = await refresh(true);
+              if (ok) setNote(text);
+            })();
           }}
         />
       ) : null}

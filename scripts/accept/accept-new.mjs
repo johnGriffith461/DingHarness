@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { verdict } from "./harness.mjs";
 
 /**
  * 11.24 验收：云盘「＋新建」真建文件 + 首页推荐卡真的会变。
@@ -100,6 +101,47 @@ try {
   report.escapedOutside = fs.existsSync(path.join(DATA, "逃逸.md")) || fs.existsSync(path.join(DATA, "..", "逃逸.md"));
 } finally {
   console.log(JSON.stringify(report, null, 2));
+
+  /*
+   * ── 判定（2026-10-14 补）────────────────────────────────────────────
+   *
+   * 原来这里只打报告就退，于是"死按钮"和"写死四条推荐"这两个**它自己声称要证明的**
+   * 缺陷，回归了它也不会红 —— 报告型脚本在批跑里等于静默不测。
+   * 下面每条都断后果：磁盘上真多了文件、同名不覆盖、带路径的名字逃不出去、推荐卡真的在换。
+   */
+  const bad = [];
+  const created = report.createdFiles ?? [];
+
+  /* 推荐卡：不是"有几条"，而是"真的会换" */
+  if ((report.batchCount ?? 0) < 4) bad.push(`首页推荐卡只有 ${report.batchCount} 条（应为池子里抽一批）`);
+  if ((report.distinctBatches ?? 0) < 2) bad.push(`离开再回来 6 次，推荐卡始终是同一批（distinct=${report.distinctBatches}）`);
+  if (report.anyDuplicateWithinBatch) bad.push("同一批推荐卡里有重复项");
+
+  /* 新建：磁盘上真多了文件，且不是空壳 */
+  if ((report.driveAfter ?? 0) !== (report.driveBefore ?? 0) + 1) {
+    bad.push(`「＋新建」应该净增 1 个文件：${report.driveBefore} → ${report.driveAfter}`);
+  }
+  if (!created.includes("会议纪要.md")) bad.push(`磁盘上没有 会议纪要.md，实际：${JSON.stringify(created)}`);
+  if (!report.createdContent?.trim()) bad.push("新建的 .md 是空壳（没有模板内容）");
+
+  /* 第二个同名：应加序号，绝不覆盖 */
+  const afterSecond = report.afterSecondCreate ?? [];
+  if (!afterSecond.length) bad.push(`状态依赖：第二个文件没建出来（实际：${JSON.stringify(afterSecond)}）`);
+  if (afterSecond.length === 1) bad.push(`同名文件把前一个覆盖了（只剩：${JSON.stringify(afterSecond)}）`);
+  /* 实际加的是 `会议纪要-2.md` 这种连字符后缀（不是中文括号 —— 我第一版正则写错了）。 */
+  if (!afterSecond.some((f) => /^会议纪要-\d+\.md$/.test(f))) {
+    bad.push(`重名没有加序号（实际：${JSON.stringify(afterSecond)}）`);
+  }
+
+  /* 非法名字：拒了，且没写到数据目录外面去 */
+  if (report.escapedOutside) bad.push("⭐ 带 ../ 的文件名逃出了数据目录");
+  if (!report.illegalNote) bad.push("非法文件名没有给出说明（用户不知道为什么没建出来）");
+  if ((report.afterIllegalName ?? []).some((f) => f.includes("逃逸"))) {
+    bad.push(`非法名字竟然落盘了：${JSON.stringify(report.afterIllegalName)}`);
+  }
+
+  verdict(bad, "云盘新建成立：落盘 + 模板内容 + 同名加序号 + 带路径的名字逃不出去；首页推荐卡真会换");
+
   await browser.close().catch(() => undefined);
   child.kill();
 }

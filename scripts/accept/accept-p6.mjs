@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { verdict } from "./harness.mjs";
 
 /**
  * 打包产物验收（阶段 6）：直接跑 `release/win-unpacked/工作台.exe`，
@@ -84,6 +85,29 @@ report.stderrTail = err.split("\n").filter(Boolean).slice(0, 6).join(" | ") || "
 
 await page.screenshot({ path: "D:/DoubaoWorkClone/.verify/shots-p6/packaged.png" });
 console.log(JSON.stringify(report, null, 2));
+
+/*
+ * ── 判定（2026-10-14 补）────────────────────────────────────────────
+ *
+ * 这条脚本要证的正是"**打包后也能用**"（不依赖 dev server / 不依赖工程目录）。
+ * 它原来只打报告，于是打包最典型的三类回归（壳起不来、画布缺资源、
+ * 保存路径指回开发目录）都不会红。
+ *
+ * `prodStoreAbsent` / `devPromptProbeAbsent` 反过来断言：打包产物里
+ * **不该**有 DEV 出口 —— 它们不是"锦上添花"，是"别把调试后门发出去"。
+ */
+const bad = [];
+if (!report.nodes) bad.push("打包版画布里没有节点（缺资源或数据目录不对）");
+if (!report.toolbar) bad.push("打包版画布工具条没渲染");
+if (!report.markerToolbar) bad.push("打包版标注工具条没渲染");
+if (!report.chatSidebar && report.chatSidebar !== 0) bad.push("打包版聊天侧栏没渲染");
+if (!report.prodStoreAbsent) bad.push("⭐ 打包产物里有 `window.__canvasStore`（DEV 出口漏出去了）");
+if (!report.devPromptProbeAbsent) bad.push("⭐ 打包产物里有 `window.__lastAiPrompt`（调试探针漏出去了）");
+if (!String(report.providers ?? "").includes(":")) bad.push(`打包版拿不到 provider 列表：${JSON.stringify(report.providers)}`);
+if (!report.snapshotWritten) bad.push("⭐ 打包版没有把画布存到数据目录（自动保存失效）");
+if (!(report.snapshot?.nodes >= 1)) bad.push(`存盘里的节点数是 ${report.snapshot?.nodes}（新加的那个没进去）`);
+
+verdict(bad, "打包版可用：画布/工具条/标注都在，provider 读得到，自动保存落到数据目录，且没有 DEV 出口漏出");
 
 await browser.close();
 child.kill();
