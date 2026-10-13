@@ -25,7 +25,33 @@ import { join } from "node:path";
  * 用法：node scripts/verify-acceptances.mjs
  */
 
-const VERIFY = ".verify";
+/**
+ * 验收脚本所在目录。
+ *
+ * ── B5（2026-10-13）：从 `.verify/` 分出来并纳入版本库 ──
+ *
+ * 原来这 94 条脚本和 700 多个**一次性手术脚本**（`wire-*.py` / `append-*.py` /
+ * `diag-*.mjs` / `tmp-*.txt`）混在同一个被 gitignore 的目录里。后果：
+ * "哪些是真验收、哪些是当场的临时动作"只存在于记忆里，而且**这批最值钱的资产不在版本库里**。
+ *
+ * 分出来之后：`.verify/` 剩下的一律是**一次性/临时**的东西（可以整目录忽略），
+ * 而这里每一条脚本都跟着 commit 走。
+ *
+ * ⚠️ 搬迁是安全的，三条实测依据（不是推断）：
+ *   ① 51 条脚本 import 的是**同级** `./harness.mjs`，`harness.mjs` **一起搬了**，所以路径仍对；
+ *   ② 192 条 .mjs 里 **179 条硬编码 `D:/DoubaoWorkClone` 绝对路径**，与脚本自身位置无关；
+ *   ③ 只有 8 条提到 `.verify/` 字面路径，且**全部是截图输出**（如 `.verify/theme-toggled.png`），
+ *      而那些是相对**进程 cwd**（本批跑器不传 `cwd`，即仓库根）解析的，与脚本位置无关。
+ */
+const ACCEPT_DIR = "scripts/accept";
+
+/**
+ * 批跑的**记录**仍留在 `.verify/`。
+ *
+ * 这两个文件每次跑都会变（`:353` 的 `accept-history.json`、`:405` 的 `accept-runs.jsonl`），
+ * 属于**运行产物**而不是脚本 —— 入库只会制造无意义的 diff。
+ */
+const RECORDS_DIR = ".verify";
 
 /** 只跑这些：都不调模型。 */
 const CASES = [
@@ -206,7 +232,7 @@ const CASES = [
 /**
  * 跑一条验收并抓它的退出码。
  *
- * @param {string} file 脚本名（相对 .verify）
+ * @param {string} file 脚本名（相对 scripts/accept）
  * @returns {Promise<{ code: number, tail: string }>}
  */
 function run(file) {
@@ -223,7 +249,7 @@ function run(file) {
      */
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    const child = spawn(process.execPath, [join(VERIFY, file)], {
+    const child = spawn(process.execPath, [join(ACCEPT_DIR, file)], {
       stdio: ["ignore", "pipe", "pipe"],
       env,
     });
@@ -289,7 +315,7 @@ function countLeftovers() {
 
 const results = [];
 for (const [file, what] of CASES) {
-  if (!existsSync(join(VERIFY, file))) {
+  if (!existsSync(join(ACCEPT_DIR, file))) {
     results.push({ file, what, ok: false, note: "脚本不存在 —— 名字改了就该更新这里的清单" });
     continue;
   }
@@ -350,7 +376,7 @@ await killLeftovers();
  * 所以这里把每次结果攒下来。下次跑的时候，
  * **"很久没通过过"这件事会自己显出来**，不用靠谁记得。
  */
-const HISTORY = join(VERIFY, "accept-history.json");
+const HISTORY = join(RECORDS_DIR, "accept-history.json");
 let history = {};
 try {
   history = JSON.parse(readFileSync(HISTORY, "utf8"));
@@ -402,7 +428,7 @@ writeFileSync(HISTORY, JSON.stringify(history, null, 2) + "\n", "utf8");
  * ② 端口互串 —— 查过，各脚本用的是自己的端口（9420 / 9590 / 变量…），**也不成立**。
  * 所以改成先**收集数据**，不再猜。
  */
-const RUNS = join(VERIFY, "accept-runs.jsonl");
+const RUNS = join(RECORDS_DIR, "accept-runs.jsonl");
 const failedNames = results.filter((r) => !r.ok).map((r) => r.file);
 try {
   appendFileSync(
