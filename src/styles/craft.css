@@ -410,3 +410,85 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 板块边界：四块之间要有"层次"，不能只靠一根 1px 描边（2026-10-14 主人指出）
+ *
+ * 主人的原话是"完全分不出来"。量了一下确实如此：左栏 / 工作区 / 画布 / 右摘要
+ * 之间各只有一条 1px 的 `--line`（浅色主题下对比度极低），四块全是同一个底色，
+ * 眼睛只能靠那一根线猜边界在哪。
+ *
+ * 做法：**投阴影而不是加粗描边**（描边加粗会把界面推向"表格"，
+ * 而这是"一块块面板叠在一起"的形态）。方向统一：
+ *   · 左栏 → 阴影投向右（它压在工作区上面）
+ *   · 画布 → 阴影投向左（它是被夹在中间的那块，两侧都从它身上切出来）
+ *   · 右摘要 → 阴影投向左
+ * 于是"谁在上面"全屏只有一种读法，不会一半左一半右。
+ *
+ * ⚠️ 数值只在 `theme.css` 的 `--edge-shadow-*` 里定义（浅/深两套），
+ * 这里只引用 —— 就地写 rgba 会撞 `themeRatchet`（工作台硬编码颜色的棘轮）。
+ * ══════════════════════════════════════════════════════════════════════ */
+.wb-nav {
+  box-shadow: var(--edge-shadow-right);
+  /* 阴影要盖到邻居身上：给它一个自己的层 */
+  position: relative;
+  z-index: 2;
+}
+.wb-canvas {
+  box-shadow: var(--edge-shadow-left);
+  position: relative;
+  z-index: 1;
+}
+.wb-summary {
+  box-shadow: var(--edge-shadow-left);
+  position: relative;
+  z-index: 2;
+}
+
+/*
+ * 输入区：它是"浮在工作区上的一块卡片"，原来只有描边 + 和背景同色（`--bg`），
+ * 于是看着像地上画了个框。给它卡片级阴影，读起来才是"可以打字的那一块"。
+ */
+.wb-composer {
+  box-shadow: var(--shadow-card);
+}
+
+/* ---------- 输入区的「资料」附件（2026-10-14）----------
+ *
+ * 占位文案承诺的「@ 添加资料」落地之后，附着的文件要**看得见、能拿掉**：
+ * 看不见就会"我明明加了资料它怎么没看"；拿不掉就只能重开一遍。
+ */
+.wb-material-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.wb-material-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: 11.5px;
+}
+.wb-material-x {
+  min-width: 20px;
+  min-height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease-out), background var(--dur-quick) var(--ease-out);
+}
+.wb-material-x:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}

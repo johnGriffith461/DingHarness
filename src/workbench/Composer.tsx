@@ -9,6 +9,8 @@ import { Blocks, Check, ChevronDown, Paperclip, Plus, Send, Sparkles, X } from "
 import { useWorkbenchStore } from "./store";
 import { PHRASE_LABELS, applyPhrase, detectAtTrigger, filterPhrases, phraseGroups, type AtTrigger, type Phrase } from "@shared/phrases";
 import { COMPOSER_PLACEHOLDER } from "./copy";
+import type { ShellBridge } from "@shared/ipc";
+import { fileContextBlock } from "./fileContext";
 import { useLibraryStore } from "./libraryStore";
 import { findItemIn } from "./libraryStore";
 import { type ConfirmMode } from "@shared/permissions";
@@ -33,12 +35,40 @@ export function Composer({
    * **任务视图传的是 `sendInTask`**（在这段对话里接着说），
    * 这也是这个组件从"只能发起任务"变成"能续聊"的那个接缝。
    */
-  onSend?: (text: string) => void;
+  onSend?: (text: string, options?: { material?: string }) => void;
 }) {
   /** 正在跑一轮（流式）—— 决定发送键是「发送」还是「停止」（补完⑤）。 */
   const running = useWorkbenchStore((st) => Boolean(st.runningRequestId));
   const createTask = useWorkbenchStore((s) => s.createTask);
   const [text, setText] = useState("");
+
+  /**
+   * **随这一轮交给 agent 的资料**（2026-10-14）。
+   *
+   * 输入区那条占位文案是本体原话「发消息或创建任务... / 使用技能 @ 添加资料」，
+   * 而 `@` 在我们这儿只出了常用语（那句证据来自 coding 聊天）—— 界面承诺过、功能没做。
+   * 这里就是补上的那一半：选文件 → 挂在输入区 → 发送时内容随请求过去。
+   */
+  const [material, setMaterial] = useState<Array<{ name: string; path: string }>>([]);
+  /** 云盘里的文件（打开 @ 选单时读一次，点选即附着）。 */
+  const [driveFiles, setDriveFiles] = useState<Array<{ name: string; path: string }>>([]);
+
+  /** 读一次云盘清单（失败就当没有资料可加 —— 不该因为读不到清单让输入区报错）。 */
+  const loadDriveFiles = async (): Promise<void> => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    try {
+      const list = await shell?.drive?.list?.();
+      setDriveFiles((list ?? []).map((f: { name: string; path: string }) => ({ name: f.name, path: f.path })));
+    } catch {
+      setDriveFiles([]);
+    }
+  };
+
+  /** 附着一份资料（已附着的忽略）。 */
+  const attachMaterial = (file: { name: string; path: string }): void => {
+    setMaterial((prev) => (prev.some((f) => f.path === file.path) ? prev : [...prev, file]));
+    setAtTrigger(null);
+  };
 
   /*
    * 「创作同款」这类按钮把一句话交过来（§159）：**取一次就清**。
@@ -94,13 +124,30 @@ export function Composer({
   /** 当前选中的项目名（没选则为 null，chip 上回落到"项目"）。 */
   const projectName = lib.projects.find((p) => p.id === projectId)?.name ?? null;
 
-  const submit = () => {
+  const submit = async (): Promise<void> => {
     const value = text.trim();
     if (!value) return;
     setText("");
+    /*
+     * 资料在**发送这一刻**读成文本（不是附着那一刻）：
+     * 用户可能先把文件挂上、过一会儿才发，中间还改过文件 —— 发的是**发的时候**那份内容。
+     * 读不到就如实写"读不到"（`fileContextBlock` 负责），绝不编。
+     */
+    let block = "";
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    if (material.length) {
+      const reads = [];
+      for (const file of material) {
+        const text = await Promise.resolve(shell?.drive?.read?.(file.path)).catch(() => null);
+        reads.push({ path: file.path, text: typeof text === "string" ? text : null });
+      }
+      block = fileContextBlock(reads);
+    }
+    setMaterial([]);
+    const options = block ? { material: block } : undefined;
     // 传了 onSend 就按它的（任务视图 = 在这段对话里接着说）；没传就是新开一段
-    if (onSend) onSend(value);
-    else void createTask(value);
+    if (onSend) onSend(value, options);
+    else void createTask(value, options);
   };
 
   const enabledNames = enabled.map((id) => findItemIn(lib, id)?.name).filter((x): x is string => Boolean(x));
@@ -117,7 +164,10 @@ export function Composer({
 
   /** 光标一动就重算（输入、点、方向键都算）。 */
   const syncTrigger = (el: HTMLTextAreaElement): void => {
-    setAtTrigger(detectAtTrigger(el.value, el.selectionStart ?? el.value.length));
+    const next = detectAtTrigger(el.value, el.selectionStart ?? el.value.length);
+    setAtTrigger(next);
+    /* 第一次唤起选单时把云盘清单读进来（点选即附着，不用再点一次"添加资料"）。 */
+    if (next && driveFiles.length === 0) void loadDriveFiles();
   };
 
   const matched = atTrigger ? filterPhrases(atTrigger.query) : [];
@@ -153,6 +203,31 @@ export function Composer({
           onMouseDown={(e) => e.preventDefault()}
         >
           <div className="wb-phrase-head">{PHRASE_LABELS.title}</div>
+          {/*
+            资料（2026-10-14）：占位文案承诺的「@ 添加资料」。
+            与常用语**同在一个选单里**，但两栏分开 —— 本体首页那条文案说的是资料，
+            coding 聊天那条说的是常用语，我们两个能力都有，就不该为了"照哪一条"删掉另一个。
+          */}
+          {driveFiles.length > 0 ? (
+            <div>
+              <div className="wb-phrase-group" data-testid="wb-material-group">
+                资料（点一下加进这轮）
+              </div>
+              {driveFiles
+                .filter((f) => !atTrigger?.query || f.name.toLowerCase().includes(atTrigger.query.toLowerCase()))
+                .slice(0, 6)
+                .map((f) => (
+                  <button
+                    key={f.path}
+                    className="wb-phrase-item"
+                    data-testid={`wb-material-${f.name}`}
+                    onClick={() => attachMaterial(f)}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+            </div>
+          ) : null}
           {matched.length === 0 ? (
             <p className="wb-phrase-empty" data-testid="wb-phrase-empty">
               {PHRASE_LABELS.empty}
@@ -178,6 +253,22 @@ export function Composer({
               );
             })
           )}
+        </div>
+      ) : null}
+      {material.length > 0 ? (
+        <div className="wb-material-chips" data-testid="wb-material-chips">
+          {material.map((f) => (
+            <span key={f.path} className="wb-material-chip" data-testid={`wb-material-chip-${f.name}`}>
+              {f.name}
+              <button
+                className="wb-material-x"
+                title="移出这轮"
+                onClick={() => setMaterial((prev) => prev.filter((x) => x.path !== f.path))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
         </div>
       ) : null}
       <textarea

@@ -219,7 +219,7 @@ export function TaskView() {
         应用会**新建一个任务**，之前那几轮完全不在上下文里。
         本体不是这样（它的「主对话」是一段多轮对话）。
       */}
-      <Composer onSend={(value) => void sendInTask(task.id, value)} />
+      <Composer onSend={(value, options) => void sendInTask(task.id, value, options)} />
     </section>
   );
 }

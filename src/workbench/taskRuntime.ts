@@ -230,7 +230,15 @@ async function summaryFor(taskId: string, older: ChatMessage[]): Promise<string>
  * @param history 这次**之前**的步骤（不含这次要发的那句）
  * @param text 这次要发的那句
  */
-export async function answerTurn(port: StorePort, taskId: string, history: TaskStep[], text: string, extraNote?: string): Promise<void> {
+export async function answerTurn(
+  port: StorePort,
+  taskId: string,
+  history: TaskStep[],
+  text: string,
+  extraNote?: string,
+  /** 这一轮随用户话一起带的资料（见 `WorkTask.material`）：空则只用任务上那份。 */
+  material?: string,
+): Promise<void> {
   const { messages, truncated } = buildHistory(history, { factor: calibrationFactor });
 
   /*
@@ -255,7 +263,7 @@ export async function answerTurn(port: StorePort, taskId: string, history: TaskS
     }
   }
 
-  const { system: baseSystem, user } = buildFollowUpPrompt(text, truncated);
+  const { system: baseSystem, user } = buildFollowUpPrompt(text, truncated, material);
   const system = withSummary(baseSystem, summary);
   const reply = await runStream(
     port,

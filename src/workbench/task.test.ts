@@ -516,4 +516,29 @@ describe("流式草稿不落盘（2026-10-14）", () => {
     expect(got).not.toBeNull();
     expect((got as Record<string, unknown>).draft).toBeUndefined();
   });
+
+  it("⭐ `material` 也是纯运行时字段：恢复出来的任务里不许带着它", () => {
+    /*
+     * 用户随这一轮交给 agent 的资料正文（「@ 添加资料」，最多 3×12000 字）。
+     * 它只对**这一次请求**有意义：任务账本（`tasks.json`）不该被几万字的正文撑起来，
+     * 重启后要重新添加。落盘前剥掉（`taskPersist.ts`），恢复那侧也不认它。
+     */
+    const got = normalizeTask({
+      id: "t1",
+      title: "标题",
+      brief: "把这份资料整理成 PPT",
+      createdAt: 1,
+      stage: "running",
+      startedAt: 1,
+      finishedAt: null,
+      steps: [],
+      questions: [],
+      questionIndex: 0,
+      activity: "正在思考",
+      artifacts: [],
+      material: "【提到的文件】\n- D:\\a.md：\n季度总结正文",
+    });
+    expect(got).not.toBeNull();
+    expect((got as Record<string, unknown>).material).toBeUndefined();
+  });
 });

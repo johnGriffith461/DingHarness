@@ -106,9 +106,9 @@ export type WorkbenchState = {
   openFloat: (seed?: string) => void;
   closeFloat: () => void;
   /** 新建一个任务并立刻开始跑（对应原版"发消息或创建任务"）。 */
-  createTask: (message: string, options?: { background?: boolean }) => Promise<void>;
+  createTask: (message: string, options?: { background?: boolean; material?: string }) => Promise<void>;
   /** 在已有对话里继续说一句（§147）—— 与 `createTask` 的区别是带上历史。 */
-  sendInTask: (taskId: string, message: string) => Promise<void>;
+  sendInTask: (taskId: string, message: string, options?: { material?: string }) => Promise<void>;
   /**
    * 回到某一步并从那里重来（§151）。
    *
@@ -274,7 +274,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      * 这样"重新生成"才是同一次提问的重跑，而不是"用现在的上下文又问一遍"。
      */
     const background = task.steps.filter((s) => s.role === "user" && s.text.includes(" → ")).map((s) => s.text);
-    const { system } = buildDoPrompt(task.brief, background);
+    const { system } = buildDoPrompt(task.brief, background, task.material);
     const raw = await runStream(port, user, system, patch, [], task.id);
     const ask = parseAskReply(raw.text);
     const { text, artifacts } = extractArtifacts(
@@ -429,7 +429,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
    * ① 把**之前那几轮**作为 `messages` 历史一起发（`buildHistory`）；
    * ② 提示词换成"接着上文回应"（不把任务复述一遍，避免模型以为用户又提了一次）。
    */
-  sendInTask: async (taskId, message) => {
+  sendInTask: async (taskId, message, options) => {
     const text = String(message ?? "").trim();
     if (!text) return;
 
@@ -440,6 +440,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const now = Date.now();
     const withNew: WorkTask = {
       ...task,
+      /* 这一轮带的资料（没给就沿用任务上原来那份）—— 与"先问再干"那条路的口径一致。 */
+      ...(options?.material ?? task.material ? { material: options?.material ?? task.material } : {}),
       steps: [...task.steps, { id: makeStepId(task.steps.length + 1), role: "user", text, at: now }],
       stage: "running",
       finishedAt: null,
@@ -451,7 +453,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      * ⚠️ 历史取的是**加新消息之前**的那份 steps —— 新那句话要作为
      * 这一次请求的 `user` 单独发（否则模型会看到同一个问题出现两次）。
      */
-    await answerTurn(port, taskId, task.steps, text);
+    await answerTurn(port, taskId, task.steps, text, undefined, withNew.material);
   },
 
   /**
@@ -491,7 +493,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      * 重答那一步带一句说明 —— 用户要能看出"这条是回退之后重新答的"，
      * 否则回退前后看起来一模一样（自己都不确定刚才那下点没点上）。
      */
-    await answerTurn(port, taskId, plan.kept.slice(0, -1), plan.reask, "已回到这一步重新回答");
+    await answerTurn(port, taskId, plan.kept.slice(0, -1), plan.reask, "已回到这一步重新回答", task.material);
   },
 
   /**
@@ -519,6 +521,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     if (!text) return;
 
     const background = options?.background ?? false;
+    const material = options?.material;
     const now = Date.now();
     const task: WorkTask = {
       id: nextId("t"),
@@ -542,6 +545,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       questionIndex: 0,
       activity: "正在思考",
       artifacts: [],
+      /* 资料随任务走（跨"先问再干"那次往返）—— 见 `WorkTask.material` 的说明。 */
+      ...(material ? { material } : {}),
     };
     /*
      * `background` 的任务**不抢焦点**。
@@ -559,7 +564,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     // 起标题与回答问题并行：标题回来了就替换，失败就留着启发式那份
     void refineTitle(port, task.id, text);
 
-    const { system, user } = buildAskPrompt(text);
+    const { system, user } = buildAskPrompt(text, [], material);
     const reply = await runStream(
       port,
       user,
@@ -591,7 +596,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const background = advanced.steps
       .filter((s) => s.role === "user" && s.text.includes(" → "))
       .map((s) => s.text);
-    const { system, user } = buildDoPrompt(advanced.brief, background);
+    const { system, user } = buildDoPrompt(advanced.brief, background, advanced.material);
     const reply = await runStream(
       port,
       user,

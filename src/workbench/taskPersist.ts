@@ -122,7 +122,18 @@ function schedulePersist(port: StorePort): void {
      * 落盘前剥掉流式草稿（`draft`）：它每几十毫秒变一次，写进磁盘纯属浪费；
      * 而且它不该跨重启活下来（被中断的那一步会被标成 failed，草稿留着自相矛盾）。
      */
-    const tasks = port.getState().tasks.map((t) => (t.draft === undefined ? t : { ...t, draft: undefined }));
+    /*
+   * 落盘前剥掉两份**只属于这一次会话**的东西：
+   *   · `draft` —— 流式草稿，每几十毫秒变一次
+   *   · `material` —— 随这轮带的资料正文（最多 3×12000 字），
+   *     `tasks.json` 是"任务账本"，不该被几万字的资料正文撑起来；
+   *     重启后要重新添加（`normalizeTask` 也不认它）
+   */
+  const tasks = port
+    .getState()
+    .tasks.map((t) =>
+      t.draft === undefined && t.material === undefined ? t : { ...t, draft: undefined, material: undefined },
+    );
     saveQueue = saveQueue.then(() => bridge.tasks.save(tasks)).catch(() => undefined);
   }, 600);
 }

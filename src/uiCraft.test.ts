@@ -80,4 +80,39 @@ describe("手感守卫（UI 做工的四条规矩）", () => {
     expect(css, "缺 reduced-motion 保护").toContain("prefers-reduced-motion: reduce");
     expect(css, "缺 focus-visible 焦点环").toContain(":focus-visible");
   });
+
+  /*
+   * ⑤ 板块边界阴影（2026-10-14 主人指出"完全分不出来"）。
+   *
+   * 为什么值得一条守卫：这四块（左栏 / 工作区 / 画布 / 右摘要）都是**同一个底色**，
+   * 边界只靠一根 1px 的 `--line`。阴影是**唯一**让眼睛看出"这是几块"的东西，
+   * 而它恰恰是最容易被后来者当成"装饰"顺手删掉的（删了不会有任何行为变化，
+   * 只有人看着别扭）。所以在这里钉住"存在、走令牌、两个主题都有"。
+   */
+  it("⑤ 四个板块之间真的有边界阴影，且走主题令牌", () => {
+    /** 取某个选择器**最后一次**出现的规则块（后者覆盖前者，所以看最后那条才算数）。 */
+    const blocks = readFileSync(path.join(STYLE_DIR, "craft.css"), "utf8");
+    const lastBlock = (selector: string) => {
+      const at = blocks.lastIndexOf(`${selector} {`);
+      return at < 0 ? "" : blocks.slice(at, blocks.indexOf("}", at) + 1);
+    };
+    const right = css.match(/--edge-shadow-right:\s*[^;]+;/);
+    const left = css.match(/--edge-shadow-left:\s*[^;]+;/);
+    expect(right, "没有 --edge-shadow-right 令牌").not.toBeNull();
+    expect(left, "没有 --edge-shadow-left 令牌").not.toBeNull();
+    /* 深色主题一套（深底上浅阴影看不见），所以令牌必须定义两次 */
+    expect((css.match(/--edge-shadow-right:/g) ?? []).length, "边界阴影只有浅色一套").toBeGreaterThanOrEqual(2);
+    for (const [sel, token] of [
+      [".wb-nav", "var(--edge-shadow-right)"],
+      [".wb-canvas", "var(--edge-shadow-left)"],
+      [".wb-summary", "var(--edge-shadow-left)"],
+      [".wb-composer", "var(--shadow-card)"],
+    ]) {
+      expect(lastBlock(sel), `${sel} 没走边界阴影（${token}）`).toContain(token);
+    }
+    /* 四个板块里不许有谁把阴影就地写成 rgba —— 那会绕开深色主题与棘轮 */
+    for (const sel of [".wb-nav", ".wb-canvas", ".wb-summary", ".wb-composer"]) {
+      expect(lastBlock(sel), `${sel} 把阴影写成了硬编码颜色`).not.toMatch(/box-shadow:[^;]*rgba\(/);
+    }
+  });
 });

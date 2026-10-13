@@ -192,3 +192,32 @@ describe("describeAnswer", () => {
     expect(describeAnswer(q({ text: "给谁看？" }), undefined)).toBe("给谁看？ → ");
   });
 });
+
+describe("资料（@ 添加资料）随请求一起过去", () => {
+  const block = "【提到的文件】\n- D:\\a.md：\n季度总结：营收增长 12%";
+
+  it("提问那轮带上资料（不然模型会拿着资料提问、然后不带资料干活）", () => {
+    const { user } = buildAskPrompt("把这份资料整理成 PPT", [], block);
+    expect(user).toContain("把这份资料整理成 PPT");
+    expect(user).toContain("营收增长 12%");
+  });
+
+  it("干活那轮也带上（跨过「先问再干」那次往返）", () => {
+    const { user } = buildDoPrompt("做周报", ["受众 → 老板"], block);
+    expect(user).toContain("我提供的关键信息：");
+    expect(user).toContain("营收增长 12%");
+  });
+
+  it("接着说那轮也带上", () => {
+    const { user } = buildFollowUpPrompt("再改一版", false, block);
+    expect(user).toContain("再改一版");
+    expect(user).toContain("营收增长 12%");
+  });
+
+  it("没资料的调用方行为一个字不变（空/空白都算没资料）", () => {
+    expect(buildAskPrompt("x").user).toBe("x");
+    expect(buildAskPrompt("x", [], "").user).toBe("x");
+    expect(buildAskPrompt("x", [], "   ").user).toBe("x");
+    expect(buildFollowUpPrompt("y").user).toBe("y");
+  });
+});

@@ -82,6 +82,16 @@
   --shadow-modal: 0 24px 60px rgba(10, 20, 40, 0.28);
   --shadow-float: 0 20px 56px rgba(12, 20, 40, 0.28);
   --shadow-blob: inset -6px -8px 18px rgba(0, 0, 0, 0.28), 0 10px 30px rgba(30, 64, 255, 0.28);
+  /*
+    板块之间的**边界阴影**（2026-10-14 主人指出：左边栏 / 工作区 / 画布 / 右摘要
+    挤在一起，只用 1px 描边分不出来是几块）。
+    方向感要一致：**右侧的板块把阴影投向左，左侧的投向右** —— 也就是说
+    "谁浮在上面"在全屏里只有一种读法。
+    ⚠️ 用变量而不是就地写 rgba：`themeRatchet` 把"工作台里硬编码颜色"钉死在 223 条，
+    这里一写死就会红（那条规矩的本意正是"每加一处硬编码，以后做深色主题就多改一处"）。
+  */
+  --edge-shadow-right: 3px 0 14px -4px rgba(16, 24, 40, 0.22);
+  --edge-shadow-left: -3px 0 14px -4px rgba(16, 24, 40, 0.22);
 
   --ok: #16a34a;
   --ok-strong: #15803d;
@@ -128,6 +138,14 @@
   --line: #262c38;
   --fg: #c9d1d9;
   --fg-dim: #7d8794;
+  /*
+    画布是**深色孤岛**（上面那几个变量就是它在跟工作台划清界限）。
+    所以它用到的每个变量都得在这里自己声明一份深色值 ——
+    边界阴影也不例外：借 `.wb` 的浅色值会在深底上糊成一片灰。
+    （守卫 `canvasThemeVars.test.ts` 会盯着这件事。）
+  */
+  --edge-shadow-left: -2px 0 12px -4px rgba(0, 0, 0, 0.55);
+  --edge-shadow-right: 2px 0 12px -4px rgba(0, 0, 0, 0.55);
   color-scheme: dark;
 }
 
@@ -520,6 +538,10 @@
   --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
   --shadow-float: 0 20px 56px rgba(0, 0, 0, 0.6);
   --shadow-blob: inset -6px -8px 18px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(30, 64, 255, 0.35);
+
+  /* 深色底上浅阴影等于没有 —— 换更强的黑，方向不变。 */
+  --edge-shadow-right: 2px 0 12px -4px rgba(0, 0, 0, 0.55);
+  --edge-shadow-left: -2px 0 12px -4px rgba(0, 0, 0, 0.55);
 }
 
 /* 渐变的深色版：压暗保色相（先定义变量，再让上面的块取用） */

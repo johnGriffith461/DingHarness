@@ -88,8 +88,17 @@ describe("画布变量必须自给自足", () => {
     expect(declared.has("--fg")).toBe(true);
   });
 
-  it("现在画布还没有引用任何变量（这条记录的是**当前实况**，变了就该改这里）", () => {
-    const { used } = readCanvas(readAllCss());
-    expect(used.size).toBe(0);
+  /*
+   * 这条记录的是**当前实况**，变了就该改这里（它自己的注释就是这么说的）。
+   *
+   * 2026-10-14 从 0 变 1：画布左边缘加了边界阴影 `var(--edge-shadow-left)` ——
+   * 上面那条"引用了什么就必须声明什么"因此真的开始工作了（这正是加它的意义：
+   * 画布是深色孤岛，借工作台的浅色变量会在深底上糊掉）。
+   */
+  it("画布引用到的变量数（当前实况：1 个，边界阴影）", () => {
+    const { used, declared } = readCanvas(readAllCss());
+    expect([...used].sort()).toEqual(["--edge-shadow-left"]);
+    /* 关键那条：引用的每个都得声明过（上面那条测试的等价直白版） */
+    for (const name of used) expect(declared.has(name), `${name} 没在 .wb-canvas 里声明`).toBe(true);
   });
 });

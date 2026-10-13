@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Minus, MoreHorizontal, Phone, Plus, Sparkles, Volume2 } from "lucide-react";
 import { abortStream, streamChat } from "@/ai/aiClient";
 import { applyEvent, emptyTurn, finishTurn } from "@shared/sessionLog";
+import type { ShellBridge } from "@shared/ipc";
+import { extractFilePaths, fileContextBlock } from "./fileContext";
+import type { PathRead } from "./fileContextTypes";
 
 /**
  * 悬浮助手窗（对标实机：任务顶栏第 3 个图标弹出的浮动面板）。
@@ -130,8 +133,31 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
           model = pick.models[0] ?? "";
         }
       }
+      /*
+       * 「提到的文件」把内容带上（2026-10-14）。
+       *
+       * 云盘行菜单点「问问豆包」发下来的就是这样一句话：
+       * `读一下这个文件：D:\...\季度总结.md 然后用一句话说清它讲了什么。`
+       * —— 只有路径。而这条路**连工具都不带**、主进程的工具集里也没有读文件的那件，
+       * 于是模型只能照路径编，或者说"我读不了你本机的文件"。
+       *
+       * 现在：把话里出现的绝对路径**读出来附在后面**（读不到就如实写"读不到"）。
+       * ⚠️ 气泡里仍然显示用户的原话（`value`），内容只进请求 ——
+       * 与聊天里引用画布节点是同一条规矩。
+       */
+      const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+      const reads: PathRead[] = [];
+      for (const path of extractFilePaths(value)) {
+        const text = await Promise.resolve(bridge?.drive?.read?.(path)).catch(() => null);
+        reads.push({ path, text: text ?? null });
+      }
+      const block = fileContextBlock(reads);
+      const content = block ? `${value}
+
+${block}` : value;
+
       const handle = await streamChat(
-        { provider, model, messages: [{ role: "user", content: value }] },
+        { provider, model, messages: [{ role: "user", content }] },
         (event) => {
           turn = applyEvent(turn, event);
           if (event.type !== "text" && event.type !== "error") return;

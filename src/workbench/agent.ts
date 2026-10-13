@@ -20,12 +20,37 @@ import { truncatedNote } from "./history";
  * 用标记块能表达"哪一段是给人看的、哪一段是给程序看的"。
  */
 
+/**
+ * 把用户给的**资料**拼到这一轮的要求后面（2026-10-14）。
+ *
+ * ## 为什么要单独一个函数
+ * 输入区那条占位文案是本体原话 ——「发消息或创建任务... / 使用技能 @ 添加资料」，
+ * 而 `@` 在我们这里只出了常用语（那一句证据来自 **coding 聊天**：
+ * `输入"@"唤起常用语`）—— 于是**界面承诺了"添加资料"，功能没做**。
+ * 用户把文件交给 agent 是它的主要用法之一（"把这份资料整理成 PPT"），
+ * 所以这次把资料补上：选文件 → 附着在输入区 → 发送时内容随请求过去。
+ *
+ * 集中在这里的理由与产物格式那一段相同：**三段提示词（问 / 干 / 接着说）都要带资料**，
+ * 各写一份迟早有一处漏掉，而"模型看不见资料"从现象上很难定位。
+ *
+ * @param user 原本要给模型的这一轮内容
+ * @param material 资料块（`fileContextBlock` 的产物）；空则原样返回
+ */
+export function withMaterial(user: string, material?: string): string {
+  if (!material || !material.trim()) return user;
+  return `${user}\n\n${material}`;
+}
+
 /** 提问块的标记。用少见标签，避免和正文里的尖括号冲突。 */
 export const ASK_OPEN = "<ask>";
 export const ASK_CLOSE = "</ask>";
 
 /** 第 1 段：判断要不要提问。 */
-export function buildAskPrompt(userMessage: string, background: string[] = []): { system: string; user: string } {
+export function buildAskPrompt(
+  userMessage: string,
+  background: string[] = [],
+  material?: string,
+): { system: string; user: string } {
   const system = [
     "你是一个任务助手。用户给你一句话，你要判断：**只凭这句话，能不能直接把活干好**。",
     "",
@@ -53,7 +78,7 @@ export function buildAskPrompt(userMessage: string, background: string[] = []): 
   const backgroundBlock = background.length
     ? `\n\n【已经问过并得到回答的背景】\n${background.map((b, i) => `${i + 1}. ${b}`).join("\n")}`
     : "";
-  return { system, user: `${userMessage}${backgroundBlock}` };
+  return { system, user: withMaterial(`${userMessage}${backgroundBlock}`, material) };
 }
 
 /** 第 2 段：拿着回答干活。 */
@@ -85,7 +110,11 @@ const ARTIFACT_RULES = [
   "5. 不需要成品的任务（例如只是回答问题）就不要产物块，正常回答即可。",
 ].join("\n");
 
-export function buildDoPrompt(userMessage: string, answers: string[]): { system: string; user: string } {
+export function buildDoPrompt(
+  userMessage: string,
+  answers: string[],
+  material?: string,
+): { system: string; user: string } {
   const system = [
     "你是一个任务助手。用户此前提出了一个任务，你已经问清了关键信息，现在开始干活。",
     "不要再反问、不要解释你会怎么做，直接给成品。",
@@ -93,7 +122,7 @@ export function buildDoPrompt(userMessage: string, answers: string[]): { system:
     ARTIFACT_RULES,
   ].join("\n");
   const answerBlock = answers.map((a, i) => `${i + 1}. ${a}`).join("\n");
-  return { system, user: `任务：${userMessage}\n\n我提供的关键信息：\n${answerBlock}` };
+  return { system, user: withMaterial(`任务：${userMessage}\n\n我提供的关键信息：\n${answerBlock}`, material) };
 }
 
 /**
@@ -106,7 +135,11 @@ export function buildDoPrompt(userMessage: string, answers: string[]): { system:
  * @param userMessage 用户这一句
  * @param truncated 历史是否被截断（截断时要把"你看不到全部"告诉模型）
  */
-export function buildFollowUpPrompt(userMessage: string, truncated = false): { system: string; user: string } {
+export function buildFollowUpPrompt(
+  userMessage: string,
+  truncated = false,
+  material?: string,
+): { system: string; user: string } {
   const system = [
     "你是一个任务助手。用户在与你的**同一段对话**里继续说了一句，请接着上文回应。",
     "前面已经问过、答过、给过的内容不要重复问；不确定的事直接说不确定，不要猜。",
@@ -114,7 +147,7 @@ export function buildFollowUpPrompt(userMessage: string, truncated = false): { s
     ARTIFACT_RULES,
     ...(truncated ? ["", truncatedNote()] : []),
   ].join("\n");
-  return { system, user: userMessage };
+  return { system, user: withMaterial(userMessage, material) };
 }
 
 /**
