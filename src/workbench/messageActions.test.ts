@@ -21,7 +21,13 @@ import { describe, expect, it } from "vitest";
  * 所以规则是：**`wb-actions` 里出现的每个 `<button>`，必须带 `onClick`。**
  */
 
-const FILE = join("src", "workbench", "Workbench.tsx");
+/*
+ * ⚠️ C6-1 把消息操作栏从 `Workbench.tsx` 拆成了 `MessageActions.tsx`。
+ * 这条守卫是"**扫源码**"型的 —— 它盯的是"那段代码在哪个文件里"，
+ * 所以拆分会让它失准。**这正是它的价值**：它逼你确认"新位置还在、约束还成立"，
+ * 而不是让约束随着搬家悄悄失效。
+ */
+const FILE = join("src", "workbench", "MessageActions.tsx");
 
 /**
  * 切出 `MessageActions` 那个函数的函数体。

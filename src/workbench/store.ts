@@ -12,6 +12,7 @@ import {
 } from "@shared/agentTools";
 import { applyEvent, emptyTurn, finishTurn, taskSessionId } from "@shared/sessionLog";
 import { assembleSystem } from "@shared/turnAssembly";
+import { fabricatedCost, type StepUsage } from "@shared/cost";
 import { buildHistory } from "./history";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
@@ -285,7 +286,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       text: text || (artifacts.length ? "产物已生成，见右侧「对话产物」。" : "(没有输出内容)"),
       at: Date.now(),
       askedWith: user,
-      cost: Math.max(0.01, Math.round(((raw.text.length / 4) * 0.01 + 0.1) * 100) / 100),
+      // 显示那个数只有一份实现（`shared/cost.ts`）；真实用量另存 `usage`（C5）
+      cost: fabricatedCost(raw.text),
+      ...(raw.usage ? { usage: raw.usage } : {}),
       // 这一步用过的工具（§141）：重跑时也照记，才能一眼看出"这条回复动过什么"
       ...(raw.tools.length ? { tools: raw.tools } : {}),
     };
@@ -561,7 +564,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       task.id,
     );
 
-    nextStep(task.id, reply.text, false, user, reply.tools);
+    nextStep(task.id, reply.text, false, user, reply.tools, undefined, reply.usage);
   },
 
   answer: async (option, custom) => {
@@ -593,7 +596,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     );
 
     // 第二段如果又吐了提问块，也照收（模型有时会追问，原版也允许）
-    nextStep(advanced.id, reply.text, true, user, reply.tools);
+    nextStep(advanced.id, reply.text, true, user, reply.tools, undefined, reply.usage);
   },
 }));
 
@@ -932,7 +935,15 @@ async function answerTurn(taskId: string, history: TaskStep[], text: string, ext
    * 合成一行而不是两条：界面上那一行本来就只放一句。
    */
   const notes = [extraNote, reply.note, olderCount ? compactedNote(olderCount) : ""].filter(Boolean);
-  nextStep(taskId, reply.text, false, user, reply.tools, notes.length ? notes.join("；") : undefined);
+  nextStep(
+    taskId,
+    reply.text,
+    false,
+    user,
+    reply.tools,
+    notes.length ? notes.join("；") : undefined,
+    reply.usage,
+  );
 }
 
 /**
@@ -961,7 +972,7 @@ async function runStream(
    * 起标题这类附带请求走的是别的函数，压根不到这里。
    */
   sessionId = "",
-): Promise<{ text: string; tools: ToolTrace[]; note?: string }> {
+): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string }> {
   const messages: ChatMessage[] = [...history, { role: "user", content: user }];
   /*
    * ⚠️ 「新对话默认模型」（§183）只在这种时候生效：
@@ -1078,8 +1089,19 @@ async function runStream(
   const view = project();
   const errorText = failure || view.error || "";
   const text = errorText ? `（出错了）${errorText}` : view.text;
-  // 「默认模型失效、先退回上次」那句跟着返回值出去，由 `answerTurn` 挂到这一步上（§184）
-  return { text, tools: view.traces, ...(fellBackNote ? { note: fellBackNote } : {}) };
+  /*
+   * ⚠️ `usage` 一起交出去（C5）：它是 provider 给的**真值**，
+   * 原来主进程发了、工作台**没有 `done` 分支**于是直接丢掉（界面那个数一直是按字数估的）。
+   * 现在它跟着这一步落盘，显示处据此**如实说明**"上面那个数是估的、真值是这个"。
+   *
+   * 「默认模型失效、先退回上次」那句跟着返回值出去，由 `answerTurn` 挂到这一步上（§184）
+   */
+  return {
+    text,
+    tools: view.traces,
+    ...(view.usage ? { usage: view.usage } : {}),
+    ...(fellBackNote ? { note: fellBackNote } : {}),
+  };
 }
 
 /**
@@ -1109,6 +1131,8 @@ function nextStep(
   tools: ToolTrace[] = [],
   /** 这一步额外要说的一句（§149：目前只用于"更早的对话已压缩为摘要"）。 */
   note?: string,
+  /** 这一步的**真实用量**（C5）：与界面那个估出来的 `cost` 一起留着，hover 里如实说。 */
+  usage?: StepUsage,
 ): void {
   const state = useWorkbenchStore.getState();
   const task = state.tasks.find((t) => t.id === taskId);
@@ -1135,8 +1159,10 @@ function nextStep(
       text: text || (artifacts.length ? "产物已生成，见右侧「对话产物」。" : "(没有输出内容)"),
       at: Date.now(),
       ...(askedWith ? { askedWith } : {}),
-      // 原版会显示「消耗 0.48」；这里按字数粗估一个口径一致的数，界面用同一套单位
-      cost: Math.max(0.01, Math.round(((raw.length / 4) * 0.01 + 0.1) * 100) / 100),
+      // 原版会显示「消耗 0.48」（**按额度**，本机没有额度体系）—— 这里按字数估一个同口径可比的数
+      cost: fabricatedCost(raw),
+      // 真实用量（provider 的 tokens）如实存下来，界面的 hover 里说出来（C5）
+      ...(usage ? { usage } : {}),
       // 工具留痕挂在**这一步**上（step 事件化）：哪一步用了什么工具，是从这里读的
       ...(tools.length ? { tools } : {}),
       ...(note ? { note } : {}),

@@ -228,7 +228,6 @@ export function registerAiIpc(): void {
             ...(request.system ? { system: request.system } : {}),
             messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
             ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-            ...(request.maxTokens === undefined ? {} : { maxOutputTokens: request.maxTokens }),
             abortSignal: controller.signal,
             /*
              * 工具**只在发起方明确要求时才带**（§143）。

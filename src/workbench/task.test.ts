@@ -455,3 +455,36 @@ describe("恢复澄清卡（§179）", () => {
     expect(normalizeQuestions(null)).toEqual([]);
   });
 });
+
+describe("真实用量进步骤（C5）", () => {
+  it("⭐ 合法的 usage 原样恢复（它是 provider 给的真值，丢了就只能显示估算）", () => {
+    const step = normalizeStep({ id: "s1", role: "assistant", text: "答", at: 1, usage: { inputTokens: 2961, outputTokens: 44 } }, 0);
+    expect(step.usage).toEqual({ inputTokens: 2961, outputTokens: 44 });
+  });
+
+  it("只有一半也留着（不假装缺的那半是 0）", () => {
+    const step = normalizeStep({ id: "s1", role: "assistant", text: "答", at: 1, usage: { outputTokens: 44 } }, 0);
+    expect(step.usage).toEqual({ outputTokens: 44 });
+  });
+
+  it("⭐⭐ 坏值一律丢掉 —— 编不出一个看起来像用量的数（那比没有更坏：界面会显示假的真值）", () => {
+    for (const bad of [
+      { inputTokens: "2961" },
+      { inputTokens: -3 },
+      { inputTokens: Number.NaN },
+      { inputTokens: Number.POSITIVE_INFINITY },
+      "2961",
+      3,
+      null,
+      {},
+    ]) {
+      const step = normalizeStep({ id: "s1", role: "assistant", text: "答", at: 1, usage: bad }, 0);
+      expect(step.usage, `应丢掉：${JSON.stringify(bad)}`).toBeUndefined();
+    }
+  });
+
+  it("0 是合法值（真正的 0 与「没拿到」是两回事）", () => {
+    const step = normalizeStep({ id: "s1", role: "assistant", text: "答", at: 1, usage: { inputTokens: 0 } }, 0);
+    expect(step.usage).toEqual({ inputTokens: 0 });
+  });
+});

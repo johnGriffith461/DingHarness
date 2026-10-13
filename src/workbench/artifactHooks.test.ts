@@ -93,7 +93,12 @@ describe("产物卡的两个钩子必须成对出现", () => {
      *   - `Workbench.tsx`    —— 右侧「对话产物」列表
      * 断言改成**两边加起来**至少两处，并且每一处都成对。
      */
-    const files = ["ArtifactCard.tsx", "Workbench.tsx"].map((name) =>
+    /*
+     * ⚠️ C6-1 之后右侧「对话产物」列表搬去了 `SummaryPanel.tsx`（`Workbench.tsx` 只剩外壳）。
+     * 这条守卫盯"钩子成对出现在哪些渲染点"，所以得跟着搬家走 ——
+     * 漏改的表现是"空扫描"（`files` 里那份文件里再也没有钩子，断言却仍然绿/红得莫名其妙）。
+     */
+    const files = ["ArtifactCard.tsx", "SummaryPanel.tsx"].map((name) =>
       readFileSync(join("src", "workbench", name), "utf8"),
     );
     const blocks = files.flatMap((text) => attributeBlocks(text));

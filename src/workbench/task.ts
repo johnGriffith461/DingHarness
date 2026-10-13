@@ -22,8 +22,15 @@ export type TaskStep = {
   role: "user" | "assistant";
   text: string;
   at: number;
-  /** AI 消息的额度消耗（原版显示「消耗 0.48」）。 */
+  /** AI 消息的「消耗」（原版显示「消耗 0.48」）。**本机版是按字数估的**，见 `shared/cost.ts`。 */
   cost?: number;
+  /**
+   * 这一步的**真实用量**（provider 给的 tokens，C5）。
+   *
+   * ⚠️ 它与 `cost` 是**两个不同的东西**：`cost` 是界面那个数（估的、为了与本体形态一致），
+   * `usage` 是真的。一起留着，"显示的数是估的"这件事才说得清、也才有的对照。
+   */
+  usage?: { inputTokens?: number; outputTokens?: number };
   /**
    * 产出这条 AI 回复时**实际发出去的用户内容**。
    *
@@ -368,6 +375,26 @@ export function cleanTitle(raw: string): string {
 export const STEP_NOTE_LIMIT = 200;
 
 /**
+ * 收窄落盘的 `usage`（C5）。
+ *
+ * 磁盘上的东西不可信：只认**数字**，别的（字符串、NaN、对象）一律丢掉 ——
+ * 编不出一个"看起来像用量"的值（那比没有更坏：界面会显示一个假的真值）。
+ *
+ * @param raw 落盘的那一项
+ * @returns 干净的用量；一个数字都没有时返回 null
+ */
+export function usageOf(raw: unknown): { inputTokens?: number; outputTokens?: number } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+  const inputTokens = num(o.inputTokens);
+  const outputTokens = num(o.outputTokens);
+  if (inputTokens === undefined && outputTokens === undefined) return null;
+  return { ...(inputTokens === undefined ? {} : { inputTokens }), ...(outputTokens === undefined ? {} : { outputTokens }) };
+}
+
+/**
  * 从落盘的（不可信）数据里恢复**一步**（§177）。
  *
  * ## 为什么把它从 `store.ts` 里抽出来
@@ -389,12 +416,15 @@ export function normalizeStep(raw: unknown, index: number): TaskStep {
   const s = (raw ?? {}) as Record<string, unknown>;
   const note = typeof s.note === "string" ? s.note.trim().slice(0, STEP_NOTE_LIMIT) : "";
   const tools = normalizeToolTraces(s.tools);
+  // 先算一次再判（分两次调用的话 TS 收不窄，会变成 `{…} | null`）
+  const usage = usageOf(s.usage);
   return {
     id: typeof s.id === "string" && s.id ? s.id : makeStepId(index),
     role: s.role === "user" ? "user" : "assistant",
     text: typeof s.text === "string" ? s.text : "",
     at: typeof s.at === "number" ? s.at : 0,
     ...(typeof s.cost === "number" ? { cost: s.cost } : {}),
+    ...(usage ? { usage } : {}),
     // 这两项要一起恢复：askedWith 是「重新生成」的依据，rating 是评价留痕
     ...(typeof s.askedWith === "string" ? { askedWith: s.askedWith } : {}),
     ...(s.rating === "up" || s.rating === "down" ? { rating: s.rating as "up" | "down" } : {}),

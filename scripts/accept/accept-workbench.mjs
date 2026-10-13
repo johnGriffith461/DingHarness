@@ -104,8 +104,15 @@ report.phone = {
 };
 
 // 4) 设置弹窗
+/*
+ * ⚠️ 2026-10-13 修：这里原来点完 `wb-account` 就等弹窗 —— 而账号按钮**早就改成下拉菜单**了
+ * （§107/R1：账号 → 菜单 → 「设置」）。脚本没跟上，于是这条**一直过期**
+ * （它不在免模型批跑的 52 条里，所以没人发现 —— 正是 §97 点过的那种"久没跑过"）。
+ */
 await page.locator('[data-testid="wb-account"]').click();
-await page.waitForTimeout(500);
+await page.waitForTimeout(600);
+await page.locator('[data-testid="wb-acct-settings"]').click();
+await page.waitForTimeout(800);
 report.settingsRows = await page.$$eval(".wb-modal-row", (els) =>
   els.map((e) => e.textContent.replace(/\s+/g, " ").trim()),
 );

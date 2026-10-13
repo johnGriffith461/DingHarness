@@ -52,13 +52,19 @@ export type TurnEvent =
   | { type: "error"; message: string };
 
 /** 一次调用的输入。 */
+/*
+ * ⚠️ 这里**没有** `maxOutputTokens`（C5 裁定）：它原来是"有管道没水源"的 ——
+ * 契约里有 `maxTokens`、主进程也接了，但**渲染层从没传过**（`src/` 全仓零命中），
+ * 端到端一次都没生效。按手册"要么被用要么被删"，删掉这条管道。
+ * **要用的时候再加回来**，并且那时**同时**要有界面上的水源（否则又是一条空管道）。
+ * （provider 自己的默认输出上限一直生效，不受这里影响。）
+ */
 export type TurnRequestInput = {
   provider: string;
   model?: string;
   system?: string;
   messages: { role: "system" | "user" | "assistant"; content: string }[];
   temperature?: number;
-  maxOutputTokens?: number;
   /** 工具集；不给就是"不带工具"的一轮（起标题、翻译这类）。 */
   tools?: ToolSet;
   /** 步数上限（父 4 / 子 6 都是这个参数）。 */
@@ -172,7 +178,6 @@ export async function runTurn(
       messages: input.messages,
       ...(input.system ? { system: input.system } : {}),
       ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
-      ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       ...(input.tools
         ? { tools: input.tools, stopWhen: stepCountIs(input.maxSteps ?? 6) }
