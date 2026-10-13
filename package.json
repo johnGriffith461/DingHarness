@@ -10,7 +10,7 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",
-    "build": "pnpm build:web && pnpm electron:build && electron-builder --win nsis && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
+    "build": "pnpm typecheck && pnpm test && pnpm build:web && pnpm electron:build && electron-builder --win nsis && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
