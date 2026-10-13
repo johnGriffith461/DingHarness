@@ -3,8 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { kindOf, type DriveEntry, type DriveKind } from "../../shared/drive";
 import { isUnsupported, type ImportItem } from "../../shared/upload";
+import { READ_MAX_BYTES } from "../../shared/driveFiles";
 // 生成图落的目录（与 imageGen 同一处，不另写一份路径）
 import { assetsDir } from "./imageGen";
+import { insideDirs } from "./drivePaths";
 
 /**
  * 云盘（阶段 11.5）。
@@ -21,9 +23,13 @@ import { assetsDir } from "./imageGen";
  * 三个来源都列在一起、用 `origin` 区分来源，因为用户视角里它们都是"我的文件"。
  */
 
-/** 通道名。 */
-/** 一份文件读成文本的上限（§158）。 */
-export const READ_MAX_BYTES = 200 * 1024;
+/*
+ * ⚠️ A1：这里原来**又写了一份** `READ_MAX_BYTES = 200 * 1024`。
+ * `shared/driveFiles.ts` 已经有同名常量，而且是渲染侧与新单测认的那一份
+ * （`src/workbench/driveFiles.test.ts` 直接断言它是 `200 * 1024`）。
+ * 两份值当时一样，但"改一处忘另一处"就是下一条静默不一致 ——
+ * 所以改成从那边导入，只留**一个**事实来源。
+ */
 
 export const DRIVE_CHANNEL = {
   list: "drive:list",
@@ -134,20 +140,24 @@ export async function listDrive(): Promise<DriveEntry[]> {
 }
 
 /**
- * 校验路径确实在我们自己的三个目录里。
+ * 校验路径确实在我们自己的来源目录里。
  *
  * 跨进程边界上必须挡一手：不校验的话渲染进程传任意路径就能让主进程删它 / 打开它。
+ *
+ * ⚠️ A1：**判断本体搬到了 `./drivePaths.ts`** ——
+ * 那是为了让这条判断能在 Electron 之外被断言（本文件顶层 import 了 `electron`，
+ * 主进程又没有测试基础设施，于是这道校验此前**一条测试都没有**）。
+ * 这里只保留"白名单从哪来"这一层，`remove` / `duplicate` / `reveal` / `open`
+ * 的调用点与语义**一字未动**。
  *
  * @param raw 渲染进程给的路径
  * @returns 通过校验的绝对路径；不通过返回 null
  */
 function insideOwnedDirs(raw: string): string | null {
-  const resolved = path.resolve(String(raw ?? ""));
-  for (const { dir } of sources()) {
-    const rel = path.relative(path.resolve(dir), resolved);
-    if (!rel.startsWith("..") && !path.isAbsolute(rel)) return resolved;
-  }
-  return null;
+  return insideDirs(
+    raw,
+    sources().map(({ dir }) => dir),
+  );
 }
 
 /**
@@ -330,11 +340,26 @@ export function registerDriveIpc(
     },
   );
 
+  /*
+   * 重命名（§158）。
+   *
+   * ⚠️ **A1：路径必须落在自己的来源目录里。**
+   * 同文件的 `remove` / `duplicate` / `reveal` / `open` 一直走了 `insideOwnedDirs`，
+   * 唯独它和下面的 `read` 漏了 —— 渲染进程传任意路径就能**改任意文件的文件名**。
+   * 不通过时返回既有的失败值 `null`（**不抛异常**，调用方就是按 null 处理的）。
+   *
+   * 另外要求**源必须是一个普通文件**：`insideOwnedDirs` 对"目录自身"也放行，
+   * 只加前者的话"把整个云盘目录改名搬走"会成为可能。云盘行本来就只列文件
+   * （见 `listDir` 里的 `if (!stat.isFile()) continue`），所以这条不打断任何界面流程。
+   */
   ipcMain.handle(DRIVE_CHANNEL.rename, async (_event, filePath: string, newName: string): Promise<string | null> => {
     const clean = String(newName ?? "").trim();
     if (!clean || /[\\/]/.test(clean)) return null;
+    const from = insideOwnedDirs(filePath);
+    if (!from) return null;
     try {
-      const from = path.resolve(String(filePath));
+      const stat = await fs.stat(from);
+      if (!stat.isFile()) return null;
       const dir = path.dirname(from);
       const to = path.join(dir, clean);
       // 目标已存在就不动（**不覆盖**）
@@ -354,12 +379,18 @@ export function registerDriveIpc(
   /*
    * 读文本（§158，右键菜单里的「AI 阅读」要用）。
    * 超上限就返回 null —— 把几兆的东西塞进阅读面板只会把界面卡住。
+   *
+   * ⚠️ **A1：路径必须落在自己的来源目录里**（原来没有这道校验，
+   * 渲染进程可以拿它读**任意** ≤200KB 的文本文件）。
+   * 不通过同样返回既有的失败值 `null`；"超上限返回 null"的行为**原样保留**。
    */
   ipcMain.handle(DRIVE_CHANNEL.read, async (_event, filePath: string): Promise<string | null> => {
+    const target = insideOwnedDirs(filePath);
+    if (!target) return null;
     try {
-      const stat = await fs.stat(String(filePath));
+      const stat = await fs.stat(target);
       if (!stat.isFile() || stat.size > READ_MAX_BYTES) return null;
-      return await fs.readFile(String(filePath), "utf8");
+      return await fs.readFile(target, "utf8");
     } catch {
       return null;
     }
