@@ -60,6 +60,60 @@ try {
       .filter((t) => t !== "wb-acct-menu" && t !== "wb-acct-theme-sub"),
   );
 
+  /*
+   * ⚠️ 2026-10-13 补：**这一组 testid 原来一个都没被任何脚本引用过** ——
+   * 把 `src/` 的 `data-testid` 与 `scripts/accept/` 做交叉，103 个"零覆盖前缀"里就有它们
+   * （技能面板那个 59px 的塌陷就是这么烂掉的：没人点过它）。
+   *
+   * 断言**不靠点击**（第一版逐项点：点到「设置」弹出模态框，把后面全挡住了 —— 30 秒超时）。
+   * 改成从 DOM 直接读两件**可证伪**的事：
+   *   ① 九项都在（少一项就红）；
+   *   ② 每一项**要么可点、要么 `disabled`** —— 这正是手册那条"杜绝假按钮"的可检查形式
+   *      （"看起来能点、点了没反应"是最坏的一种）。
+   */
+  out.rowKinds = await page.evaluate(() => {
+    // 与上面读 items 用同一套查询（按前缀从整页取）—— 第一版限定在菜单容器里，容器没命中就全成了 missing
+    const rows = [...document.querySelectorAll('[data-testid^="wb-acct-"]')]
+      .filter((e) => !["wb-acct-theme-sub", "wb-acct-menu"].includes(e.getAttribute("data-testid") ?? ""))
+      .map((e) => ({
+        id: e.getAttribute("data-testid"),
+        tag: e.tagName.toLowerCase(),
+        disabled: e.hasAttribute("disabled"),
+        title: e.getAttribute("title") ?? "",
+      }));
+    return rows;
+  });
+  out.rowIds = (out.rowKinds ?? []).map((r) => r.id);
+  /** 应当存在的九项（本体口径，见 §107 / R1）。 */
+  out.expectIds = [
+    "wb-acct-settings",
+    "wb-acct-appearance",
+    "wb-acct-starred",
+    "wb-acct-site",
+    "wb-acct-update",
+    "wb-acct-help",
+    "wb-acct-quota",
+    "wb-acct-add",
+    "wb-acct-logout",
+  ];
+  out.missingRows = out.expectIds.filter((id) => !out.rowIds.includes(id));
+  /*
+   * "假按钮"的可验证口径（第一版写成"没 title 就算假"，**是错的**：真按钮不需要 title）：
+   *   · **壳**（本机版没有那个能力）必须是 `disabled` **且带 title 说明为什么** ——
+   *     这正是手册那条"杜绝假按钮：界面保持 disabled 且有说明"；
+   *   · **真入口**（设置 / 外观设置 / 收藏夹）不许被禁掉。
+   */
+  out.shellRows = ["wb-acct-site", "wb-acct-update", "wb-acct-help", "wb-acct-add", "wb-acct-logout"];
+  out.realRows = ["wb-acct-settings", "wb-acct-appearance", "wb-acct-starred"];
+  out.shellNotDisabled = (out.rowKinds ?? [])
+    .filter((r) => out.shellRows.includes(r.id) && !r.disabled)
+    .map((r) => r.id);
+  out.shellNoReason = (out.rowKinds ?? [])
+    .filter((r) => out.shellRows.includes(r.id) && r.disabled && !r.title)
+    .map((r) => r.id);
+  out.realDisabled = (out.rowKinds ?? []).filter((r) => out.realRows.includes(r.id) && r.disabled).map((r) => r.id);
+  out.disabledRows = (out.rowKinds ?? []).filter((r) => r.disabled).map((r) => r.id);
+
   // 3) 外观设置 → 子菜单三选一
   await page.locator('[data-testid="wb-acct-appearance"]').click();
   await page.waitForTimeout(700);
@@ -102,4 +156,25 @@ try {
 } finally {
   console.log(JSON.stringify(out, null, 2));
   child.kill();
+
+  /*
+   * 判定（2026-10-13 补：这九项的 testid 原来一个都没被脚本引用过 —— 见上面说明）。
+   * 两条都是**可证伪**的：少一项就红；"壳"没 disabled、或 disabled 却不说为什么也红。
+   */
+  const bad = [];
+  if ((out.missingRows ?? []).length) bad.push(`账号菜单少了这些项：${out.missingRows.join(" / ")}`);
+  if ((out.shellNotDisabled ?? []).length) {
+    bad.push(`⭐ 这些"壳"没被 disabled（点下去没反应 = 假按钮）：${out.shellNotDisabled.join(" / ")}`);
+  }
+  if ((out.shellNoReason ?? []).length) {
+    bad.push(`⭐ 这些"壳"disabled 了却没说为什么（title 为空）：${out.shellNoReason.join(" / ")}`);
+  }
+  if ((out.realDisabled ?? []).length) bad.push(`⭐ 这些是真入口却被禁掉了：${out.realDisabled.join(" / ")}`);
+  if (out.error) bad.push("异常: " + out.error);
+  if (bad.length) {
+    console.error("✗ " + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 账号菜单九项齐全 / 五个壳都 disabled 且有说明 / 三个真入口可用 / 外观三选一与持久化成立");
+  }
 }
