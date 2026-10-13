@@ -4,9 +4,9 @@ import { stepCountIs, streamText } from "ai";
 import { resolveSecret } from "./credentials";
 import { getProvider } from "./aiProviders";
 import { listProvidersWithProbe, markProviderFailed, markProviderOk, probeProviders } from "./aiProbe";
-import { createSessionLogger } from "./sessionStore";
+import { getSessionLogger } from "./sessionStore";
 import { agentTools, runToolOnce, type ToolEnv } from "./tools";
-import { describeToolResult } from "../../shared/agentTools";
+import { describeToolResult, rejectedLine } from "../../shared/agentTools";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 
 /**
@@ -95,6 +95,27 @@ export function registerAiIpc(): void {
    */
   ipcMain.handle(AI_CHANNEL.runTool, async (_event, request: ToolRunRequest): Promise<ToolRunResult> => {
     /*
+     * ── 拒绝：不执行，只把决定记进日志（INV-3）──────────────────────
+     *
+     * 原来"拒绝"是**纯渲染层**的动作：连 IPC 都不发。后果是重启之后
+     * 那条留痕又变回「等你确认」（用户明明拒过），而"谁拒的、拒了什么"也**无从查证**。
+     * 现在它走同一个通道、落同一条决策记录 —— 与批准对称。
+     */
+    if (request.reject) {
+      const line = rejectedLine(request.name);
+      if (request.toolCallId) {
+        getSessionLogger(request.sessionId)?.log({
+          type: "approval",
+          toolCallId: request.toolCallId,
+          name: request.name,
+          approved: false,
+          line,
+        });
+      }
+      return { ok: true, line };
+    }
+
+    /*
      * 放行时给一个**默认 provider**（§150）：父请求的上下文早就结束了。
      * 对子智能体来说这不影响语义（它用自己的上下文跑），
      * 所以取当前第一个可用 provider 就够 —— 拿不到就空着，交给执行体报错。
@@ -107,7 +128,25 @@ export function registerAiIpc(): void {
       depth: 0,
     };
     const res = await runToolOnce(request.name, request.input, env);
-    return { ...res, line: describeToolResult(request.name, res.ok, res.output, res.error) };
+    const line = describeToolResult(request.name, res.ok, res.output, res.error);
+    /*
+     * 批准：把**决定与结果一起**记进日志（INV-3）。
+     * 记结果是因为重放日志时要能还原成"已保存，当前 N 条"那一行 ——
+     * 只记"批过了"的话，重启后那条留痕会变成一个没有内容的空壳。
+     */
+    if (request.toolCallId) {
+      getSessionLogger(request.sessionId)?.log({
+        type: "approval",
+        toolCallId: request.toolCallId,
+        name: request.name,
+        approved: true,
+        ok: res.ok,
+        ...(res.output === undefined ? {} : { output: res.output }),
+        ...(res.error ? { error: res.error } : {}),
+        line,
+      });
+    }
+    return { ...res, line };
   });
 
   ipcMain.handle(AI_CHANNEL.abort, (_event, requestId: string) => {
@@ -131,7 +170,12 @@ export function registerAiIpc(): void {
      * `sessionId` 由发起方给（工作台是任务 id、聊天是对话 id）；
      * 不给就不记（`refineTitle` 这类附带请求不是 agent 回合）。
      */
-    const sessionLog = createSessionLogger(request.sessionId);
+    /*
+     * ⚠️ 用 `getSessionLogger`（**同一会话共用一个**），不是每次新建：
+     * 用户点「允许」时由 `ai:runTool` 往**同一个文件**写决策记录 ——
+     * 两个写入器各自从 seq=1 数，就会撞号，读回来按 seq 排序时"批准"会排到它那一轮前面。
+     */
+    const sessionLog = getSessionLogger(request.sessionId);
     sessionLog?.log({
       requestId,
       type: "request",

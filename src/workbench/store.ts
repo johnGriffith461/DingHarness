@@ -10,7 +10,7 @@ import {
   toolLabel,
   type ToolTrace,
 } from "@shared/agentTools";
-import { applyEvent, emptyTurn, finishTurn } from "@shared/sessionLog";
+import { applyEvent, emptyTurn, finishTurn, taskSessionId } from "@shared/sessionLog";
 import { buildHistory } from "./history";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
@@ -348,7 +348,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     if (!trace || !step) return;
 
     if (!approve) {
-      patchTrace({ pending: false, ok: true, line: rejectedLine(trace.name) });
+      /*
+       * 拒绝也**上报**（C2/INV-3）：主进程把决定记进会话日志。
+       *
+       * 原来这里纯在本地改一行 —— 重启后那条留痕又变回「等你确认」，
+       * 而"谁拒的、拒了什么"查不到。现在与批准对称，文案也以主进程返回的为准。
+       */
+      const rejected = await runToolOnce({
+        name: trace.name,
+        input: trace.input,
+        toolPolicy: readConfirmMode(),
+        reject: true,
+        toolCallId,
+        ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
+      });
+      patchTrace({ pending: false, ok: true, line: rejected.line || rejectedLine(trace.name) });
       return;
     }
 
@@ -361,6 +375,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
        * 那正是"审批穿透"要防的事。
        */
       toolPolicy: readConfirmMode(),
+      // 决策要进日志（INV-3）：哪一次调用、哪段会话
+      toolCallId,
+      ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
     });
     patchTrace({
       pending: false,

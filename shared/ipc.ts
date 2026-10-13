@@ -92,6 +92,24 @@ export type ChatRequest = {
 import type { ConfirmMode } from "./permissions";
 export type { ConfirmMode };
 
+/**
+ * 会话日志的两条读接口（F3）。
+ *
+ * ⚠️ 回的是**记录**不是"投影好的消息"：投影是纯函数（`shared/sessionLog.ts`），
+ * 渲染层自己算 —— 主进程再算一遍就等于两份实现（C2 刚把它们并成一份）。
+ */
+export type SessionSummary = {
+  /** 日志 id（`chat-<对话 id>`）。 */
+  sessionId: string;
+  /** 对话 id（界面用的那个）。 */
+  conversationId: string;
+  /** 标题（取这一会话第一条用户消息的第一行）。 */
+  title: string;
+  /** 最后写入时间（epoch ms）。 */
+  updatedAt: number;
+  bytes: number;
+};
+
 export type ChatStartResult = {
   requestId: string;
   ok: boolean;
@@ -128,6 +146,23 @@ export type ToolRunRequest = {
    * "用户已放行"的名义下拿到全部放行权。
    */
   toolPolicy?: ConfirmMode;
+  /**
+   * 这是**拒绝**（C2/INV-3）：不执行，只把决定记进日志。
+   *
+   * 为什么让拒绝也走这条通道：拒绝原来是**纯渲染层**的动作（连 IPC 都不发），
+   * 于是重启后那条留痕又变回「等你确认」、而"谁拒的"无从查证。
+   * 与批准走同一条路之后，两种决定在日志里形状一致（`approved: true/false`）。
+   */
+  reject?: boolean;
+  /**
+   * 这是哪一次调用（与流事件里那个 `toolCallId` 同一个）。
+   *
+   * 决策记录靠它认人：一条被拦下的调用在日志里是
+   * "拦下 → **谁批的** → 结果"三段，缺了它就只能按工具名猜（一次回复里可能有多次调用）。
+   */
+  toolCallId?: string;
+  /** 属于哪段会话（与 `ChatRequest.sessionId` 同一个）。缺了就不记日志。 */
+  sessionId?: string;
 };
 
 /** 放行执行的结果。`line` 是界面要显示的那一行（由主进程生成，前端不重算）。 */
@@ -386,6 +421,16 @@ export type ShellBridge = {
     save: (tasks: unknown) => Promise<boolean>;
   };
   /** 远端控制的本机侧状态（阶段 11.26）。 */
+  /**
+   * 会话日志（C2/F3）。
+   *
+   * ⚠️ 它**不在** `shell.workbench` / `shell.ai` 里，因为它是**记录层**：
+   * 谁写的（聊天/工作台）都由 `sessionId` 前缀区分。
+   */
+  session: {
+    list: () => Promise<SessionSummary[]>;
+    load: (sessionId: string) => Promise<{ records: unknown[]; skipped: number }>;
+  };
   remote: {
     status: () => Promise<{ allowConnect: boolean; keepAwake: boolean }>;
     setKeepAwake: (on: boolean) => Promise<boolean>;

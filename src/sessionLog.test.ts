@@ -8,6 +8,13 @@ import {
   logLine,
   parseLog,
   projectTurn,
+  splitTurns,
+  chatSessionId,
+  taskSessionId,
+  isChatSessionId,
+  conversationIdOf,
+  type LogRecord,
+  type ApprovalRecord,
 } from "@shared/sessionLog";
 
 /**
@@ -37,6 +44,12 @@ type EvInput = AiStreamEvent extends infer U ? (U extends AiStreamEvent ? Omit<U
 
 /** 造一条事件（省掉每个用例重复写 requestId）。 */
 const ev = (e: EvInput): AiStreamEvent => ({ requestId: "r1", ...e } as AiStreamEvent);
+
+/**
+ * 造一条**决策记录**（`approval` 不在 `AiStreamEvent` 里 —— 它是日志自己的记录类型：
+ * 它记的不是"模型说了什么"，而是"用户批了什么"）。
+ */
+const appr = (e: Omit<ApprovalRecord, "seq" | "at">) => e;
 
 describe("applyEvent · 正文与收尾", () => {
   it("文本按到达顺序累积；done 之前不算结束", () => {
@@ -282,5 +295,171 @@ describe("日志行（jsonl）", () => {
     expect(records.map((e) => (e as { text: string }).text)).toEqual(["前", "后"]);
     // 归位之后投影出来才是对的顺序
     expect(projectTurn(records).text).toBe("前后");
+  });
+});
+
+describe("决策记录（INV-3）：谁批的、批了之后是什么结果", () => {
+  /** 一条被闸门拦下的调用（真实形状：pending 信封）。 */
+  const blocked = [
+    ev({ type: "tool-call", toolCallId: "c1", toolName: "memory_save", input: { text: "主人喜欢美式" } }),
+    ev({
+      type: "tool-result",
+      toolCallId: "c1",
+      toolName: "memory_save",
+      output: { pending: true, notice: "这一步需要你确认" },
+    }),
+  ];
+
+  it("⭐⭐ 批准：留痕从「等你确认」变成结论（pending 摘掉、那一行换成结果）", () => {
+    const view = projectTurn([
+      ...blocked,
+      appr({
+        type: "approval",
+        toolCallId: "c1",
+        name: "memory_save",
+        approved: true,
+        ok: true,
+        output: { count: 1 },
+        line: "⚙ 记忆：已保存，当前 1 条（写入「主人喜欢美式」）",
+      }),
+    ]);
+    expect(view.traces[0].pending).toBeUndefined();
+    expect("pending" in view.traces[0]).toBe(false); // 摘掉，不是置 false
+    expect(view.traces[0].line).toContain("已保存");
+    expect(view.traces[0].output).toEqual({ count: 1 });
+  });
+
+  it("⭐⭐ 拒绝：也留痕（原来拒绝连 IPC 都不发，重启后无从查证）", () => {
+    const view = projectTurn([
+      ...blocked,
+      appr({ type: "approval", toolCallId: "c1", name: "memory_save", approved: false, line: "⚙ 记忆：你已拒绝" }),
+    ]);
+    expect(view.traces[0].pending).toBeUndefined();
+    expect(view.traces[0].line).toContain("你已拒绝");
+  });
+
+  it("决策记录找不到对应留痕时忽略（日志被截过也不许凭空造一条）", () => {
+    const view = projectTurn([
+      ev({ type: "tool-call", toolCallId: "c1", toolName: "memory_save", input: {} }),
+      ev({ type: "tool-result", toolCallId: "c1", toolName: "memory_save", output: { count: 1 } }),
+      appr({ type: "approval", toolCallId: "查无此调用", name: "memory_save", approved: true, line: "x" }),
+    ]);
+    expect(view.traces).toHaveLength(1);
+    expect(view.traces[0].line).toContain("已保存");
+  });
+
+  it("决策记录能往返落盘（缺 approved 的行算坏行，不拿半条去重放）", () => {
+    const good = logLine(
+      appr({ type: "approval", toolCallId: "c1", name: "memory_save", approved: true, line: "⚙ 记忆：已保存" }),
+      1,
+      T(1),
+    );
+    const bad = '{"seq":2,"at":1,"requestId":"r1","type":"approval","toolCallId":"c2","line":"缺 approved"}';
+    const { records, skipped } = parseLog([good, bad].join("\n"));
+    expect(skipped).toBe(1);
+    expect(records).toHaveLength(1);
+    expect((records[0] as { approved: boolean }).approved).toBe(true);
+  });
+});
+
+describe("splitTurns（F3：聊天历史按轮恢复）", () => {
+  const conv = [
+    { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "第一句" }] },
+    { seq: 2, at: T(2), requestId: "r1", type: "text", text: "第一答" },
+    { seq: 3, at: T(3), requestId: "r1", type: "done" },
+    { seq: 4, at: T(4), requestId: "r2", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "第二句" }] },
+    { seq: 5, at: T(5), requestId: "r2", type: "text", text: "第二答" },
+    { seq: 6, at: T(6), requestId: "r2", type: "done", usage: { inputTokens: 9, outputTokens: 4 } },
+  ] as unknown as LogRecord[];
+
+  it("⭐ 按 request 切成两轮，各自带着自己的输入与投影", () => {
+    const chunks = splitTurns(conv);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].request?.messages[0].content).toBe("第一句");
+    expect(chunks[0].view.text).toBe("第一答");
+    expect(chunks[1].view.text).toBe("第二答");
+    expect(chunks[1].view.usage).toEqual({ inputTokens: 9, outputTokens: 4 });
+  });
+
+  it("一轮里的工具与被批过的调用都跟着那一轮（恢复出来的历史才完整）", () => {
+    const records = [
+      conv[0],
+      { seq: 2, at: T(2), requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "memory_save", input: { text: "x" } },
+      { seq: 3, at: T(3), requestId: "r1", type: "tool-result", toolCallId: "c1", toolName: "memory_save", output: { pending: true } },
+      { seq: 4, at: T(4), requestId: "r1", type: "approval", toolCallId: "c1", name: "memory_save", approved: true, ok: true, line: "⚙ 记忆：已保存" },
+      { seq: 5, at: T(5), requestId: "r1", type: "done" },
+    ] as unknown as LogRecord[];
+    const [chunk] = splitTurns(records);
+    expect(chunk.view.traces).toHaveLength(1);
+    expect(chunk.view.traces[0].pending).toBeUndefined();
+    expect(chunk.view.traces[0].line).toContain("已保存");
+  });
+
+  it("开头若有「没有 request」的记录，自成一截而**不丢**（那仍是发生过的事）", () => {
+    const records = [{ seq: 1, at: T(1), requestId: "r0", type: "text", text: "半截" }, ...conv] as unknown as LogRecord[];
+    const chunks = splitTurns(records);
+    expect(chunks).toHaveLength(3);
+    expect(chunks[0].request).toBeNull();
+    expect(chunks[0].view.text).toBe("半截");
+  });
+
+  it("空日志给空数组（第一次跑是正常的）", () => {
+    expect(splitTurns([])).toEqual([]);
+  });
+});
+
+describe("会话 id（F3：聊天的日志要能列出来，而且要能反推回对话）", () => {
+  it("前缀区分两条路；聊天 id 能反推回对话 id", () => {
+    expect(chatSessionId("c1")).toBe("chat-c1");
+    expect(taskSessionId("t-123")).toBe("task-t-123");
+    expect(isChatSessionId("chat-c1")).toBe(true);
+    expect(isChatSessionId("task-t-123")).toBe(false);
+    expect(conversationIdOf("chat-c-1700-3")).toBe("c-1700-3");
+    expect(conversationIdOf("task-t-123")).toBe("");
+  });
+});
+
+describe("splitTurns · 参数不能丢（真验收抓到的那一条）", () => {
+  it("⭐⭐ 恢复出来的留痕必须带 `input`（否则重启后点「允许」执行的是空参数）", () => {
+    /*
+     * 这条是 accept-chathistory 端到端跑出来的真缺陷：
+     * 第一版 splitTurns 每来一条记录都从**成品投影**反推状态，
+     * 而成品里没有"等配对的调用"（`finishTurn` 会把它们剔掉）——
+     * 于是 `tool-result` 找不到那次调用的参数，恢复出来的留痕 `input` 是空的，
+     * 用户重启后点「允许」时执行体拿到 undefined，报
+     * `Cannot read properties of undefined (reading 'text')`。
+     *
+     * 断言只看一件事：**参数活着穿过日志**。
+     */
+    const records = [
+      { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "记住 42" }] },
+      { seq: 2, at: T(2), requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "memory_save", input: { text: "幸运数字是 42" } },
+      { seq: 3, at: T(3), requestId: "r1", type: "tool-result", toolCallId: "c1", toolName: "memory_save", output: { pending: true } },
+      { seq: 4, at: T(4), requestId: "r1", type: "done" },
+    ] as unknown as LogRecord[];
+
+    const [chunk] = splitTurns(records);
+    expect(chunk.view.traces).toHaveLength(1);
+    expect(chunk.view.traces[0].input).toEqual({ text: "幸运数字是 42" });
+    expect(chunk.view.traces[0].pending).toBe(true);
+  });
+
+  it("决策记录回溯到它那一轮时，参数同样还在（恢复后能直接放行）", () => {
+    const records = [
+      { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "记住 42" }] },
+      { seq: 2, at: T(2), requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "memory_save", input: { text: "幸运数字是 42" } },
+      { seq: 3, at: T(3), requestId: "r1", type: "tool-result", toolCallId: "c1", toolName: "memory_save", output: { pending: true } },
+      { seq: 4, at: T(4), requestId: "r1", type: "done" },
+      // 下一轮开始之后用户才点「允许」（真实形状）
+      { seq: 5, at: T(5), requestId: "r2", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "还有别的吗" }] },
+      { seq: 6, at: T(6), type: "approval", toolCallId: "c1", name: "memory_save", approved: true, ok: true, line: "⚙ 记忆：已保存，当前 1 条" },
+    ] as unknown as LogRecord[];
+
+    const chunks = splitTurns(records);
+    expect(chunks).toHaveLength(2);
+    // 决策落在**它自己那一轮**（第一轮），不是后一轮
+    expect(chunks[0].view.traces[0].input).toEqual({ text: "幸运数字是 42" });
+    expect(chunks[0].view.traces[0].pending).toBeUndefined();
+    expect(chunks[1].view.traces).toHaveLength(0);
   });
 });

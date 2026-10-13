@@ -91,6 +91,19 @@ export default function ChatSidebar() {
     void loadProviders();
   }, [loadProviders]);
 
+  /*
+   * 从**会话日志**恢复历史（F3）。
+   *
+   * ⚠️ 放在挂载时而不是"应用启动时"：这一段日志是聊天侧唯一的持久化，
+   * 谁挂载谁负责把它读回来（画布面板没打开时不读盘）。
+   *
+   * `restoreHistory` 自己会处理"还没有任何日志"（第一次跑）—— 那种情况什么都不做，
+   * 保留初始那个空对话。
+   */
+  useEffect(() => {
+    void useChatStore.getState().restoreHistory();
+  }, []);
+
   // 新消息或流式增量都滚到底
   useEffect(() => {
     const el = listRef.current;

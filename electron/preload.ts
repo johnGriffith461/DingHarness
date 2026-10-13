@@ -3,6 +3,7 @@ import { AI_CHANNEL } from "./ipc/ai";
 import { CLIPBOARD_CHANNEL } from "./ipc/clipboard";
 import { CODING_CHANNEL } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
+import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
 import { CANVAS_EXPORT_CHANNEL } from "./ipc/canvasExport";
 import { ARTIFACT_CHANNEL } from "./ipc/artifactStore";
@@ -214,6 +215,19 @@ const api = {
     read: (filePath: string): Promise<string | null> => ipcRenderer.invoke(DRIVE_CHANNEL.read, filePath),
     download: (filePath: string, targetDir?: string) =>
       ipcRenderer.invoke(DRIVE_CHANNEL.download, filePath, targetDir),
+  },
+  /*
+   * 会话日志（C2/F3）。
+   *
+   * ⚠️ 放**顶层**而不是塞进 workbench/ai：它是记录层 ——
+   * 聊天与工作台写同一个目录，靠 `sessionId` 前缀（chat- / task-）区分。
+   * 放在某一侧下会让另一侧"看起来没有这个能力"。
+   */
+  session: {
+    /** 列聊天会话（重启后把对话列表恢复出来）。 */
+    list: (): Promise<unknown[]> => ipcRenderer.invoke(SESSION_CHANNEL.list),
+    /** 读回一整段会话的记录（投影在渲染层做，主进程不重复算一遍）。 */
+    load: (sessionId: string): Promise<unknown> => ipcRenderer.invoke(SESSION_CHANNEL.load, sessionId),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */

@@ -27,7 +27,7 @@ vi.mock("electron", () => ({
   app: { getPath: () => env.userData },
 }));
 
-const { createSessionLogger, readSessionLog, safeSessionId, sessionLogPath } = await import(
+const { createSessionLogger, listChatSessions, readSessionLog, safeSessionId, sessionLogPath } = await import(
   "../electron/ipc/sessionStore"
 );
 
@@ -137,5 +137,77 @@ describe("写入器", () => {
 
   it("文件不存在时给空（第一次跑是正常的，不算错误）", async () => {
     expect(await readSessionLog("从来没有过的会话")).toEqual({ records: [], skipped: 0 });
+  });
+});
+
+describe("列出聊天会话（F3：重启后把对话列表恢复出来）", () => {
+  const request = (text: string) => ({
+    type: "request" as const,
+    requestId: "r1",
+    provider: "deepseek",
+    model: "deepseek-chat",
+    messages: [{ role: "user", content: text }],
+  });
+
+  it("⭐ 只列聊天会话（工作台任务的日志在同一个目录里，混进来会多出一堆假对话）", async () => {
+    const chat = createSessionLogger("chat-c1");
+    chat?.log(request("帮我写个周报"));
+    chat?.log({ requestId: "r1", type: "done" });
+    const task = createSessionLogger("task-t1");
+    task?.log(request("任务那句话"));
+    await Promise.all([chat?.flush(), task?.flush()]);
+
+    const list = await listChatSessions();
+    expect(list.map((s) => s.sessionId)).toEqual(["chat-c1"]);
+    expect(list[0].conversationId).toBe("c1");
+  });
+
+  it("标题取第一条用户消息（与发送时的口径一致，超长截断）", async () => {
+    const long = "这是一句特别特别长的开场白".repeat(4);
+    const a = createSessionLogger("chat-c2");
+    a?.log(request(long));
+    await a?.flush();
+
+    const [first] = await listChatSessions();
+    expect(first.title).toHaveLength(24);
+    expect(long.startsWith(first.title)).toBe(true);
+  });
+
+  it("最近写入的排在前面；没有日志时给空数组（不抛）", async () => {
+    const older = createSessionLogger("chat-old");
+    older?.log(request("旧的那段"));
+    await older?.flush();
+    // 让 mtime 明确拉开
+    await new Promise((r) => setTimeout(r, 30));
+    const newer = createSessionLogger("chat-new");
+    newer?.log(request("新的那段"));
+    await newer?.flush();
+
+    const list = await listChatSessions();
+    expect(list.map((s) => s.sessionId)).toEqual(["chat-new", "chat-old"]);
+  });
+});
+
+describe("seq 跨进程续号（真验收抓到的第二个缺陷）", () => {
+  it("⭐⭐ 新建写入器时从**已有文件的末号**接着数（否则新记录与旧记录撞号）", async () => {
+    /*
+     * 场景是实测的：用户重启应用之后才点「允许」——写决策记录的是**新进程**。
+     * 每个进程从 1 开始数的话，那条决策会带着 `seq: 1` 落进同一个文件，
+     * 读回来按 seq 排序时排到最前面 → 回溯找不到它那一轮 → 留痕永远是"等确认"。
+     */
+    const first = createSessionLogger("chat-c1");
+    first?.log({ requestId: "r1", type: "text", text: "第一进程写的第一条" });
+    first?.log({ requestId: "r1", type: "text", text: "第一进程写的第二条" });
+    await first?.flush();
+
+    // 模拟"应用重启"：换一个写入器（新进程）
+    const second = createSessionLogger("chat-c1");
+    second?.log({ requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "memory_save", input: {} });
+    await second?.flush();
+
+    const { records, skipped } = await readSessionLog("chat-c1");
+    expect(skipped).toBe(0);
+    expect(records.map((r) => r.seq)).toEqual([1, 2, 3]); // 不许撞号、不许倒序
+    expect((records[2] as { toolCallId: string }).toolCallId).toBe("c1");
   });
 });

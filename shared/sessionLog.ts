@@ -81,16 +81,90 @@ export type TurnRequest = {
   useTools?: boolean;
 };
 
+/**
+ * 日志里的**决策记录**（INV-3）：用户批了还是拒了、放行之后结果如何。
+ *
+ * ## 为什么它必须进日志
+ *
+ * 批准/拒绝原来是**纯渲染进程状态**（`chatStore.ts` / `store.ts` 里的 `resolveTool`），
+ * 主进程压根不知道 —— 于是：
+ * - 重启之后**看不出那条调用到底谁批的**（"等确认"那条会原样回到界面上，用户以为没批过）；
+ * - 批准这件事只有放行那次会路过主进程（`ai:runTool`），**拒绝连 IPC 都不发**。
+ *
+ * 记下来之后：一条被拦下的调用在日志里是"**拦下 → 谁批的 → 结果**"三段，
+ * 重放日志就能把界面恢复到那一刻的样子（F3 的聊天历史恢复靠的正是这一条）。
+ */
+export type ApprovalRecord = {
+  /**
+   * 哪一轮的调用。
+   *
+   * ⚠️ **可以不填**：批准往往发生在那一轮**结束之后**（用户看着「等你确认」想一会儿才点），
+   * 那时渲染层已经拿不到 requestId 了。真正的配对依据是 `toolCallId`
+   * —— 所以这里允许缺，而 `splitTurns` 会**回溯**把它应用到对应那一轮（见那里的注释）。
+   */
+  requestId?: string;
+  seq: number;
+  at: number;
+  type: "approval";
+  /** 针对哪一次调用（与 `tool-call` / `tool-result` 同一个 id）。 */
+  toolCallId: string;
+  name: string;
+  /** 用户批了没有。 */
+  approved: boolean;
+  /** 放行执行的结果（拒绝时没有：拒绝不执行）。 */
+  ok?: boolean;
+  output?: unknown;
+  error?: string;
+  /** 界面上那一行（主进程生成，与放行时返回给界面的**同一句**）。 */
+  line: string;
+};
+
 /** 日志里可能出现的一条记录。 */
-export type LogRecord = LoggedEvent | TurnRequest;
+export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord;
 
 /**
- * 投影的输入：日志里的记录，或**还没落盘的**流事件。
+ * 会话 id 的前缀：**会话日志要能分清"这是哪条路写下来的"**。
  *
- * 后者是流式那一侧用的（事件先到界面、日志在同一个出口处顺手记）：
- * 同一个  两边都吃，这正是两边不会算出不同结果的落点。
+ * 为什么需要：F3 要让聊天历史从日志恢复，就得**列出**聊天会话 ——
+ * 而工作台任务也往同一个目录写日志。没有前缀时，"列出来的是聊天还是任务"只能靠猜。
+ *
+ * ⚠️ 加前缀之前的旧日志（`c1.jsonl` / `tmv….jsonl`）不会被列出来。
+ * 它们是 C2 当天写的、只用于排错，**不当作数据迁移**（要说的话：旧日志不参与恢复）。
  */
-export type TurnInput = LogRecord | AiStreamEvent;
+export const SESSION_PREFIX = { chat: "chat-", task: "task-" } as const;
+
+/** 聊天会话的日志 id（由对话 id 得到）。 */
+export function chatSessionId(conversationId: string): string {
+  return `${SESSION_PREFIX.chat}${conversationId}`;
+}
+
+/** 工作台任务会话的日志 id（由任务 id 得到）。 */
+export function taskSessionId(taskId: string): string {
+  return `${SESSION_PREFIX.task}${taskId}`;
+}
+
+/** 一条日志 id 是不是聊天会话（列会话时用）。 */
+export function isChatSessionId(sessionId: string): boolean {
+  return sessionId.startsWith(SESSION_PREFIX.chat);
+}
+
+/**
+ * 从聊天会话的日志 id 反推对话 id（恢复历史时用）。
+ *
+ * @param sessionId 日志 id
+ * @returns 对话 id；不是聊天会话就给空串
+ */
+export function conversationIdOf(sessionId: string): string {
+  return isChatSessionId(sessionId) ? sessionId.slice(SESSION_PREFIX.chat.length) : "";
+}
+
+/**
+ * 投影的输入：日志里的记录、**还没落盘的**记录（缺 `seq`/`at`），或裸的流事件。
+ *
+ * 后两者是流式那一侧用的（事件先到界面、日志在同一个出口处顺手记）：
+ * 同一个 `applyEvent` 两边都吃，这正是"两边不会算出不同结果"的落点。
+ */
+export type TurnInput = LogRecord | LogInput | AiStreamEvent;
 
 /**
  * 落盘前的记录：还没分配 `seq`/`at`。
@@ -215,6 +289,20 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
     return { ...state, done: true, ...(event.usage ? { usage: event.usage } : {}) };
   }
 
+  if (event.type === "approval") {
+    /*
+     * 用户批了/拒了（INV-3）：把那条留痕**就地改成结论**。
+     *
+     * ⚠️ 这同时是 F3 的关键一步 —— 聊天历史恢复时，"等确认"那条要能回到
+     * **它真正的样子**（已批准 → 结果那行；已拒绝 → 你已拒绝），
+     * 而不是重启后又冒出一个"允许/拒绝"按钮（用户会以为自己的决定丢了）。
+     */
+    const idx = state.traces.findIndex((t) => t.toolCallId === event.toolCallId);
+    if (idx < 0) return state; // 没有对应留痕（日志被截过）：忽略，不凭空造一条
+    const traces = state.traces.map((t, i) => (i === idx ? resolvedTrace(t, event) : t));
+    return { ...state, traces };
+  }
+
   if (event.type === "error") return { ...state, done: true, error: event.message };
 
   /*
@@ -229,6 +317,28 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
    * 代价是"未知事件被静默忽略"。这是刻意的取舍：**不认识 ≠ 失败**。
    */
   return state;
+}
+
+/**
+ * 把"等确认"的那条留痕换成**结论**（用户批了/拒了之后的样子）。
+ *
+ * ⚠️ `pending` 要**摘掉**（不是置 false）：`pending: false` 与"没有这个字段"
+ * 在 `ToolTraceList` 那里是两回事（前者仍算"可处置"的候选）。这也是
+ * `normalizeToolTraces` 用 `...(x.pending === true ? …)` 的原因。
+ *
+ * @param trace 原来那条（`pending: true`）
+ * @param record 决策记录
+ * @returns 结论留痕
+ */
+function resolvedTrace(trace: ToolTrace, record: Extract<TurnInput, { type: "approval" }>): ToolTrace {
+  const { pending: _pending, ...rest } = trace;
+  return {
+    ...rest,
+    ok: record.ok ?? rest.ok,
+    line: record.line,
+    ...(record.output === undefined ? {} : { output: record.output }),
+    ...(record.error ? { error: record.error } : {}),
+  };
 }
 
 /**
@@ -293,6 +403,24 @@ export function finishTurn(state: TurnState, opts: ProjectOptions = {}): TurnVie
 type SubagentBlockedLike = { toolCallId: string; name: string; input?: unknown };
 
 /**
+ * 一段会话的标题（F3：界面上那份会话列表要从日志重建）。
+ *
+ * 取**第一条 request 里最后一条用户消息**的第一行，截到 `max` 字 ——
+ * 与聊天侧"会话标题取第一句话"的口径一致（`chatStore.ts` 里那句
+ * `title: trimmed.slice(0, 24)`）。日志里没有用户消息时给空串，由调用方兜底。
+ *
+ * @param records 会话日志
+ * @param max 最多几个字
+ * @returns 标题（可能为空）
+ */
+export function conversationTitle(records: readonly LogRecord[], max = 24): string {
+  const first = records.find((r) => r.type === "request") as TurnRequest | undefined;
+  const user = [...(first?.messages ?? [])].reverse().find((m) => m.role === "user");
+  const text = (user?.content ?? "").trim().split("\n")[0]?.trim() ?? "";
+  return text.slice(0, max);
+}
+
+/**
  * 把一串记录投影成一轮（`applyEvent` 的折叠）。
  *
  * @param records 这一轮的记录（按发生顺序；`request` 记录会被跳过）
@@ -303,6 +431,93 @@ export function projectTurn(records: readonly TurnInput[], opts: ProjectOptions 
   let state = emptyTurn();
   for (const record of records) state = applyEvent(state, record);
   return finishTurn(state, opts);
+}
+
+/** 一段会话里的一轮：它的**输入**（模型看见了什么）与它的**投影**。 */
+export type TurnChunk = {
+  /**
+   * 这一轮的请求记录。
+   *
+   * ⚠️ 可能是 `null` —— 日志开头若有"没有 request 的记录"（比如日志被截过头、
+   * 或写入顺序被打断），它们会自成一截。**不丢**（那仍然是发生过的事），
+   * 但调用方要能看见它没有输入记录。
+   */
+  request: TurnRequest | null;
+  view: TurnView;
+};
+
+/**
+ * 把整段日志按**轮**切开，每轮给出"输入 + 投影"。
+ *
+ * ## 为什么需要它（F3）
+ *
+ * 单轮的投影（`projectTurn`）够界面**边流边显示**用；但"重启之后把聊天历史恢复出来"
+ * 需要的是**整段会话**：哪几轮、每轮用户说了什么、模型回了什么、哪些调用被批过。
+ * 切分点就是 `request` 记录 —— 它本来就是"一轮的开始"。
+ *
+ * @param records 会话日志（按 `seq` 顺序）
+ * @param opts 见 `ProjectOptions`
+ * @returns 按轮切的片段（顺序与日志一致）
+ */
+export function splitTurns(records: readonly LogRecord[], opts: ProjectOptions = {}): TurnChunk[] {
+  const chunks: TurnChunk[] = [];
+  /**
+   * 每一截的**累积状态**（与 `chunks` 一一对应）。
+   *
+   * ⚠️ 必须单独留着它，不能每来一条记录就从 `view` 反推（那是我第一版写的，**真踩了**）：
+   * `view` 是**成品**，里面没有"等配对的调用"（`finishTurn` 会把它们剔掉）。
+   * 从 view 反推 → 下一条 `tool-result` 找不到它那次调用的**参数** →
+   * 恢复出来的留痕没有 `input` → 用户重启后点「允许」执行的是**空参数**
+   * （实测报错：`Cannot read properties of undefined (reading 'text')`）。
+   */
+  const states: TurnState[] = [];
+  let current = -1;
+
+  /** 把一条记录并进第 i 截。 */
+  const feed = (i: number, record: TurnInput): void => {
+    states[i] = applyEvent(states[i], record);
+    chunks[i].view = finishTurn(states[i], opts);
+  };
+
+  /**
+   * 决策记录要**回溯**到它对应的那一轮。
+   *
+   * ⚠️ 这是实测出来的形状：用户看到「等你确认」之后可能想一会儿才点，
+   * 那时这一轮早就 `done` 了 —— 于是决策记录落在**下一轮**（甚至更后面）。
+   * 只往"当前这一截"里塞的话，重启后那条留痕会**永远停在"等确认"**
+   * （用户点过了，界面却又冒出一个按钮）。所以按 `toolCallId` 从后往前找它属于哪一截。
+   *
+   * @param record 决策记录
+   * @returns 是否已落到某一截里
+   */
+  const feedBack = (record: Extract<TurnInput, { type: "approval" }>): boolean => {
+    for (let i = chunks.length - 1; i >= 0; i -= 1) {
+      if (chunks[i].view.traces.some((t) => t.toolCallId === record.toolCallId)) {
+        feed(i, record);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /** 开新一截（状态与成品一起建，保证两个数组永远对齐）。 */
+  const open = (request: TurnRequest | null): void => {
+    chunks.push({ request, view: projectTurn([], opts) });
+    states.push(emptyTurn());
+    current = chunks.length - 1;
+  };
+
+  for (const record of records) {
+    if (record.type === "request") {
+      open(record);
+      continue;
+    }
+    if (current < 0) open(null);
+    // 决策记录先回溯；找不到归属（日志被截过）就按"当前这一截"处理（会被忽略，不凭空造留痕）
+    if (record.type === "approval" && feedBack(record)) continue;
+    feed(current, record);
+  }
+  return chunks;
 }
 
 /* ────────────────────── 落盘：一行一条 ────────────────────── */
@@ -336,12 +551,26 @@ export function parseLogLine(line: string): LogRecord | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.seq !== "number" || typeof o.at !== "number") return null;
-  if (typeof o.requestId !== "string" || typeof o.type !== "string") return null;
+  if (typeof o.type !== "string") return null;
+  /*
+   * ⚠️ `requestId` 只对**流事件**是必需的（它们要按它归并到某一次请求）。
+   * 决策记录（`approval`）可以没有 —— 用户可能在那一轮结束很久之后才点确认，
+   * 那时渲染层手里已经没有 requestId 了（见 `ApprovalRecord` 的说明）。
+   */
   if (o.type === "request") {
+    if (typeof o.requestId !== "string") return null;
     // 输入记录：必须真带着消息数组（不然"模型看见过什么"是空的）
     if (!Array.isArray(o.messages)) return null;
     return o as TurnRequest;
   }
+  if (o.type === "approval") {
+    // 决策记录：id / 批没批 / 那一行 —— 少一样就不是一条能重放的记录
+    // ⚠️ 不要求 requestId：批准常常发生在那一轮结束之后（那时渲染层已拿不到它），见 ApprovalRecord
+    if (typeof o.toolCallId !== "string" || typeof o.approved !== "boolean") return null;
+    if (typeof o.line !== "string" || typeof o.name !== "string") return null;
+    return o as ApprovalRecord;
+  }
+  if (typeof o.requestId !== "string") return null;
   const known = ["text", "tool-call", "tool-result", "done", "error"];
   if (!known.includes(o.type)) return null;
   return o as LoggedEvent;

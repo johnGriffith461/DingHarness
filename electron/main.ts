@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerAiIpc } from "./ipc/ai";
+import { registerSessionIpc } from "./ipc/sessionStore";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
@@ -238,6 +239,7 @@ ipcMain.handle("app:userDataDir", () => app.getPath("userData"));
 
 try {
   registerAiIpc();
+  registerSessionIpc(ipcMain);
 } catch (error) {
   // AI 通道起不来不该拖垮整个应用：日志里说清楚，窗口照常开
   console.error("[ai] 注册失败：", error instanceof Error ? error.message : error);
