@@ -9,6 +9,7 @@ import { clampCrop, cropStyle, cropToPercent, isFullCrop, loadImage, percentToCr
 import { IMAGE_ACTIONS, imageAction, targetSizeFor, type ImageActionId } from "../imageActions";
 import { editImage, humanImageError } from "@/ai/imageClient";
 import { normalize } from "@shared/imageSize";
+import { bump } from "../renderProbe";
 
 /**
  * 图片节点（PLAN 2.3）：上传 / 预览 / 裁剪 / 复原。
@@ -32,6 +33,7 @@ type DragState = {
 };
 
 export default function ImageNodeView({ id, data, selected }: NodeProps<ImageNodeType>) {
+  bump("ImageNode");
   const { beginEdit, setData } = useNodeActions();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);

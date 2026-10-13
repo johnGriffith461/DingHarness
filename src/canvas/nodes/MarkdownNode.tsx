@@ -9,6 +9,7 @@ import DeferredRender from "./DeferredRender";
 import { useNodeActions } from "../useNodeActions";
 import { renderMarkdown } from "@/utils/markdown";
 import { textStyleToCss } from "../textStyle";
+import { bump } from "../renderProbe";
 
 /**
  * 文本 / Markdown 节点（PLAN 2.1）。
@@ -18,6 +19,7 @@ import { textStyleToCss } from "../textStyle";
  * 渲染结果按视口懒加载，长文档不会在拖动画布时反复重排。
  */
 export default function MarkdownNodeView({ id, data, selected }: NodeProps<MarkdownNodeType>) {
+  bump("MarkdownNode");
   const { beginEdit, setData } = useNodeActions();
   const [draft, setDraft] = useState(data.text);
 

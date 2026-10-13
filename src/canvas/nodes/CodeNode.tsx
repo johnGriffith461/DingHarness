@@ -17,6 +17,7 @@ import { NodeView } from "./NodeView";
 import NodeGenerationBar from "./NodeGenerationBar";
 import DeferredRender from "./DeferredRender";
 import { useNodeActions } from "../useNodeActions";
+import { bump } from "../renderProbe";
 
 /**
  * 代码节点（PLAN 2.2）。
@@ -60,6 +61,7 @@ const PRISM_LANG: Record<string, string> = {
 const MAX_HIGHLIGHT_LINES = 600;
 
 export default function CodeNodeView({ id, data, selected }: NodeProps<CodeNodeType>) {
+  bump("CodeNode");
   const { beginEdit, setData } = useNodeActions();
   const [draft, setDraft] = useState(data.code);
   const gutterRef = useRef<HTMLDivElement | null>(null);

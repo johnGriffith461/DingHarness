@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Handle, Position } from "@xyflow/react";
+import { bump } from "../renderProbe";
 
 /**
  * 节点视图基类（对标原版 `data-node-view-wrapper`）。
@@ -45,6 +46,7 @@ export function NodeView({
   className = "",
   children,
 }: NodeViewProps) {
+  bump("NodeView");
   const classes = ["nv", fixedSize ? "nv-fixed" : "nv-auto", selected ? "is-selected" : "", className]
     .filter(Boolean)
     .join(" ");
