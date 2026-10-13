@@ -1,0 +1,85 @@
+# ⚠️ 本仓目前**没有远端**（`git remote -v` 为空），所以这份 workflow **从未在真 CI 上跑过**。
+# 它是照施工手册 B4 写下的"最小 CI"，本地能做的只有：把步骤写对、把不跑什么写清。
+#
+# 判据（手册 B4）：装依赖 → typecheck → test；**明确禁用真实模型与网络**。
+# 这一点靠的是结构而不是开关，理由写在下面每一条注释里。
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# 只读仓库内容：CI 不需要写任何东西
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    # Electron + NSIS 的 Windows 桌面应用，路径与大小写语义都按 win32 来。
+    # 跑在 windows 上也顺带保证 `drivePaths.test.ts` 里那条"大小写不敏感"的断言真的被执行
+    # （它在非 Windows 上是 skip 的）。
+    runs-on: windows-latest
+
+    env:
+      # 断言"不碰真实模型"用的：验收脚本与任何真调模型的路径都不在下面这几步里，
+      # 万一有人把 `pnpm verify:accept`（会真启 Electron）或 `.verify/ai-smoke.mjs`
+      # （会真调模型）加进来，这个变量会让它们立刻失败而不是悄悄烧钱。
+      CI: "true"
+      DSH_NO_REAL_MODEL: "1"
+      # 画布持久化的数据目录指向 runner 临时目录，绝不碰任何真实 userData
+      DSH_CANVAS_DATA_DIR: ${{ runner.temp }}/dsh-canvas-data
+
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 装 Node（版本跟本机一致：24.x LTS）
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: 装 pnpm（版本取自 package.json 的 packageManager）
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: 装依赖（锁文件为准，不升级任何东西）
+        # 用 --frozen-lockfile：lockfile 与 package.json 不一致就**直接失败**，
+        # 而不是悄悄替一份新的出来（B1 刚把 23 个通配依赖锁成具体版本，这条是它的守卫）。
+        #
+        # ⚠️ **已知本地怪象（如实记录）**：同一条 `pnpm install --frozen-lockfile` 在这台机器上
+        # 连跑三次的退出码是 `-1073741819`(0xC0000005 访问冲突) / `-1073741819` / `0` ——
+        # 三次的输出都打印了 `Done`，且随后的 typecheck / lint / test 全部退出码 0。
+        # 判断是 pnpm 在 Windows 上收尾时偶发崩溃（疑似杀软扫描新链接的 .bin 文件），
+        # **不是安装失败**。这里**不做掩盖**（不吞退出码）：如果 CI 上因此变红，
+        # 先看它是不是同一现象，再决定要不要顶一层重试；不要把它当"CI 坏了"。
+        #
+        # ⚠️ 只走这一步就够：electron 的 postinstall 会下 ~100MB 的二进制，
+        # 这是 CI 里唯一的"网络下载"，但它不是"调模型"——本 workflow 不配置任何模型 key。
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型
+        run: pnpm typecheck
+
+      - name: lint
+        run: pnpm lint
+
+      - name: 单测
+        # 纯 node 环境：`vitest.config.ts` 的 include 只有 `src/` 下的测试，
+        # 不启 Electron、不连网、不调模型 —— 这是"不烧钱"的结构性保证，不是承诺。
+        run: pnpm test
+
+      # ── 以下**有意不做**（照手册 §7 的"不烧钱地验"）──
+      #
+      # · `pnpm verify:accept`（约 52 条 Playwright 验收）：每条都要启一个真 Electron 应用，
+      #   耗时且历史上 flaky（失败的那条每次都换）。它是**发布前**的门，不是每次 push 的门；
+      #   它已经在 `pnpm build` 的链尾，所以不会漏。
+      # · `electron-builder` 打包：CI 不出安装包（出包在 `pnpm build` 里做）。
+      # · 任何真调模型的脚本（`.verify/ai-smoke.mjs`、`accept-chatartifact.mjs` 等）：
+      #   **一条都不跑**。真调模型的能力单独手动跑，见 `.verify/ATTACH-ONLY.md` 的三问。
