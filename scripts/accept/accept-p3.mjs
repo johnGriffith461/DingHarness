@@ -71,15 +71,12 @@ await page.evaluate(() => {
  *（§104 的教训：补在报错那一行之前太晚，中间读侧栏的调用会先失败。）
  */
 /*
- * wb-canvas-toggle 是**开关**，不是"打开"：脚本前面可能已经开过画布，
- * 无条件再点一次会把它**关掉**（§114 就这么撞了一次）。
- * 所以先判当前状态，只在没开时才点。
+ * 画布要开着才能点它侧栏的对话（§104 / §114 的教训都在这一处）。
+ * 现在是 `openCanvas(page)` —— 它**幂等**（已经开着就直接返回），
+ * 所以不用再自己判状态；当年那个"开关点两下会关掉"的坑由助手兜住了。
  */
-const __canvasAlreadyOpen = (await page.locator('[data-testid="wb-canvas"]').count()) > 0;
-if (!__canvasAlreadyOpen) {
-  await openCanvas(page);
-  await page.waitForTimeout(1500);
-}
+await openCanvas(page);
+await page.waitForTimeout(1500);
 await page.waitForSelector('[data-testid="wb-canvas-chat-toggle"]', { timeout: 10000 });
 await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
 await page.waitForTimeout(2000);

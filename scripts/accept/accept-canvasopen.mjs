@@ -78,7 +78,9 @@ try {
   await openCanvas(page);
   await page.waitForTimeout(1500);
   const nodesBefore = await page.locator(".react-flow__node").count();
-  await openCanvas(page);
+  /* ⚠️ 这一次是**关掉**（上面注释：「先开画布数一遍，关掉，再点卡片数一遍，看增量」）——
+      机械迁移时按"点击之后的文字"判断开/关，这一处判断错了，已改回 closeCanvas。 */
+  await closeCanvas(page);
   await page.waitForTimeout(1500);
   report.nodesBefore = nodesBefore;
 
