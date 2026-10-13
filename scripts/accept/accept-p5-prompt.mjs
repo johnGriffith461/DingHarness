@@ -3,16 +3,34 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-/**
- * 验证「标记当提示词」真的把标记拼进了发给模型的要求（阶段 5.3）。
+/* ══════════════════════════════════════════════════════════════════════
+ * ⚠️ **退役（2026-10-14）—— 保留供开发期手工排查，不再维护、不在任何清单里。**
  *
- * 断言的是 `generateContent` 组装出来的**实际请求文本**（dev 期挂在
- * `window.__lastAiPrompt`）。preload 的 `shell` 在渲染进程是冻结的，
- * 没法从页面里包一层抓 IPC，所以用这个观察点。
- */
+ * 它验的是「标记当提示词」有没有把标记拼进发给模型的要求（阶段 5.3），
+ * 做法是从 `window.__lastAiPrompt` 读**实际请求文本** —— 而那个探针是
+ * `import.meta.env.DEV` 才挂的（`canvasGenerate.ts:143`），**打包产物里没有**。
+ * 而验收跑的、以及本文件下面 spawn 的都是**打包产物** → 这条脚本
+ * **在任何时候都跑不到那个观察点**（它在历史记录里长期是红的，就是这么来的）。
+ *
+ * ## 它要守的东西现在归谁
+ * `instructionFromMarkers` 已从 `CanvasRuntime.tsx` 搬进纯模块 `markers.ts`
+ * （依赖方向也正过来了：不再认识 store 与节点类型表），由
+ * **`src/canvas/markers.test.ts` 里那 5 条单测**守着：
+ *   · 开关打开 + 圈住节点 → 要求里出现「【画布标记】」与节点名
+ *   · 开关关着 → 原样返回（不许偷偷改用户的要求）
+ *   · 没有标记 → 原样返回（不拼一个空段）
+ *   · 圈在空白处 → 照样进去，但不硬说命中谁
+ *   · 批注文字逐字进要求
+ * 比原来那条"跑起来、点生成、等模型"的链路更快也更稳，而且**不需要模型**。
+ *
+ * ## 还留着它干嘛
+ * 开发构建（`npm run dev:web`，DEV 为真）里那个探针是有的，
+ * 想连真模型手工看一次实际请求文本时，这条还能用。
+ * ══════════════════════════════════════════════════════════════════════ */
 
-const DATA = "D:/DoubaoWorkClone/data";
-fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
+/* 数据目录隔离（2026-10-14）：原来指到真实 `data/`，跑一次就在真实画布上画标记。 */
+const DATA = "D:/DoubaoWorkClone/.verify/p5prompt-data";
+fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;

@@ -44,16 +44,15 @@ import BottomToolbar from "./BottomToolbar";
 import NodeContextMenu from "./NodeContextMenu";
 import GeneratePanel from "./GeneratePanel";
 import type { MarkerKind } from "./markers";
-import { markersAsPrompt } from "./markers";
+import { instructionFromMarkers } from "./markers";
 import { matchShortcut } from "./shortcuts";
 import { parseClipboard, planPaste, serializeClipboard } from "./clipboard";
-import type { Rect } from "./nodeRect";
 import { NODE_KIND_META } from "./types";
 import { useRuntimeStore } from "./runtimeStore";
-import type { RuntimeState } from "./runtimeStore";
 import type { CanvasNode, NodeKind } from "./types";
 import { generateNodeFromSelection, type GenerateIntent } from "./canvasGenerate";
 import { useChatStore } from "@/ai/chatStore";
+import { bump } from "./renderProbe";
 
 /**
  * 画布宿主（对标原版 `CanvasReactRuntimeProvider` + 无限画布）。
@@ -74,6 +73,8 @@ function extractViewport(viewport: { x: number; y: number; zoom: number }): View
 }
 
 export default function CanvasRuntime() {
+  /* 渲染计数（见 `renderProbe.ts`）：量拖一次节点到底重渲染几次。 */
+  bump("CanvasRuntime");
   const nodes = useRuntimeStore((s) => s.nodes);
   const edges = useRuntimeStore((s) => s.edges);
   const revision = useRuntimeStore((s) => s.revision);
@@ -420,7 +421,15 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
        * 生成是异步的，用户完全可能在生成前刚把开关点掉，闭包读到的是旧值。
        */
       const live = useRuntimeStore.getState();
-      const withMarkers = instructionFromMarkers(live, live.useMarkersAsPrompt, instruction);
+      const withMarkers = instructionFromMarkers(
+        live,
+        live.useMarkersAsPrompt,
+        instruction,
+        (id) => {
+          const node = live.nodes.find((n) => n.id === id);
+          return node ? `${id}(${NODE_KIND_META[node.type as NodeKind]?.label ?? node.type})` : id;
+        },
+      );
       const result = await generateNodeFromSelection(
         intent,
         withMarkers,
@@ -793,36 +802,3 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
   );
 }
 
-/**
- * 把标记转成给模型的一段要求（阶段 5.3）。
- *
- * 只在开关打开、且确实有标记时才拼这一段；否则原样返回用户输入 ——
- * 不该因为"画布上有标记"就悄悄改变没打开这个功能的人看到的结果。
- *
- * @param store 当前画布状态
- * @param enabled 是否把标记当提示词
- * @param instruction 用户原本输入的要求
- * @returns 附加了标记描述的要求
- */
-function instructionFromMarkers(
-  store: Pick<RuntimeState, "markers" | "nodes">,
-  enabled: boolean,
-  instruction: string,
-): string {
-  if (!enabled || store.markers.length === 0) return instruction;
-  const rects = new Map<string, Rect>();
-  for (const node of store.nodes) {
-    rects.set(node.id, {
-      x: node.position.x,
-      y: node.position.y,
-      width: node.width ?? 300,
-      height: node.height ?? 200,
-    });
-  }
-  const marks = markersAsPrompt(store.markers, rects, (id) => {
-    const node = store.nodes.find((n) => n.id === id);
-    return node ? `${id}(${NODE_KIND_META[node.type as NodeKind]?.label ?? node.type})` : id;
-  });
-  if (!marks) return instruction;
-  return `${instruction}\n\n【画布标记】\n${marks}`;
-}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MARKER_KINDS,
   dragLongEnough,
+  instructionFromMarkers,
   makeMarker,
   markerHitsNodes,
   markerNeedsDrag,
@@ -100,6 +101,48 @@ describe("markersAsPrompt", () => {
 
   it("没有标记时返回空串（调用方据此跳过拼接）", () => {
     expect(markersAsPrompt([], rects, (id) => id)).toBe("");
+  });
+});
+
+/*
+ * 「标记当提示词」这一段的**真正入口**（2026-10-14 补）。
+ *
+ * 原来这件事只有一条 e2e 在守（`accept-p5-prompt.mjs`），而它读的是
+ * `window.__lastAiPrompt` —— DEV 构建才有的探针，打包产物里没有，
+ * 所以那条脚本**永远跑不了**：功能等于没人守。函数搬进纯模块后由这里钉住。
+ */
+describe("instructionFromMarkers", () => {
+  const node = (id: string, x: number, y: number) => ({ id, position: { x, y }, width: 300, height: 200 });
+  const rect = makeMarker("m1", "rect", { x: 10, y: 10 }, { x: 310, y: 210 }, style);
+
+  it("开关打开且圈住了节点时：把标记写进要求里，并带上是哪个节点", () => {
+    const out = instructionFromMarkers({ markers: [rect], nodes: [node("n1", 0, 0)] }, true, "按标记改", (id) => `${id}(文本)`);
+    expect(out).toContain("按标记改");
+    expect(out).toContain("【画布标记】");
+    expect(out).toContain("n1(文本)");
+  });
+
+  it("开关关着 → 原样返回（不许偷偷改用户的要求）", () => {
+    const out = instructionFromMarkers({ markers: [rect], nodes: [node("n1", 0, 0)] }, false, "按标记改");
+    expect(out).toBe("按标记改");
+  });
+
+  it("画布上没有标记 → 原样返回（不拼一个空的「画布标记」段）", () => {
+    const out = instructionFromMarkers({ markers: [], nodes: [node("n1", 0, 0)] }, true, "按标记改");
+    expect(out).toBe("按标记改");
+  });
+
+  it("标记圈在空白处 → 也要进去（只说要处理哪里，不硬说命中谁）", () => {
+    const far = makeMarker("m2", "rect", { x: 5000, y: 5000 }, { x: 5300, y: 5200 }, style);
+    const out = instructionFromMarkers({ markers: [far], nodes: [node("n1", 0, 0)] }, true, "改这里");
+    expect(out).toContain("【画布标记】");
+    expect(out).not.toContain("n1(");
+  });
+
+  it("批注的文字逐字进要求（人写什么就送什么）", () => {
+    const note = makeMarker("m3", "text", { x: 20, y: 20 }, { x: 20, y: 20 }, style, { text: "这块内容要压缩成三行" });
+    const out = instructionFromMarkers({ markers: [note], nodes: [node("n1", 0, 0)] }, true, "改一下");
+    expect(out).toContain("这块内容要压缩成三行");
   });
 });
 

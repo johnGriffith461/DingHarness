@@ -218,3 +218,48 @@ export function dragLongEnough(from: MarkerPoint, to: MarkerPoint, min = MARKER_
 }
 
 export type { XYPosition };
+
+/**
+ * 把标记并进用户的要求里（阶段 5.3「标记当提示词」）。
+ *
+ * **为什么在这里**（2026-10-14 从 `CanvasRuntime.tsx` 搬过来）：
+ * 这段逻辑以前只能靠"跑起来、点生成、从一个 DEV-only 的 `window.__lastAiPrompt`
+ * 里读请求文本"来验（`accept-p5-prompt.mjs`）—— 而那个探针打包后就没了，
+ * 于是那条脚本**永远跑不了**、这个功能等于没人守。
+ * 搬进纯模块之后，同一件事由单测钉住（`markers.test.ts`）：不连模型、不看探针。
+ *
+ * 依赖方向也顺手正过来了：这里**不认识** store、也不认识节点类型表 ——
+ * 节点怎么称呼由调用方给（`labelOf`），画布以外的东西一律不进来。
+ *
+ * 只在开关打开、且确实有标记时才拼这一段；否则原样返回用户输入 ——
+ * 不该因为"画布上有标记"就悄悄改变没打开这个功能的人看到的结果。
+ *
+ * @param store 当前画布状态（只要有标记与节点的位置/尺寸）
+ * @param enabled 是否把标记当提示词
+ * @param instruction 用户原本输入的要求
+ * @param labelOf 某个节点在提示词里怎么写（如 `n1(文本)`）；不传就只写 id
+ * @returns 附加了标记描述的要求
+ */
+export function instructionFromMarkers(
+  store: {
+    markers: Marker[];
+    nodes: { id: string; position: XYPosition; width?: number | null; height?: number | null }[];
+  },
+  enabled: boolean,
+  instruction: string,
+  labelOf: (id: string) => string = (id) => id,
+): string {
+  if (!enabled || store.markers.length === 0) return instruction;
+  const rects = new Map<string, Rect>();
+  for (const node of store.nodes) {
+    rects.set(node.id, {
+      x: node.position.x,
+      y: node.position.y,
+      width: node.width ?? 300,
+      height: node.height ?? 200,
+    });
+  }
+  const marks = markersAsPrompt(store.markers, rects, labelOf);
+  if (!marks) return instruction;
+  return `${instruction}\n\n【画布标记】\n${marks}`;
+}
