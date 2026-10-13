@@ -608,11 +608,26 @@
 .wb-chip-empty { padding: 8px; color: var(--fg-dim); font-size: 12.5px; }
 
 
-/* 输入区「技能」的命令面板 —— 形态对齐本体（锚在输入框左边缘、近全宽、底部搜索） */
+/* 输入区「技能」的命令面板 —— 形态对齐本体（锚在输入框上沿、底部搜索） */
 .wb-cmd-panel {
   position: absolute;
+  /*
+   * ⚠️ 2026-10-13 修一个一直没人看见的布局塌陷：
+   *
+   * 这两行原来只有 `left: 0; right: 0` —— 宽高随**定位祖先**走。而这个面板在 DOM 里
+   * 挂在 `.wb-env` 里（就是「技能」那颗 chip 的包装，**宽 59px**），
+   * 于是面板被算成 59px 宽：中文**一字一行**竖着排、还压在推荐卡上（用户截图报上来的就是这个）。
+   *
+   * 它一直没被发现，是因为**没有任何验收脚本点过这个面板**（`wb-skill-panel` 全仓只在
+   * `SkillPanel.tsx` 里出现，`scripts/accept/` 里零命中）。这次顺手把断言补进 `accept-chips`。
+   *
+   * 修法：给面板一个**真宽度**（不再靠祖先），并 right:auto 明确右边界由宽度决定。
+   * `max-width` 是防止窄窗口下溢出屏幕。
+   */
   left: 0;
-  right: 0;
+  right: auto;
+  width: 380px;
+  max-width: calc(100vw - 32px);
   bottom: calc(100% + 8px);
   z-index: 45;
   max-height: 380px;

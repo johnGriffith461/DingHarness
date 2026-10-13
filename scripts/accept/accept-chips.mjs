@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { shot } from "./harness.mjs";
 
 /**
  * 验收：输入区三个 chip（用户报的三个问题）。
@@ -83,6 +84,30 @@ try {
     () => document.querySelector('[data-testid="wb-confirm"]')?.textContent?.trim() ?? null,
   );
 
+  /* ── 「技能」命令面板：宽度与排版（2026-10-13 补） ──
+   *
+   * ⚠️ 这个面板**在此之前没有任何验收点过它**（`wb-skill-panel` 在 scripts/accept/ 里零命中），
+   * 于是它烂了很久没人知道：面板宽高跟着**定位祖先**（`.wb-env`，只有 59px = 技能 chip 的宽），
+   * 中文**一字一行**竖着排、还压在推荐卡上 —— 用户截图报上来的就是这个。
+   * 断言量的是**排版结果**（宽 ≥ 240、首项高度 ≤ 60 即"一行放得下"），不是"元素在不在"。
+   */
+  await page.locator('[data-testid="wb-skills"]').click();
+  await page.waitForTimeout(700);
+  out.skillPanel = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="wb-skill-panel"]');
+    if (!el) return null;
+    const first = el.querySelector('[data-testid^="wb-cmd-"]');
+    return {
+      width: Math.round(el.getBoundingClientRect().width),
+      firstItemHeight: first ? Math.round(first.getBoundingClientRect().height) : null,
+      hasSearch: Boolean(el.querySelector('[data-testid="wb-cmd-search"]')),
+      items: el.querySelectorAll('[data-testid^="wb-cmd-"]').length,
+    };
+  });
+  await shot(page, "chips-skillpanel.png");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
   await b.close();
 } catch (e) {
   out.error = String(e).slice(0, 220);
@@ -95,6 +120,16 @@ try {
   if (!out.confirmPopOpened) bad.push("「按需确认」没有下拉");
   if (!(out.confirmAfterPick ?? "").includes("每步确认")) bad.push("选了没生效: " + out.confirmAfterPick);
   if (!(out.confirmAfterReload ?? "").includes("每步确认")) bad.push("档位刷新后没记住：" + out.confirmAfterReload);
+  /* 技能面板：排版断言（不是"元素在不在"） */
+  if (!out.skillPanel) bad.push("「技能」命令面板打不开（wb-skill-panel）");
+  else {
+    if (out.skillPanel.width < 240) bad.push(`⭐ 技能面板被挤成 ${out.skillPanel.width}px（中文会一字一行）`);
+    if ((out.skillPanel.firstItemHeight ?? 0) > 60) {
+      bad.push(`⭐ 技能面板首项高 ${out.skillPanel.firstItemHeight}px —— 说明文字竖排了（一行应当 ≤ 40px 上下）`);
+    }
+    if (!out.skillPanel.hasSearch) bad.push("技能面板底部没有搜索框");
+    if (out.skillPanel.items < 3) bad.push(`技能面板条目太少（${out.skillPanel.items} 条）`);
+  }
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
     console.error("✗ " + bad.join("；"));
