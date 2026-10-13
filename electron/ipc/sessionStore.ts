@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
 
@@ -104,9 +104,13 @@ export type SessionLogger = {
  * @param sessionId 会话 id（渲染进程给的，会被收窄）
  * @returns 写入器；id 不合法时返回 null（调用方据此跳过记日志）
  */
-export function createSessionLogger(sessionId: unknown): SessionLogger | null {
+export function createSessionLogger(
+  sessionId: unknown,
+  opts: { maxBytes?: number } = {},
+): SessionLogger | null {
   const file = sessionLogPath(sessionId);
   if (!file) return null;
+  const maxBytes = opts.maxBytes ?? SESSION_RETENTION.maxSessionBytes;
 
   let seq = 0;
   let queue: Promise<void> = Promise.resolve();
@@ -126,6 +130,15 @@ export function createSessionLogger(sessionId: unknown): SessionLogger | null {
    * （实测：`accept-chathistory` 第二次重启后按钮还在）。
    */
   const ready = (async () => {
+    /*
+     * 单会话过大就**轮转**（改名留档，见 `SESSION_RETENTION`）：`.old` 不以 `.jsonl` 结尾，
+     * 所以不会再被当成会话列出来；新文件从 `seq = 1` 重新数起（下面的 reduce 读到空文件）。
+     */
+    const info = await stat(file).catch(() => null);
+    if (info && info.size > maxBytes) {
+      await rename(file, `${file}.${Date.now()}.old`).catch(() => undefined);
+      console.error(`[session] 日志超过 ${Math.round(maxBytes / 1024 / 1024)}MB，已轮转留档：${path.basename(file)}.old`);
+    }
     const { records } = await readRecords(file);
     seq = records.reduce((max, r) => Math.max(max, r.seq), 0);
   })();
@@ -250,6 +263,13 @@ export async function listChatSessions(): Promise<SessionSummary[]> {
  * @param ipcMain Electron 的 ipcMain
  */
 export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
+  /*
+   * 启动时清一次（补完②）：日志只增不减，这里按天数/条数收口。
+   * 不 await、失败也不拦启动 —— 清理是"顺手做的事"，不该挡住应用起来。
+   */
+  void pruneSessions().then(({ deleted }) => {
+    if (deleted.length) console.log(`[session] 清理了 ${deleted.length} 个过期会话日志`);
+  });
   ipcMain.handle(SESSION_CHANNEL.list, () => listChatSessions());
   ipcMain.handle(SESSION_CHANNEL.load, async (_event, sessionId: unknown) => {
     const got = await readSessionLog(sessionId);
@@ -257,6 +277,75 @@ export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
   });
 }
 
+
+/**
+ * 会话日志的保留策略（补完②）。
+ *
+ * ## 为什么必须有
+ *
+ * 日志是**只增不减**的（每一轮都往里追加），而一条会话里"请求记录会重复带上历史"，
+ * 所以单个会话的体积是**平方级**增长：一轮带工具约 1.5–2KB，
+ * 二十来轮约 100KB，上百轮就是几 MB。放在 userData 里不清理，几年下来会很难看。
+ *
+ * ## 口径（都是"到点就清、清得掉就清"）
+ *
+ * - **按天数**：超过 `maxAgeDays` 没动过的会话，删；
+ * - **按条数**：会话数超过 `maxFiles` 时，从最旧的开始删；
+ * - **单个会话过大**（`maxSessionBytes`）：**轮转**（改名成 `<id>.<时间戳>.jsonl.old` 留在原地，
+ *   不删 —— 那是用户自己的对话记录），新的一轮从新文件开始。
+ *   ⚠️ 轮转之后，聊天恢复只能看到轮转之后的部分（`.old` 仍在磁盘上，用户自己找得到）。
+ *   这是**刻意的取舍**：不轮转的话，一条马拉松对话会让每次读写都拖着几 MB 的历史。
+ *
+ * ⚠️ 只清 `sessions/` 里的 `.jsonl`（会话日志）。**不碰** 12 个实体文件、也不碰产物。
+ */
+export const SESSION_RETENTION = {
+  maxAgeDays: 30,
+  maxFiles: 200,
+  maxSessionBytes: 4 * 1024 * 1024,
+} as const;
+
+/**
+ * 清理过期/超量的会话日志。
+ *
+ * @param opts 覆盖保留策略（测试用）
+ * @returns 删掉的文件名与剩下的条数
+ */
+export async function pruneSessions(
+  opts: { maxAgeDays?: number; maxFiles?: number } = {},
+): Promise<{ deleted: string[]; kept: number }> {
+  const maxAgeDays = opts.maxAgeDays ?? SESSION_RETENTION.maxAgeDays;
+  const maxFiles = opts.maxFiles ?? SESSION_RETENTION.maxFiles;
+  let names: string[] = [];
+  try {
+    names = (await readdir(sessionsDir())).filter((n) => n.endsWith(".jsonl"));
+  } catch {
+    return { deleted: [], kept: 0 }; // 目录还没建过
+  }
+
+  const alive: { name: string; at: number }[] = [];
+  const deleted: string[] = [];
+  const cutoff = Date.now() - maxAgeDays * 86400000;
+
+  for (const name of names) {
+    const info = await stat(path.join(sessionsDir(), name)).catch(() => null);
+    if (!info?.isFile()) continue;
+    if (info.mtimeMs < cutoff) {
+      await rm(path.join(sessionsDir(), name), { force: true }).catch(() => undefined);
+      deleted.push(name);
+      continue;
+    }
+    alive.push({ name, at: info.mtimeMs });
+  }
+
+  // 还超量就从最旧的开始删
+  alive.sort((a, b) => b.at - a.at);
+  for (const item of alive.slice(maxFiles)) {
+    await rm(path.join(sessionsDir(), item.name), { force: true }).catch(() => undefined);
+    deleted.push(item.name);
+  }
+
+  return { deleted, kept: Math.min(alive.length, maxFiles) };
+}
 
 /**
  * 读回一个会话的事件日志。

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,9 +27,8 @@ vi.mock("electron", () => ({
   app: { getPath: () => env.userData },
 }));
 
-const { createSessionLogger, listChatSessions, readSessionLog, safeSessionId, sessionLogPath } = await import(
-  "../electron/ipc/sessionStore"
-);
+const { SESSION_RETENTION, createSessionLogger, listChatSessions, pruneSessions, readSessionLog, safeSessionId, sessionLogPath } =
+  await import("../electron/ipc/sessionStore");
 
 beforeEach(() => {
   env.userData = mkdtempSync(path.join(os.tmpdir(), "dwc-session-"));
@@ -209,5 +208,72 @@ describe("seq 跨进程续号（真验收抓到的第二个缺陷）", () => {
     expect(skipped).toBe(0);
     expect(records.map((r) => r.seq)).toEqual([1, 2, 3]); // 不许撞号、不许倒序
     expect((records[2] as { toolCallId: string }).toolCallId).toBe("c1");
+  });
+});
+
+describe("会话日志的保留策略（补完②：原本只增不减）", () => {
+
+  const mk = (name: string, text = "x") => {
+    mkdirSync(path.join(env.userData, "sessions"), { recursive: true });
+    writeFileSync(path.join(env.userData, "sessions", name), text, "utf8");
+  };
+  const list = () => readdirSync(path.join(env.userData, "sessions")).sort();
+
+  it("⭐ 超过天数的会话被清掉，新的留着", async () => {
+    mk("chat-old.jsonl");
+    mk("chat-new.jsonl");
+    const old = new Date(Date.now() - 40 * 86400000);
+    utimesSync(path.join(env.userData, "sessions", "chat-old.jsonl"), old, old);
+
+    const { deleted, kept } = await pruneSessions();
+    expect(deleted).toEqual(["chat-old.jsonl"]);
+    expect(kept).toBe(1);
+    expect(list()).toEqual(["chat-new.jsonl"]);
+  });
+
+  it("⭐ 超过条数上限时从**最旧**的开始删", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      mk(`chat-${i}.jsonl`);
+      const at = new Date(Date.now() - (10 - i) * 3600000); // i 越大越新
+      utimesSync(path.join(env.userData, "sessions", `chat-${i}.jsonl`), at, at);
+    }
+    const { kept } = await pruneSessions({ maxFiles: 2 });
+    expect(kept).toBe(2);
+    expect(list()).toEqual(["chat-3.jsonl", "chat-4.jsonl"]); // 最旧的三条被删
+  });
+
+  it("只认 .jsonl：轮转留档的 .old 不会被当会话列出来，也不会被清", async () => {
+    mk("chat-a.jsonl");
+    mk("chat-a.1700000000000.jsonl.old");
+    // 明确把它做旧（用超小天数的 cutoff 会踩"文件就是刚刚建的"这个边界，不稳）
+    const old = new Date(Date.now() - 40 * 86400000);
+    utimesSync(path.join(env.userData, "sessions", "chat-a.jsonl"), old, old);
+    await pruneSessions();
+    expect(list()).toContain("chat-a.1700000000000.jsonl.old");
+    expect(list()).not.toContain("chat-a.jsonl");
+  });
+
+  it("默认策略写在常量里（改它要改这里，逼一次「想清楚」）", () => {
+    expect(SESSION_RETENTION.maxAgeDays).toBe(30);
+    expect(SESSION_RETENTION.maxFiles).toBe(200);
+    expect(SESSION_RETENTION.maxSessionBytes).toBe(4 * 1024 * 1024);
+  });
+
+  it("⭐⭐ 单会话超过上限时**轮转留档**（不删），新文件从 seq=1 重新数", async () => {
+    const first = createSessionLogger("chat-big", { maxBytes: 200 });
+    first?.log({ requestId: "r1", type: "text", text: "x".repeat(300) });
+    await first?.flush();
+    const before = list().filter((f) => f.startsWith("chat-big"));
+    expect(before.length).toBe(1);
+
+    // 换一个写入器（下一次启动）：文件超限 → 轮转
+    const second = createSessionLogger("chat-big", { maxBytes: 200 });
+    second?.log({ requestId: "r2", type: "text", text: "新的一轮" });
+    await second?.flush();
+
+    const after = list().filter((f) => f.startsWith("chat-big"));
+    expect(after.some((f) => f.endsWith(".old"))).toBe(true); // 旧内容留档
+    const { records } = await readSessionLog("chat-big");
+    expect(records.map((r) => r.seq)).toEqual([1]); // 新文件重新数
   });
 });
