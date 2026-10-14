@@ -104,6 +104,27 @@ try {
     }
   }
   report.requestHasMark = requestText.includes(MARK);
+  /*
+   * ── 这一轮**给模型下发了哪些工具**（2026-10-14 补）──
+   *
+   * 日志里的 `tools` 字段就是"模型够得着什么"。加它的起因是「读文件」工具：
+   * 在此之前 agent 看不见用户提到的任何文件（只能编），而"工具到底有没有下发"
+   * 事后没法查 —— 现在一条日志就能回答，顺带让这件事**可断言**（不需要模型真的调用）。
+   */
+  let toolsOffered = null;
+  for (const f of files) {
+    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      let rec;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (rec.type === "request" && Array.isArray(rec.tools)) toolsOffered = rec.tools;
+    }
+  }
+  report.toolsOffered = toolsOffered;
   report.requestHasBlock = requestText.includes("【提到的文件】");
   report.requestHasPath = requestText.includes("季度总结.md");
   report.requestSlice = requestText.slice(0, 200);
@@ -129,6 +150,17 @@ try {
   if (!report.requestHasBlock) bad.push("⭐ 发出去的请求里没有资料块（等于资料没交给模型）");
   if (!report.requestHasMark) bad.push("⭐ 请求里没有文件正文里的标记 —— 送过去的可能只是个文件名");
   if (!report.requestHasPath) bad.push("请求里没写清资料来自哪个文件（模型没法引用它）");
+
+  /* ③b 工具下发：日志里要写清这一轮给了模型哪些工具，且「读文件」在里面 */
+  if (!Array.isArray(report.toolsOffered)) {
+    bad.push("会话日志里没记这一轮下发了哪些工具（tools 字段缺失）");
+  } else {
+    for (const need of ["read_file", "memory_save", "canvas_add_node"]) {
+      if (!report.toolsOffered.includes(need)) {
+        bad.push(`这一轮没给模型「${need}」（实际：${JSON.stringify(report.toolsOffered)}）`);
+      }
+    }
+  }
 
   /* ④ 资料只属于这一轮：发完就摘掉；气泡里也只有用户写的那句话 */
   if (report.chipsAfterSend) bad.push("发送之后附件还挂着（下一轮会莫名其妙又带上）");

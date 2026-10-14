@@ -5,6 +5,7 @@ import { agentTools, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
 import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "./runTurn";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
+import type { ConfirmMode } from "../../shared/permissions";
 
 /**
  * AI IPC（PLAN 3.1 / 3.2）。
@@ -58,6 +59,21 @@ function safeSend(sender: WebContents, event: AiStreamEvent): void {
   } catch {
     /* 窗口正在关闭，丢掉即可 */
   }
+}
+
+/**
+ * 这一轮**会下发给模型**的工具名（与真正构造工具集时用同一套判定）。
+ *
+ * 为什么要有它：日志里只记"用没用工具"是看不出"够得着什么"的 ——
+ * 新加的工具到底有没有下发、某个档位下是不是被隐藏了，都得有个可查的记录。
+ *
+ * @param request 渲染进程给的这次请求
+ * @returns 工具名列表；不带工具时是空数组
+ */
+function offeredToolNames(request: { useTools?: boolean; toolPolicy?: ConfirmMode }): string[] {
+  if (!request.useTools) return [];
+  const mode = request.toolPolicy ?? "全部允许";
+  return Object.keys(agentTools({ mode, provider: "", depth: 0 }));
 }
 
 export function registerAiIpc(): void {
@@ -163,6 +179,15 @@ export function registerAiIpc(): void {
       messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
       ...(request.toolPolicy ? { toolPolicy: request.toolPolicy } : {}),
       ...(request.useTools ? { useTools: true } : {}),
+      /*
+       * **这一轮给了模型哪些工具**（2026-10-14 补）。
+       *
+       * 以前日志只记了"用没用工具"（`useTools: true`）与档位 —— 于是事后没人知道
+       * 模型当时**够得着什么**：一个新加的工具到底有没有被下发？只能靠复现。
+       * 名字列表很小，记下来之后这类问题一条日志就能回答，
+       * 顺带让"工具被正确注入"这件事**可断言**（不需要模型真的调用它）。
+       */
+      tools: offeredToolNames(request),
     });
     /** 发给渲染进程的同时记进日志（**唯一**的事件出口）。 */
     const emit = (e: AiStreamEvent): void => {

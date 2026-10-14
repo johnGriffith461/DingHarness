@@ -79,6 +79,14 @@ export type TurnRequest = {
   messages: { role: string; content: string }[];
   toolPolicy?: string;
   useTools?: boolean;
+  /**
+   * 这一轮**下发给模型的工具名**（2026-10-14 补）。
+   *
+   * 只有 `useTools: true` 是看不出"够得着什么"的：新加的工具有没有真的下发、
+   * 某个档位下是不是被隐藏了，事后都得靠复现。
+   * 记下来之后这两类问题一条日志就能回答（也让"注入正确"可断言）。
+   */
+  tools?: string[];
 };
 
 /**

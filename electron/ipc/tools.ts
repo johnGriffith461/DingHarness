@@ -22,12 +22,19 @@ import {
   subagentPrompt,
 } from "../../shared/agentTools";
 import { decide, injectableTools, pendingApprovalNotice, type ConfirmMode } from "../../shared/permissions";
-import { unknownToolNotice } from "../../shared/agentTools";
+import {
+  READ_FILE_DESC,
+  READ_FILE_INPUT,
+  READ_FILE_TOOL,
+  unknownToolNotice,
+} from "../../shared/agentTools";
 import { addMemory, MEMORY_MAX } from "../../shared/memory";
 import { describeNextRun, makeJob, REPEAT_LABEL, validateJob, type RepeatType } from "../../shared/schedule";
 import { readMemory, writeMemory } from "./memoryStore";
 import { broadcastScheduleChanged, loadJobs, saveJobs } from "./scheduleStore";
 import { sendCanvasCommand } from "./canvas";
+import { describeReadResult, readFileForModel } from "./readTool";
+import { ownedDirs } from "./driveStore";
 import { runSubagent } from "./subagent";
 
 /**
@@ -155,6 +162,25 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const result = await sendCanvasCommand({ kind, text, ...(lang ? { lang } : {}) });
     if (!result.ok) return { ok: false, error: result.error ?? "画布没有完成这个操作" };
     return { ok: true, kind, nodeId: result.nodeId, opened: result.opened };
+  },
+
+  /**
+   * 读用户目录里的一个文本文件（2026-10-14）。
+   *
+   * 在此之前 agent **看不见用户提到的任何文件** —— "把云盘里的季度总结改成三行"这种话
+   * 它只能靠编。这个执行体把读取收在一处：
+   *   · 目录白名单与 `drive:read` 共用（`ownedDirs()`），不各写一份；
+   *   · 大小上限、二进制判定、各种"读不到"的分支都在 `readTool.ts`（纯函数、有单测）；
+   *   · 返回的那句话（`describeReadResult`）同时用于**界面留痕**，两边不会说法不一。
+   */
+  [READ_FILE_TOOL]: async (input) => {
+    const { path } = input as { path: string };
+    const result = await readFileForModel(path, ownedDirs());
+    return {
+      ok: result.ok,
+      line: describeReadResult(result, path),
+      ...(result.ok ? { text: result.text, chars: result.chars, truncated: result.truncated } : { error: result.error }),
+    };
   },
 
   /**
@@ -299,6 +325,11 @@ export function agentTools(env: ToolEnv): ToolSet {
         env,
       ),
     }),
+    [READ_FILE_TOOL]: tool({
+      description: READ_FILE_DESC,
+      inputSchema: READ_FILE_INPUT,
+      execute: gated<{ path: string }>(READ_FILE_TOOL, mode, (input) => EXECUTORS[READ_FILE_TOOL](input, env), env),
+    }),
     [SPAWN_AGENT_TOOL]: tool({
       description: SPAWN_AGENT_DESC,
       inputSchema: SPAWN_AGENT_INPUT,
@@ -338,4 +369,5 @@ export const TOOL_NAMES = [
   SCHEDULE_LIST_TOOL,
   CANVAS_ADD_NODE_TOOL,
   SPAWN_AGENT_TOOL,
+  READ_FILE_TOOL,
 ] as const;

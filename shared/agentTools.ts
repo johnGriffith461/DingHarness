@@ -23,6 +23,14 @@ export type AgentToolSpec = {
   schema: z.ZodTypeAny;
 };
 
+/**
+ * 一次读文件最多给模型多少字。
+ *
+ * 与其它工具输出的口径一致（400 → 8000，见 §"工具输出该给多少"）：
+ * 给太少模型看不到关键段，给太多会把上下文顶爆。
+ */
+export const READ_FILE_MODEL_CHARS = 8000;
+
 export const MEMORY_SAVE_TOOL = "memory_save";
 export const MEMORY_LIST_TOOL = "memory_list";
 
@@ -120,6 +128,37 @@ export const CANVAS_ADD_NODE_INPUT = z.object({
  * 依据 cline 的 `spawn_agent`：**它有自己的一份上下文**，
  * 做完只回一份**汇合摘要**（不是它整段对话），成本要能上卷到父级。
  * ============================================================ */
+
+export const READ_FILE_TOOL = "read_file";
+
+/**
+ * 「读文件」的说明（2026-10-14）。
+ *
+ * ## 为什么要有这个工具
+ * 在此之前，agent **看不见用户提到的任何文件**：任务里说"把云盘里的季度总结改成三行"，
+ * 它手上既没有内容、也没有读文件的手段，只能编或者反问。
+ * 我们自己已经有两个功能把这件需求摆在那里了 ——
+ * 悬浮窗的「问问豆包」（提示词里写的是"读一下这个文件：<路径>"）与聊天里的引用/资料，
+ * 都在指望"模型能自己拿到文件内容"。这一条把它补上。
+ *
+ * ## 边界（在 description 里对模型说清楚，它会因此少撞墙）
+ * 只读**用户自己的云盘 / 产物 / 导出目录**里的文本文件（与界面上那几个目录是同一批），
+ * 目录之外一律读不到；非文本、空文件、超大文件都会如实回报，不会假装读到了。
+ *
+ * ⚠️ 名字与参数是本机版自己定的（本体那侧没有可引用的工具名）；
+ * 但"agent 得能读用户提到的文件"这件事，是我们已经发出去的功能所要求的 —— 如实记着。
+ */
+export const READ_FILE_DESC = [
+  "读取用户**云盘 / 产物 / 导出目录**里的一个文本文件，返回它的正文。",
+  "用户提到某个文件的路径、或者需要看文件内容才能完成任务时用它。",
+  "路径要传完整的绝对路径（用户给的、或文件列表里看到的）。",
+  `单次最多返回 ${READ_FILE_MODEL_CHARS} 字，超出会截断并注明原文长度。`,
+  "目录之外的文件、二进制文件、空文件都会如实说明读不到，不要凭路径猜测内容。",
+].join("");
+
+export const READ_FILE_INPUT = z.object({
+  path: z.string().trim().min(1).describe("要读的文件的绝对路径"),
+});
 
 export const SPAWN_AGENT_TOOL = "spawn_agent";
 
@@ -311,6 +350,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: SCHEDULE_LIST_TOOL, description: SCHEDULE_LIST_DESC, schema: SCHEDULE_LIST_INPUT },
   { name: CANVAS_ADD_NODE_TOOL, description: CANVAS_ADD_NODE_DESC, schema: CANVAS_ADD_NODE_INPUT },
   { name: SPAWN_AGENT_TOOL, description: SPAWN_AGENT_DESC, schema: SPAWN_AGENT_INPUT },
+  { name: READ_FILE_TOOL, description: READ_FILE_DESC, schema: READ_FILE_INPUT },
 ];
 
 /** 按名字取声明；没有就是 `undefined`（→ 走"未知工具"那条路）。 */
@@ -342,6 +382,7 @@ export function toolLabel(name: string): string {
   if (name === SCHEDULE_CREATE_TOOL || name === SCHEDULE_LIST_TOOL) return "定时任务";
   if (name === CANVAS_ADD_NODE_TOOL) return "画布";
   if (name === SPAWN_AGENT_TOOL) return "子智能体";
+  if (name === READ_FILE_TOOL) return "读文件";
   return name;
 }
 

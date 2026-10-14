@@ -62,6 +62,16 @@ function exportsDir(): string {
   return path.join(app.getPath("userData"), "exports");
 }
 
+/**
+ * **允许读的目录**（绝对路径）——给 agent 的「读文件」工具用（2026-10-14）。
+ *
+ * ⚠️ 与 `drive:read` 用**同一份** `sources()`：两个入口各写一份白名单的话，
+ * "界面上能读的"与"agent 能读的"迟早分叉，而分叉的方向通常是其中一边变松。
+ */
+export function ownedDirs(): string[] {
+  return sources().map((s) => s.dir);
+}
+
 /** 三个来源目录与它们的 origin 标签。 */
 function sources(): Array<{ dir: string; origin: DriveEntry["origin"] }> {
   return [
