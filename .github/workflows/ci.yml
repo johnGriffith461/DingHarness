@@ -1,4 +1,4 @@
-# 本仓已开源（github.com/johnGriffith461/Dingwork），这份 workflow 现在**真在 GitHub Actions 上跑**
+# 本仓已开源（github.com/johnGriffith461/DingHarness），这份 workflow 现在**真在 GitHub Actions 上跑**
 # （windows-latest）。判据（手册 B4）：装依赖 → typecheck → test；**明确禁用真实模型与网络**。
 # 这一点靠的是结构而不是开关，理由写在下面每一条注释里。
 name: CI

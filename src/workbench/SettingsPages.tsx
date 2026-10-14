@@ -147,8 +147,8 @@ export default function SettingsPages({
           <div className="wb-setpage-row">
             <span className="wb-setpage-label">{SETTINGS_LABELS.website}</span>
             {/* 本机版没有官网，指到项目仓库 */}
-            <a className="wb-setpage-btn" href="https://github.com/johnGriffith461/Dingwork" target="_blank" rel="noreferrer">
-              github.com/johnGriffith461/Dingwork
+            <a className="wb-setpage-btn" href="https://github.com/johnGriffith461/DingHarness" target="_blank" rel="noreferrer">
+              github.com/johnGriffith461/DingHarness
             </a>
           </div>
         </div>

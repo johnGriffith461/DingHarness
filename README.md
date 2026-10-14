@@ -1,6 +1,6 @@
 # Ding Harness
 
-[![CI](https://github.com/johnGriffith461/Dingwork/actions/workflows/ci.yml/badge.svg)](https://github.com/johnGriffith461/Dingwork/actions/workflows/ci.yml)
+[![CI](https://github.com/johnGriffith461/DingHarness/actions/workflows/ci.yml/badge.svg)](https://github.com/johnGriffith461/DingHarness/actions/workflows/ci.yml)
 
 > AI 工作台 + 无限画布 —— 一个本机优先的桌面 Agent 工作台
 >
