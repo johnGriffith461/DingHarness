@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { WRITE_MAX_CHARS, describeWriteResult, resolveWriteTarget, writeFileForModel } from "../../electron/ipc/writeTool";
+import { WRITE_MAX_CHARS, describeWriteResult, resolveWriteTarget, writeFileForModel } from "@engine/runtime/tools/writeTool";
 
 /**
  * agent 的「写文件」工具（2026-10-14）。

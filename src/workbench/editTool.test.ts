@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describeEditResult, editFileForModel } from "../../electron/ipc/editTool";
+import { describeEditResult, editFileForModel } from "@engine/runtime/tools/editTool";
 
 /**
  * agent 的「改文件」工具（2026-10-14）。

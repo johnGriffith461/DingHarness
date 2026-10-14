@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MODEL_MAX_CHARS, READ_MAX_BYTES, describeReadResult, readFileForModel } from "../../electron/ipc/readTool";
+import { MODEL_MAX_CHARS, READ_MAX_BYTES, describeReadResult, readFileForModel } from "@engine/runtime/tools/readTool";
 
 /**
  * agent 的「读文件」工具（2026-10-14）。

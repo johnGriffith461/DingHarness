@@ -10,7 +10,7 @@ import {
   listDirForModel,
   nothingFoundNote,
   searchFilesForModel,
-} from "../../electron/ipc/searchTool";
+} from "@engine/runtime/tools/searchTool";
 
 /**
  * agent 的「找文件」与「看目录」（2026-10-14）。

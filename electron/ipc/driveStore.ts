@@ -6,7 +6,7 @@ import { isUnsupported, type ImportItem } from "../../shared/upload";
 import { READ_MAX_BYTES } from "../../shared/driveFiles";
 // 生成图落的目录（与 imageGen 同一处，不另写一份路径）
 import { assetsDir } from "./imageGen";
-import { insideDirs } from "./drivePaths";
+import { insideDirs } from "../../engine/runtime/tools/drivePaths";
 import { workspaceDirsSync } from "./workspaceStore";
 
 /**

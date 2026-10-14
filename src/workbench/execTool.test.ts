@@ -7,7 +7,7 @@ import {
   COMMAND_MAX_OUTPUT_LINES,
   describeRunResult,
   runCommandForModel,
-} from "../../electron/ipc/execTool";
+} from "@engine/runtime/tools/execTool";
 
 /**
  * agent 的「跑命令」工具（2026-10-14）。

@@ -54,13 +54,13 @@ import { describeNextRun, makeJob, REPEAT_LABEL, validateJob, type RepeatType } 
 import { readMemory, writeMemory } from "./memoryStore";
 import { broadcastScheduleChanged, loadJobs, saveJobs } from "./scheduleStore";
 import { sendCanvasCommand } from "./canvas";
-import { describeReadResult, readFileForModel } from "./readTool";
-import { describeWriteResult, writeFileForModel } from "./writeTool";
-import { describeEditResult, editFileForModel } from "./editTool";
-import { describeRunResult, runCommandForModel } from "./execTool";
-import { nothingFoundNote } from "./searchTool";
+import { describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
+import { describeWriteResult, writeFileForModel } from "../../engine/runtime/tools/writeTool";
+import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
+import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
+import { nothingFoundNote } from "../../engine/runtime/tools/searchTool";
 import { callMcpTool, mcpToolBindings } from "./mcpStore";
-import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "./searchTool";
+import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "../../engine/runtime/tools/searchTool";
 import { listDrive, ownedDirs } from "./driveStore";
 import { runSubagent } from "../../engine/runtime/subagent";
 

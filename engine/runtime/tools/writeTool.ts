@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { insideDirs } from "./drivePaths";
-import { WRITE_FILE_MODEL_CHARS } from "../../shared/agentTools";
+import { WRITE_FILE_MODEL_CHARS } from "../../../shared/agentTools";
 
 /**
  * 「写文件」工具的执行体（2026-10-14）。

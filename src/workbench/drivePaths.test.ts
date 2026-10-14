@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { insideDirs } from "../../electron/ipc/drivePaths";
+import { insideDirs } from "@engine/runtime/tools/drivePaths";
 
 /**
  * 云盘路径的归属判断（**A1**）。
