@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, shot } from "./harness.mjs";
+import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
 
 /**
  * 11.13 验收：右栏「图片与视频」画廊 + 另两个 tab 的如实空态。
@@ -38,7 +38,8 @@ const child = spawn(
   [".", "--remote-debugging-port=" + __port],
   { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
 );
-await new Promise((r) => setTimeout(r, 8000));
+/* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
+await waitForPort(__port, 40000);
 
 const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const pages = browser.contexts()[0].pages();

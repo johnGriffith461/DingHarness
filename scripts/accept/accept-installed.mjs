@@ -23,11 +23,12 @@ delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 // 打包后的应用**忽略命令行上的 --remote-debugging-port**（早期轮次踩过这个坑），
 // 只认这个环境变量 —— 所以下面 spawn 里那个参数是没用的，靠这一行。
-env.DSH_DEBUG_PORT = "9855";
 
 const report = { exeBytes: fs.statSync(EXE).size };
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12855]);
+/* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
+env.DSH_DEBUG_PORT = String(__port);
 const child = spawn(EXE, ["--remote-debugging-port=" + __port], {
   env,
   stdio: ["ignore", "ignore", "ignore"],

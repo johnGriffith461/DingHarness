@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openCanvas, pickPort, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./harness.mjs";
 
 /**
  * 图片动作端到端验收（阶段 9.3）。
@@ -30,7 +30,8 @@ const child = spawn(EXE, [".", "--remote-debugging-port=" + __port], {
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });
-await new Promise((r) => setTimeout(r, 8000));
+/* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
+await waitForPort(__port, 40000);
 
 const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const pages = browser.contexts()[0].pages();

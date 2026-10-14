@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, readStoreFile, shot, verdict } from "./harness.mjs";
+import { connectWithRetry, pickPort, readStoreFile, shot, verdict, waitForPort } from "./harness.mjs";
 
 /**
  * 定时任务真调度的验收（阶段 11.6）。
@@ -32,7 +32,8 @@ async function launch(port) {
     env,
     stdio: ["ignore", "ignore", "ignore"],
   });
-  await new Promise((r) => setTimeout(r, 8000));
+  /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
+await waitForPort(port, 40000);
   const browser = await connectWithRetry(chromium, `http://127.0.0.1:${port}`);
   const pages = browser.contexts()[0].pages();
   const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];

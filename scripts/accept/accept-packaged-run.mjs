@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, pickPort, shot } from "./harness.mjs";
 
 /**
  * 打包产物端到端验收（阶段 9.4 / 9.5）。
@@ -33,7 +33,9 @@ report.asarHuman = `${(asarBytes.length / 1024 / 1024).toFixed(1)} MB`;
 // 2) 起打包后的应用
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-env.DSH_DEBUG_PORT = "9480";
+/* 打包产物只认这个环境变量（命令行那个会被忽略）→ 先挑一个能用的端口。 */
+const __port = await pickPort([9330]);
+env.DSH_DEBUG_PORT = String(__port);
 // 打包版写系统 userData；给它一个独立目录，别污染真实配置
 const PORTABLE_DATA = "D:/DoubaoWorkClone/.verify/packaged-userdata";
 fs.rmSync(PORTABLE_DATA, { recursive: true, force: true });

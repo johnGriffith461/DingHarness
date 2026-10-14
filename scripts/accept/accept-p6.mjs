@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, openCanvas, shot, verdict } from "./harness.mjs";
+import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness.mjs";
 
 /**
  * 打包产物验收（阶段 6）：直接跑 `release/win-unpacked/工作台.exe`，
@@ -20,7 +20,9 @@ const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 // 打包产物不认命令行上的 --remote-debugging-port，用主进程里的显式开关
-env.DSH_DEBUG_PORT = "9330";
+/* 打包产物只认这个环境变量（命令行那个会被忽略）→ 先挑一个能用的端口。 */
+const __port = await pickPort([9330]);
+env.DSH_DEBUG_PORT = String(__port);
 
 const exe = "D:/DoubaoWorkClone/release/win-unpacked/工作台.exe";
 if (!fs.existsSync(exe)) {

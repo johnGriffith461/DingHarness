@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { connectWithRetry, freshDir, killTree, pickPort, readStoreFile, shot } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, pickPort, readStoreFile, shot, waitForPort } from "./harness.mjs";
 
 /**
  * 验收：记忆（对应本体 `chat/memory/list|clear|delete`）。
@@ -17,11 +17,12 @@ if (!(await freshDir(DATA))) {
 }
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-env.DSH_DEBUG_PORT = "9994";
 env.DSH_CANVAS_DATA_DIR = DATA;
 
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12994]);
+/* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
+env.DSH_DEBUG_PORT = String(__port);
 const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
   cwd: "D:/DoubaoWorkClone",
   env,
@@ -36,7 +37,8 @@ const openSettings = async (page) => {
   await page.waitForTimeout(800);
 };
 
-await new Promise((r) => setTimeout(r, 13000));
+/* 固定等 13 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
+await waitForPort(__port, 40000);
 let browser;
 try {
   browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);

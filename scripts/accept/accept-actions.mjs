@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, readStoreFile, shot } from "./harness.mjs";
+import { connectWithRetry, pickPort, readStoreFile, shot, waitForPort } from "./harness.mjs";
 
 /**
  * 11.19 验收：消息操作栏的六个动作**全部真的能用**。
@@ -25,7 +25,8 @@ const child = spawn(
   [".", "--remote-debugging-port=" + __port],
   { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
 );
-await new Promise((r) => setTimeout(r, 8000));
+/* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
+await waitForPort(__port, 40000);
 
 const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const ctx = browser.contexts()[0];
