@@ -15,7 +15,7 @@ import { connectWithRetry, openCanvas, pickPort, shot } from "./harness.mjs";
  *   5. 开发态才有的探针（`__canvasStore`）在打包版里**不存在**
  */
 const UNPACKED = "release/win-unpacked";
-const EXE = path.join(UNPACKED, "工作台.exe");
+const EXE = path.join(UNPACKED, "Ding Harness.exe");
 if (!fs.existsSync(EXE)) {
   console.log("没有解包产物，先 pnpm build");
   process.exit(1);

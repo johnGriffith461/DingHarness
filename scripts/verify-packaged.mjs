@@ -16,7 +16,7 @@ import { join } from "node:path";
  * 所以"仓库里能跑、打包后不能跑"这类问题，**任何门禁都抓不到** ——
  * 它每次都要靠人手工去装、去点，才可能撞见。
  *
- * 这一条把它变成机械检查：起 `release/win-unpacked/工作台.exe`，
+ * 这一条把它变成机械检查：起 `release/win-unpacked/Ding Harness.exe`，
  * 连上去确认 `[data-testid="wb"]` 渲染出来，再关掉。
  *
  * ## 两个必须踩对的细节（都踩过）
@@ -29,7 +29,7 @@ import { join } from "node:path";
  */
 
 const ROOT = process.cwd();
-const EXE = join(ROOT, "release", "win-unpacked", "工作台.exe");
+const EXE = join(ROOT, "release", "win-unpacked", "Ding Harness.exe");
 const DATA = join(ROOT, ".verify", "packaged-smoke-data");
 const PORT = "9866";
 

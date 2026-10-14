@@ -395,7 +395,7 @@ function killLeftovers() {
   return new Promise((resolve) => {
     const deadline = Date.now() + 12000;
     const tick = () => {
-      const first = spawn("taskkill", ["/F", "/IM", "工作台.exe", "/T"], { stdio: "ignore" });
+      const first = spawn("taskkill", ["/F", "/IM", "Ding Harness.exe", "/T"], { stdio: "ignore" });
       first.on("close", () => {
         const second = spawn("taskkill", ["/F", "/IM", "electron.exe", "/T"], { stdio: "ignore" });
         second.on("close", () => {
@@ -428,7 +428,7 @@ function countLeftovers() {
     if (/no tasks|没有运行|信息: 没有/i.test(s)) return 0;
     return (s.match(new RegExp(name.replace(".", "\\."), "gi")) ?? []).length;
   };
-  return n("electron.exe") + n("工作台.exe");
+  return n("electron.exe") + n("Ding Harness.exe");
 }
 
 /*

@@ -13,7 +13,7 @@ import fs from "node:fs";
  *
  * 这三件都不是"被测的东西坏了"，却都会让验收红。所以收进这里，一次修对。
  *
- * ⚠️ 只杀 electron.exe / 工作台.exe —— **不要**按 `DoubaoWork` 杀：
+ * ⚠️ 只杀 electron.exe / Ding Harness.exe —— **不要**按 `DoubaoWork` 或 `工作台` 杀：
  * 那是**用户本体的进程**（我这边是复刻版，进程名不同）。
  */
 
@@ -26,7 +26,7 @@ export function leftoverCount() {
   const r = spawnSync("tasklist", ["/FI", "IMAGENAME eq electron.exe", "/NH"], { encoding: "utf8" });
   const s = r.stdout ?? "";
   const n = /no tasks|没有运行|信息: 没有/i.test(s) ? 0 : (s.match(/electron\.exe/gi) ?? []).length;
-  const w = spawnSync("tasklist", ["/FI", "IMAGENAME eq 工作台.exe", "/NH"], { encoding: "utf8" });
+  const w = spawnSync("tasklist", ["/FI", "IMAGENAME eq Ding Harness.exe", "/NH"], { encoding: "utf8" });
   const ws = w.stdout ?? "";
   const wn = /no tasks|没有运行|信息: 没有/i.test(ws) ? 0 : (ws.match(/工作台\.exe/gi) ?? []).length;
   return n + wn;
@@ -42,14 +42,14 @@ export function leftoverCount() {
  * 判据和 `waitForPort` 一样：**等那个真条件（进程数为 0），不等固定秒数。**
  * 连续两次读到 0 才算稳，避免刚好卡在退出过程中间。
  *
- * ⚠️ 只杀 electron.exe / 工作台.exe —— **不要**按 `DoubaoWork` 杀：
+ * ⚠️ 只杀 electron.exe / Ding Harness.exe —— **不要**按 `DoubaoWork` 或 `工作台` 杀：
  * 那是**用户本体的进程**（我这边是复刻版，进程名不同）。
  */
 export async function killLeftovers({ budgetMs = 12000 } = {}) {
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     spawnSync("taskkill", ["/F", "/IM", "electron.exe", "/T"], { stdio: "ignore" });
-    spawnSync("taskkill", ["/F", "/IM", "工作台.exe", "/T"], { stdio: "ignore" });
+    spawnSync("taskkill", ["/F", "/IM", "Ding Harness.exe", "/T"], { stdio: "ignore" });
     await sleep(450);
     if (leftoverCount() === 0) {
       await sleep(450);

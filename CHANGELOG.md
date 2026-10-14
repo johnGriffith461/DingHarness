@@ -61,6 +61,21 @@
 - 测试抖动：假 provider 的共享计数器跨用例串状态、SQLite 用例的临时目录清理在 Windows 上
   EPERM 判红（都改掉了）。
 
+### ⚠️ 未解决：打包出来的安装包起不来（既有问题，不是这次换代引入的）
+
+`release/ding-harness-0.1.0-setup.exe` 能打出来，但**装上启动即崩**：
+
+```
+ENTRY-LOAD-FAILED Error: Cannot find module 'readable-stream/passthrough'
+```
+
+根因是 electron-builder 的依赖收集器**漏掉嵌套副本**（`lazystream` 要
+`readable-stream@2` 的子路径，而包里顶层那份是 v3，v3 没有这个子路径）。
+**开发态永远看不到**（开发态用的是仓库根那棵完整的树）。
+定位过程与试过、都不行的四种办法记在 `.npmrc` 顶部的注释里；判据是现成的：
+`node scripts/verify-packaged.mjs`（它就是这么逮到这件事的）。
+**在它绿之前不发安装包**，所以这一版**没有打 tag、也没有发 release**。
+
 ### 如实记下的边界
 
 - 仅 Windows 构建；macOS / Linux 未验证。

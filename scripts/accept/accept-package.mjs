@@ -45,7 +45,7 @@ const setup = path.join(R, "工作台-0.1.0-setup.exe");
 report.setup = { exists: exists(setup), bytes: size(setup), human: mb(size(setup)) };
 report.setupIcon = exists(setup) ? peHasIcon(setup) : null;
 
-const unpackedExe = path.join(R, "win-unpacked", "工作台.exe");
+const unpackedExe = path.join(R, "win-unpacked", "Ding Harness.exe");
 report.unpackedExe = { exists: exists(unpackedExe), bytes: size(unpackedExe) };
 report.unpackedIcon = exists(unpackedExe) ? peHasIcon(unpackedExe) : null;
 

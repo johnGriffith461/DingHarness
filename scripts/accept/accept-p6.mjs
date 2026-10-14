@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness.mjs";
 
 /**
- * 打包产物验收（阶段 6）：直接跑 `release/win-unpacked/工作台.exe`，
+ * 打包产物验收（阶段 6）：直接跑 `release/win-unpacked/Ding Harness.exe`，
  * 确认它**不依赖 dev server、不依赖工程目录**也能起来，
  * 并且画布、AI 通道、持久化都还在。
  *
@@ -24,7 +24,7 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([9330]);
 env.DSH_DEBUG_PORT = String(__port);
 
-const exe = "release/win-unpacked/工作台.exe";
+const exe = "release/win-unpacked/Ding Harness.exe";
 if (!fs.existsSync(exe)) {
   console.log("打包产物不存在：", exe);
   process.exit(1);
