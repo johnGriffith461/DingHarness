@@ -1,7 +1,5 @@
-# ⚠️ 本仓目前**没有远端**（`git remote -v` 为空），所以这份 workflow **从未在真 CI 上跑过**。
-# 它是照施工手册 B4 写下的"最小 CI"，本地能做的只有：把步骤写对、把不跑什么写清。
-#
-# 判据（手册 B4）：装依赖 → typecheck → test；**明确禁用真实模型与网络**。
+# 本仓已开源（github.com/johnGriffith461/Dingwork），这份 workflow 现在**真在 GitHub Actions 上跑**
+# （windows-latest）。判据（手册 B4）：装依赖 → typecheck → test；**明确禁用真实模型与网络**。
 # 这一点靠的是结构而不是开关，理由写在下面每一条注释里。
 name: CI
 
@@ -32,8 +30,9 @@ jobs:
       # （会真调模型）加进来，这个变量会让它们立刻失败而不是悄悄烧钱。
       CI: "true"
       DSH_NO_REAL_MODEL: "1"
-      # 画布持久化的数据目录指向 runner 临时目录，绝不碰任何真实 userData
-      DSH_CANVAS_DATA_DIR: ${{ runner.temp }}/dsh-canvas-data
+      # ⚠️ 画布数据目录（DSH_CANVAS_DATA_DIR）**不能**放这里 —— `runner` 上下文在 job 级 `env`
+      # 里不可用，GitHub 会报 `Unrecognized named-value: 'runner'`，整个 workflow 启动即失败。
+      # 它放在「单测」那一步的步骤级 env 里。
 
     steps:
       - name: 检出
@@ -73,6 +72,11 @@ jobs:
       - name: 单测
         # 纯 node 环境：`vitest.config.ts` 的 include 只有 `src/` 下的测试，
         # 不启 Electron、不连网、不调模型 —— 这是"不烧钱"的结构性保证，不是承诺。
+        #
+        # 画布持久化的数据目录指向 runner 临时目录，绝不碰任何真实 userData。
+        # 放**步骤级**（`runner` 上下文在步骤级 env 可用）。
+        env:
+          DSH_CANVAS_DATA_DIR: ${{ runner.temp }}/dsh-canvas-data
         run: pnpm test
 
       # ── 以下**有意不做**（照手册 §7 的"不烧钱地验"）──
