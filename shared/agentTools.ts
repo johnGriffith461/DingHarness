@@ -531,23 +531,14 @@ export function toolSpec(name: string): AgentToolSpec | undefined {
   return AGENT_TOOLS.find((t) => t.name === name);
 }
 
-/**
- * **未知工具 / 参数不合格**时回注给模型的那句话。
+/*
+ * ⚠️ `unknownToolNotice` 搬去 `engine/core/notices.ts` 了（Phase 3.1）。
  *
- * 这是 goose 的做法（也是 12-factor 的 Factor 9「把错误压缩进上下文」）：
- * **不抛异常、不静默丢掉**，而是当成一次工具结果发回去，让模型自己纠正再试。
- *
- * 好处很直接：省掉一层重试逻辑，而且模型看到的失败原因与它调用的参数在同一个上下文里。
- *
- * @param name 模型调用的工具名
- * @param reason 可选的更具体原因（例如 schema 校验失败的信息）
- * @returns 一句话
+ * 它是**给模型看**的错误回注，与"未知工具 / 闸门拦截 / 执行失败"是一组，
+ * 三者住在一起才能保证两个宿主对同一件事说同一句话。
+ * 本文件剩下的 `toolLabel` / `toolLine` / `describeToolResult` 是**给界面看**的文案，
+ * 性质不同，所以留在契约层。
  */
-export function unknownToolNotice(name: string, reason?: string): string {
-  const known = AGENT_TOOLS.map((t) => t.name).join(" / ");
-  const head = `没有名为「${name}」的工具。可用工具：${known}。`;
-  return reason ? `${head}（参数问题：${reason}）请修正后重试。` : `${head}请改用其中一个。`;
-}
 
 /** 工具名 → 给人看的短标签（界面文案与测试共用一份）。 */
 export function toolLabel(name: string): string {

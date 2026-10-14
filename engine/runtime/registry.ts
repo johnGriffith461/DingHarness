@@ -7,7 +7,8 @@ import {
   toolSpec,
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
-import { decide, injectableTools, pendingApprovalNotice } from "../core/policy";
+import { pendingApprovalNotice, toolFailedNotice } from "../core/notices";
+import { decide, injectableTools } from "../core/policy";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
 
 /**
@@ -167,7 +168,7 @@ export function buildToolSet(input: {
          * 留痕才会写"失败"；返回一个 ok:false 的**正常**载荷会被当成"工具跑成功了"。
          */
         if (result.ok) return result.output;
-        throw new Error(result.error ?? `${entry.name} 执行失败`);
+        throw new Error(toolFailedNotice(entry.name, result.error));
       },
     });
   }

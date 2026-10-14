@@ -14,10 +14,10 @@ import {
   SEARCH_FILES_TOOL,
   SPAWN_AGENT_TOOL,
   subagentPrompt,
-  unknownToolNotice,
   WRITE_FILE_TOOL,
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
+import { unknownToolNotice } from "../../engine/core/notices";
 import {
   buildToolSet,
   createToolRegistry,

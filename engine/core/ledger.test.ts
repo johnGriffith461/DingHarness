@@ -1,0 +1,107 @@
+import { describe, expect, it } from "vitest";
+
+import { formatTotal, ledgerOf, localDay, rollup } from "./ledger";
+import type { LogRecord } from "./events";
+
+/**
+ * 成本账本（Phase 3.3）。
+ *
+ * ## 这组断言真正防的是什么
+ *
+ * 一个"花了多少"的数字，最坏的失效不是偏小，是**看起来精确**。
+ * 所以这里每一组断言都在问同一件事：**没拿到的数，有没有被悄悄补上**。
+ */
+
+const T = (n: number) => 1_700_000_000_000 + n;
+
+/** 造一轮（request + done）。 */
+function turn(n: number, usage?: { inputTokens?: number; outputTokens?: number }, model = "deepseek-chat"): LogRecord[] {
+  return [
+    {
+      seq: n,
+      at: T(n),
+      type: "request",
+      requestId: `r${n}`,
+      provider: "deepseek",
+      model,
+      messages: [{ role: "user", content: "x" }],
+    },
+    { seq: n + 1, at: T(n + 1), type: "done", requestId: `r${n}`, ...(usage ? { usage } : {}) },
+  ] as unknown as LogRecord[];
+}
+
+describe("成本账本 · 入账", () => {
+  it("⭐ 只记 provider 上报过的轮次（没有 usage 的那一轮不入账，也不记 0）", () => {
+    const records = [...turn(1, { inputTokens: 100, outputTokens: 20 }), ...turn(3)];
+    const book = ledgerOf(records, "cli-1");
+    expect(book).toHaveLength(1);
+    expect(book[0]).toMatchObject({ model: "deepseek-chat", usage: { inputTokens: 100, outputTokens: 20 } });
+  });
+
+  it("provider/model 从那一轮的 `request` 配过来（不是猜的）", () => {
+    const book = ledgerOf(turn(1, { inputTokens: 5, outputTokens: 5 }, "deepseek-reasoner"), "cli-1");
+    expect(book[0]).toMatchObject({ provider: "deepseek", model: "deepseek-reasoner", sessionId: "cli-1" });
+  });
+
+  it("配不上 request 的 done（日志被截过）**照样入账**，只是 provider/model 空着", () => {
+    const orphan = [{ seq: 9, at: T(9), type: "done", requestId: "r404", usage: { inputTokens: 7, outputTokens: 1 } }] as unknown as LogRecord[];
+    const book = ledgerOf(orphan, "cli-1");
+    // 用量是 provider 真报过的数 —— 丢掉它会让总数偏小，那比"少一个标签"坏得多
+    expect(book).toHaveLength(1);
+    expect(book[0]).toMatchObject({ model: "", usage: { inputTokens: 7, outputTokens: 1 } });
+    // 汇总时它落到"未登记模型"那一行，一眼能看出是缺标签而不是缺钱
+    expect(rollup(book, "model")[0]?.key).toBe("(未登记模型)");
+  });
+
+  it("缓存明细一并入账（provider 给了就带上）", () => {
+    const records = [
+      { seq: 1, at: T(1), type: "request", requestId: "r1", provider: "p", model: "m", messages: [] },
+      {
+        seq: 2,
+        at: T(2),
+        type: "done",
+        requestId: "r1",
+        usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 80, noCacheTokens: 20 },
+      },
+    ] as unknown as LogRecord[];
+    expect(ledgerOf(records, "s")[0]?.usage).toMatchObject({ cacheReadTokens: 80, noCacheTokens: 20 });
+  });
+});
+
+describe("成本账本 · 汇总", () => {
+  const entries = [
+    ...ledgerOf(turn(1, { inputTokens: 100, outputTokens: 10 }, "a"), "s1"),
+    ...ledgerOf(turn(3, { inputTokens: 200, outputTokens: 20 }, "b"), "s1"),
+    ...ledgerOf(turn(5, { inputTokens: 50, outputTokens: 5 }, "a"), "s2"),
+  ];
+
+  it("⭐ 逐项求和（合计 = 各轮相加，不是取平均）", () => {
+    const rows = rollup(entries, "session");
+    const s1 = rows.find((r) => r.key === "s1");
+    const s2 = rows.find((r) => r.key === "s2");
+    expect(s1).toMatchObject({ turns: 2, totalTokens: 330 }); // 100+200 / 10+20
+    expect(s1?.usage).toMatchObject({ inputTokens: 300, outputTokens: 30 });
+    expect(s2).toMatchObject({ turns: 1, totalTokens: 55 });
+    // 两行加起来 = 全部入账
+    expect((s1?.totalTokens ?? 0) + (s2?.totalTokens ?? 0)).toBe(385);
+  });
+
+  it("按模型汇总：同名模型跨会话合并，未登记模型的轮次标出来", () => {
+    const rows = rollup([...entries, ...ledgerOf(turn(7, { inputTokens: 1, outputTokens: 1 }, ""), "s3")], "model");
+    // 按 token 降序：b(220) > a(110) > 未登记(2)
+    expect(rows.map((r) => r.key)).toEqual(["b", "a", "(未登记模型)"]);
+  });
+
+  it("按天汇总用**本地时区**（用户按自己的日期理解「今天花了多少」）", () => {
+    expect(localDay(T(0))).toBe(localDay(T(0)));
+    const rows = rollup(entries, "day");
+    expect(rows).toHaveLength(1); // 三条都在同一天（测试时间戳相邻）
+    expect(rows[0]?.turns).toBe(3);
+  });
+
+  it("缺失的字段写成 `-`，**不写成 0**（0 是真没花，- 是 provider 没说）", () => {
+    const line = formatTotal({ key: "s", label: "s", turns: 1, usage: { outputTokens: 5 }, totalTokens: 5 });
+    expect(line).toContain("↑-");
+    expect(line).toContain("↓5");
+  });
+});

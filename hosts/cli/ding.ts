@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { createEngine, type Engine, type EngineRunRequest } from "../../engine/index";
 import { cliSessionId, splitTurns, type LogRecord } from "../../engine/core/events";
+import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import type { ToolExecutor } from "../../engine/ports/executor";
@@ -227,7 +228,51 @@ async function cmdRun(p: Parsed): Promise<number> {
   return 0;
 }
 
+/**
+ * 成本账本（`ding sessions --cost [--by day|model]`）。
+ *
+ * ⚠️ 账本是**从会话日志现算的**，没有第二份"用量统计"文件 ——
+ * 另存一份统计迟早会与日志漂移（那是本项目的老毛病）。所以这里的数与
+ * `--export` 出来的记录**必然一致**。
+ */
+async function cmdCost(p: Parsed): Promise<number> {
+  const store = createSqliteSessionStore(dataDir());
+  try {
+    const kind = flag(p, "kind");
+    const sessions = await store.list(kind === "chat" || kind === "task" || kind === "cli" ? { kind } : undefined);
+    const entries: LedgerEntry[] = [];
+    for (const summary of sessions) {
+      const { records } = await store.load(summary.sessionId);
+      // 只给会话维度留标题（其它维度用的是日期/模型名，不需要）
+      const book = ledgerOf(records, summary.sessionId);
+      for (const e of book) entries.push({ ...e });
+      titles.set(summary.sessionId, summary.title || summary.sessionId);
+    }
+
+    const by = flag(p, "by");
+    const dim = by === "day" || by === "model" ? by : "session";
+    const rows = rollup(entries, dim, (key) => titles.get(key) || key);
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify(rows, null, 2));
+      return 0;
+    }
+    if (!rows.length) {
+      console.log("账本还是空的（没有任何一轮带 provider 上报的用量）。");
+      return 0;
+    }
+    for (const row of rows) console.log(formatTotal(row));
+    console.log("[2m口径：数字全部来自 provider 上报的 usage；`-` 表示 provider 没给（不是 0）。[0m");
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
+/** 会话 id → 标题（成本账本按会话汇总时给人看的那一列）。 */
+const titles = new Map<string, string>();
+
 async function cmdSessions(p: Parsed): Promise<number> {
+  if (p.flags.has("cost")) return cmdCost(p);
   const store = createSqliteSessionStore(dataDir());
   try {
     const kind = flag(p, "kind");
@@ -328,6 +373,7 @@ function cmdHelp(): number {
       "",
       '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
+      "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
       "  ding record <会话 id> [--out <文件>]",
       "  ding replay <快照文件>",
       "  ding models",

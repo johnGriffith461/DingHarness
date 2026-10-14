@@ -160,12 +160,8 @@ export function injectableTools(mode: ConfirmMode, all: readonly string[]): stri
  * 是不是那三个档位之一"，属于词表的守卫，不属于策略判定。
  */
 
-/**
- * 被拦下时回给模型的那句话。
- *
- * 口径同 `unknownToolNotice`（goose / Factor 9）：**当成一次工具结果回注**，不抛异常。
- * 要说清三件事：没执行、等谁、别再试 —— 否则模型会在这一轮里反复重试同一个工具。
+/*
+ * ⚠️ `pendingApprovalNotice` 搬去 `engine/core/notices.ts` 了（Phase 3.1）——
+ * 与"未知工具 / 执行失败"是一组（Factor 9 的错误回注三件套），
+ * 三者住在一起，两个宿主才不会对同一件事说两样的话。
  */
-export function pendingApprovalNotice(name: string, mode: ConfirmMode): string {
-  return `已把这次「${name}」交给用户确认（当前档位：${mode}），**还没有执行**。请不要重试，直接把需要确认的事告诉用户。`;
-}

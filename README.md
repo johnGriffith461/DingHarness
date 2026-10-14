@@ -74,6 +74,8 @@ engine/                       内核（不 import electron —— 有守卫盯�
 │   ├─ context.ts    上下文规划器（唯一切分 + 用量校准）
 │   ├─ policy.ts     审批闸门判定（run / ask / hide）
 │   ├─ assembly.ts   系统提示词装配
+│   ├─ notices.ts    错误回注三件套（未知工具 / 闸门拦截 / 执行失败，单一来源）
+│   ├─ ledger.ts     成本账本（从事件流现算，不另存统计）
 │   └─ snapshot.ts   快照：重放 diff（重构零漂移的验收器）
 ├─ runtime/    编排层
 │   ├─ loop.ts       ★ 唯一的主循环（streamText + stepCountIs）
@@ -108,6 +110,7 @@ src/           渲染进程（React 19 + zustand + Vite）
 pnpm ding                          # 等同 tsx hosts/cli/ding.ts
 pnpm ding run "把 demo 里的 md 整理成一份纪要" --dir ./demo
 pnpm ding sessions                 # 列会话（--json / --export <id>）
+pnpm ding sessions --cost          # 成本账本（--by session|day|model；数字只来自 provider 上报）
 pnpm ding record <会话 id>          # 录一份快照（fixture）
 pnpm ding replay <快照文件>         # 重放并与录下来的投影 diff —— 重构零漂移的验收器
 pnpm ding models

@@ -4,9 +4,9 @@ import {
   TOOL_POLICY,
   decide,
   injectableTools,
-  pendingApprovalNotice,
   policyOf,
 } from "@engine/core/policy";
+import { pendingApprovalNotice } from "@engine/core/notices";
 import { AGENT_TOOLS } from "@shared/agentTools";
 
 /**

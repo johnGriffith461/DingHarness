@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { unknownToolNotice } from "@engine/core/notices";
 import {
   AGENT_TOOLS,
   MEMORY_LIST_INPUT,
@@ -24,7 +25,6 @@ import {
   toolLabel,
   toolLine,
   toolSpec,
-  unknownToolNotice,
   WRITE_FILE_DESC,
   WRITE_FILE_INPUT,
   WRITE_FILE_TOOL,

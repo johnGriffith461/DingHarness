@@ -3,9 +3,9 @@ import type { ToolSet } from "ai";
 import {
   SPAWN_AGENT_TOOL,
   subagentPrompt,
-  unknownToolNotice,
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
+import { unknownToolNotice } from "../../engine/core/notices";
 import type { ExecutorContext, ToolExecutor, ToolResult } from "../../engine/ports/executor";
 import type { HealthStore } from "../../engine/ports/health";
 import { runSubagent } from "../../engine/runtime/subagent";
