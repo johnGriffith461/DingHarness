@@ -86,7 +86,7 @@ describe("C6-5：巨石文件守卫", () => {
       .map((r) => `${r.rel}（${r.lines} 行 > ${r.limit}）`);
     expect(
       offenders,
-      `这些文件又长回巨石了 —— 请按 docs/PLAN-C6-结构拆分.md 的办法按区域/组件拆开：\n${offenders.join("\n")}`,
+      `这些文件又长回巨石了 —— 请按区域/组件把它拆开：\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 

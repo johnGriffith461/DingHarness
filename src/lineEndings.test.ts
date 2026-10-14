@@ -24,7 +24,7 @@ import { describe, expect, it } from "vitest";
 const ROOT = path.resolve(__dirname, "..");
 
 /** 跟踪目录（与 git 里真正入库的范围一致）。构建产物、依赖、临时目录不在内。 */
-const DIRS = ["src", "shared", "electron", "scripts", "docs"];
+const DIRS = ["src", "shared", "electron", "scripts"];
 const SKIP_DIRS = new Set(["node_modules", "dist", "dist-electron", "release", "data", ".verify", ".git"]);
 const TEXT_EXT = new Set([".ts", ".tsx", ".mjs", ".js", ".cjs", ".json", ".css", ".html", ".yml", ".yaml", ".md", ".txt"]);
 
