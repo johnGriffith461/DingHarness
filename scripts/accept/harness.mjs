@@ -293,6 +293,36 @@ async function bootOnce({ port, dataDir, extraEnv = {}, cwd = ".", timeoutMs = 3
  * @param page 页面
  * @returns 画布是否真的开了（调用方据此断言/记录）
  */
+/**
+ * 读**这个数据目录里所有会话**的记录（走应用的 IPC，不读文件）。
+ *
+ * ## 为什么要有这个帮手（2026-10-14，Phase 4.3）
+ *
+ * 有几条验收脚本原来是**直接读 `sessions/*.jsonl`** 的。存储换成 SQLite 之后
+ * 那条路永远是空的 —— 于是它们全红，而红的原因是**脚本读错了地方**，
+ * 不是产品坏了（`accept-material` / `accept-mcp` 就是这么红的）。
+ *
+ * 走 IPC 之后，存储再换一次也不用动脚本；而且脚本从此只依赖
+ * **应用自己承认的状态**，不依赖"数据摆在哪几个文件里"。
+ *
+ * ⚠️ 用 `list("all")`：工作台任务的日志是 `task-` 前缀，**从来不在聊天列表里** ——
+ * 以前靠"直接读目录"绕过这一点，现在由 `session:list` 的口子把它补上。
+ *
+ * @param page Playwright 页面
+ * @returns 记录数组（所有会话的，按会话顺序拼起来）
+ */
+export async function readAllSessionRecords(page) {
+  return page.evaluate(async () => {
+    const list = await window.shell.session.list("all");
+    const out = [];
+    for (const s of list) {
+      const got = await window.shell.session.load(s.sessionId);
+      for (const rec of got?.records ?? []) out.push(rec);
+    }
+    return out;
+  });
+}
+
 export async function openCanvas(page) {
   if ((await page.locator('[data-testid="wb-canvas"]').count()) > 0) return true;
   if ((await page.locator('[data-testid="wb-skill-panel"]').count()) === 0) {

@@ -267,8 +267,12 @@ const api = {
    * 放在某一侧下会让另一侧"看起来没有这个能力"。
    */
   session: {
-    /** 列聊天会话（重启后把对话列表恢复出来）。 */
-    list: (): Promise<SessionSummary[]> => ipcRenderer.invoke(SESSION_CHANNEL.list),
+    /**
+     * 列会话。不给参数 = 只列聊天（渲染层要的）。
+     * `"all"` 给验收脚本用（它要看得到 `task-` 的工作台日志）。
+     */
+    list: (kind?: "chat" | "task" | "cli" | "all"): Promise<SessionSummary[]> =>
+      ipcRenderer.invoke(SESSION_CHANNEL.list, kind),
     /** 读回一整段会话的记录（投影在渲染层做，主进程不重复算一遍）。 */
     load: (sessionId: string): Promise<{ records: unknown[]; skipped: number }> =>
       ipcRenderer.invoke(SESSION_CHANNEL.load, sessionId),

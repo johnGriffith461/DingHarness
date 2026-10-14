@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, verdict } from "./harness.mjs";
+import { connectWithRetry, pickPort, readAllSessionRecords, verdict } from "./harness.mjs";
 
 /**
  * 「@ 添加资料」——把文件交给 agent（2026-10-14）。
@@ -86,26 +86,20 @@ try {
     .catch(() => null);
 
   report.step = "读会话日志里的请求体";
-  const dir = path.join(DATA, "sessions");
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
-  report.sessionFiles = files;
+  /*
+   * ⚠️ 走应用的 IPC 读会话记录（`readAllSessionRecords`），**不读 sessions/*.jsonl**：
+   * 存储在 Phase 4.3 换成了 SQLite，直接读文件永远是空的 ——
+   * 而那样红出来的理由是"脚本读错了地方"，看着却像"资料没交给模型"。
+   */
+  const records = await readAllSessionRecords(page);
+  report.sessionFiles = records.length; // 名字留着（历史报告里有它），值改成"读到几条"
   let requestText = "";
-  for (const f of files) {
-    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      let rec;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (rec.type !== "request") continue;
-      for (const m of rec.messages ?? []) {
-        if (m.role === "user") requestText += String(m.content ?? "") + "\n";
-      }
+  for (const rec of records) {
+    if (rec.type !== "request") continue;
+    for (const m of rec.messages ?? []) {
+      if (m.role === "user") requestText += String(m.content ?? "") + "\n";
     }
   }
-  report.requestHasMark = requestText.includes(MARK);
   /*
    * ── 这一轮**给模型下发了哪些工具**（2026-10-14 补）──
    *
@@ -114,17 +108,8 @@ try {
    * 事后没法查 —— 现在一条日志就能回答，顺带让这件事**可断言**（不需要模型真的调用）。
    */
   let toolsOffered = null;
-  for (const f of files) {
-    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      let rec;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (rec.type === "request" && Array.isArray(rec.tools)) toolsOffered = rec.tools;
-    }
+  for (const rec of records) {
+    if (rec.type === "request" && Array.isArray(rec.tools)) toolsOffered = rec.tools;
   }
   report.toolsOffered = toolsOffered;
   report.requestHasBlock = requestText.includes("【提到的文件】");

@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
 
@@ -31,7 +32,16 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⑩ 撤销之后工具**立刻**碰不到那个目录了（白名单当场收紧，不用重启）
  */
 const DATA = ".verify/workspace-data";
-const WORK = ".verify/workspace-dir";
+/*
+ * ⚠️ 必须是**绝对**路径（2026-10-14 修）。
+ *
+ * 它会被当成 `run_command` 的 `workdir` **和**命令里那个输出文件的路径前缀。
+ * 用相对路径时，node 会把那个"相对路径"再相对 workdir 解析一次 ——
+ * 于是变成 `.verify/workspace-dir/.verify/workspace-dir/由命令写出.txt`，
+ * 报 ENOENT，看着却像"跑命令没落盘"。基准目录由脚本自身位置算出来，跟着仓库走。
+ */
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const WORK = path.join(ROOT, ".verify", "workspace-dir");
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

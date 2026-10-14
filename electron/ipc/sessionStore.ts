@@ -174,8 +174,13 @@ async function migrateLegacyJsonl(store: SessionStore): Promise<{ files: number;
  * @param ipcMain Electron 的 ipcMain
  */
 export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
-  ipcMain.handle(SESSION_CHANNEL.list, async () => {
+  ipcMain.handle(SESSION_CHANNEL.list, async (_event, kind: unknown) => {
     await ready();
+    // 不给 = 只列聊天（渲染层的既有行为）；`all` = 全都列（验收脚本要看 task- 的）
+    if (kind === "all" || kind === undefined) {
+      return kind === "all" ? desktopSessionStore().list() : desktopSessionStore().list({ kind: "chat" });
+    }
+    if (kind === "chat" || kind === "task" || kind === "cli") return desktopSessionStore().list({ kind });
     return desktopSessionStore().list({ kind: "chat" });
   });
   ipcMain.handle(SESSION_CHANNEL.load, async (_event, sessionId: unknown) => {

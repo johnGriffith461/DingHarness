@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readAllSessionRecords, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**连接器（MCP）接得上、工具交给模型、调用真回到服务端**（2026-10-14）。
@@ -139,21 +139,12 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-testid="wb-send-stop"]'), { timeout: 25000 });
   await page.waitForTimeout(1200);
 
-  const dir = path.join(DATA, "sessions");
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
-  out.sessionFiles = files;
+  // ⚠️ 走 IPC 读记录（存储已换成 SQLite，直接读 sessions/*.jsonl 永远是空的）
+  const records = await readAllSessionRecords(page);
+  out.sessionFiles = records.length; // 名字留着（历史报告里有），值改成"读到几条"
   let toolsOffered = null;
-  for (const f of files) {
-    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      let rec;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (rec.type === "request" && Array.isArray(rec.tools)) toolsOffered = rec.tools;
-    }
+  for (const rec of records) {
+    if (rec.type === "request" && Array.isArray(rec.tools)) toolsOffered = rec.tools;
   }
   out.toolsOffered = toolsOffered;
 

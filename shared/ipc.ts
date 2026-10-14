@@ -493,7 +493,15 @@ export type ShellBridge = {
    * 谁写的（聊天/工作台）都由 `sessionId` 前缀区分。
    */
   session: {
-    list: () => Promise<SessionSummary[]>;
+    /**
+     * 列会话。
+     *
+     * ⚠️ 不给参数 = **只列聊天**（渲染层要的就是这个，行为与以前一致）。
+     * `"all"` 是给验收脚本用的：它要看到工作台任务的日志（`task-` 前缀），
+     * 而那些**从来不在聊天列表里** —— 以前脚本靠"直接读 sessions/ 目录"绕过去，
+     * 存储换成 SQLite 之后那条路没了（Phase 4.3），所以这里补上口子。
+     */
+    list: (kind?: "chat" | "task" | "cli" | "all") => Promise<SessionSummary[]>;
     load: (sessionId: string) => Promise<{ records: unknown[]; skipped: number }>;
   };
   remote: {
