@@ -1,53 +1,29 @@
-import { jsonSchema, tool, type ToolSet } from "ai";
+import { jsonSchema, type ToolSet } from "ai";
 import { isMcpTool, parseMcpToolName } from "../../shared/mcp";
 import {
-  CANVAS_ADD_NODE_DESC,
-  CANVAS_ADD_NODE_INPUT,
   CANVAS_ADD_NODE_TOOL,
-  MAX_SUBAGENT_DEPTH,
-  MEMORY_LIST_DESC,
-  MEMORY_LIST_INPUT,
-  MEMORY_SAVE_DESC,
-  MEMORY_SAVE_INPUT,
-  MEMORY_SAVE_TOOL,
+  EDIT_FILE_TOOL,
+  LIST_DIR_TOOL,
+  LIST_FILES_TOOL,
   MEMORY_LIST_TOOL,
-  SCHEDULE_CREATE_DESC,
-  SCHEDULE_CREATE_INPUT,
+  MEMORY_SAVE_TOOL,
+  READ_FILE_TOOL,
+  RUN_COMMAND_TOOL,
   SCHEDULE_CREATE_TOOL,
-  SCHEDULE_LIST_DESC,
-  SCHEDULE_LIST_INPUT,
   SCHEDULE_LIST_TOOL,
-  SPAWN_AGENT_DESC,
-  SPAWN_AGENT_INPUT,
+  SEARCH_FILES_TOOL,
   SPAWN_AGENT_TOOL,
   subagentPrompt,
-} from "../../shared/agentTools";
-import type { ConfirmMode } from "../../shared/ipc";
-import { decide, injectableTools, pendingApprovalNotice } from "../../engine/core/policy";
-import {
-  LIST_FILES_DESC,
-  LIST_FILES_INPUT,
-  LIST_FILES_TOOL,
-  EDIT_FILE_DESC,
-  EDIT_FILE_INPUT,
-  EDIT_FILE_TOOL,
-  LIST_DIR_DESC,
-  LIST_DIR_INPUT,
-  LIST_DIR_TOOL,
-  READ_FILE_DESC,
-  READ_FILE_INPUT,
-  READ_FILE_TOOL,
-  RUN_COMMAND_DESC,
-  RUN_COMMAND_INPUT,
-  RUN_COMMAND_TOOL,
-  SEARCH_FILES_DESC,
-  SEARCH_FILES_INPUT,
-  SEARCH_FILES_TOOL,
   unknownToolNotice,
-  WRITE_FILE_DESC,
-  WRITE_FILE_INPUT,
   WRITE_FILE_TOOL,
 } from "../../shared/agentTools";
+import type { ConfirmMode } from "../../shared/ipc";
+import {
+  buildToolSet,
+  createToolRegistry,
+  type ToolEntry,
+} from "../../engine/runtime/registry";
+import type { ToolExecutor } from "../../engine/ports/executor";
 import { formatFileList } from "../../shared/fileList";
 import { addMemory, MEMORY_MAX } from "../../shared/memory";
 import { describeNextRun, makeJob, REPEAT_LABEL, validateJob, type RepeatType } from "../../shared/schedule";
@@ -392,22 +368,6 @@ export async function runToolOnce(
   }
 }
 
-/** 给一次执行套上审批闸门（§143）。
- *
- * `ask` 档下**不执行**，回一条"已交给用户确认"的结果 —— 口径同 goose / Factor 9：
- * 当成一次工具结果回注，让模型知道"没执行、在等谁、别重试"。
- *
- * 注意这里是**执行前**判定（不是"执行了再问"）：写着"确认"却已经把事做完，
- * 那是本项目最不能接受的那种"看着有、其实没用"。
- */
-function gated<T>(name: string, mode: ConfirmMode, run: (input: T, env: ToolEnv) => Promise<unknown> | unknown, env: ToolEnv) {
-  return async (input: T): Promise<unknown> => {
-    if (decide(mode, name) === "ask") {
-      return { pending: true, notice: pendingApprovalNotice(name, mode) };
-    }
-    return run(input, env);
-  };
-}
 /**
  * 一次请求的"环境"（§150）。
  *
@@ -433,159 +393,62 @@ export type ToolEnv = {
 };
 
 /**
+ * 宿主的**执行体**：内核只认 `ToolExecutor` 这个接口，这里把它接到真实工具上。
+ *
+ * ⚠️ 它同时是"宿主边界"的落点：内核（`engine/`）不知道记忆/画布/定时任务存在，
+ * 只知道"给我名字和参数，我给你结果"。
+ */
+const hostExecutor: ToolExecutor = {
+  run: (name, input, ctx) =>
+    runToolOnce(name, input, {
+      mode: ctx.mode,
+      provider: ctx.provider,
+      ...(ctx.model ? { model: ctx.model } : {}),
+      ...(ctx.depth === undefined ? {} : { depth: ctx.depth }),
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    }),
+};
+
+/**
+ * 连接器（MCP）交出来的工具 → 注册表条目。
+ *
+ * schema 用服务端给的 JSON Schema **直接转**（`jsonSchema()`）—— 不重新描述一遍：
+ * MCP 服务端本来就是按 JSON Schema 暴露参数的，再抄一份必然漂移。
+ */
+function mcpToolEntries(): ToolEntry[] {
+  return mcpToolBindings().map((binding) => ({
+    name: binding.localName,
+    source: "mcp" as const,
+    description: binding.description,
+    inputSchema: jsonSchema((binding.inputSchema as never) ?? { type: "object", properties: {} }),
+  }));
+}
+
+/**
  * 交给模型的工具集。
+ *
+ * ⚠️ 这里的每一件事都已收进内核（`engine/runtime/registry.ts`）：
+ * 有哪些工具、哪些该 `hide`、哪些要 `ask`、深度封顶 —— 本函数只是**装配**：
+ * 内置声明来自 `AGENT_TOOLS`，连接器工具来自 MCP，执行体是本文件上面那个。
+ * 在这之前，13 个工具每个都手抄一遍 `description`/`inputSchema`/`execute`，
+ * 于是"说明"与"判定"与"执行"三份东西各长各的。
  *
  * @param env 闸门档位 / provider / 深度
  * @returns 该档位下应当注入的工具；被 `hide` 的**不在这里**（模型看不到它）
  */
 export function agentTools(env: ToolEnv): ToolSet {
-  const { mode, depth = 0 } = env;
-  const tools: ToolSet = {
-    [MEMORY_SAVE_TOOL]: tool({
-      description: MEMORY_SAVE_DESC,
-      inputSchema: MEMORY_SAVE_INPUT,
-      execute: gated<{ text: string }>(MEMORY_SAVE_TOOL, mode, (input) => EXECUTORS[MEMORY_SAVE_TOOL](input, env), env),
-    }),
-    [MEMORY_LIST_TOOL]: tool({
-      description: MEMORY_LIST_DESC,
-      inputSchema: MEMORY_LIST_INPUT,
-      execute: gated<Record<string, never>>(MEMORY_LIST_TOOL, mode, (input) => EXECUTORS[MEMORY_LIST_TOOL](input, env), env),
-    }),
-    [SCHEDULE_CREATE_TOOL]: tool({
-      description: SCHEDULE_CREATE_DESC,
-      inputSchema: SCHEDULE_CREATE_INPUT,
-      execute: gated<{ title: string; prompt: string; repeat: RepeatType; customMinutes?: number }>(
-        SCHEDULE_CREATE_TOOL,
-        mode,
-        (input) => EXECUTORS[SCHEDULE_CREATE_TOOL](input, env),
-        env,
-      ),
-    }),
-    [SCHEDULE_LIST_TOOL]: tool({
-      description: SCHEDULE_LIST_DESC,
-      inputSchema: SCHEDULE_LIST_INPUT,
-      execute: gated<Record<string, never>>(SCHEDULE_LIST_TOOL, mode, (input) => EXECUTORS[SCHEDULE_LIST_TOOL](input, env), env),
-    }),
-    [CANVAS_ADD_NODE_TOOL]: tool({
-      description: CANVAS_ADD_NODE_DESC,
-      inputSchema: CANVAS_ADD_NODE_INPUT,
-      execute: gated<{ kind: "markdown" | "code"; text: string; lang?: string }>(
-        CANVAS_ADD_NODE_TOOL,
-        mode,
-        (input) => EXECUTORS[CANVAS_ADD_NODE_TOOL](input, env),
-        env,
-      ),
-    }),
-    [LIST_FILES_TOOL]: tool({
-      description: LIST_FILES_DESC,
-      inputSchema: LIST_FILES_INPUT,
-      execute: gated<Record<string, never>>(LIST_FILES_TOOL, mode, (input) => EXECUTORS[LIST_FILES_TOOL](input, env), env),
-    }),
-    [READ_FILE_TOOL]: tool({
-      description: READ_FILE_DESC,
-      inputSchema: READ_FILE_INPUT,
-      execute: gated<{ path: string }>(READ_FILE_TOOL, mode, (input) => EXECUTORS[READ_FILE_TOOL](input, env), env),
-    }),
-    [LIST_DIR_TOOL]: tool({
-      description: LIST_DIR_DESC,
-      inputSchema: LIST_DIR_INPUT,
-      execute: gated<{ path?: string; depth?: number; pattern?: string }>(LIST_DIR_TOOL, mode, (input) =>
-        EXECUTORS[LIST_DIR_TOOL](input, env), env,
-      ),
-    }),
-    [SEARCH_FILES_TOOL]: tool({
-      description: SEARCH_FILES_DESC,
-      inputSchema: SEARCH_FILES_INPUT,
-      execute: gated<{ pattern: string; path?: string; include?: string; literal?: boolean; limit?: number }>(
-        SEARCH_FILES_TOOL,
-        mode,
-        (input) => EXECUTORS[SEARCH_FILES_TOOL](input, env),
-        env,
-      ),
-    }),
-    [EDIT_FILE_TOOL]: tool({
-      description: EDIT_FILE_DESC,
-      inputSchema: EDIT_FILE_INPUT,
-      execute: gated<{ path: string; oldText: string; newText: string; replaceAll?: boolean }>(
-        EDIT_FILE_TOOL,
-        mode,
-        (input) => EXECUTORS[EDIT_FILE_TOOL](input, env),
-        env,
-      ),
-    }),
-    [RUN_COMMAND_TOOL]: tool({
-      description: RUN_COMMAND_DESC,
-      inputSchema: RUN_COMMAND_INPUT,
-      execute: gated<{ command: string; workdir?: string; timeout?: number }>(RUN_COMMAND_TOOL, mode, (input) =>
-        EXECUTORS[RUN_COMMAND_TOOL](input, env), env,
-      ),
-    }),
-    [WRITE_FILE_TOOL]: tool({
-      description: WRITE_FILE_DESC,
-      inputSchema: WRITE_FILE_INPUT,
-      execute: gated<{ path: string; content: string; overwrite?: boolean }>(
-        WRITE_FILE_TOOL,
-        mode,
-        (input) => EXECUTORS[WRITE_FILE_TOOL](input, env),
-        env,
-      ),
-    }),
-    [SPAWN_AGENT_TOOL]: tool({
-      description: SPAWN_AGENT_DESC,
-      inputSchema: SPAWN_AGENT_INPUT,
-      execute: gated<{ task: string; context?: string }>(SPAWN_AGENT_TOOL, mode, (input) =>
-        EXECUTORS[SPAWN_AGENT_TOOL](input, env), env,
-      ),
-    }),
-  };
-
-  /*
-   * **连接器（MCP）的工具**并进来（2026-10-14）。
-   *
-   * 名字是 `mcp__<server>__<tool>`，schema 用服务端给的 JSON Schema 直接转
-   * （`jsonSchema()`）—— 不重新描述一遍：MCP 服务端本来就是按 JSON Schema 暴露参数的。
-   *
-   * 闸门：`decide()` 对 MCP 工具**默认按写对待**（见 `shared/permissions.ts` 的说明），
-   * 所以「按需确认」档下会先问一次。
-   */
-  for (const binding of mcpToolBindings()) {
-    tools[binding.localName] = tool({
-      description: binding.description,
-      inputSchema: jsonSchema((binding.inputSchema as never) ?? { type: "object", properties: {} }),
-      execute: async (input: unknown) => {
-        if (decide(mode, binding.localName) === "ask") {
-          return { pending: true, notice: pendingApprovalNotice(binding.localName, mode) };
-        }
-        const res = await callMcpTool(binding.localName, input);
-        return {
-          ok: res.ok,
-          line: describeMcpLine(binding.server, binding.tool, !res.ok || res.isError),
-          ...(res.ok ? { text: res.text } : { error: res.error }),
-        };
-      },
-    });
-  }
-
-  /*
-   * `hide` 的从注入列表里去掉。
-   * 与"注入了但一律被拒"是两回事：模型看不到，就不会在回复里说
-   * "我来调用 xxx" 然后失败 —— 那种失败会让人以为产品坏了。
-   */
-  const keep = new Set(injectableTools(mode, Object.keys(tools)));
-
-  /*
-   * ⭐ 深度到顶就把 `spawn_agent` **拿掉**（§150）。
-   *
-   * 注意是"拿掉"而不是"拦下"：模型看不到它，就不会试着派子智能体然后失败。
-   * 这也让"最多一层"这件事**不需要靠运行时判断**去保证。
-   */
-  if (depth >= MAX_SUBAGENT_DEPTH) keep.delete(SPAWN_AGENT_TOOL);
-
-  const out: ToolSet = {};
-  for (const [name, t] of Object.entries(tools)) {
-    if (keep.has(name)) out[name] = t;
-  }
-  return out;
+  return buildToolSet({
+    registry: createToolRegistry({ extra: mcpToolEntries() }),
+    mode: env.mode,
+    executor: hostExecutor,
+    ctx: {
+      mode: env.mode,
+      provider: env.provider,
+      ...(env.model ? { model: env.model } : {}),
+      ...(env.signal ? { signal: env.signal } : {}),
+      ...(env.depth === undefined ? {} : { depth: env.depth }),
+    },
+  });
 }
 
 /**
