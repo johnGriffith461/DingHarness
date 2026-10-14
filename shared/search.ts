@@ -36,7 +36,32 @@ export const SEARCH_LABELS = {
   /** `search_history` / `search_history_clear` —— 记下来，本机版还没做搜索历史 */
   history: "全部搜索记录",
   historyClear: "清空全部搜索记录",
+  /*
+   * ── 下面三条是**本机自定措辞**（§160 的补全，2026-10-14）──────────
+   * 证据里没有对应键（本体那三个输入框的清除/计数文案没被采到），
+   * 所以**不假装是原版那份** —— 按本项目一贯的做法：能对上的逐字用证据，对不上的如实标自定。
+   */
+  /** 输入框里那颗清除键的可访问名（图标按钮，见 `uiCraft` 守卫 ⑧） */
+  clear: "清除",
+  /** 空态里的出路（原来只有一句"无匹配"，没有可点的东西） */
+  clearFilter: "清除筛选",
+  /** 命中计数：`命中 N 条` */
+  hitsPrefix: "命中",
+  hitsSuffix: "条",
 } as const;
+
+/**
+ * 命中计数那句话（**本机自定措辞**，见上面 `SEARCH_LABELS` 的说明）。
+ *
+ * 为什么要有它：搜索完只看到结果变少，**不知道筛掉了多少** ——
+ * 用户会怀疑"是不是目录本身就少了几条"。有个数字就一目了然。
+ *
+ * @param count 命中几条
+ * @returns 例如 `命中 3 条`
+ */
+export function hitLabel(count: number): string {
+  return `${SEARCH_LABELS.hitsPrefix} ${count} ${SEARCH_LABELS.hitsSuffix}`;
+}
 
 /** 搜索范围（决定空态说哪句）。 */
 export type SearchScope = "skills" | "files";

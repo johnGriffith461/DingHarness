@@ -4,10 +4,10 @@
  */
 
 import { useEffect, useState } from "react";
-import { SEARCH_LABELS, placeholderFor, searchItems } from "@shared/search";
+import { SEARCH_LABELS, hitLabel, placeholderFor, searchItems } from "@shared/search";
 import { SearchHistoryStrip } from "./SearchHistoryStrip";
 import { useSearchHistoryStore } from "./searchHistoryStore";
-import { Check, ChevronDown, List, Plus, Search, Settings2 } from "lucide-react";
+import { Check, ChevronDown, List, Plus, Search, Settings2, X } from "lucide-react";
 import { ADMIN_TABS } from "./copy";
 import { FEATURED_ITEMS, RECOMMENDED_PLUGINS, SKILL_GROUPS, type CatalogItem } from "./catalog";
 import { findItemIn, useLibraryStore } from "./libraryStore";
@@ -43,9 +43,14 @@ export function PluginsPage() {
   /* 技能搜索（§160）：`search_skills_input_placeholder` = 搜索技能 */
   const [skillQuery, setSkillQuery] = useState("");
   const recordSearch = useSearchHistoryStore((s) => s.record);
-  /** 什么时候算"搜过一次"：按回车、或离开输入框时（**不是每敲一个字都记**）。 */
-  const commitSkillQuery = (): void => {
-    if (skillQuery.trim()) recordSearch("skills", skillQuery);
+  /**
+   * 什么时候算"搜过一次"：按回车、或离开输入框时（**不是每敲一个字都记**）。
+   * 带参调用是给"清除"用的：清空**不算搜过**，不能往历史里塞一条空记录
+   * （`setSkillQuery("")` 是异步的，这里读闭包只会读到旧值，所以必须显式传）。
+   */
+  const commitSkillQuery = (next?: string): void => {
+    const q = next ?? skillQuery;
+    if (q.trim()) recordSearch("skills", q);
   };
   /** 管理页的三 tab：插件 / 技能 / **连接器**（与市场页的「工作伙伴」不同）。 */
   const [manageTab, setManageTab] = useState<"插件" | "技能" | "连接器">("插件");
@@ -247,9 +252,40 @@ export function PluginsPage() {
             onKeyDown={(e) => {
               if (e.key === "Enter") commitSkillQuery();
             }}
-            onBlur={commitSkillQuery}
+            onBlur={() => commitSkillQuery()}
           />
+          {/*
+            「清除」（§160 补全，2026-10-14）：原来输入框里没有 ×，
+            用户要"不搜了"只能全选删掉 —— 而搜索框旁边空出一大片。
+            只在有内容时出现（空的时候摆一颗 × 是没有意义的）。
+          */}
+          {skillQuery ? (
+            <button
+              className="wb-search-x"
+              type="button"
+              aria-label={SEARCH_LABELS.clear}
+              title={SEARCH_LABELS.clear}
+              data-testid="wb-plugins-search-clear"
+              onClick={() => {
+                setSkillQuery("");
+                commitSkillQuery("");
+              }}
+            >
+              <X size={12} />
+            </button>
+          ) : null}
         </label>
+        {/*
+          命中计数：搜索完只看到结果变少，**不知道筛掉了多少** ——
+          有个数字就不会怀疑"目录本身少了几条"。
+          和空态一样只在**技能**栏显示：别的栏里结果根本不渲染，
+          摆一个够不着的数字只会让人以为"筛没了"。
+        */}
+        {tab === "技能" && skillQuery.trim() ? (
+          <div className="wb-search-hits" data-testid="wb-plugins-hits">
+            {hitLabel(filteredSkillGroups.reduce((n, g) => n + g.items.length, 0))}
+          </div>
+        ) : null}
         {skillQuery ? null : <SearchHistoryStrip scope="skills" onPick={setSkillQuery} />}
         <div className="wb-chips" data-testid="wb-plugin-categories">
           {PLUGIN_CATEGORIES.map((c) => (
@@ -288,9 +324,26 @@ export function PluginsPage() {
               而不是留一片空白让人以为页面坏了。
             */}
             {skillEmpty ? (
-              <p className="wb-search-empty" data-testid="wb-plugins-empty">
-                {SEARCH_LABELS.skillsEmpty}
-              </p>
+              <div className="wb-search-empty" data-testid="wb-plugins-empty">
+                <p>{SEARCH_LABELS.skillsEmpty}</p>
+                {/*
+                  空态**必须给出路**：原来只有这一句说明，用户唯一的办法是自己把字删掉。
+                  （本项目的纪律：拦下就要给出路 —— 见 `ToolTraceList` 那段自述。）
+                */}
+                {skillQuery.trim() ? (
+                  <button
+                    className="wb-page-btn"
+                    type="button"
+                    data-testid="wb-plugins-empty-clear"
+                    onClick={() => {
+                      setSkillQuery("");
+                      commitSkillQuery("");
+                    }}
+                  >
+                    {SEARCH_LABELS.clearFilter}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </>
         ) : (

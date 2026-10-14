@@ -417,6 +417,49 @@ html[data-kb="1"] .wb-searchbox:focus-within {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ * 搜索的「清除 × / 命中 N 条 / 空态给出路」（2026-10-14，§160 补全）
+ *
+ * 审计（`docs/UI-做工体检.md` §3.12）把这三条标成**要做功能，不是改样式**：
+ * ① 输入框里没有 ×，想"不搜了"只能全选删掉；② 搜不到只剩一句说明，
+ * 用户唯一出路是自己把字删掉；③ 只看到结果变少，**不知道筛掉了多少**。
+ *
+ * 这些都是"缺了也能用、但用着别扭"的洞 —— 所以按功能补，样式只做最小的那层。
+ * ==================================================================== */
+.wb-search-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 桌面可点区域底线 24px（和搜索历史那颗 × 同一口径） */
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease-out);
+}
+.wb-search-x:hover { color: var(--fg); }
+/* 数字用等宽：不然"命中 1 条"→"命中 11 条"会左右跳 */
+.wb-search-hits {
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* 空态 = 一句说明 + 一个动作（横排会挤，所以竖着放，动作贴左） */
+.wb-search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.wb-search-empty p { margin: 0; }
+/* 云盘空态也长出了"说明 + 动作"两行：段落的默认外边距会把虚线框撑高，
+   动作按钮跟着原来的 `text-align: center` 居中（和那句话同一列）。 */
+.wb-cloud-empty p { margin: 0; }
+
+/* ══════════════════════════════════════════════════════════════════════
  * 画布里的对话侧栏会把画布压成 **0 宽**（2026-10-14 实测修）
  *
  * ## 量到的现象（打包产物、窗口 1440）

@@ -55,7 +55,20 @@ function readCanvas(text: string): { declared: Set<string>; used: Set<string> } 
   const declared = new Set<string>();
   const used = new Set<string>();
 
-  const rules = [...text.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  /*
+   * ⚠️ 判定前**必须先去掉注释**（2026-10-14）。
+   *
+   * 切规则用的是正则 `([^{}]+)\{`，它会把**紧邻规则上方的注释**一起算进"选择器"文本里。
+   * 于是只要某条规则上面那段注释里提了一句 `.wb-canvas`，那条规则就被当成**画布规则**：
+   * 实测就是 `dingwork-tokens.css` 里 `.wb h1/h2 { font-family: var(--dw-font-display) }`
+   * 上方的注释解释"画布作用域显式排除"，结果 `--dw-font-display` 被算成"画布引用的变量"，
+   * 把下面那条"当前实况 1 个"的断言顶红。
+   *
+   * 这与 `uiCraft.test.ts` ①/⑨ 踩的是**同一类**坑（注释被当成代码）—— 那边也是先去掉
+   * 注释才判对的。选择器归选择器、说明归说明。
+   */
+  const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...strip(text).matchAll(/([^{}]+)\{([^{}]*)\}/g)];
   for (const rule of rules) {
     const selector = rule[1];
     const body = rule[2];

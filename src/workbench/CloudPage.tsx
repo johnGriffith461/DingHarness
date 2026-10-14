@@ -8,14 +8,14 @@ import type { ShellBridge } from "@shared/ipc";
 import { countByKind, DRIVE_KIND_META, formatBytes, formatDriveTime, selectEntries, type DriveEntry, type DriveKind, type DriveTab, ORIGIN_LABEL } from "@shared/drive";
 import { RENAME_LABELS, isTextKind, planRename } from "@shared/driveFiles";
 import { DOWNLOAD_LABELS, downloadNote } from "@shared/driveOps";
-import { emptyLabelFor, placeholderFor } from "@shared/search";
+import { SEARCH_LABELS, emptyLabelFor, hitLabel, placeholderFor } from "@shared/search";
 import { SearchHistoryStrip } from "./SearchHistoryStrip";
 import { UPLOAD_HINTS } from "@shared/upload";
 import { UploadPanel } from "./UploadPanel";
 import { useUploadStore } from "./uploadStore";
 import { useSearchHistoryStore } from "./searchHistoryStore";
 import { deleteConfirmTitle, DRIVE_LABELS, DRIVE_SORTS, DRIVE_SORT_LABEL, DRIVE_TABS, DRIVE_TAB_LABEL, emptyTextFor, filterByKind, filterByQuery, kindOptions, sortEntries, storageLine, untitledName, validateDriveName, type DriveSort } from "@shared/driveOps";
-import { FileText, FolderOpen, Grid3x3, List, Plus, Search, Upload } from "lucide-react";
+import { FileText, FolderOpen, Grid3x3, List, Plus, Search, Upload, X } from "lucide-react";
 import { useLibraryStore } from "./libraryStore";
 import { useReaderStore } from "./readerStore";
 import { useWorkbenchStore } from "./store";
@@ -105,8 +105,14 @@ export function CloudPage() {
   /* 云盘搜索（§160）：`drive_searchWindow_placeholder` = 搜索文件 */
   const [fileQuery, setFileQuery] = useState("");
   const recordSearch = useSearchHistoryStore((s) => s.record);
-  const commitFileQuery = (): void => {
-    if (fileQuery.trim()) recordSearch("files", fileQuery);
+  /**
+   * 带参调用是给"清除/空态给出路"用的：清空**不算搜过**，
+   * 不能往历史里塞一条空记录（`setFileQuery("")` 是异步的，
+   * 这里读闭包只会读到旧值，所以必须显式传）。
+   */
+  const commitFileQuery = (next?: string): void => {
+    const q = next ?? fileQuery;
+    if (q.trim()) recordSearch("files", q);
   };
   /* 删除确认与重命名（§158）：两个都要对话框，删文件不可逆、改名会影响引用 */
   const [confirmDel, setConfirmDel] = useState<DriveEntry | null>(null);
@@ -291,10 +297,38 @@ export function CloudPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitFileQuery();
               }}
-              onBlur={commitFileQuery}
+              onBlur={() => commitFileQuery()}
             />
+            {/* 清除 ×：只在有内容时出现（空的时候摆一颗 × 没有意义） */}
+            {fileQuery ? (
+              <button
+                className="wb-search-x"
+                type="button"
+                aria-label={SEARCH_LABELS.clear}
+                title={SEARCH_LABELS.clear}
+                data-testid="wb-cloud-search-clear"
+                onClick={() => {
+                  setFileQuery("");
+                  commitFileQuery("");
+                }}
+              >
+                <X size={12} />
+              </button>
+            ) : null}
           </label>
-          {fileQuery ? null : <SearchHistoryStrip scope="files" onPick={setFileQuery} />}
+          {/*
+            搜索历史条与命中数**抢同一个位置**：不搜的时候给"上次搜过什么"，
+            搜起来就换成"这一搜命中几条" —— 两个都摆上去会把工具栏挤爆。
+          */}
+          {fileQuery.trim() ? (
+            visible.length > 0 ? (
+              <span className="wb-search-hits" data-testid="wb-cloud-hits">
+                {hitLabel(visible.length)}
+              </span>
+            ) : null
+          ) : (
+            <SearchHistoryStrip scope="files" onPick={setFileQuery} />
+          )}
           <label className="wb-cloud-filter" title={DRIVE_LABELS.filter}>
             <select
               data-testid="wb-cloud-filter"
@@ -340,12 +374,33 @@ export function CloudPage() {
 
         {visible.length === 0 ? (
           <div className="wb-cloud-empty" data-testid="wb-cloud-empty">
-            {tab === "starred"
-              ? "还没有收藏的文件（点文件名旁的 ☆ 收藏）"
-              : entries.length === 0
-                ? emptyTextFor(kindFilter)
-                : /* 有搜索结果这一说的时候，说清"是这一搜没有"（`drive_searchWindow_result_empty`） */
-                  emptyLabelFor("files", visible.length) || "这个筛选下没有文件"}
+            <p>
+              {tab === "starred"
+                ? "还没有收藏的文件（点文件名旁的 ☆ 收藏）"
+                : entries.length === 0
+                  ? emptyTextFor(kindFilter)
+                  : /* 有搜索结果这一说的时候，说清"是这一搜没有"（`drive_searchWindow_result_empty`） */
+                    emptyLabelFor("files", visible.length) || "这个筛选下没有文件"}
+            </p>
+            {/*
+              空态**必须给出路**：原来只有一句话，用户唯一的办法是自己把搜索词/筛选逐个清掉。
+              只有当"确实有东西在筛"时才给这颗按钮 ——
+              收藏夹为空、云盘本来就没文件，清筛选是清不出来的（那属于空盘，不是空筛选）。
+            */}
+            {fileQuery.trim() || kindFilter !== "all" ? (
+              <button
+                className="wb-page-btn"
+                type="button"
+                data-testid="wb-cloud-empty-clear"
+                onClick={() => {
+                  setFileQuery("");
+                  commitFileQuery("");
+                  setKindFilter("all");
+                }}
+              >
+                {SEARCH_LABELS.clearFilter}
+              </button>
+            ) : null}
           </div>
         ) : (
           <div className={`wb-table${grid ? " is-grid" : ""}`} data-testid="wb-cloud-table">
