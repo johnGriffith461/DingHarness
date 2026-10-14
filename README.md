@@ -84,14 +84,16 @@ engine/                       内核（不 import electron —— 有守卫盯�
 │   ├─ providers.ts  provider 表（baseURL 惰性读环境变量）
 │   └─ tools/        与宿主无关的文件工具（read/write/edit/exec/search）
 ├─ ports/      宿主适配接口：store / health / executor
-├─ adapters/   SQLite 事件存储（node:sqlite：CLI 与桌面同一份实现）
+├─ adapters/   SQLite 事件存储（node:sqlite：CLI 与桌面**同一份实现**）
 └─ index.ts    createEngine(ports) → { run, resume, replay, record }
 
 hosts/
 ├─ cli/ding.ts     命令行宿主：run / sessions / record / replay / models
-└─ （桌面宿主暂仍在 electron/，Phase 4 切换）
+└─ （桌面宿主在 electron/：窗口与各 store；跑一轮也走 createEngine）
 
 electron/      桌面宿主：窗口、IPC、各 store（JSON 落盘）、MCP 连接器
+               ├─ 会话事件 → engine 的 SQLite 库（userData/sessions.db）
+               └─ 启动时把旧 sessions/*.jsonl 一次性迁进来（只读旧、写新、不删旧）
 shared/        跨宿主契约：ipc.ts（含档位词表）/ agentTools.ts（工具声明）/ mcp.ts
 src/           渲染进程（React 19 + zustand + Vite）
 ```
@@ -133,7 +135,8 @@ pnpm test        # vitest（内核测试在 engine/**/*.test.ts，与渲染层�
 - 仅 Windows 构建；macOS / Linux 尚未验证。
 - `run_command` 与用户同权限运行，**没有沙箱**。
 - 只有 OpenAI 兼容一种 provider 通道（协议分层在 Phase 5/6 才做）。
-- 桌面宿主**尚未**切到新内核（Phase 4）；CLI 已经跑在新内核上。
+- 桌面与 CLI 都已跑在新内核上；两者的会话事件存在同一个 SQLite 库里（各自的数据目录）。
+- 旧 JSONL 数据会在启动时自动迁移；迁移**不删**旧文件。
 - 尚无插件机制：能力来自内置工具与 MCP。
 
 ## 许可
