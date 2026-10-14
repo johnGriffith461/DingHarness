@@ -180,7 +180,46 @@ export const NO_PAGE_HINT =
  *   `ok=false` 表示端口始终没开（多半是被单实例锁挡住），调用方应据此**报出真因**，
  *   而不是继续往下点按钮然后报一个看不懂的超时。
  */
-export async function bootApp({ port, dataDir, extraEnv = {}, cwd = "D:/DoubaoWorkClone", timeoutMs = 30000 }) {
+/**
+ * 起应用并确保**它真的可用**。
+ *
+ * ## 为什么要"换端口重试"（2026-10-14 加）
+ * 这台机器上会出现**成段回环端口对 Electron 的调试服务器不通**的情况
+ * （实测：端口开得起来、`DevTools listening on ws://…` 也打了，但 HTTP/WS 握手超时；
+ * 同一时刻 9200–9450、9700+ 正常，9500–9650 全挂，而且会随时间变）。
+ * 不重试的后果是 `connectOverCDP: connect ETIMEDOUT` —— 读的人只会以为脚本坏了。
+ *
+ * 关键点：判据必须是**真的问一次 CDP**（`bootOnce` 里的 `/json/version`），
+ * 而不是"端口开着"或"用 Node 服务器探一下这个端口" ——
+ * 后者会误判（Node 服务器在 9579 上通，Electron 的调试服务器在那里却不答）。
+ *
+ * @param options 同 `bootOnce`；`port` 是首选，不通会就近换（最多 3 个）
+ * @returns `bootOnce` 的返回值（`port` 是**实际**用的那个）
+ */
+export async function bootApp(options) {
+  const tried = [];
+  let candidate = options.port;
+  for (let i = 0; i < 3; i += 1) {
+    const booted = await bootOnce({ ...options, port: candidate });
+    if (booted.ok) return booted;
+    tried.push(candidate);
+    try {
+      booted.child.kill();
+    } catch {
+      /* 已经死了就算了 */
+    }
+    /*
+     * 换一个候选：**跳到另一个底座**再挑。
+     * 原来写的是 `candidate + 7` —— 实测那一段（9500–9650）会整段不通，
+     * 就近换还是会落在坏区间里（三次都失败）。跳底座才能真正换出去。
+     */
+    const altBase = [9711, 9211, 12311, 14311][i % 4];
+    candidate = await pickPort([altBase]);
+  }
+  return { child: null, port: candidate, ok: false, getLog: () => `试过的端口都不通：${tried.join(" / ")}` };
+}
+
+async function bootOnce({ port, dataDir, extraEnv = {}, cwd = "D:/DoubaoWorkClone", timeoutMs = 30000 }) {
   const env = { ...process.env, ...extraEnv };
   delete env.ELECTRON_RUN_AS_NODE;
   env.DSH_DEBUG_PORT = String(port);
@@ -212,7 +251,31 @@ export async function bootApp({ port, dataDir, extraEnv = {}, cwd = "D:/DoubaoWo
   child.stdout?.on("data", (d) => cap(String(d)));
   child.stderr?.on("data", (d) => cap(String(d)));
 
-  const ok = await waitForPort(port, timeoutMs);
+  /*
+   * ⚠️ `ok` 判的是**CDP 真的能握手**，不只是"端口开着"（2026-10-14 修）。
+   *
+   * 起因：`accept-html` 在本机某个端口上**端口开得起来、`fetch /json/version` 却超时**
+   * （`netstat` 能看到那条 TIME_WAIT；同一个应用换 9521 立刻 200）——
+   * 于是 `connectOverCDP` 报 `connect ETIMEDOUT`，看着像脚本坏了。
+   * 光等端口会把这类失败放进"应用已就绪"里，下一步才炸，而且炸得看不懂。
+   * （台机器上这已经是第二次了：9660 那次也是"换个端口就好"。）
+   *
+   * 所以：先等端口，再**问一次 CDP 的 HTTP 端点** —— 只有它答 200 才算 ok。
+   */
+  const opened = await waitForPort(port, timeoutMs);
+  let ok = false;
+  if (opened) {
+    const deadline = Date.now() + Math.max(3000, timeoutMs / 3);
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1500) });
+        if (res.ok) { ok = true; break; }
+      } catch {
+        /* 端点还没准备好，或者这个端口上的握手在这台机器上根本不通 */
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
   return { child, port, ok, getLog: () => log };
 }
 
@@ -252,6 +315,147 @@ export async function closeCanvas(page) {
   await page.locator('[data-testid="wb-canvas-toggle"]').click();
   await page.waitForTimeout(1200);
   return (await page.locator('[data-testid="wb-canvas"]').count()) === 0;
+}
+
+/**
+ * 连 CDP，失败**重试几次**（2026-10-14）。
+ *
+ * 这台机器上偶发 `connectOverCDP` 抖动：HTTP 端点答得出来、WebSocket 却
+ * `ETIMEDOUT`，或者连上后立刻 `code=1006` 断开。这类抖动不该判脚本死刑，
+ * 也不该被当成"产品坏了" —— 用这个助手包一层。
+ *
+ * ⚠️ 但**同一个端口**上反复 1006 时，重试救不了（那是这个端口的 WS 路径坏了）——
+ * 那种情况要看 `openApp`（它会换端口重来）。
+ *
+ * @param browserType Playwright 的 `chromium`
+ * @param url `http://127.0.0.1:<port>`
+ * @param attempts 最多试几次
+ * @returns 连上的 browser
+ */
+export async function connectWithRetry(browserType, url, attempts = 4) {
+  let last = null;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await browserType.connectOverCDP(url);
+    } catch (error) {
+      last = error;
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+  throw last;
+}
+
+/**
+ * 起应用**并连上**（换端口重试）—— 新写验收直接用这个。
+ *
+ * ## 为什么"boot 成功"还不够（2026-10-14 实测出来的三层坑）
+ *   ① `connectOverCDP` 连 HTTP 都超时（`ETIMEDOUT`）；
+ *   ② HTTP 端点答 200、**WebSocket 却立刻 `code=1006` 断开**（同一端口重试 4 次全挂）；
+ *   ③ **Node 服务器在同一个端口上好好的** —— 所以"探一下这个端口通不通"**预测不了 Electron**。
+ *
+ * 结论：能不能用**只能以 Playwright 真连一次为准**。于是把"起 + 连"当一个整体：
+ * 连不上就杀掉、换一个底座端口重来（最多 3 个端口）。
+ *
+ * @param chromium Playwright 的 `chromium`
+ * @param options 同 `bootApp`（`port` 是首选，连不上会换）
+ * @returns `{ browser, page, child, port, getLog }`
+ */
+export async function openApp(chromium, options) {
+  const tried = [];
+  let candidate = options.port;
+  const altBases = [9711, 9211, 12311];
+  for (let i = 0; i < 3; i += 1) {
+    const booted = await bootApp({ ...options, port: candidate });
+    if (booted.ok) {
+      try {
+        const browser = await connectWithRetry(chromium, `http://127.0.0.1:${booted.port}`, 2);
+        const page = await waitForPage(browser);
+        return { browser, page, child: booted.child, port: booted.port, getLog: booted.getLog };
+      } catch {
+        /* 连不上：这个端口对 Playwright 不算数 */
+      }
+    }
+    tried.push(candidate);
+    try {
+      booted.child?.kill();
+    } catch {
+      /* 已经死了 */
+    }
+    candidate = await pickPort([altBases[i % altBases.length]]);
+  }
+  throw new Error(`换了三个端口都起不来 / 连不上（试过：${tried.join(" / ")}）—— 这台机器的端口状态要看一眼`);
+}
+
+/**
+ * 挑一个**真的能用**的回环端口（2026-10-14）。
+ *
+ * ## 为什么需要（这台机器的环境坑，实测过）
+ * 有些回环端口对**任何进程**都不通：起得了监听、连不上（`netstat` 里能看到
+ * `SYN_RECEIVED`）。实测对照：
+ * ```
+ * 9521 → 通     9555 → 不通     9577 → 不通     9799 → 通
+ * ```
+ * 用的是同一个极简 `http.createServer().listen(p, "127.0.0.1")` + `fetch`，
+ * 所以与脚本、与 Electron 都无关 —— 是机器状态（大概率是安全软件/防火墙把这些端口挂了）。
+ *
+ * 不挑的后果很难看：`connectOverCDP` 报 `connect ETIMEDOUT`，
+ * 读的人只会以为"脚本/产品坏了"，而真相是"这个端口在这台机器上不通"。
+ *
+ * @param candidates 候选端口（按顺序试）
+ * @returns 第一个能"起监听 + 连得上"的端口
+ * @throws 全部候选都不通时抛错（这种情况要看机器，不是改脚本）
+ */
+export async function pickPort(candidates) {
+  const list = Array.isArray(candidates) ? candidates : [candidates];
+  const { createServer } = await import("node:http");
+  for (const port of list) {
+    const usable = await new Promise((resolve) => {
+      const srv = createServer((_req, res) => res.end("ok"));
+      srv.on("error", () => resolve(false));
+      srv.listen(port, "127.0.0.1", async () => {
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) });
+          resolve(res.ok);
+        } catch {
+          resolve(false);
+        } finally {
+          srv.close();
+        }
+      });
+    });
+    if (usable) return port;
+  }
+  /*
+   * 首选都不通就**换几段扫描**：这台机器上实测是"**整段**不通"
+   * （9500–9650 全挂，9200–9450 / 9700+ 正常，而且会随时间变），
+   * 所以只往后顺延是没用的（可能一路都在坏区间里）——
+   * 改成"就近顺延 → 换几个不同基数再扫"。
+   *
+   * ⚠️ 但这条判据**预测不了 Electron**：同一个端口，Node 服务器探着通、
+   * Electron 的调试服务器却握手超时（9561 实测）。真正的判据是 `bootApp` 里那次
+   * CDP 询问 —— 所以它**也会**换端口重试（见 `bootApp`）。
+   */
+  const bases = [list[list.length - 1] + 1, 9211, 9711, 12311, 14311];
+  for (const base of bases) {
+    for (let port = base; port < base + 20; port += 1) {
+      const usable = await new Promise((resolve) => {
+        const srv = createServer((_req, res) => res.end("ok"));
+        srv.on("error", () => resolve(false));
+        srv.listen(port, "127.0.0.1", async () => {
+          try {
+            const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1200) });
+            resolve(res.ok);
+          } catch {
+            resolve(false);
+          } finally {
+            srv.close();
+          }
+        });
+      });
+      if (usable) return port;
+    }
+  }
+  throw new Error(`这些端口以及几段兜底候选都不通：${list.join(" / ")}（这台机器的端口状态要看一眼）`);
 }
 
 /** 一条验收的标准判定：把 bad 列表收敛成退出码与判词。 */

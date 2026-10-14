@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import {
   Blocks,
+  ChevronDown,
   ChevronRight,
   Clock,
   FolderInput,
@@ -19,6 +20,7 @@ import {
   Pin,
   Settings,
   Smartphone,
+  X,
 } from "lucide-react";
 import { useWorkbenchStore, type WorkbenchView } from "./store";
 import { type WorkTask } from "./task";
@@ -236,11 +238,20 @@ export function NavSidebar() {
                     })
                   }
                 >
-                  <span className="wb-nav-mini">{open ? "▾" : "▸"}</span>
+                  <span className="wb-nav-mini" aria-hidden>
+                    {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  </span>
                   <span className="wb-nav-row-title">{project.name}</span>
                   <em className="wb-nav-count">{project.memberIds.length}</em>
-                  <span
+                  {/*
+                    ⚠️ 这三个原来都是**可点的 `<span>`**（2026-10-14 改成真按钮）：
+                    键盘够不着、读屏念不出，而且用「✎ × −」这几个字符当图标
+                    （与全站的 lucide 不一致 —— `best-practices` 那条"图标来自图标库"）。
+                  */}
+                  <button
                     className="wb-nav-mini"
+                    type="button"
+                    aria-label="重命名项目"
                     title="重命名"
                     data-testid={`wb-project-rename-${project.id}`}
                     onClick={(e) => {
@@ -249,10 +260,12 @@ export function NavSidebar() {
                       if (name) rename(project.id, name);
                     }}
                   >
-                    ✎
-                  </span>
-                  <span
+                    <Pencil size={12} />
+                  </button>
+                  <button
                     className="wb-nav-mini"
+                    type="button"
+                    aria-label="删除项目"
                     title="删除项目（里面的任务不会被删）"
                     data-testid={`wb-project-del-${project.id}`}
                     onClick={(e) => {
@@ -260,8 +273,8 @@ export function NavSidebar() {
                       dropProject(project.id);
                     }}
                   >
-                    ×
-                  </span>
+                    <X size={12} />
+                  </button>
                 </button>
                 {open
                   ? project.memberIds.map((id) => (
@@ -273,16 +286,18 @@ export function NavSidebar() {
                       >
                         <ListTodo size={13} />
                         <span className="wb-nav-row-title">{titleOf(id)}</span>
-                        <span
+                        <button
                           className="wb-nav-mini"
+                          type="button"
+                          aria-label="移出项目"
                           title="移出项目"
                           onClick={(e) => {
                             e.stopPropagation();
                             assignProject(null, id);
                           }}
                         >
-                          −
-                        </span>
+                          <Minus size={12} />
+                        </button>
                       </button>
                     ))
                   : null}
