@@ -45,7 +45,7 @@ export const SUMMARY_MARKER = "【更早对话的摘要】";
  *
  * 这里只留**压缩本身**：怎么把要压的那些拼成一段、摘要怎么挂回系统提示词。
  */
-export { KEEP_RECENT_TOKENS as KEEP_TOKENS, estimateTokens, totalTokens, shouldCompact, planContext } from "@shared/contextWindow";
+export { KEEP_RECENT_TOKENS as KEEP_TOKENS, estimateTokens, totalTokens, shouldCompact, planContext } from "@engine/core/context";
 
 /**
  * 造"把这段对话压成要点"的请求。

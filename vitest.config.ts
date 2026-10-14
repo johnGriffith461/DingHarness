@@ -32,11 +32,17 @@ export default defineConfig({
     alias: {
       "@": resolve(here, "src"),
       "@shared": resolve(here, "shared"),
+      "@engine": resolve(here, "engine"),
       "@xyflow/system": resolveXyflowSystem(),
     },
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    /*
+     * `engine/**` 也在里面：内核是**纯逻辑**（不 import electron），
+     * 所以它能与渲染层一起在同一个 node 环境里被直接断言 —— 那是"可整包单测"
+     * 这条不变量在工程上的落点（内核测试不需要起应用）。
+     */
+    include: ["src/**/*.test.ts", "engine/**/*.test.ts"],
   },
 });

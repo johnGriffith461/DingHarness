@@ -1,5 +1,5 @@
 import type { ChatMessage } from "@shared/ipc";
-import { KEEP_RECENT_TOKENS as KEEP_TOKENS, omittedNote, planContext } from "@shared/contextWindow";
+import { KEEP_RECENT_TOKENS as KEEP_TOKENS, omittedNote, planContext } from "@engine/core/context";
 import type { ToolTrace } from "@shared/agentTools";
 import type { TaskStep } from "./task";
 

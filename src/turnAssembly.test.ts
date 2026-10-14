@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleSystem } from "@shared/turnAssembly";
+import { assembleSystem } from "@engine/core/assembly";
 
 /**
  * C2-4：系统提示词的装配（**一份实现，两条路共用**）。

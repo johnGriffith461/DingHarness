@@ -5,7 +5,7 @@ import { applyEvent, chatSessionId, emptyTurn, finishTurn, type LogRecord } from
 import { artifactFileName, extractArtifacts, type Artifact } from "@/workbench/artifact";
 import { enabledPromptBlock } from "@shared/library";
 import { memoryPromptBlock } from "@shared/memory";
-import { assembleSystem } from "@shared/turnAssembly";
+import { assembleSystem } from "@engine/core/assembly";
 import {
   KEEP_RECENT_TOKENS,
   calibrationOf,
@@ -13,7 +13,7 @@ import {
   omittedNote,
   planContext,
   totalTokens,
-} from "@shared/contextWindow";
+} from "@engine/core/context";
 import type { SessionSummary, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "./aiClient";
 import { readConfirmMode } from "@/workbench/confirmMode";

@@ -8,7 +8,7 @@ import {
   planContext,
   shouldCompact,
   totalTokens,
-} from "@shared/contextWindow";
+} from "@engine/core/context";
 
 /**
  * C3：上下文窗口的**唯一负责人**（计量 + 切分）。

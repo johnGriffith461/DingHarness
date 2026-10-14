@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./ipc";
+import type { ChatMessage } from "../../shared/ipc";
 
 /**
  * 上下文窗口的**唯一负责人**（C3）。

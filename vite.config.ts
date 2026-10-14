@@ -13,6 +13,7 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "src"),
       "@shared": path.resolve(__dirname, "shared"),
+      "@engine": path.resolve(__dirname, "engine"),
     },
   },
   optimizeDeps: {

@@ -19,8 +19,9 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@shared/*": ["shared/*"]
+      "@shared/*": ["shared/*"],
+      "@engine/*": ["engine/*"]
     }
   },
-  "include": ["src", "shared", "electron", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "shared", "electron", "engine", "hosts", "vite.config.ts", "vitest.config.ts"]
 }
