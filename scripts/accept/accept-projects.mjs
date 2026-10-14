@@ -1,6 +1,5 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
-import path from "node:path";
 import { openApp, shot, verdict } from "./harness.mjs";
 
 /**
@@ -64,12 +63,6 @@ try {
   await page.locator('[data-testid="wb-send"]').click();
   await page.waitForFunction(() => !document.querySelector('[data-testid="wb-send-stop"]'), { timeout: 25000 });
   await page.waitForTimeout(1200);
-  const taskId = await page.evaluate(() => {
-    const row = document.querySelector('[data-testid^="wb-pinned-"], .wb-nav-row[data-testid]');
-    return window.__lastTaskId ?? null;
-  });
-  report.taskIdFromDom = taskId;
-
   report.step = "把它归入项目";
   /* 任务行上的 ⋯ → 菜单里那条「归入「验收项目（改名后）」」 */
   const rowMore = page.locator('[data-testid="wb-nav"] .wb-nav-row').first();

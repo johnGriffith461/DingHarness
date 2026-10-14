@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# 提交前的快门（2026-10-14）。
+#
+# ## 为什么要有它
+# 同一个错今天犯了**三次**：跑门 → 看都没看就提交 → 红的进去了
+# （两次是 LF 守卫、一次是漏改一处描述还写了"已改"）。
+# 靠"下次记得看"是不行的 —— 把这件事交给钩子：门不过就不许提交。
+#
+# ## 跑哪几道（都要快：整个钩子目标 ≤20 秒）
+#   · 类型检查（tsc --noEmit）
+#   · lint（oxlint）
+#   · 快守卫（换行符 / 结构 / 手感）：vitest 只跑这几个文件
+# 全量测试（7 秒）**故意不在这里** —— 它是 `npm run build` 那一环的事，
+# 而且钩子里跑全量会让"改一行文档"也等很久，久而久之就被人 --no-verify 绕过。
+#
+# ## 装法（一次）
+#   git config core.hooksPath .githooks
+# 这个目录随仓库走，所以换台机器只有这一条命令要敲。
+#
+# ## 绕过（真的需要时）
+#   git commit --no-verify
+# ⚠️ 绕过之后请自己把门跑一遍 —— 否则就是"明知故犯"，比忘了还糟。
+#
+
+set -e
+
+echo "[pre-commit] typecheck…"
+npx tsc -p tsconfig.json --noEmit
+
+echo "[pre-commit] lint…"
+npx oxlint >/dev/null
+
+echo "[pre-commit] 快守卫（换行符 / 结构 / 手感）…"
+npx vitest run --silent=true \
+  src/lineEndings.test.ts \
+  src/structureGuard.test.ts \
+  src/uiCraft.test.ts \
+  src/workbench/themeRatchet.test.ts \
+  src/workbench/canvasThemeVars.test.ts >/dev/null
+
+echo "[pre-commit] 通过 ✓"
