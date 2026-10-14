@@ -61,8 +61,14 @@ export type EnginePorts = {
 
 /** 跑一轮的请求。 */
 export type EngineRunRequest = {
-  /** 这一轮属于哪段会话（宿主决定：工作台给任务 id、聊天给对话 id）。 */
-  sessionId: string;
+  /**
+   * 这一轮属于哪段会话（宿主决定：工作台给任务 id、聊天给对话 id）。
+   *
+   * ⚠️ **可以不给** —— 起标题、翻译这类附带请求不是 agent 回合，
+   * 记进去只会让日志里多出一堆无主的请求（既有产品语义就是这样）。
+   * 不给 = 这一轮**不入库**：没有日志、没有账本，但照样跑。
+   */
+  sessionId?: string;
   provider: string;
   model?: string;
   system?: string;
@@ -75,6 +81,14 @@ export type EngineRunRequest = {
   /** 步数上限（父 4 / 子 6 是各自的经验值，作为参数传进来）。 */
   maxSteps?: number;
   abortSignal?: AbortSignal;
+  /**
+   * 宿主的**上屏出口**（可选，同步调用，与 `runTurn` 的 `onEvent` 同一个位置）。
+   *
+   * ⚠️ 有了它内核**照样自己落盘**：这个出口只用来"边跑边显示"，
+   * 不是日志的第二份来源。两者出自同一个 emit 点，所以界面上看到的
+   * 与日志里记的**顺序与内容一致**（这正是 C2 收敛时定下的口径）。
+   */
+  onEvent?: (event: TurnEvent) => void;
 };
 
 /** 一轮的结局。 */
@@ -131,6 +145,7 @@ export function createEngine(ports: EnginePorts): Engine {
 
       /** 落一条记录（**发事件与记日志是同一个出口** —— 两处各写一份必然漂移）。 */
       const record = async (record: LogInput): Promise<void> => {
+        if (!request.sessionId) return; // 不属于任何会话：不入库（见上面 sessionId 的说明）
         const stored = await ports.store.append(request.sessionId, [record]);
         records.push(...stored);
       };
@@ -178,6 +193,8 @@ export function createEngine(ports: EnginePorts): Engine {
         },
         (event) => {
           events.push(event);
+          // 先给宿主上屏，再落盘（落盘是排队的，不等它 —— 等它会让吐字被磁盘 IO 拖住）
+          request.onEvent?.(event);
           /*
            * ⚠️ `step-finish` **不落盘**：它只用来数步数，不改变正文/工具/用量。
            * 落进去的后果不是"多一条记录"—— 是 `parseLogLine` 不认它，读回时被算成**坏行**，

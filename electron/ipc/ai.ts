@@ -1,11 +1,11 @@
 import { ipcMain, type WebContents } from "electron";
 import { healthStore, listProvidersWithProbe, probeProviders } from "./aiProbe";
-import { getSessionLogger } from "./sessionStore";
-import { agentTools, runToolOnce, type ToolEnv } from "./tools";
+import { createJsonlSessionStore } from "./sessionStore";
+import { hostExecutor, mcpToolEntries, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
-import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "../../engine/runtime/loop";
+import { createEngine } from "../../engine/index";
+import { humanError, resolveTurnTarget, type TurnEvent } from "../../engine/runtime/loop";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
-import type { ConfirmMode } from "../../shared/ipc";
 
 /**
  * AI IPC（PLAN 3.1 / 3.2）。
@@ -51,6 +51,33 @@ type LiveStream = { controller: AbortController };
 
 const liveStreams = new Map<string, LiveStream>();
 
+/**
+ * 桌面的会话存储（Phase 4.1：经端口）。
+ *
+ * ⚠️ 这里拿到的是 **JSONL 实现**（`createJsonlSessionStore`）—— 桌面的落盘行为
+ * 一个字没变，换的只是"谁在写它"：从主进程手写变成内核统一写。
+ * 换成 SQLite 是**一次替换**（`createSqliteSessionStore`），执行路径不用动。
+ */
+const sessionStore = createJsonlSessionStore();
+
+/**
+ * 往会话日志补一条记录（宿主侧的唯一补记入口：闸门决策）。
+ *
+ * ⚠️ 没有 `sessionId` 时**什么都不做**（那一轮不属于任何会话）；
+ * 写失败也**不抛给调用方** —— 用户点「允许」这件事本身不该因为日志写不进去而失败。
+ *
+ * @param sessionId 会话 id（可能没给）
+ * @param record 要补记的记录
+ */
+async function storeAppend(sessionId: string | undefined, record: Parameters<typeof sessionStore.append>[1][number]): Promise<void> {
+  if (!sessionId) return;
+  try {
+    await sessionStore.append(sessionId, [record]);
+  } catch (error) {
+    console.error("[session] 补记失败（不影响这次操作）：", error instanceof Error ? error.message : error);
+  }
+}
+
 /** 渲染进程可能已经刷新/关闭，发送前确认目标还在。 */
 function safeSend(sender: WebContents, event: AiStreamEvent): void {
   if (sender.isDestroyed()) return;
@@ -61,20 +88,12 @@ function safeSend(sender: WebContents, event: AiStreamEvent): void {
   }
 }
 
-/**
- * 这一轮**会下发给模型**的工具名（与真正构造工具集时用同一套判定）。
- *
- * 为什么要有它：日志里只记"用没用工具"是看不出"够得着什么"的 ——
- * 新加的工具到底有没有下发、某个档位下是不是被隐藏了，都得有个可查的记录。
- *
- * @param request 渲染进程给的这次请求
- * @returns 工具名列表；不带工具时是空数组
+/*
+ * ⚠️ "这一轮下发给模型的工具名"（`offeredToolNames`）**搬进内核了**
+ * （`engine/runtime/registry.ts`），日志也由内核自己写 ——
+ * 它在装配工具集与写 `request` 记录时用的是同一个注册表，两边不可能对不上。
+ * 主进程这里不再重算一份（重算就是"同一件事的第二份实现"）。
  */
-function offeredToolNames(request: { useTools?: boolean; toolPolicy?: ConfirmMode }): string[] {
-  if (!request.useTools) return [];
-  const mode = request.toolPolicy ?? "全部允许";
-  return Object.keys(agentTools({ mode, provider: "", depth: 0 }));
-}
 
 export function registerAiIpc(): void {
   ipcMain.handle(AI_CHANNEL.listProviders, () => listProvidersWithProbe());
@@ -103,7 +122,12 @@ export function registerAiIpc(): void {
     if (request.reject) {
       const line = rejectedLine(request.name);
       if (request.toolCallId) {
-        getSessionLogger(request.sessionId)?.log({
+        /*
+         * 走**同一个 store 端口**（不再直接抓写入器）：决策记录与事件流必须落在
+         * 同一条编号序列上 —— 两个写入器各数一遍 seq 的后果，是重启后这条留痕
+         * 永远停在"等确认"（实测过）。
+         */
+        await storeAppend(request.sessionId, {
           type: "approval",
           toolCallId: request.toolCallId,
           name: request.name,
@@ -134,7 +158,7 @@ export function registerAiIpc(): void {
      * 只记"批过了"的话，重启后那条留痕会变成一个没有内容的空壳。
      */
     if (request.toolCallId) {
-      getSessionLogger(request.sessionId)?.log({
+      await storeAppend(request.sessionId, {
         type: "approval",
         toolCallId: request.toolCallId,
         name: request.name,
@@ -158,50 +182,19 @@ export function registerAiIpc(): void {
     const sender = event.sender;
 
     /*
-     * ── 会话日志（C2）──────────────────────────────────────────────
+     * ── 解析目标（必须在**同步返回**之前做完）──────────────────────
      *
-     * 主进程是**唯一**知道"这一轮完整发生了什么"的地方：请求体、每一次工具调用、
-     * 真实用量、中止与错误。原来这些发完即丢，事后只能靠渲染层那份"渲染后的样子"去猜。
-     *
-     * 所以：**发与记在同一处**（下面的 `emit`）—— 两处各写一份必然会漂移，
-     * 而"日志说调了工具、界面没显示"这种不一致最难查。
-     *
-     * ⚠️ 用 `getSessionLogger`（**同一会话共用一个**）：用户点「允许」时
-     * `ai:runTool` 要往**同一个文件**写决策记录，两个写入器各自从 seq=1 数就会撞号。
-     */
-    const sessionLog = getSessionLogger(request.sessionId);
-    sessionLog?.log({
-      requestId,
-      type: "request",
-      provider: request.provider,
-      model: request.model ?? "",
-      ...(request.system ? { system: request.system } : {}),
-      messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
-      ...(request.toolPolicy ? { toolPolicy: request.toolPolicy } : {}),
-      ...(request.useTools ? { useTools: true } : {}),
-      /*
-       * **这一轮给了模型哪些工具**（2026-10-14 补）。
-       *
-       * 以前日志只记了"用没用工具"（`useTools: true`）与档位 —— 于是事后没人知道
-       * 模型当时**够得着什么**：一个新加的工具到底有没有被下发？只能靠复现。
-       * 名字列表很小，记下来之后这类问题一条日志就能回答，
-       * 顺带让"工具被正确注入"这件事**可断言**（不需要模型真的调用它）。
-       */
-      tools: offeredToolNames(request),
-    });
-    /** 发给渲染进程的同时记进日志（**唯一**的事件出口）。 */
-    const emit = (e: AiStreamEvent): void => {
-      sessionLog?.log(e);
-      safeSend(sender, e);
-    };
-
-    /*
-     * 解析目标要在**同步返回**之前做完：渲染层拿 `{provider, model}` 显示"这次用的谁"。
-     * 规则只有一份（`resolveTurnTarget`），下面 `runTurn` 内部用的也是它。
+     * 渲染层拿 `{provider, model}` 显示"这次用的谁"，所以这一步不能挪进异步体。
+     * 规则只有一份（`resolveTurnTarget`），引擎内部用的也是它。
      */
     const target = resolveTurnTarget(request.provider, request.model);
     if (!target.ok) {
-      emit({ requestId, type: "error", message: target.error });
+      /*
+       * 连 provider 都没解析出来 —— 这一轮**没跑**，引擎不会介入（它连注册表都没见过）。
+       * 所以这条错误由宿主自己记：不记的话，日志里会缺一次"用户发了话、什么都没发生"。
+       */
+      await sessionStore.append(request.sessionId ?? "", [{ requestId, type: "error", message: target.error }]).catch(() => undefined);
+      safeSend(sender, { requestId, type: "error", message: target.error });
       return { requestId, ok: false, error: target.error };
     }
 
@@ -219,12 +212,12 @@ export function registerAiIpc(): void {
           flushTimer = null;
         }
         if (buffered) {
-          emit({ requestId, type: "text", text: buffered });
+          safeSend(sender, { requestId, type: "text", text: buffered });
           buffered = "";
         }
       };
 
-      /** 主循环的事件 → IPC 事件（**只在这里补 requestId**；其余字段一一对应）。 */
+      /** 内核的事件 → IPC 事件（**只在这里补 requestId**；其余字段一一对应 —— 传输耦合只留这里）。 */
       const toStreamEvent = (e: TurnEvent): AiStreamEvent | null => {
         if (e.type === "text") return { requestId, type: "text", text: e.text };
         if (e.type === "tool-call") {
@@ -245,38 +238,34 @@ export function registerAiIpc(): void {
         return null; // step-finish：只用来数步数，不进 IPC
       };
 
+      /*
+       * 引擎**每一轮现建**：MCP 的连接器工具是运行时才出现的（用户随时可以接上一个），
+       * 而注册表在 `createEngine` 时快照一次。装配本身不碰 IO，代价可忽略。
+       */
+      const engine = createEngine({
+        store: sessionStore,
+        executor: hostExecutor,
+        health: healthStore,
+        tools: mcpToolEntries(),
+      });
+
       try {
-        const outcome = await runTurn(
-          {
-            provider: request.provider,
-            model: target.model,
-            ...(request.system ? { system: request.system } : {}),
-            messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
-            ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-            abortSignal: controller.signal,
-            /*
-             * 工具**只在发起方明确要求时才带**（§143）。
-             *
-             * 起标题、翻译这类附带请求与回答是并行的，它们拿到工具集就会真的执行动作
-             * —— 一次发送写两次记忆就是这么来的。默认不带，是这里唯一安全的默认值。
-             *
-             * ⚠️ `signal` 也放进 env：它一路传到 `spawn_agent` → 子智能体（C2-3）。
-             */
-            ...(request.useTools
-              ? {
-                  tools: agentTools({
-                    mode: request.toolPolicy ?? "全部允许",
-                    provider: target.provider.id,
-                    model: target.model,
-                    depth: 0,
-                    signal: controller.signal,
-                  }),
-                  // 步数上限：父级 4（子智能体 6）—— **参数，不是两条代码路径**
-                  maxSteps: 4,
-                }
-              : {}),
-          },
-          (e) => {
+        await engine.run({
+          sessionId: request.sessionId,
+          provider: request.provider,
+          model: target.model,
+          ...(request.system ? { system: request.system } : {}),
+          messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+          ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+          mode: request.toolPolicy ?? "全部允许",
+          ...(request.useTools ? { useTools: true } : {}),
+          abortSignal: controller.signal,
+          /*
+           * ⚠️ 这个出口只负责**上屏**：请求记录、每一次工具调用、用量、中止与错误
+           * 全部由**引擎自己写进会话日志**（它在同一个 emit 点做，所以界面看到的
+           * 与日志里记的顺序一致）。宿主不再另写一份 —— 那正是 C2 收敛掉的东西。
+           */
+          onEvent: (e) => {
             if (e.type === "text") {
               // 40ms 一批：一个字一次 IPC 会把渲染进程淹掉
               buffered += e.text;
@@ -289,22 +278,19 @@ export function registerAiIpc(): void {
              */
             flush();
             const mapped = toStreamEvent(e);
-            if (mapped) emit(mapped);
+            if (mapped) safeSend(sender, mapped);
           },
-          /* 宿主注入的记账：内核不 import 主进程的任何东西（Phase 1 D1 的端口）。 */
-          { health: healthStore },
-        );
+        });
         flush();
         /*
-         * 被用户中止：主进程**不发**事件（渲染层那边的 `abort()` 已经本地收尾了），
-         * 但**日志里要留下终止记录** —— 否则读日志的人分不清"这一轮断了"
-         * 还是"这一轮还在跑"。所以这里只记不发。
+         * 被用户中止：主进程**不发**事件（渲染层那边的 `abort()` 已经本地收尾了）。
+         * 日志里那条终止记录由**引擎**写（它知道 outcome.aborted）——
+         * 宿主只负责不发。
          */
-        if (outcome.aborted) sessionLog?.log({ requestId, type: "error", message: "已中止" });
       } catch (error) {
-        // runTurn 自己已经把错误翻成事件了；这里只是"连事件都没能发出去"时的兜底
+        // 引擎自己已经把错误翻成事件了；这里只是"连事件都没能发出去"时的兜底
         flush();
-        emit({ requestId, type: "error", message: humanError(error) });
+        safeSend(sender, { requestId, type: "error", message: humanError(error) });
       } finally {
         liveStreams.delete(requestId);
       }

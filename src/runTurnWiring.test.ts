@@ -21,18 +21,25 @@ import { describe, expect, it } from "vitest";
  * 并在 `docs/HANDOFF.md` 里如实写"端到端未验"。
  * 这样至少"有人顺手删掉 signal 那一行"会被立刻挡住。
  *
- * ⚠️ 判据是**接线**不是**存在**：只断言 `signal` 真的从 controller 流到 `agentTools`、
+ * ⚠️ 判据是**接线**不是**存在**：只断言 `signal` 真的从 controller 流到工具环境、
  * 从 env 流到 `runSubagent`、从 `runSubagent` 流到 `runTurn`。
+ *
+ * ⚠️ Phase 4.1 之后这条线**穿过内核**：`ai:chat` 把信号交给 `engine.run`，
+ * 由引擎放进 `ExecutorContext`。判据跟着改，但**要断言的那件事没变** ——
+ * 信号必须一路到得了工具（否则"点了停止、子智能体还在跑"）。所以下面同时读宿主与内核。
  */
 
 const ROOT = path.resolve(__dirname, "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
 describe("C2-3 连线守卫：一份循环 + 中止信号穿三层", () => {
-  it("① `ai:chat` 把 controller 的信号放进工具环境（也放进 runTurn）", () => {
-    const src = read("electron/ipc/ai.ts");
-    expect(src, "工具环境里没有 signal → 子智能体拿不到中止信号").toContain("signal: controller.signal");
-    expect(src, "runTurn 那一路没有 abortSignal").toContain("abortSignal: controller.signal");
+  it("① `ai:chat` 把 controller 的信号交给引擎（引擎再放进工具环境）", () => {
+    const host = read("electron/ipc/ai.ts");
+    expect(host, "调用引擎时没有把中止信号传下去").toContain("abortSignal: controller.signal");
+    const kernel = read("engine/index.ts");
+    expect(kernel, "引擎没有把 abortSignal 放进执行上下文 → 子智能体拿不到中止信号").toContain(
+      "...(request.abortSignal ? { signal: request.abortSignal } : {}),",
+    );
   });
 
   it("② 工具执行把信号交给子智能体", () => {
@@ -48,13 +55,24 @@ describe("C2-3 连线守卫：一份循环 + 中止信号穿三层", () => {
     expect(src, "子智能体又自己写了一份 streamText（第二份循环）").not.toContain("streamText(");
   });
 
+  it("⑤ 桌面宿主**经引擎**跑（自己调 runTurn = 绕过引擎的落盘与账本）", () => {
+    const host = read("electron/ipc/ai.ts");
+    expect(host, "ai.ts 没有建引擎").toContain("createEngine({");
+    expect(host, "ai.ts 没有调用 engine.run").toContain("await engine.run({");
+    // 直接调 runTurn 会让这一轮**没有日志**（引擎才写日志）——表面上看不出，重启后才发现历史缺了一段
+    expect(host, "ai.ts 绕过引擎直接调了 runTurn").not.toMatch(/runTurn\s*\(/);
+    // 事件的落盘由引擎负责：宿主只把事件发上屏，不再自己写一份日志
+    expect(host, "ai.ts 又在自己写事件日志（第二份真相）").not.toContain("sessionLog?.log(");
+  });
+
   it("④ 步数上限是参数（父 4 / 子 6），两条路共用同一份循环", () => {
-    const ai = read("electron/ipc/ai.ts");
+    const host = read("electron/ipc/ai.ts");
+    const kernel = read("engine/index.ts");
     const sub = read("engine/runtime/subagent.ts");
-    expect(ai, "父级的步数上限应当是 4（沿用原值，不许顺手统一）").toContain("maxSteps: 4");
+    expect(kernel, "父级的步数上限应当是 4（沿用原值，不许顺手统一）").toContain("maxSteps: request.maxSteps ?? 4");
     expect(sub, "子智能体的步数上限应当是 6（沿用原值）").toContain("maxSteps: input.maxSteps ?? 6");
-    // 两份循环的痕迹：父级不该再直接 import streamText
-    expect(ai, "ai.ts 又自己 import 了 streamText（第二份循环）").not.toContain("streamText");
-    expect(ai + sub, "主循环应当只有 runTurn 一份实现").toContain("runTurn");
+    // 两份循环的痕迹：宿主不该再直接 import streamText
+    expect(host, "ai.ts 又自己 import 了 streamText（第二份循环）").not.toContain("streamText");
+    expect(kernel + sub, "主循环应当只有 runTurn 一份实现").toContain("runTurn");
   });
 });

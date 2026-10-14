@@ -11,6 +11,7 @@ import {
   type LogInput,
   type LogRecord,
 } from "../../engine/core/events";
+import type { SessionStore } from "../../engine/ports/store";
 import { retryAsync } from "../../shared/persist";
 
 /**
@@ -81,7 +82,18 @@ export const SESSION_CHANNEL = {
 
 /** 一个会话的写入器。 */
 export type SessionLogger = {
-  /** 记一条记录（**同步入队**：调用方不必 await，顺序不会乱）。 */
+  /**
+   * 追加一批记录，返回**落盘形态**（带 `seq`/`at`）。
+   *
+   * ⚠️ 编号在**队列内部**分配（不是调用时就分配）：同一个会话会被多处写入
+   * （`ai:chat` 写事件、用户点「允许」之后 `ai:runTool` 写决策记录），
+   * 谁先入队谁拿小号 —— 这是"两个写入器从 1 各数一遍"那个老毛病唯一的结构性解法。
+   *
+   * @param records 还没编号的记录
+   * @returns 落盘形态（顺序与入参一致）
+   */
+  append: (records: readonly LogInput[]) => Promise<LogRecord[]>;
+  /** 记一条（同步入队，不关心编号时用）。 */
   log: (record: LogInput) => void;
   /** 等已入队的写入全部落盘（验收与排错用）。 */
   flush: () => Promise<void>;
@@ -155,18 +167,35 @@ export function createSessionLogger(
     }
   };
 
+  /**
+   * 追加一批：编号与写入都在**同一条队列**里，所以编号顺序 = 落盘顺序。
+   *
+   * 编号**必须**在队列内部做：`seq` 的起点要等 `ready`（读旧文件的末号）才知道，
+   * 在调用侧分配就只能先摸一次文件，那等于绕开这条队列。
+   */
+  const appendBatch = async (records: readonly LogInput[]): Promise<LogRecord[]> => {
+    const stored: LogRecord[] = [];
+    queue = queue
+      .then(() => ready)
+      .then(async () => {
+        for (const record of records) {
+          seq += 1;
+          const at = Date.now();
+          stored.push({ seq, at, ...record } as LogRecord);
+          await append(logLine(record, seq, at));
+        }
+      });
+    await queue;
+    return stored;
+  };
+
   return {
     file,
     flush: () => queue,
     count: () => seq,
+    append: appendBatch,
     log: (record) => {
-      // 写与计数都在**同一条队列**里：编号顺序 = 落盘顺序
-      queue = queue
-        .then(() => ready)
-        .then(async () => {
-          seq += 1;
-          await append(logLine(record, seq, Date.now()));
-        });
+      void appendBatch([record]);
     },
   };
 }
@@ -366,4 +395,52 @@ export async function readSessionLog(sessionId: unknown): Promise<{ records: Log
     /* 文件不存在 / 读不了：都当"还没有日志"，不算错误 */
     return { records: [], skipped: 0 };
   }
+}
+
+/* ────────────────────── 会话存储端口（Phase 4.1） ────────────────────── */
+
+/**
+ * `SessionStore` 端口的 **JSONL 实现**。
+ *
+ * ## 为什么要有它（而不是直接换 SQLite）
+ *
+ * `engine/ports/store.ts` 是"按意图定下来"的接口，SQLite 是它的第一个实现。
+ * 但**只有一个实现**的端口没法证明"存储可换"—— 而这正是端口存在的全部理由。
+ *
+ * 这一份把桌面**已经在用**的那套 JSONL 落盘（上面的写入器 + 读取 + 列举 + 保留策略）
+ * 接到同一个接口上。于是：
+ *   · 桌面切到 `createEngine` 时**存储行为一个字没变**（零回归）；
+ *   · 端口有了第二个实现，`engine` 里没有任何一行代码知道"现在存的是 JSONL 还是 SQLite"；
+ *   · 换成 SQLite 变成**一次纯粹的替换**（Phase 4.3），而不是"连执行路径一起改"。
+ *
+ * ⚠️ 语义差异（如实记，都是 JSONL 那一套本来就有的）：
+ *   · `append` 不是**事务**：写第 2 条时崩了，第 1 条已经落下去（SQLite 那份是整批一个事务）。
+ *     这是既有行为，不是这次引入的；
+ *   · 坏行由 `parseLog` 跳过并计数（与 SQLite 那份同一个 `parseLogLine`）。
+ *
+ * @returns 满足 `SessionStore` 的实现
+ */
+export function createJsonlSessionStore(): SessionStore {
+  return {
+    async append(sessionId: string, records: readonly LogInput[]): Promise<LogRecord[]> {
+      if (!records.length) return [];
+      const logger = getSessionLogger(sessionId);
+      // id 不合法：**抛**（不是静默跳过）。落盘的最后一道闸，静默等于"日志悄悄没了"。
+      if (!logger) throw new Error(`会话 id 不合法，拒绝落盘：${sessionId}`);
+      return logger.append(records);
+    },
+
+    async load(sessionId: string): Promise<{ records: LogRecord[]; skipped: number }> {
+      return readSessionLog(sessionId);
+    },
+
+    async list(opts?: { kind?: "chat" | "task" | "cli" }): Promise<SessionSummary[]> {
+      const chats = await listChatSessions();
+      return opts?.kind && opts.kind !== "chat" ? [] : chats;
+    },
+
+    close(): void {
+      // JSONL 没有句柄要放；保留策略在启动时那次 `pruneSessions` 里做
+    },
+  };
 }

@@ -398,7 +398,7 @@ export type ToolEnv = {
  * ⚠️ 它同时是"宿主边界"的落点：内核（`engine/`）不知道记忆/画布/定时任务存在，
  * 只知道"给我名字和参数，我给你结果"。
  */
-const hostExecutor: ToolExecutor = {
+export const hostExecutor: ToolExecutor = {
   run: (name, input, ctx) =>
     runToolOnce(name, input, {
       mode: ctx.mode,
@@ -415,7 +415,7 @@ const hostExecutor: ToolExecutor = {
  * schema 用服务端给的 JSON Schema **直接转**（`jsonSchema()`）—— 不重新描述一遍：
  * MCP 服务端本来就是按 JSON Schema 暴露参数的，再抄一份必然漂移。
  */
-function mcpToolEntries(): ToolEntry[] {
+export function mcpToolEntries(): ToolEntry[] {
   return mcpToolBindings().map((binding) => ({
     name: binding.localName,
     source: "mcp" as const,
