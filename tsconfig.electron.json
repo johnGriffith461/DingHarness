@@ -16,5 +16,17 @@
     "removeComments": false,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["electron/**/*.ts", "shared/**/*.ts", "engine/**/*.ts", "hosts/**/*.ts"]
+  "include": ["electron/**/*.ts", "shared/**/*.ts", "engine/**/*.ts"],
+  /*
+   * ⚠️ 两条排除，都不是"图省事"：
+   *
+   * · `hosts/**` —— CLI 宿主**不进 Electron 构建**。它是另一个宿主（跑在 tsx/Node 上），
+   *   里面用了顶层 await（CJS 下非法），而且打进主进程产物里也没有任何用途。
+   * · `**\/*.test.ts` —— 测试用 `@engine/*` 这类路径别名 import，而这套配置
+   *   （CJS + moduleResolution: node）没有 paths；更要紧的是**测试不该进产物**。
+   *
+   * 这两条漏掉的后果实测过：`pnpm electron:build` 直接以 16 条 TS 报错失败，
+   * 而 `pnpm typecheck` / `lint` / `test` 全绿 —— 因为它们是两套 include。
+   */
+  "exclude": ["hosts/**", "**/*.test.ts"]
 }

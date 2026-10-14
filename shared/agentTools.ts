@@ -502,6 +502,14 @@ export function mergeToolTraces(existing: readonly ToolTrace[], incoming: readon
   return [...existing, ...incoming.filter((t) => !seen.has(t.toolCallId))];
 }
 
+/*
+ * ⚠️ `list_files` 曾经**不在**这张表里（它只出现在 `electron/ipc/tools.ts` 手抄的那份对象里）。
+ * Phase 1 D5 把那段手抄换成"注册表直接吃这张表"之后，它当场消失了 ——
+ * 而且**什么都不报**：没有类型错误、没有测试红，只是模型少了一个工具。
+ * 这是"两处各写一份"最典型的代价：删掉其中一处时，另一处不会喊。
+ *
+ * 现在补进来，并由 `engine/runtime/registry.test.ts` 盯着"表里的都在"与"在的都不少"。
+ */
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: MEMORY_SAVE_TOOL, description: MEMORY_SAVE_DESC, schema: MEMORY_SAVE_INPUT },
   { name: MEMORY_LIST_TOOL, description: MEMORY_LIST_DESC, schema: MEMORY_LIST_INPUT },
@@ -509,6 +517,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: SCHEDULE_LIST_TOOL, description: SCHEDULE_LIST_DESC, schema: SCHEDULE_LIST_INPUT },
   { name: CANVAS_ADD_NODE_TOOL, description: CANVAS_ADD_NODE_DESC, schema: CANVAS_ADD_NODE_INPUT },
   { name: SPAWN_AGENT_TOOL, description: SPAWN_AGENT_DESC, schema: SPAWN_AGENT_INPUT },
+  { name: LIST_FILES_TOOL, description: LIST_FILES_DESC, schema: LIST_FILES_INPUT },
   { name: LIST_DIR_TOOL, description: LIST_DIR_DESC, schema: LIST_DIR_INPUT },
   { name: SEARCH_FILES_TOOL, description: SEARCH_FILES_DESC, schema: SEARCH_FILES_INPUT },
   { name: READ_FILE_TOOL, description: READ_FILE_DESC, schema: READ_FILE_INPUT },
