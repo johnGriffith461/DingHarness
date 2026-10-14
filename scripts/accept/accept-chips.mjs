@@ -13,7 +13,7 @@ import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
  * 验的是**点了之后 DOM 里真出现了选项** —— 不是"按钮渲染出来没有"。
  * 死按钮恰恰是"渲染出来了、点了没反应"，所以只查存在性是查不出来的。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/chip-data";
+const DATA = ".verify/chip-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -23,8 +23,8 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([12971]);
 /* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
 env.DSH_DEBUG_PORT = String(__port);
-const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
-  cwd: "D:/DoubaoWorkClone",
+const child = spawn("node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
+  cwd: ".",
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });

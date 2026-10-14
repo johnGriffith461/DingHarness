@@ -15,7 +15,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⑥ Esc 收起（`@` 还在，不吞字）
  * ⑦ 选单开着时按 Enter **是选第一条，不是把消息发出去**
  */
-const DATA = "D:/DoubaoWorkClone/.verify/phrases-data";
+const DATA = ".verify/phrases-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

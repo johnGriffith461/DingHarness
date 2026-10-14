@@ -19,7 +19,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ④ 再拖一个 `.exe` → 那一行是 `解析失败（暂不支持该文件类型）`，**且它没落盘**
  * ⑤ 拖进来时角标出现、拖出去（dragleave）角标消失
  */
-const DATA = "D:/DoubaoWorkClone/.verify/drop-data";
+const DATA = ".verify/drop-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

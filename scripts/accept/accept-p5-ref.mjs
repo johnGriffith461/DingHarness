@@ -18,7 +18,7 @@ import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness
  *   · **界面这一路走不走得通**（打 @ → 候选 → 点选 → 芯片 → 删掉节点后芯片变断链）→ 本脚本，
  *     全部走真实交互（右键菜单删节点），不碰任何内部出口。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/p5ref-data";
+const DATA = ".verify/p5ref-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 const env = { ...process.env };
@@ -28,9 +28,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12350]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 await new Promise((r) => setTimeout(r, 9000));
 
@@ -138,7 +138,7 @@ try {
     .getAttribute("class")
     .catch(() => null);
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/shots-p5/05-refchips.png");
+  await shot(page, ".verify/shots-p5/05-refchips.png");
 } catch (error) {
   report.error = `在「${report.step ?? "未知"}」这一步失败：${String(error).split(String.fromCharCode(10))[0]}`;
 } finally {

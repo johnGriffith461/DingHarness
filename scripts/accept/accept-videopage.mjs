@@ -18,7 +18,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ③ 「最近生成」的空态用的是证据里那句（生成的图片和视频会显示在这里）
  * ④ 不点生成 —— 这条验收不动这台机器上的钱和网络
  */
-const DATA = "D:/DoubaoWorkClone/.verify/videopage-data";
+const DATA = ".verify/videopage-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -19,7 +19,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  *
  * ⚠️ 会真调模型（约 1~2 分钟）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/agent-persona-data";
+const DATA = ".verify/agent-persona-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

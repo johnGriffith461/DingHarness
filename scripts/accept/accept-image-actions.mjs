@@ -16,17 +16,17 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
  *   6. **Ctrl+Z 能撤回**改图（改之前记了历史）
  *   7. 自由编辑的空指令时「改」按钮置灰
  */
-const DATA = "D:/DoubaoWorkClone/.verify/actions-data";
+const DATA = ".verify/actions-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+const EXE = "node_modules/electron/dist/electron.exe";
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12495]);
 const child = spawn(EXE, [".", "--remote-debugging-port=" + __port], {
-  cwd: "D:/DoubaoWorkClone",
+  cwd: ".",
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });
@@ -121,7 +121,7 @@ await page
 await page.waitForTimeout(2000);
 report.afterExpand = await genImg();
 report.errorAfterExpand = await page.locator(`[data-testid="image-error-${nodeId}"]`).textContent().catch(() => null);
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/image-actions.png");
+await shot(page, ".verify/shots-final/image-actions.png");
 
 // 6) Ctrl+Z 撤回
 await page.locator("body").click({ position: { x: 800, y: 500 } }).catch(() => undefined);

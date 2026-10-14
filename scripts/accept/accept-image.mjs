@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { openCanvas, shot } from "./harness.mjs";
 
-const OUT = "D:/DoubaoWorkClone/.verify/shots-p2";
+const OUT = ".verify/shots-p2";
 mkdirSync(OUT, { recursive: true });
 
 // 造一张纯色测试图（800×600，用最小 PNG 头合成不方便，直接写 SVG 后让浏览器读成 dataURL 不行，
@@ -45,7 +45,7 @@ const pngBase64 = await page.evaluate(() => {
   ctx.fillText("800x600", 250, 320);
   return c.toDataURL("image/png").split(",")[1];
 });
-const tmp = "D:/DoubaoWorkClone/.verify/sample-800x600.png";
+const tmp = ".verify/sample-800x600.png";
 writeFileSync(tmp, Buffer.from(pngBase64, "base64"));
 
 // 上传到图片节点

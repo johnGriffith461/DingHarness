@@ -20,7 +20,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  *
  * ⚠️ **这条会真调模型**（约 2~3 分钟），不进无模型批跑。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/subagent-data";
+const DATA = ".verify/subagent-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

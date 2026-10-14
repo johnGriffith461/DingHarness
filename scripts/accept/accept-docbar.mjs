@@ -17,7 +17,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⑤ ⭐ 选中一个 → 插进来的是一条 `dshasset://file/<origin>/<名字>` 链接，**且与那个文件对得上**
  * ⑥ 剪贴板空的时候**有话直说**（不是点了没反应）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/docbar-data";
+const DATA = ".verify/docbar-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -9,7 +9,7 @@ import { connectWithRetry, freshDir, killTree, pickPort, readStoreFile, shot, wa
  * 走真实路径：账号菜单 → 设置 → 点「记忆」→ 加一条 → **刷新** → 还在 → 删掉。
  * 重点是**刷新后还在** —— "加完能用、重启就没了"是这个项目犯过的错（§49）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/mem-data";
+const DATA = ".verify/mem-data";
 // 先杀残留再删：Windows 上被句柄占着的目录会报 EPERM（§135 撞过）。
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
@@ -23,8 +23,8 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([12994]);
 /* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
 env.DSH_DEBUG_PORT = String(__port);
-const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
-  cwd: "D:/DoubaoWorkClone",
+const child = spawn("node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
+  cwd: ".",
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });

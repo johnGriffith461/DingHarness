@@ -219,12 +219,12 @@ export async function bootApp(options) {
   return { child: null, port: candidate, ok: false, getLog: () => `试过的端口都不通：${tried.join(" / ")}` };
 }
 
-async function bootOnce({ port, dataDir, extraEnv = {}, cwd = "D:/DoubaoWorkClone", timeoutMs = 30000 }) {
+async function bootOnce({ port, dataDir, extraEnv = {}, cwd = ".", timeoutMs = 30000 }) {
   const env = { ...process.env, ...extraEnv };
   delete env.ELECTRON_RUN_AS_NODE;
   env.DSH_DEBUG_PORT = String(port);
   if (dataDir) env.DSH_CANVAS_DATA_DIR = dataDir;
-  const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", `--remote-debugging-port=${port}`], {
+  const child = spawn("node_modules/electron/dist/electron.exe", [".", `--remote-debugging-port=${port}`], {
     cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],

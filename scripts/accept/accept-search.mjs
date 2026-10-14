@@ -28,7 +28,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * 第一版就是拿「个股研究」（1 组 1 条）验的，把命中数改成"分组数"照样绿。
  * 现在换成「分析」（1 组 2 条）与「销售」（2 行）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/search-data";
+const DATA = ".verify/search-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -24,7 +24,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⑤ 重命名**真改磁盘**（顺带证明这条链路端到端是通的）
  * ⑥ 删除走**确认框**（§158 建的规矩，对新来源同样成立）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/assets-data";
+const DATA = ".verify/assets-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -25,8 +25,8 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  */
 
 const PORT = 9712;
-const DATA = "D:/DoubaoWorkClone/.verify/measure-renders";
-const OUT = "D:/DoubaoWorkClone/.verify/measure-canvas-renders.json";
+const DATA = ".verify/measure-renders";
+const OUT = ".verify/measure-canvas-renders.json";
 
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
@@ -34,9 +34,9 @@ delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", `--remote-debugging-port=${PORT}`],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "pipe", "pipe"] },
+  { cwd: ".", env, stdio: ["ignore", "pipe", "pipe"] },
 );
 /* 不读管道会把自己憋死（见 harness.ts 里 §137 那条注释），这里只留尾部。 */
 let log = "";
@@ -137,7 +137,7 @@ await arm();
 const move2 = await dragOnce(nodeCount - 1, 15, -180);
 const drag2 = await read();
 
-await shot(page, "D:/DoubaoWorkClone/.verify/measure-renders-shot.png");
+await shot(page, ".verify/measure-renders-shot.png");
 
 const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
 const report = {

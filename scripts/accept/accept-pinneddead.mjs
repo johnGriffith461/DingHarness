@@ -18,7 +18,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ① 种一个**形状对但不存在**的默认（`nope/nope`）→ 通用那行标「（不可用）」
  * ② 种一个**真实可用**的默认 → **不标**
  */
-const DATA = "D:/DoubaoWorkClone/.verify/pinneddead-data";
+const DATA = ".verify/pinneddead-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

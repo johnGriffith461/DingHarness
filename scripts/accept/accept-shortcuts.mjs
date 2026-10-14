@@ -12,7 +12,7 @@ import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort } fro
  * 键位依据本体左栏原文（`app-triage/dynamic-ui/route-sweep.json` 的 head）：
  * 新工作任务 Ctrl N / 定时任务 Ctrl Shift T / 插件·技能·伙伴 Ctrl Shift S / 云盘 Ctrl Shift D
  */
-const DATA = "D:/DoubaoWorkClone/.verify/sc-data";
+const DATA = ".verify/sc-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);
@@ -25,8 +25,8 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([12992]);
 /* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
 env.DSH_DEBUG_PORT = String(__port);
-const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
-  cwd: "D:/DoubaoWorkClone",
+const child = spawn("node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
+  cwd: ".",
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });

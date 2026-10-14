@@ -21,7 +21,7 @@ import { openApp, openCanvas, shot, verdict } from "./harness.mjs";
  *   屏幕坐标 = iframe 的屏幕左上角 + 框内坐标 × 画布缩放
  * 框内坐标要在 iframe 里用 `getBoundingClientRect()` 量。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/html-data";
+const DATA = ".verify/html-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -229,7 +229,7 @@ report.framesAfterAllow = await page.locator("iframe.nv-html-frame").count();
 
 report.frameAfterAllow = await readFrameState();
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/html-final.png");
+await shot(page, ".verify/shots-final/html-final.png");
 
 // 7) 落盘 + 重启
 await page.waitForTimeout(1800);

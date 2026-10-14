@@ -13,7 +13,7 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
  *   快捷键说明面板列出全部条目
  */
 
-const DATA = "D:/DoubaoWorkClone/data";
+const DATA = "data";
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -22,9 +22,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12320]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);
@@ -92,7 +92,7 @@ await page.locator('[data-testid="shortcut-help"]').click();
 await page.waitForTimeout(300);
 report.cheatsheetRows = await page.locator('[data-testid="shortcut-cheatsheet"] .shortcut-row').count();
 report.cheatsheetKeys = await page.locator('[data-testid="shortcut-cheatsheet"] kbd').allTextContents();
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-p5/04-shortcuts.png");
+await shot(page, ".verify/shots-p5/04-shortcuts.png");
 
 // Esc 退出标记模式
 await page.locator('[data-testid="shortcut-help"]').click();

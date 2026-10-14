@@ -20,7 +20,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot, verdict, waitForPa
  * ② 已经吐出来的内容**留着**（不是整段消失）；
  * ③ **会话日志里有终止记录** —— 否则读日志的人分不清"这一轮断了"还是"还在跑"。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/abort-data";
+const DATA = ".verify/abort-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

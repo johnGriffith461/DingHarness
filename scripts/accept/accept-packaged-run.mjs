@@ -14,7 +14,7 @@ import { connectWithRetry, openCanvas, pickPort, shot } from "./harness.mjs";
  *   4. **打包版能真的生成图片**（自定义协议 + assets 目录在系统 userData 下也成立）
  *   5. 开发态才有的探针（`__canvasStore`）在打包版里**不存在**
  */
-const UNPACKED = "D:/DoubaoWorkClone/release/win-unpacked";
+const UNPACKED = "release/win-unpacked";
 const EXE = path.join(UNPACKED, "工作台.exe");
 if (!fs.existsSync(EXE)) {
   console.log("没有解包产物，先 pnpm build");
@@ -37,7 +37,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 const __port = await pickPort([9330]);
 env.DSH_DEBUG_PORT = String(__port);
 // 打包版写系统 userData；给它一个独立目录，别污染真实配置
-const PORTABLE_DATA = "D:/DoubaoWorkClone/.verify/packaged-userdata";
+const PORTABLE_DATA = ".verify/packaged-userdata";
 fs.rmSync(PORTABLE_DATA, { recursive: true, force: true });
 env.DSH_CANVAS_DATA_DIR = PORTABLE_DATA;
 
@@ -122,7 +122,7 @@ report.generated = await page.evaluate(() => {
 });
 report.nodesDelta = (await page.locator(".react-flow__node").count()) - nodesBefore;
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/packaged.png");
+await shot(page, ".verify/shots-final/packaged.png");
 
 // 6) 打包版的导出目录 / assets 落在哪里
 report.assetsDir = fs.existsSync(path.join(PORTABLE_DATA, "assets"))

@@ -17,7 +17,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openCanvas
  * ③ ⭐ 正文里**不再有** `<artifact` 标签原文
  * ④ 卡片上带协议类型编号（`data-artifact-resource-type`，与工作台同一套）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/chatartifact-data";
+const DATA = ".verify/chatartifact-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

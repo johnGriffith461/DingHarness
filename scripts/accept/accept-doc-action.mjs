@@ -18,7 +18,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } fr
  *
  * ⚠️ 会真调模型（约 1 分钟）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/doc-action-data";
+const DATA = ".verify/doc-action-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -12,7 +12,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  *
  * 用**预置 tasks.json**造记录，不调模型 —— 时间分档不该依赖一次三十秒的模型调用。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/threads-data";
+const DATA = ".verify/threads-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

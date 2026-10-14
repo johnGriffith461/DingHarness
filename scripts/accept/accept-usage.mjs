@@ -20,7 +20,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, ver
  *
  * 这条把两条都验掉：读磁盘 + 读界面那句 title。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/usage-data";
+const DATA = ".verify/usage-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

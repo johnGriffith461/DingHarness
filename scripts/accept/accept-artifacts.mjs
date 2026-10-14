@@ -19,7 +19,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openSummar
  *
  * 断言：**页面照常打开**、好的照常显示、坏的没出现、控制台没有报错。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/artifacts-data";
+const DATA = ".verify/artifacts-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

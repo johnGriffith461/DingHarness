@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { openCanvas, shot } from "./harness.mjs";
 
-const OUT = "D:/DoubaoWorkClone/.verify/shots-final";
+const OUT = ".verify/shots-final";
 mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch({

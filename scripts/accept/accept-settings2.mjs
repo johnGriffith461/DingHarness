@@ -16,7 +16,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  * ⑤ ⭐ 点「开启新话题」→ 真的回到新工作任务的空状态
  * ⑥ 关于页：标题 `关于 Ding Harness`、用户协议、官网链接在
  */
-const DATA = "D:/DoubaoWorkClone/.verify/settings2-data";
+const DATA = ".verify/settings2-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

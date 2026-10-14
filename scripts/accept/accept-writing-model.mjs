@@ -21,12 +21,12 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
 /*
  * ⚠️ 数据目录必须是**隔离**的（2026-10-14 改）。
  *
- * 这条原来写死 `D:/DoubaoWorkClone/data` —— 那是**开发机真实的数据目录**。
+ * 这条原来写死 `data` —— 那是**开发机真实的数据目录**。
  * 它真的连模型、真的改写节点，于是每次跑都在主人的真实画布上动刀
  * （还写进真实会话日志）。验收不许碰真实数据，这条也是手册里
  * 「DSH_CANVAS_DATA_DIR 必须指到隔离目录」那条规矩的漏网之鱼。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/writing-data";
+const DATA = ".verify/writing-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -35,9 +35,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12370]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);
@@ -109,7 +109,7 @@ await page.waitForTimeout(900);
 report.textAfterUndo = await textOf();
 report.undoRestored = report.textAfterUndo === report.textBefore;
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-p5/07-writing.png");
+await shot(page, ".verify/shots-p5/07-writing.png");
 console.log(JSON.stringify(report, null, 2));
 
 await browser.close();

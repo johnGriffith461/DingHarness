@@ -14,9 +14,9 @@ import { bootApp, connectWithRetry, killLeftovers, killTree, openCanvas, shot } 
  *   3. 伪造"未确认快照"→ 再开 → 回退到确认版并弹出提示
  */
 
-const DATA = "D:/DoubaoWorkClone/data";
+const DATA = "data";
 const SNAP = path.join(DATA, "canvas", "document.json");
-const OUT = "D:/DoubaoWorkClone/.verify/shots-p4";
+const OUT = ".verify/shots-p4";
 fs.mkdirSync(OUT, { recursive: true });
 /*
  * 开机前先清残留（§137）。

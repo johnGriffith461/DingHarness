@@ -13,7 +13,7 @@ import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness
  *      Electron 会把自己当 Node 跑 —— 没有脚本、直接退出码 0，看起来像"应用秒退"。
  *   ② 数据目录用 DSH_CANVAS_DATA_DIR 指到临时位置，别污染真实 userData。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/packaged-data";
+const DATA = ".verify/packaged-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 const env = { ...process.env };
@@ -24,14 +24,14 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([9330]);
 env.DSH_DEBUG_PORT = String(__port);
 
-const exe = "D:/DoubaoWorkClone/release/win-unpacked/工作台.exe";
+const exe = "release/win-unpacked/工作台.exe";
 if (!fs.existsSync(exe)) {
   console.log("打包产物不存在：", exe);
   process.exit(1);
 }
 
 const child = spawn(exe, [], {
-  cwd: "D:/DoubaoWorkClone/release/win-unpacked",
+  cwd: "release/win-unpacked",
   env,
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -85,7 +85,7 @@ if (report.snapshotWritten) {
 report.statusText = await page.locator(".canvas-statusbar").textContent();
 report.stderrTail = err.split("\n").filter(Boolean).slice(0, 6).join(" | ") || "(空)";
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-p6/packaged.png");
+await shot(page, ".verify/shots-p6/packaged.png");
 console.log(JSON.stringify(report, null, 2));
 
 /*

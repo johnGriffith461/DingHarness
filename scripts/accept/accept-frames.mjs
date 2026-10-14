@@ -14,17 +14,17 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  *   4. 删掉画框 → 里面的卡片不会跟着消失（只是回到顶层）
  *   5. 画框随文档落盘、重启后还在
  */
-const DATA = "D:/DoubaoWorkClone/data";
+const DATA = "data";
 const SNAP = path.join(DATA, "canvas", "document.json");
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+const EXE = "node_modules/electron/dist/electron.exe";
 async function boot(port) {
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
-    cwd: "D:/DoubaoWorkClone",
+    cwd: ".",
     env,
     stdio: ["ignore", "ignore", "ignore"],
   });
@@ -99,7 +99,7 @@ const report = {};
     frameMoved: Math.abs((await page.locator(".frame-node").boundingBox()).x - frameEl.x) > 40,
   };
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/frames.png");
+  await shot(page, ".verify/shots-final/frames.png");
 
   /*
    * ── 底部工具条那三颗（2026-10-13 补）──

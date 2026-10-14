@@ -25,9 +25,13 @@ jobs:
     runs-on: windows-latest
 
     env:
-      # 断言"不碰真实模型"用的：验收脚本与任何真调模型的路径都不在下面这几步里，
-      # 万一有人把 `pnpm verify:accept`（会真启 Electron）或 `.verify/ai-smoke.mjs`
-      # （会真调模型）加进来，这个变量会让它们立刻失败而不是悄悄烧钱。
+      # 「禁止真实模型」这道闸（内核里真的读它：`engine/runtime/loop.ts` 的 realModelBlocked）。
+      # 验收脚本与任何真调模型的路径都不在下面这几步里；万一有人把 `pnpm verify:accept`
+      # （会真启 Electron 并往输入框填提示词点发送）加进来，这个变量会让每一次远程调用
+      # 直接以"DSH_NO_REAL_MODEL 已设置：拒绝调用远程 provider"失败，而不是悄悄烧钱。
+      #
+      # ⚠️ 2026-10-14 修：在这之前**仓库里没有任何代码读这个变量** —— 注释承诺的闸门是空的
+      # （而验收脚本确实会打真模型：整批 99 条跑一遍就是 99 次真调用）。现在它是真的了。
       CI: "true"
       DSH_NO_REAL_MODEL: "1"
       # ⚠️ 画布数据目录（DSH_CANVAS_DATA_DIR）**不能**放这里 —— `runner` 上下文在 job 级 `env`

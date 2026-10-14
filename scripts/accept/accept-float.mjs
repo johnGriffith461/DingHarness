@@ -11,7 +11,7 @@ import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
  *   · 产物在对话流里是一张卡片（标题 + 创建时间 + 打开），不只是右侧面板里的一行；
  *   · 悬浮窗可拖拽、自带输入区、**问一句答一句但不建任务**。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/float-data";
+const DATA = ".verify/float-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -20,9 +20,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12580]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);
@@ -84,7 +84,7 @@ report.floatReplyLength = replied.length;
 const tasksAfterFloat = await page.locator('[data-testid^="wb-recent-"]').count();
 report.taskCountUnchanged = { before: tasksBeforeFloat, after: tasksAfterFloat };
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-16-float.png");
+await shot(page, ".verify/shots-final/wb-16-float.png");
 
 await page.locator('[data-testid="wb-float-close"]').click();
 await page.waitForTimeout(500);
@@ -129,7 +129,7 @@ await page.locator('[data-testid^="wb-artcard-open-"]').first().click();
 await page.waitForTimeout(1500);
 report.afterOpenNote = await page.locator('[data-testid^="wb-artcard-"]').first().textContent().catch(() => null);
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-17-artcard.png");
+await shot(page, ".verify/shots-final/wb-17-artcard.png");
 
 console.log(JSON.stringify(report, null, 2));
 await browser.close();

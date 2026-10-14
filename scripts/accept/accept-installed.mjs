@@ -9,8 +9,8 @@ import { connectWithRetry, pickPort, verdict } from "./harness.mjs";
  * 这是补 §72 里列的那个缺口："安装包已产出、解包版验过，但安装向导本身没实际走一遍"。
  * 静默安装已经跑过（退出码 0），这里验装出来的那份能不能起来并渲染。
  */
-const EXE = "D:/DoubaoWorkClone/.verify/instA/工作台.exe";
-const DATA = "D:/DoubaoWorkClone/.verify/instA-data";
+const EXE = ".verify/instA/工作台.exe";
+const DATA = ".verify/instA-data";
 
 if (!fs.existsSync(EXE)) {
   console.log(JSON.stringify({ launched: false, reason: "安装目录里没有 工作台.exe" }));

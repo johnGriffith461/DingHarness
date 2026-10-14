@@ -18,7 +18,7 @@ import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
  * 这正是这个项目反复在清的那类缺陷（"看着有、其实没用"），
  * 所以**必须点一遍看计算样式真变了**，而不是只看那一行有没有渲染出来。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/theme-data";
+const DATA = ".verify/theme-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 const env = { ...process.env };
@@ -30,9 +30,9 @@ const __port = await pickPort([12888]);
 /* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
 env.DSH_DEBUG_PORT = String(__port);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 
 const report = {};

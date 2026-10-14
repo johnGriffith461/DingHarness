@@ -15,7 +15,7 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
  *   5. 执行「置顶」后，DOM 里该节点排到最后（= 最上层）
  */
 
-const DATA = "D:/DoubaoWorkClone/data";
+const DATA = "data";
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -24,9 +24,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12420]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);
@@ -123,7 +123,7 @@ await page.locator(`.layer-row[data-layer-id="${top}"]`).click({ button: "right"
 await page.waitForTimeout(500);
 report.topMenuDisabledFront = await page.locator('[data-layer-op="front"]').isDisabled();
 await page.locator('[data-layer-op="forward"]').isDisabled();
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/layers.png");
+await shot(page, ".verify/shots-final/layers.png");
 
 console.log(JSON.stringify(report, null, 2));
 await browser.close();

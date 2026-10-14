@@ -21,7 +21,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  * ⚠️ 会真调模型（1 次）。工具策略若要求确认，那一行会是"等你确认"——
  * **那条同样该带参数**（用户正要决定放不放行），所以两种都算通过。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/toolargs-data";
+const DATA = ".verify/toolargs-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

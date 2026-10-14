@@ -27,7 +27,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot, verdict } from "./
  *    走了两条路（那正是 C2 要消灭的东西）。
  * ⑥ 没有坏行（0 行跳过）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/sessionlog-data";
+const DATA = ".verify/sessionlog-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

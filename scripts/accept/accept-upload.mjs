@@ -22,7 +22,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⚠️ **没验**：点「上传」→ 系统框 → 面板逐条亮起。框点不了，
  * 所以"面板的可见性与逐条状态"这半边靠 `upload.test.ts`（19 条）+ 结构断言。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/upload-data";
+const DATA = ".verify/upload-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

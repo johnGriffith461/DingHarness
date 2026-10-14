@@ -19,7 +19,7 @@ import { connectWithRetry, pickPort, verdict } from "./harness.mjs";
  * ⚠️ 顺带断一条界面口径：**气泡里只显示用户自己写的那句话**，
  * 资料正文不该混进他说的话里（那是给模型的，不是给他看的）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/material-data";
+const DATA = ".verify/material-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 /* 预置一份资料：内容里有**只有读到才知道**的标记 */
 const MARK = "验收专用标记-7Q4Z";
@@ -27,7 +27,7 @@ fs.mkdirSync(path.join(DATA, "drive"), { recursive: true });
 fs.writeFileSync(path.join(DATA, "drive", "季度总结.md"), `# 季度总结\n\n${MARK}\n营收增长 12%\n`, "utf8");
 
 /* 没有密钥 → 这一轮必定失败，但请求照记（省时省钱，且结论一样硬） */
-const EMPTY_KEYS = "D:/DoubaoWorkClone/.verify/material-keys-empty.yaml";
+const EMPTY_KEYS = ".verify/material-keys-empty.yaml";
 fs.writeFileSync(EMPTY_KEYS, "refs:\n", "utf8");
 
 const env = { ...process.env };
@@ -38,9 +38,9 @@ env.DSH_CREDENTIALS_FILE = EMPTY_KEYS;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12781]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 await new Promise((r) => setTimeout(r, 9000));
 

@@ -17,17 +17,17 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  *   6. 生成结果落盘，且文档里**只有文件名**（不是几百 KB 的 base64）
  *   7. 重启后图还在
  */
-const DATA = "D:/DoubaoWorkClone/.verify/gen-data";
+const DATA = ".verify/gen-data";
 const SNAP = path.join(DATA, "canvas", "document.json");
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+const EXE = "node_modules/electron/dist/electron.exe";
 async function boot(port) {
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
-    cwd: "D:/DoubaoWorkClone",
+    cwd: ".",
     env,
     stdio: ["ignore", "ignore", "ignore"],
   });
@@ -114,7 +114,7 @@ const report = {};
   });
   report.genToast = await page.locator(".canvas-toast").textContent().catch(() => null);
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/gen-image.png");
+  await shot(page, ".verify/shots-final/gen-image.png");
 
   // 6) 落盘 + 文档里只有文件名
   await page.waitForTimeout(2000);

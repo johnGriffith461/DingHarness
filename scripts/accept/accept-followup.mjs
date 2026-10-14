@@ -23,7 +23,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  *    `那再乘以 3 呢？` 里的"那"指代上一轮的 `1 + 1 = 2`，
  *    **没有历史的话模型根本不知道要拿什么乘 3**。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/followup-data";
+const DATA = ".verify/followup-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

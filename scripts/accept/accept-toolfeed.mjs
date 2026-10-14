@@ -25,7 +25,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  *
  * ⚠️ 会真调模型（2 次）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/toolfeed-data";
+const DATA = ".verify/toolfeed-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

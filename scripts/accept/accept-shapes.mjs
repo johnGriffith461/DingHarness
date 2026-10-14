@@ -14,17 +14,17 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  *   4. 图层菜单里的翻转真的改变了 transform
  *   5. 形状随文档落盘、重启后还在
  */
-const DATA = "D:/DoubaoWorkClone/data";
+const DATA = "data";
 const SNAP = path.join(DATA, "canvas", "document.json");
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+const EXE = "node_modules/electron/dist/electron.exe";
 async function boot(port) {
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
-    cwd: "D:/DoubaoWorkClone",
+    cwd: ".",
     env,
     stdio: ["ignore", "ignore", "ignore"],
   });
@@ -107,7 +107,7 @@ const report = {};
     const el = document.querySelector(`.react-flow__node[data-id="${id}"] .shape-node`);
     return el ? getComputedStyle(el).transform : null;
   }, rectId);
-  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/shapes.png");
+  await shot(page, ".verify/shots-final/shapes.png");
 
   await page.waitForTimeout(1500);
   if (fs.existsSync(SNAP)) {

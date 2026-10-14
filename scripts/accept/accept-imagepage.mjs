@@ -17,7 +17,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ④ 「最近生成」的空态在
  * ⑤ 不点生成 —— 这条验收**不动这台机器上的钱和网络**
  */
-const DATA = "D:/DoubaoWorkClone/.verify/imagepage-data";
+const DATA = ".verify/imagepage-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

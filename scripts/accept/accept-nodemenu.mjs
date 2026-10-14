@@ -16,7 +16,7 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
  * `window.__canvasStore` 是 DEV-only，构建版没有。所以全部走**行为级**断言：
  * 拖不拖得动、DOM 少没少、菜单项是否被禁用 —— 这比读内部状态更有说服力。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/nm2";
+const DATA = ".verify/nm2";
 fs.rmSync(DATA, { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -25,9 +25,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12700]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);
@@ -39,7 +39,7 @@ await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
 await page.waitForTimeout(1500);
 
 const report = {};
-const shots = "D:/DoubaoWorkClone/.verify/shots-final";
+const shots = ".verify/shots-final";
 const countNodes = () => page.locator(".react-flow__node").count();
 
 /** 重置到干净画布：重载 + 打开画布。 */

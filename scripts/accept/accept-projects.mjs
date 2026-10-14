@@ -16,9 +16,9 @@ import { openApp, shot, verdict } from "./harness.mjs";
  * 建任务那一步会调模型 → 用**空凭据文件**让它注定失败（`.verify/projects-keys.yaml`），
  * 任务照样建出来（这一步只需要"有个任务能归进项目"）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/projects-data";
+const DATA = ".verify/projects-data";
 fs.rmSync(DATA, { recursive: true, force: true });
-const EMPTY_KEYS = "D:/DoubaoWorkClone/.verify/projects-keys.yaml";
+const EMPTY_KEYS = ".verify/projects-keys.yaml";
 fs.writeFileSync(EMPTY_KEYS, "refs:\n", "utf8");
 
 const { browser, page, child } = await openApp(chromium, {
@@ -101,7 +101,7 @@ try {
   await page.waitForTimeout(900);
   report.countAfterRemove = await page.locator(".wb-nav-count").first().textContent().catch(() => null);
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/projects.png");
+  await shot(page, ".verify/shots-final/projects.png");
 
   /* ⑥ 删项目：项目没了，**任务还在**（那一行的说明就是这句） */
   report.step = "删项目";

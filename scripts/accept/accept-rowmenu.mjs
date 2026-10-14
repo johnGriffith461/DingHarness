@@ -14,7 +14,7 @@ import { connectWithRetry, pickPort, readStoreFile, shot, waitForPort } from "./
  * 「移除任务」有一条必须验的语义：**只从列表去掉，不动磁盘上的产物** ——
  * 产物是用户的东西，移出一个任务不该顺手把文件删了。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/rowmenu-data";
+const DATA = ".verify/rowmenu-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 fs.mkdirSync(path.join(DATA, "artifacts"), { recursive: true });
 fs.writeFileSync(path.join(DATA, "artifacts", "已有产物.docx"), "x", "utf8");
@@ -26,9 +26,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12620]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);
@@ -40,7 +40,7 @@ await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
 await page.waitForTimeout(1500);
 
 const report = {};
-const shots = "D:/DoubaoWorkClone/.verify/shots-final";
+const shots = ".verify/shots-final";
 
 try {
   // 建两个任务
@@ -124,9 +124,9 @@ try {
   child.kill();
   await new Promise((r) => setTimeout(r, 2500));
   const child2 = spawn(
-    "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+    "node_modules/electron/dist/electron.exe",
     [".", "--remote-debugging-port=9621"],
-    { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+    { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
   );
   await new Promise((r) => setTimeout(r, 8000));
   const b2 = await connectWithRetry(chromium, "http://127.0.0.1:9621");

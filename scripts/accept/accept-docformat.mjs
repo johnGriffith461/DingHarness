@@ -16,7 +16,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ④ ⭐ 点「小标题」→ 正文那几行**真的被加上 `##`**
  * ⑤ ⭐ 点「正文」→ 标记被去掉；且每次都留了历史版本（由来写着「小标题」/「正文」）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/docformat-data";
+const DATA = ".verify/docformat-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

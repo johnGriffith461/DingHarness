@@ -18,7 +18,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  * ⑤ ⭐⭐ **重启之后喜欢还在**（`coding-likes.json` 而不是 localStorage —— §156 的教训）
  * ⑥ 界面上**不给假的点赞数**（本机版只有你自己）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/codinglike-data";
+const DATA = ".verify/codinglike-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

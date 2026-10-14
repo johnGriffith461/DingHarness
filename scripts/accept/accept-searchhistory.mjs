@@ -20,7 +20,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  * ⚠️ 第 ⑦ 条是本条最要紧的：搜索历史是"用户觉得它一直在"的东西 ——
  * §156 就是在类似的地方栽过（放 localStorage，强杀就丢）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/history-data";
+const DATA = ".verify/history-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

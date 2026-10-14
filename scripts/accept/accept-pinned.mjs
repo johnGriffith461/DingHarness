@@ -16,7 +16,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  *    （用 `__DSH_TEST__` 之外的公开路径拿不到，所以这条由 7 条 `pickRoute` 单测守着；
  *     这里只断言"设置真的接进了渲染侧内存"，即列表那行的文案跟着变）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/pinned-data";
+const DATA = ".verify/pinned-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

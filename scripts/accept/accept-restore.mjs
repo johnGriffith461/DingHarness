@@ -21,7 +21,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⑤ 上次关窗口时还在跑的任务，恢复后是 `failed` 且写明"上次关闭时被中断"
  *    （这是原有口径，顺带钉住 —— 免得以后有人"顺手改好"改成 running）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/restore-data";
+const DATA = ".verify/restore-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

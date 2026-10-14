@@ -17,7 +17,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openCanvas
  * 所以验收必须**两边各问一次同样的问题**，且问题只能靠"注入的记忆"答对：
  * 记忆里放一个暗号，问它暗号是什么。没注入就答不出来（这是可证伪的地方）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/bothpaths-data";
+const DATA = ".verify/bothpaths-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

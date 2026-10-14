@@ -15,7 +15,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * ⑤ **图表**抽出表格并数出图片
  * ⑥ 「最近阅读」收进去后**重开还在**（落盘），点它能重新打开
  */
-const DATA = "D:/DoubaoWorkClone/.verify/reader-data";
+const DATA = ".verify/reader-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

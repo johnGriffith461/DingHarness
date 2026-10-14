@@ -24,7 +24,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⑦ 配置文件路径显示出来了（用户要知道去哪加连接器）
  * ⑧ 「重新连接」之后仍然连得上（重连不是摆设）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/mcp-data";
+const DATA = ".verify/mcp-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

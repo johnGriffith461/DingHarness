@@ -18,7 +18,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⚠️ 关键是**页面照常打开**：原来这里是一句 `as CronJob[]` 直接断言，
  * 坏字段会一路带到界面与 ticker 里。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/schedbad-data";
+const DATA = ".verify/schedbad-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

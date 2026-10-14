@@ -16,7 +16,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * ⑤ 「已经到底了」在列表末尾
  * ⑥ 存储行是「已使用 X」（**没有百分比** —— 本机版没有配额，不编）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/driveops-data";
+const DATA = ".verify/driveops-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -19,7 +19,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  * ⑤ 文档真的落盘了（`docs.json` 里查得到，不是只在界面上）
  * ⑥ 留痕写着「从对话创建」
  */
-const DATA = "D:/DoubaoWorkClone/.verify/createdoc-data";
+const DATA = ".verify/createdoc-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

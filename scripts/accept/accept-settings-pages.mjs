@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort } from "./harness.mjs";
 
 /** 验：设置里「标准套餐」→ 个人资料页、「账号」→ 账号页，且能返回。 */
-const DATA = "D:/DoubaoWorkClone/.verify/setp-data";
+const DATA = ".verify/setp-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);
@@ -16,8 +16,8 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([12995]);
 /* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
 env.DSH_DEBUG_PORT = String(__port);
-const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
-  cwd: "D:/DoubaoWorkClone",
+const child = spawn("node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
+  cwd: ".",
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
 
-const OUT = "D:/DoubaoWorkClone/.verify/shots-p3";
+const OUT = ".verify/shots-p3";
 mkdirSync(OUT, { recursive: true });
 
 // 启动 Electron（不带 ELECTRON_RUN_AS_NODE —— 带上的话 electron.exe 会退化成纯 Node）
@@ -14,16 +14,16 @@ delete env.ELECTRON_RUN_AS_NODE;
  * 数据目录必须隔离 —— 否则读写真实 userData：自己拿不到预置数据，
  * 还会把状态写进真实目录、污染批跑里后续的条目（§109 撞到过一次）。
  */
-const DATA_DIR = "D:/DoubaoWorkClone/.verify/p3-data";
+const DATA_DIR = ".verify/p3-data";
 rmSync(DATA_DIR, { recursive: true, force: true });
 env.DSH_CANVAS_DATA_DIR = DATA_DIR;
 const PORT = "9931";
 env.DSH_DEBUG_PORT = PORT;
 
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", `--remote-debugging-port=${PORT}`],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "pipe", "pipe"] },
+  { cwd: ".", env, stdio: ["ignore", "pipe", "pipe"] },
 );
 let stderr = "";
 child.stderr.on("data", (d) => {

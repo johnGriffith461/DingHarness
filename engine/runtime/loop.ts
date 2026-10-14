@@ -124,12 +124,48 @@ export function humanError(error: unknown): string {
  * @param model 请求里带的模型名（可选）
  * @returns 解析结果（失败时给一句给人看的话）
  */
+/**
+ * 「禁止真实模型」这道闸（`DSH_NO_REAL_MODEL`）。
+ *
+ * ## 为什么它必须真的存在
+ *
+ * CI 的 workflow 里一直写着这个变量，注释还承诺"万一有人把真调模型的验收加进来，
+ * 这个变量会让它们立刻失败而不是悄悄烧钱"—— 而**仓库里没有任何代码读它**。
+ * 也就是说那句承诺是空的：闸门画在墙上，门是开的。
+ *
+ * （实测过代价：跑一条验收脚本 `accept-tools.mjs` 会真的打 provider，
+ * 它往输入框里填提示词然后点发送。整批 99 条跑一遍就是 99 次真调用。）
+ *
+ * 判据是**地址**而不是"哪个 provider"：指向 `127.0.0.1`/`localhost` 的（本地假服务、
+ * 本地推理）照常放行 —— 那正是"不烧钱地测主循环"该走的路。
+ *
+ * ⚠️ 解析不出主机名时**当远程拦掉**：宁可拦错一次，不要放过一次真花钱的调用。
+ *
+ * @param baseURL provider 的地址
+ * @returns 是否该拒
+ */
+function realModelBlocked(baseURL: string): boolean {
+  if (!process.env.DSH_NO_REAL_MODEL?.trim()) return false;
+  try {
+    const host = new URL(baseURL).hostname;
+    return !(host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]");
+  } catch {
+    return true;
+  }
+}
+
 export function resolveTurnTarget(
   providerId: string,
   model?: string,
 ): { ok: true; provider: NonNullable<ReturnType<typeof getProvider>>; model: string } | { ok: false; error: string } {
   const provider = getProvider(providerId);
   if (!provider) return { ok: false, error: `未知 provider：${providerId}` };
+  if (realModelBlocked(provider.baseURL)) {
+    return {
+      ok: false,
+      error: `DSH_NO_REAL_MODEL 已设置：拒绝调用远程 provider（${provider.label} → ${provider.baseURL}）。只有指向本机的任务才允许跑。`,
+    };
+  }
   if (!resolveSecret(provider.keyRef)) {
     return { ok: false, error: `${provider.label} 没有可用密钥（需要 ${provider.keyRef}）` };
   }
@@ -168,12 +204,24 @@ export async function runTurn(
   deps: TurnDeps = {},
 ): Promise<TurnOutcome> {
   const health = deps.health ?? noopHealth;
-  const provider = getProvider(input.provider);
-  if (!provider) {
-    const message = `未知 provider：${input.provider}`;
-    onEvent({ type: "error", message });
-    return { ok: false, error: message, aborted: false, provider: input.provider, model: "" };
+
+  /*
+   * ⭐ provider / 模型 / 「禁真模型」闸**只有一份判定**：`resolveTurnTarget`。
+   *
+   * ⚠️ 这里原来自己又写了一遍（getProvider + 查密钥 + 模型回落）。于是上面那句
+   * 注释"规则只有一份（resolveTurnTarget），这里用的也是它"**是假的** ——
+   * 而代价实测到了：给 `resolveTurnTarget` 加上的防烧钱闸，
+   * 通过 `ding run` 走这条路时**完全没生效**，一次真调用照打出去。
+   *
+   * 被复制一份的判定，就是会被绕过的那一份。
+   */
+  const target = resolveTurnTarget(input.provider, input.model);
+  if (!target.ok) {
+    onEvent({ type: "error", message: target.error });
+    return { ok: false, error: target.error, aborted: false, provider: input.provider, model: "" };
   }
+  const provider = target.provider;
+  const model = target.model;
 
   const apiKey = resolveSecret(provider.keyRef);
   if (!apiKey) {
@@ -181,12 +229,6 @@ export async function runTurn(
     onEvent({ type: "error", message });
     return { ok: false, error: message, aborted: false, provider: provider.id, model: "" };
   }
-
-  /*
-   * 模型校验：**不在清单里就退回默认**（原来只有父级这么做，子级只判真值 ——
-   * 于是子智能体可以拿一个不存在的模型名去请求，然后以"连不上"的形式失败）。
-   */
-  const model = input.model && provider.models.includes(input.model) ? input.model : (provider.models[0] ?? "");
 
   try {
     const client = createOpenAICompatible({ name: provider.id, baseURL: provider.baseURL, apiKey });

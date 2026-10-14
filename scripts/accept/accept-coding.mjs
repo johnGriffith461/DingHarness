@@ -20,7 +20,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * ⚠️ **不点「预览应用」**：那是用系统默认程序打开（会真的拉起浏览器）。
  * 只断言按钮在 —— 点它会污染这台机器，而这件事不该由验收来做。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/coding-data";
+const DATA = ".verify/coding-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

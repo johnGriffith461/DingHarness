@@ -20,7 +20,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * ③ **本地对话没被动过**：六个气泡（3 问 3 答）都还在。
  *    压缩只该改变"这次发给模型什么"，**不许删用户看得到的历史**。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/compaction-data";
+const DATA = ".verify/compaction-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -12,7 +12,7 @@ import { connectWithRetry, pickPort, waitForPort } from "./harness.mjs";
  *   2. 草稿是**取走即清**的 —— 离开再回来不能被重新填一遍，
  *      否则用户会以为"上次填的没提交"。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/sched-draft";
+const DATA = ".verify/sched-draft";
 fs.rmSync(DATA, { recursive: true, force: true });
 fs.mkdirSync(DATA, { recursive: true });
 const now = Date.now();
@@ -45,9 +45,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12720]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);

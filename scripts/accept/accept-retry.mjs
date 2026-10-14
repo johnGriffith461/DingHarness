@@ -22,13 +22,13 @@ import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness
  * ⚠️ 界面上的"问了几遍"是真的会误导人的：`send` 每次都往历史里追加一条用户消息，
  * 所以"重试"如果只重发不撤，历史里就有两条一样的提问。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/retry-data";
+const DATA = ".verify/retry-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 /*
  * 凭据文件是 **YAML**（`electron/ipc/credentials.ts` 只解析 `refs:` 下一层的 KEY: value），
  * 不是 JSON —— 所以这里写一个**空的 refs 段**，而不是 `{}`。
  */
-const EMPTY_KEYS = "D:/DoubaoWorkClone/.verify/retry-keys-empty.yaml";
+const EMPTY_KEYS = ".verify/retry-keys-empty.yaml";
 fs.writeFileSync(EMPTY_KEYS, "refs:\n", "utf8");
 
 const env = { ...process.env };
@@ -39,9 +39,9 @@ env.DSH_CREDENTIALS_FILE = EMPTY_KEYS;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12740]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 await new Promise((r) => setTimeout(r, 9000));
 
@@ -131,7 +131,7 @@ try {
   /* 流真的停了：不该还挂着"停止" */
   report.stoppedAfterRetry = (await page.locator('[data-testid="chat-send-stop"]').count()) === 0;
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/retry.png");
+  await shot(page, ".verify/retry.png");
 } catch (error) {
   report.error = `在「${report.step ?? "未知"}」这一步失败：${String(error).split(String.fromCharCode(10))[0]}`;
 } finally {

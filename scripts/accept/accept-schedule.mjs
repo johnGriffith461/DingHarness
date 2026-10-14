@@ -15,20 +15,20 @@ import { connectWithRetry, pickPort, readStoreFile, shot, verdict, waitForPort }
  *
  * 只看界面上出现了那一行是不够的：那和写死的假数据看不出区别。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/sched-data";
+const DATA = ".verify/sched-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+const EXE = "node_modules/electron/dist/electron.exe";
 
 async function launch(port) {
   /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
   port = await pickPort([port]);
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
-    cwd: "D:/DoubaoWorkClone",
+    cwd: ".",
     env,
     stdio: ["ignore", "ignore", "ignore"],
   });
@@ -134,7 +134,7 @@ report.afterPause = {
   next: await page.locator(`[data-testid="wb-job-next-${report.jobId}"]`).textContent().catch(() => null),
 };
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-14-scheduled.png");
+await shot(page, ".verify/shots-final/wb-14-scheduled.png");
 
 /* ---------- 重启：任务应还在 ---------- */
 await browser.close();

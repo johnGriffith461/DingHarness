@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "./loop";
 import { createToolRegistry, buildToolSet } from "./registry";
+import { getProvider } from "./providers";
 import type { HealthStore } from "../ports/health";
 import type { ToolExecutor } from "../ports/executor";
 import { z } from "zod";
@@ -355,6 +356,53 @@ describe("主循环 · 前置校验与错误翻译", () => {
   it("模型名不在清单里就退回默认（不拿一个不存在的模型去请求）", () => {
     const target = resolveTurnTarget("strata", "不存在的模型");
     expect(target).toMatchObject({ ok: true, model: "deepseek-flash" });
+  });
+
+  it("⭐ `DSH_NO_REAL_MODEL` 是**真闸**：远程 provider 直接拒，本机照常放行", () => {
+    /*
+     * 这个变量在 CI 里写着、注释还承诺"会让真调模型的路径立刻失败"，
+     * 而在此之前**没有任何代码读它**。这条断言就是那句承诺的兑现处 ——
+     * 没有它，下一个人把闸门函数删掉也不会有东西喊。
+     */
+    const prev = process.env.DSH_NO_REAL_MODEL;
+    try {
+      process.env.DSH_NO_REAL_MODEL = "1";
+      // 远程（deepseek 官方）→ 拒
+      const remote = resolveTurnTarget("deepseek", "deepseek-chat");
+      expect(remote.ok).toBe(false);
+      expect(remote.ok ? "" : remote.error).toContain("DSH_NO_REAL_MODEL");
+      // 本机（测试里的假 provider 就在 127.0.0.1）→ 放行，否则"不烧钱地测主循环"这条路也被堵死
+      const local = resolveTurnTarget("strata", "deepseek-flash");
+      expect(local.ok).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.DSH_NO_REAL_MODEL;
+      else process.env.DSH_NO_REAL_MODEL = prev;
+    }
+  });
+
+  it("⭐ 闸门在**真跑那一轮**里也生效（不只是 resolveTurnTarget 里）", async () => {
+    /*
+     * ⚠️ 这条是补出来的：给 `resolveTurnTarget` 加了闸之后，CLI 真跑一次
+     * **照打不误** —— 因为 `runTurn` 自己又写了一遍 provider 解析、没走那个函数。
+     * 所以"闸门在判定函数里"不算数，得断言"真的没发请求"。
+     */
+    const prev = process.env.DSH_NO_REAL_MODEL;
+    const fake = getProvider("strata")!;
+    const remote = { ...fake, baseURL: "https://api.deepseek.com/v1" };
+    try {
+      process.env.DSH_NO_REAL_MODEL = "1";
+      // 直接把 strata 的地址改成远程（只改进程环境不够，这里改的是 provider 表读到的值）
+      process.env.STRATA_BASE_URL = remote.baseURL;
+      const events: TurnEvent[] = [];
+      const outcome = await run((e) => events.push(e));
+      expect(outcome.ok).toBe(false);
+      expect(events[0]).toMatchObject({ type: "error" });
+      expect(hitsOf(token), "闸门没拦住：请求真打出去了").toBe(0);
+    } finally {
+      process.env.STRATA_BASE_URL = `http://127.0.0.1:${port}/v1`;
+      if (prev === undefined) delete process.env.DSH_NO_REAL_MODEL;
+      else process.env.DSH_NO_REAL_MODEL = prev;
+    }
   });
 
   it("错误翻译：密钥 / 限流 / 网络 / 余额分别给人话", () => {

@@ -11,7 +11,7 @@ import { connectWithRetry, openSummary, pickPort, shot, waitForPort } from "./ha
  * 而 `dshasset://` 原来只服务 assets 目录。所以断言里要看 `naturalWidth > 0`
  * —— 只看有没有 `<img>` 标签是过不了这一关的（破图也有标签）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/media-data";
+const DATA = ".verify/media-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 // 预置几张真图片（1×1 PNG 的最小合法字节）与一个假视频
@@ -34,9 +34,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12590]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 /* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
 await waitForPort(__port, 40000);
@@ -72,7 +72,7 @@ report.thumbLoad = await page.evaluate(() => {
 });
 report.allThumbsOk = report.thumbLoad.every((t) => t.ok);
 
-await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-18-media.png");
+await shot(page, ".verify/shots-final/wb-18-media.png");
 
 /* ---------- 另两个 tab 的如实空态 ---------- */
 await page.locator('[data-testid="wb-summary-tab-browser"]').click();

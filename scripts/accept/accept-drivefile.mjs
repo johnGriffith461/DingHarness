@@ -14,7 +14,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * ③ 重命名到**已存在的名字**：被挡住并说清原因，**磁盘没变**（不覆盖）
  * ④ 右键菜单里的「AI 阅读」：文件文本进阅读面板（标题是文件名）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/drivefile-data";
+const DATA = ".verify/drivefile-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

@@ -26,7 +26,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  *
  * ⚠️ 会真调图像模型（生成 1 次 + 变清晰 1 次，约 1 分钟）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/imageedit-data";
+const DATA = ".verify/imageedit-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

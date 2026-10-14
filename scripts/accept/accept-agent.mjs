@@ -15,7 +15,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } fr
  * ④ 填完点「开始聊天」→ 落到 `agents.json`，**重开还在**
  * ⑤ 建出来的智能体**是"正在使用"**的（人设要能真的用上；真调模型的那条另见 accept-agent-persona）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/agent-data";
+const DATA = ".verify/agent-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

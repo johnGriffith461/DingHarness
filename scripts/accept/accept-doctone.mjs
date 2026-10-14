@@ -19,7 +19,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  *
  * ⚠️ 会真调模型（1 次）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/doctone-data";
+const DATA = ".verify/doctone-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

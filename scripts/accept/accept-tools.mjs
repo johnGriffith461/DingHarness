@@ -18,7 +18,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } fr
  * 只断言 ① 是不够的 —— 界面那行小字是渲染出来的，写盘失败它照样能显示。
  * 只断言 ② 也是不够的 —— 那就说明不了"用户看得见"。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/tools-data";
+const DATA = ".verify/tools-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

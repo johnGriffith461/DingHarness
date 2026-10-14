@@ -18,7 +18,7 @@ import path from "node:path";
  * 所以不需要写 BMP/DIB 那一套。
  */
 
-const OUT_DIR = "D:/DoubaoWorkClone/build";
+const OUT_DIR = "build";
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
 const MAX = 256;
 

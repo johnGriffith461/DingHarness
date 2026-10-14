@@ -22,7 +22,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openCanvas
  * ③ ⭐ 聊天里出现**可点的「允许」**（不是干等着）
  * ④ 点允许 → 工具真的执行 → `memory.json` 里出现那句话
  */
-const DATA = "D:/DoubaoWorkClone/.verify/chatapprove-data";
+const DATA = ".verify/chatapprove-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

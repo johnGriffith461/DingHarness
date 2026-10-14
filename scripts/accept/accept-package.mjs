@@ -38,7 +38,7 @@ function peHasIcon(file) {
   return { ok: groupHits > 0 && iconHits > 0, groupHits, iconHits, bytes: buf.length };
 }
 
-const R = "D:/DoubaoWorkClone/release";
+const R = "release";
 const report = {};
 
 const setup = path.join(R, "工作台-0.1.0-setup.exe");

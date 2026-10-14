@@ -12,7 +12,7 @@ import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
  * 测的是**行为**：点了菜单出不出来、勾在哪一项、选完颜色真变没变、
  * 刷新后记不记得住 —— 不是"那几行渲染出来没有"。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/acct-data";
+const DATA = ".verify/acct-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 const env = { ...process.env };
@@ -23,8 +23,8 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([12921]);
 /* 应用只认这个环境变量（命令行那个在打包产物里会被忽略）—— 两处必须是同一个端口。 */
 env.DSH_DEBUG_PORT = String(__port);
-const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
-  cwd: "D:/DoubaoWorkClone",
+const child = spawn("node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
+  cwd: ".",
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });

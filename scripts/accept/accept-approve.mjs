@@ -19,7 +19,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  * ④ ⭐ 点「拒绝」→ **磁盘上没有留下东西**，那一行写着「你已拒绝」
  * ⑤ 拒绝的那条不许被执行（上面那一条记忆仍然只有 1 条，不是 2 条）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/approve-data";
+const DATA = ".verify/approve-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

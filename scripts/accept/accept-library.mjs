@@ -37,7 +37,7 @@ import { bootApp, connectWithRetry, readStoreFile, shot } from "./harness.mjs";
  * 结论：修好它是**另一件独立的活**（重写 + 加判定），别在这里顺手缝。
  * 在那之前：**不要引用这条脚本来证明任何事**。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/lib-data";
+const DATA = ".verify/lib-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 /**
@@ -167,7 +167,7 @@ try {
   report.libAfterAssign = readLib();
   report.recentRowsAfterAssign = await page.locator('[data-testid^="wb-recent-"]').count();
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/wb-15-library.png");
+  await shot(page, ".verify/shots-final/wb-15-library.png");
 
   /* ---------- 重启：库应完整保留 ---------- */
   await browser.close();

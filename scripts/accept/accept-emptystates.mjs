@@ -20,7 +20,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openSummar
  * 断的是**文案逐字 + 容器宽度**（宽 < 200px 就是被挤塌了 —— 那正是 §201 的死法），
  * 不是"元素在不在"。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/emptystates-data";
+const DATA = ".verify/emptystates-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

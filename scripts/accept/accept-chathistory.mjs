@@ -24,7 +24,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openCanvas
  * ④ ⭐⭐ **再重启一次**：那一行变成**结论**（「已保存」），而且**不再有按钮**
  *    —— 决策记录进了日志（INV-3），恢复时按它回到"批过之后"的样子。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/chathistory-data";
+const DATA = ".verify/chathistory-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

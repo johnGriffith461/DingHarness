@@ -15,17 +15,17 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  *   5. 排版落盘，重启后还在
  *   6. Ctrl+Z 能把整串调整一次撤回（不是要按几十下）
  */
-const DATA = "D:/DoubaoWorkClone/data";
+const DATA = "data";
 const SNAP = path.join(DATA, "canvas", "document.json");
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+const EXE = "node_modules/electron/dist/electron.exe";
 async function boot(port) {
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
-    cwd: "D:/DoubaoWorkClone",
+    cwd: ".",
     env,
     stdio: ["ignore", "ignore", "ignore"],
   });
@@ -135,7 +135,7 @@ const report = {};
   await page.waitForTimeout(600);
   report.toolbarOnImage = await page.locator('[data-testid="text-toolbar"]').count();
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/shots-final/text-toolbar.png");
+  await shot(page, ".verify/shots-final/text-toolbar.png");
   await browser.close();
   child.kill();
   await new Promise((r) => setTimeout(r, 2000));

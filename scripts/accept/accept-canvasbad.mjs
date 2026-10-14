@@ -19,7 +19,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openCanvas
  * 断言：**画布打得开**、两个好节点在、坏的没进画布、**渲染期无报错**、
  * 并且界面上**如实说了有东西读不进来**（静默吞掉最坏）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/canvasbad-data";
+const DATA = ".verify/canvasbad-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

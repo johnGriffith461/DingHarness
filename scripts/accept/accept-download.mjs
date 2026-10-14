@@ -18,7 +18,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⚠️ 没验"弹系统另存为框"那条路：框不是自动化能点的东西，
  * 这里只保证**它与静默复制共用同一段复制逻辑**（都在 `drive:download` 里）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/download-data";
+const DATA = ".verify/download-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

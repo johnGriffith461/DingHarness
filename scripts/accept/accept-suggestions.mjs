@@ -10,7 +10,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * 之前渲染的是一整条字符串 + 一枚统一的 ✨ —— 结构上就少了两段，
  * 只查"卡片渲染出来没有"的断言对它完全无感（卡片一直在）。所以这条**查三段结构**。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/sugg-data";
+const DATA = ".verify/sugg-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

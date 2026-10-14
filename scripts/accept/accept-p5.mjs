@@ -13,20 +13,20 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  *   5. 标记当提示词：拼进生成要求（读请求内容做断言）
  */
 
-const DATA = "D:/DoubaoWorkClone/data";
+const DATA = "data";
 const SNAP = path.join(DATA, "canvas", "document.json");
-const OUT = "D:/DoubaoWorkClone/.verify/shots-p5";
+const OUT = ".verify/shots-p5";
 fs.mkdirSync(OUT, { recursive: true });
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
-const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
+const EXE = "node_modules/electron/dist/electron.exe";
 
 async function boot(port) {
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
-    cwd: "D:/DoubaoWorkClone",
+    cwd: ".",
     env,
     stdio: ["ignore", "ignore", "ignore"],
   });

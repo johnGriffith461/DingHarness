@@ -14,7 +14,7 @@ import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness
  * ## 不连模型
  * 画布初始文档里就有一个代码节点（`initialGraph.ts`），复制它不需要任何 AI 通道。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/codecopy-data";
+const DATA = ".verify/codecopy-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 
 const env = { ...process.env };
@@ -24,9 +24,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12750]);
 const child = spawn(
-  "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
+  "node_modules/electron/dist/electron.exe",
   [".", "--remote-debugging-port=" + __port],
-  { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
+  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 await new Promise((r) => setTimeout(r, 9000));
 
@@ -90,7 +90,7 @@ try {
   await page.waitForTimeout(2400);
   report.okStateAfter = await page.locator(`[data-testid="nv-copy-${nodeId}"].is-ok`).count();
 
-  await shot(page, "D:/DoubaoWorkClone/.verify/codecopy.png");
+  await shot(page, ".verify/codecopy.png");
 } catch (error) {
   report.error = `在「${report.step ?? "未知"}」这一步失败：${String(error).split(String.fromCharCode(10))[0]}`;
 } finally {

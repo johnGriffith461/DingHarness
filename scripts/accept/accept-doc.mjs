@@ -14,7 +14,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } fr
  * ④ 复制全文真把正文写进剪贴板
  * ⑤ 历史记录里有版本，点「回到此版本」正文真的回去了
  */
-const DATA = "D:/DoubaoWorkClone/.verify/doc-data";
+const DATA = ".verify/doc-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

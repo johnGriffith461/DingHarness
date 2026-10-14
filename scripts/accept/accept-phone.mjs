@@ -22,7 +22,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, pickPort, readStoreF
  * ② **加了判定**（`verdict`）。原来它只 `console.log` 一个报告就退，**从不判定** ——
  *    于是"开关没写盘"这种真问题它永远是绿的（§109 那条"只点按钮不验证后果"的形态）。
  */
-const DATA = "D:/DoubaoWorkClone/.verify/phone-data";
+const DATA = ".verify/phone-data";
 /* 先杀掉上一轮残留再删目录：Windows 上被句柄占着的目录会报 EPERM（§135 撞过）。 */
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
@@ -49,7 +49,7 @@ async function launch(port) {
 }
 
 const report = {};
-const shots = "D:/DoubaoWorkClone/.verify/shots-final";
+const shots = ".verify/shots-final";
 let { child, browser, page } = await launch(12680);
 
 try {

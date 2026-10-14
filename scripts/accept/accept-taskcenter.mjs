@@ -16,7 +16,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * ⑤ 移除**在跑的**对话要先确认，且有「取消」；确认后真没了
  * ⑥ 超出的条目走「查看更多」
  */
-const DATA = "D:/DoubaoWorkClone/.verify/center-data";
+const DATA = ".verify/center-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

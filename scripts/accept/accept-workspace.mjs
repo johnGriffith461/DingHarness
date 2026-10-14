@@ -30,8 +30,8 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * ⑨ 界面上（输入区 ＋ 菜单）**列着这个授权**，撤销之后列表为空
  * ⑩ 撤销之后工具**立刻**碰不到那个目录了（白名单当场收紧，不用重启）
  */
-const DATA = "D:/DoubaoWorkClone/.verify/workspace-data";
-const WORK = "D:/DoubaoWorkClone/.verify/workspace-dir";
+const DATA = ".verify/workspace-data";
+const WORK = ".verify/workspace-dir";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
   process.exit(1);

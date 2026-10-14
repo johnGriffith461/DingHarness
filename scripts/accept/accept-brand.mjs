@@ -26,7 +26,7 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 import { openApp, killLeftovers, killTree } from "./harness.mjs";
 
-const DATA = "D:/DoubaoWorkClone/.verify/brand-data";
+const DATA = ".verify/brand-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 await killLeftovers();
 
