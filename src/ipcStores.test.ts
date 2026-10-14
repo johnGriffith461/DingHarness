@@ -334,13 +334,28 @@ describe("provider 探测记录（provider-probe.json）· C1 收编后", () => 
     markProviderOk("p1");
     markProviderFailed("p2", "连不上");
     markProviderOk("p3");
-    await new Promise((r) => setTimeout(r, 120));
-
-    const got = JSON.parse(readFileSync(fileOf("provider-probe.json"), "utf8")) as {
-      data: Record<string, { ok: boolean; note?: string }>;
+    /*
+     * ⚠️ **轮询等落盘，不固定睡 120ms**（2026-10-14 改）。
+     * 原来是 `await sleep(120)` 然后断言 —— 平时够，但机器一有负载（比如批跑正在
+     * 一条条起应用）就不够：那条"并发三条不丢"会偶发只看到两条（假红）。
+     * 判据本身没变（还是要三条都在），变的是**别把"多久算够"写死**。
+     */
+    /* ⚠️ 第一次读时文件**可能还没建出来**（三条写还在队列里）→ 容忍 ENOENT，继续等。 */
+    const readData = (): { data: Record<string, { ok: boolean; note?: string }> } | null => {
+      try {
+        return JSON.parse(readFileSync(fileOf("provider-probe.json"), "utf8"));
+      } catch {
+        return null;
+      }
     };
-    expect(Object.keys(got.data).sort()).toEqual(["p1", "p2", "p3"]);
-    expect(got.data.p2).toMatchObject({ ok: false, note: "连不上" });
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && Object.keys(readData()?.data ?? {}).length < 3) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const got = readData();
+    expect(got, "等 4 秒也没等到 provider-probe.json").not.toBeNull();
+    expect(Object.keys(got!.data).sort()).toEqual(["p1", "p2", "p3"]);
+    expect(got!.data.p2).toMatchObject({ ok: false, note: "连不上" });
   });
 });
 
