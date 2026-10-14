@@ -12,6 +12,7 @@ import type { ToolExecutor } from "../../engine/ports/executor";
 import { buildToolSet, createToolRegistry } from "../../engine/runtime/registry";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
 import { describeBudget } from "../../engine/runtime/budget";
+import { modelInfoOf } from "../../engine/runtime/models";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
 
@@ -252,7 +253,8 @@ async function cmdCost(p: Parsed): Promise<number> {
 
     const by = flag(p, "by");
     const dim = by === "day" || by === "model" ? by : "session";
-    const rows = rollup(entries, dim, (key) => titles.get(key) || key);
+    // 目录表从 runtime 递进来（core 的账本自己不去查表 —— 分层方向）
+    const rows = rollup(entries, dim, (key) => titles.get(key) || key, modelInfoOf);
     if (p.flags.has("json")) {
       console.log(JSON.stringify(rows, null, 2));
       return 0;

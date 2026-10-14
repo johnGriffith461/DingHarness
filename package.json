@@ -30,6 +30,8 @@
     ]
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.79",
+    "@ai-sdk/google": "^4.0.95",
     "@ai-sdk/openai-compatible": "3.0.67",
     "ai": "7.0.137",
     "docx": "9.10.0",

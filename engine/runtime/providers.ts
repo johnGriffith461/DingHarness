@@ -1,4 +1,5 @@
 import { hasSecret } from "./credentials";
+import type { Protocol } from "./models";
 
 /**
  * provider 抽象层（PLAN 3.2）。
@@ -18,10 +19,16 @@ import { hasSecret } from "./credentials";
  * 现在只在**用到时**读一次。改的只是时机，默认值与语义一字不变。
  */
 
-export type ProviderId = "deepseek" | "tokenrhythm" | "apihub" | "qianwen" | "strata";
+/*
+ * ⚠️ provider id 从"五个字面量的联合类型"改成 `string`（Phase 5.2）：
+ * 数量开始涨（官方直连 + 中转 + 自建端点），每加一家都要改联合类型、
+ * 改渲染层的下拉、改四处 `as ProviderId`。而它们对代码的意义只有一个：
+ * **是个稳定的键**。真正约束行为的是 `protocol`，那个仍然是封闭的词表。
+ */
+export type ProviderId = string;
 
 export type ProviderDef = {
-  id: ProviderId;
+  id: string;
   /** 展示名。 */
   label: string;
   /** OpenAI 兼容 baseURL（表里给的是**默认值**）。 */
@@ -32,48 +39,135 @@ export type ProviderDef = {
   keyRef: string;
   /** 可选模型（第一个是默认）。 */
   models: string[];
-  /** 备注：走本机 / 中转 / 官方直连。 */
+  /**
+   * **这一家说哪种协议**（Phase 5.2）。
+   *
+   * ⚠️ 必填，而且是**线路格式**，不是"哪家公司"。中转站把 claude 用 OpenAI 格式转出来，
+   * 那它的协议就是 `openai-compatible` —— 引擎据此选 adapter，不看模型是谁家的。
+   */
+  protocol: Protocol;
+  /**
+   * 覆盖模型清单的环境变量名（逗号分隔）。
+   *
+   * 存在的理由很实际：**模型名会变**，而它是配置不是数据。表里给的是 2026-10-15
+   * 从官方/目录里列到的真名；用户手上的账号能开哪些、名字有没有变，
+   * 让他们用环境变量覆盖比我们猜要靠谱。
+   */
+  modelsEnv?: string;
+  /** 备注：走本机 / 中转 / 官方直连，以及这个模型清单是哪来的。 */
   note: string;
 };
 
-/** 表本体（`baseURL` 是默认值；要拿覆盖后的值请走 `allProviders()` / `getProvider()`）。 */
+/**
+ * 表本体（`baseURL` 是默认值；要拿覆盖后的值请走 `allProviders()` / `getProvider()`）。
+ *
+ * ## 模型清单是哪来的（2026-10-15，如实记）
+ *
+ * 全部**列出来的**，不是凭印象写的：
+ * - `anthropic` / `google` / `openai` 三家：models.dev 仓库里各自 `models/` 目录的**当日文件名**；
+ * - `openrouter`：models.dev 的 `models.json`（OpenRouter 目录快照）里的 `vendor/model` 全名；
+ * - 原有的五家：沿用本项目既有的清单（那是用户实际在用的名字）。
+ *
+ * 都能用 `<PROVIDER>_MODELS` 环境变量覆盖（模型名会变，而它是配置不是数据）。
+ */
 const PROVIDER_TABLE: ProviderDef[] = [
   {
     id: "deepseek",
     label: "DeepSeek 官方",
+    protocol: "openai-compatible",
     baseURL: "https://api.deepseek.com/v1",
     keyRef: "DEEPSEEK_API_KEY",
     models: ["deepseek-chat", "deepseek-reasoner"],
+    modelsEnv: "DEEPSEEK_MODELS",
     note: "官方直连，最稳",
   },
   {
     id: "tokenrhythm",
     label: "tokenrhythm 中转",
+    protocol: "openai-compatible",
     baseURL: "https://tokenrhythm.studio/v1",
     keyRef: "A_API_KEY",
     models: ["deepseek-flash", "deepseek-chat", "gpt-4o-mini"],
+    modelsEnv: "TOKENRHYTHM_MODELS",
     note: "中转，便宜",
   },
   {
     id: "apihub",
     label: "API_HUB 中转",
+    protocol: "openai-compatible",
     baseURL: "https://api.apihub.top/v1",
     baseURLEnv: "API_HUB_BASE_URL",
     keyRef: "API_HUB_API_KEY",
     models: ["deepseek-chat", "deepseek-v3", "gpt-4o-mini", "claude-3-5-sonnet"],
+    modelsEnv: "API_HUB_MODELS",
     note: "多模型中转（baseURL 可用 API_HUB_BASE_URL 覆盖）",
   },
   {
     id: "qianwen",
     label: "通义千问",
+    protocol: "openai-compatible",
     baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     keyRef: "QIANWEN_API_KEY",
     models: ["qwen-plus", "qwen-max", "qwen-turbo"],
+    modelsEnv: "QIANWEN_MODELS",
     note: "阿里兼容模式",
+  },
+  /*
+   * ── Phase 5.2 新增：协议分层之后，加一家只加一条配置 ──
+   *
+   * ⚠️ 这三家走的是**原生协议**，不是 OpenAI 兼容层。理由各不相同，都写在各条的 note 里
+   * （最要紧的一条：Anthropic 的缓存控制只有原生协议才有）。
+   */
+  {
+    id: "anthropic",
+    label: "Anthropic 官方",
+    protocol: "anthropic",
+    baseURL: "https://api.anthropic.com/v1",
+    keyRef: "ANTHROPIC_API_KEY",
+    models: ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"],
+    modelsEnv: "ANTHROPIC_MODELS",
+    note: "原生 Messages API（兼容层不给 prompt caching）。模型名取自 models.dev 当日清单",
+  },
+  {
+    id: "google",
+    label: "Google Gemini 官方",
+    protocol: "google",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta",
+    keyRef: "GOOGLE_API_KEY",
+    models: ["gemini-2.5-pro", "gemini-3.5-flash", "gemini-3.1-pro-preview"],
+    modelsEnv: "GOOGLE_MODELS",
+    note: "原生协议（多 safetySettings 与 functionDeclarations）。模型名取自 models.dev 当日清单",
+  },
+  {
+    id: "openai",
+    label: "OpenAI 官方",
+    protocol: "openai-compatible",
+    baseURL: "https://api.openai.com/v1",
+    keyRef: "OPENAI_API_KEY",
+    models: ["gpt-5.4-mini", "gpt-4o-mini"],
+    modelsEnv: "OPENAI_MODELS",
+    note: "官方端点本身就是 OpenAI 协议。模型名取自 models.dev 当日清单",
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter（一站式）",
+    protocol: "openai-compatible",
+    baseURL: "https://openrouter.ai/api/v1",
+    keyRef: "OPENROUTER_API_KEY",
+    models: [
+      "anthropic/claude-sonnet-4.5",
+      "openai/gpt-5.4-mini",
+      "deepseek/deepseek-chat",
+      "qwen/qwen-plus",
+      "google/gemini-2.5-pro",
+    ],
+    modelsEnv: "OPENROUTER_MODELS",
+    note: "一站式数百模型（OpenAI 协议）。模型名是 vendor/model 全名，取自 models.dev 快照",
   },
   {
     id: "strata",
     label: "本地 abliterated",
+    protocol: "openai-compatible",
     baseURL: "http://127.0.0.1:8080/v1",
     baseURLEnv: "STRATA_BASE_URL",
     keyRef: "STRATA_API_KEY",
@@ -90,10 +184,25 @@ const PROVIDER_TABLE: ProviderDef[] = [
  * @returns provider 定义（新的数组，调用方改它不会污染表）
  */
 export function allProviders(): ProviderDef[] {
-  return PROVIDER_TABLE.map((p) => ({
-    ...p,
-    baseURL: (p.baseURLEnv ? process.env[p.baseURLEnv]?.trim() : "") || p.baseURL,
-  }));
+  return PROVIDER_TABLE.map((p) => {
+    const override = (p.modelsEnv ? process.env[p.modelsEnv]?.trim() : "") || "";
+    const models = override
+      ? override
+          .split(",")
+          .map((m) => m.trim())
+          .filter(Boolean)
+      : p.models;
+    return {
+      ...p,
+      models: models.length ? models : p.models,
+      baseURL: (p.baseURLEnv ? process.env[p.baseURLEnv]?.trim() : "") || p.baseURL,
+    };
+  });
+}
+
+/** 取某一家**实际生效**的协议（不认识这家就按 OpenAI 兼容处理，别把请求发歪）。 */
+export function protocolOf(providerId: string): Protocol {
+  return getProvider(providerId)?.protocol ?? "openai-compatible";
 }
 
 /** 脱敏后的 provider 信息（可安全回传渲染进程）。 */

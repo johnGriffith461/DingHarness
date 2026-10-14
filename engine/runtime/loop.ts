@@ -1,10 +1,10 @@
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { stepCountIs, streamText, type ToolSet } from "ai";
 
 import type { StepUsage } from "../../shared/cost";
 import type { HealthStore } from "../ports/health";
 import { noopHealth } from "../ports/health";
-import { getProvider } from "./providers";
+import { getProvider, protocolOf } from "./providers";
+import { adapterFor } from "./protocols";
 import { resolveSecret } from "./credentials";
 
 /**
@@ -231,14 +231,25 @@ export async function runTurn(
   }
 
   try {
-    const client = createOpenAICompatible({ name: provider.id, baseURL: provider.baseURL, apiKey });
+    /*
+     * ⭐ **协议只在这里分一次**（Phase 5.2）。
+     *
+     * 在这之前这一行写死的是 `createOpenAICompatible` —— 想接 Anthropic 原生
+     * （哪怕只为了它的 prompt caching）都得改这个函数，而这个函数还管着
+     * 事件流、用量、健康记账。
+     *
+     * 现在：adapter 负责"把话说对"，本函数负责"把流翻成 TurnEvent"。
+     * 换协议、换 SDK，**下面那一整段一个字都不用动** —— 这正是 Phase 6 的硬约束。
+     */
+    const adapter = adapterFor(protocolOf(provider.id));
+    const client = adapter.createModel({ baseURL: provider.baseURL, apiKey, model });
     /*
      * 这一轮**真的**花了多久 —— 吞吐量（tok/s）的分母。
      * 量的是"从发请求到 provider 把用量交回来"这一段；界面上那个数因此是实测，不是估的。
      */
     const startedAt = Date.now();
     const result = streamText({
-      model: client(model),
+      model: client,
       messages: input.messages,
       ...(input.system ? { system: input.system } : {}),
       ...(input.temperature === undefined ? {} : { temperature: input.temperature }),

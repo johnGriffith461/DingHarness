@@ -36,6 +36,21 @@ export type LedgerEntry = {
   usage: StepUsage;
 };
 
+/**
+ * 目录表里关于某个模型的信息（由调用方注入）。
+ *
+ * ⚠️ 账本**自己不去查目录表**：它在 `core/`（纯逻辑、零依赖），
+ * 而目录表在 `runtime/`。让 core 去 import runtime 就把分层倒过来了。
+ * 所以由调用方把"这个模型登记过没有、单价多少"作为**参数**传进来。
+ */
+export type ModelInfo = {
+  /** 目录表里有没有这个模型。 */
+  registered: boolean;
+  priceIn?: number;
+  priceOut?: number;
+  priceCacheRead?: number;
+};
+
 /** 汇总里的一行。 */
 export type LedgerTotal = {
   key: string;
@@ -47,6 +62,17 @@ export type LedgerTotal = {
   usage?: StepUsage;
   /** 输入 + 输出（provider 没给就 null —— **不编**）。 */
   totalTokens: number | null;
+  /** 这个模型**没在目录表里登记**（成本账本要标出来，别让人以为价格是核过的）。 */
+  unregistered?: boolean;
+  /**
+   * 按目录表单价**估算**的花费（美元）。
+   *
+   * ⚠️ 它是**估算**，名字里就带着 `estimated`：
+   * - `usage` 是 provider 报的真值，但**单价**来自目录表，而目录表可能过期；
+   * - 缓存读/写的计价口径各家不同，这里只按"输入/输出"两档粗算。
+   * 所以它只用来"看量级"，不能当账单。拿不到单价时**不给数**（不编一个 0）。
+   */
+  estimatedCost?: number;
 };
 
 /**
@@ -110,6 +136,11 @@ export function rollup(
   entries: readonly LedgerEntry[],
   by: "session" | "day" | "model",
   labelOf: (key: string) => string = (k) => k,
+  /**
+   * 目录表查询（可选）。给了就在汇总行上标出"未登记模型"并估算花费。
+   * 不给 = 只报 provider 报过的 token（那是**一定不编**的那部分）。
+   */
+  modelInfo?: (modelId: string) => ModelInfo,
 ): LedgerTotal[] {
   const groups = new Map<string, LedgerEntry[]>();
   const keyOf = (e: LedgerEntry): string =>
@@ -124,15 +155,50 @@ export function rollup(
   for (const [key, list] of groups) {
     const usage = sumUsage(list.map((e) => e.usage));
     const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+    /*
+     * 目录表信息：按**这一组里的模型**取。按会话/按天汇总时一组里可能混着多个模型，
+     * 那时只要有一个没登记就标出来（宁可多标，别让一个未登记的混过去）。
+     */
+    const infos = modelInfo ? list.map((e) => modelInfo(e.model || "")) : [];
+    const unregistered = infos.length > 0 && infos.some((i) => !i.registered);
+    const cost = estimateCost(list, modelInfo);
     rows.push({
       key,
       label: by === "session" ? labelOf(key) : key,
       turns: list.length,
       ...(usage ? { usage } : {}),
       totalTokens: totalTokens > 0 ? totalTokens : null,
+      ...(unregistered ? { unregistered: true } : {}),
+      ...(cost === undefined ? {} : { estimatedCost: cost }),
     });
   }
   return rows.sort((a, b) => (b.totalTokens ?? -1) - (a.totalTokens ?? -1));
+}
+
+/**
+ * 按目录单价估算花费。
+ *
+ * ⚠️ 规矩：**任何一项拿不到就整条不给数**。
+ * 宁可没有这个数，也不要给一个"看起来像账单"的估算 —— 那种数最容易被当真。
+ *
+ * @param list 这一组里的入账
+ * @param modelInfo 目录查询（没给就直接返回 undefined）
+ * @returns 估算（美元，四位小数）；算不出来时 undefined
+ */
+function estimateCost(list: readonly LedgerEntry[], modelInfo?: (id: string) => ModelInfo): number | undefined {
+  if (!modelInfo) return undefined;
+  let total = 0;
+  let any = false;
+  for (const entry of list) {
+    const info = modelInfo(entry.model || "");
+    const inTokens = entry.usage.inputTokens;
+    const outTokens = entry.usage.outputTokens;
+    if (!info.registered || typeof info.priceIn !== "number" || typeof info.priceOut !== "number") continue;
+    if (typeof inTokens !== "number" && typeof outTokens !== "number") continue;
+    total += ((inTokens ?? 0) * info.priceIn + (outTokens ?? 0) * info.priceOut) / 1e6;
+    any = true;
+  }
+  return any ? Math.round(total * 1e4) / 1e4 : undefined;
 }
 
 /**
@@ -149,5 +215,12 @@ export function formatTotal(row: LedgerTotal): string {
   const input = typeof u?.inputTokens === "number" ? String(u.inputTokens) : "-";
   const output = typeof u?.outputTokens === "number" ? String(u.outputTokens) : "-";
   const cache = typeof u?.cacheReadTokens === "number" ? ` 缓存读 ${u.cacheReadTokens}` : "";
-  return `${row.label}：${row.turns} 轮　↑${input} ↓${output}${cache}`;
+  /*
+   * ⚠️ 这三段尾巴的措辞是**刻意的**：
+   * - "未登记模型" 明说"我们不知道它的价格"；
+   * - "约 $x（按目录单价估）" 把"估"字带出来 —— 它是量级参考，不是账单。
+   */
+  const flag = row.unregistered ? "　（未登记模型：单价未知）" : "";
+  const cost = typeof row.estimatedCost === "number" ? `　约 $${row.estimatedCost.toFixed(4)}（按目录单价估）` : "";
+  return `${row.label}：${row.turns} 轮　↑${input} ↓${output}${cache}${cost}${flag}`;
 }

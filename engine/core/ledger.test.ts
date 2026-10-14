@@ -99,6 +99,38 @@ describe("成本账本 · 汇总", () => {
     expect(rows[0]?.turns).toBe(3);
   });
 
+  it("⭐ 未登记模型要标出来（别让人以为那个价格是核过的）", () => {
+    const info = (id: string) => (id === "known" ? { registered: true, priceIn: 1, priceOut: 2 } : { registered: false });
+    const rows = rollup([...ledgerOf(turn(1, { inputTokens: 10, outputTokens: 5 }, "known"), "s1"), ...ledgerOf(turn(3, { inputTokens: 10, outputTokens: 5 }, "mystery"), "s2")], "model", (k) => k, info);
+    const known = rows.find((r) => r.key === "known")!;
+    const mystery = rows.find((r) => r.key === "mystery")!;
+    expect(known.unregistered).toBeUndefined();
+    expect(mystery.unregistered).toBe(true);
+    expect(formatTotal(mystery)).toContain("未登记模型");
+  });
+
+  it("⭐ 估算花费：只按目录单价算，且**标明是估的**", () => {
+    const info = () => ({ registered: true, priceIn: 1, priceOut: 2 });
+    const [row] = rollup(ledgerOf(turn(1, { inputTokens: 1_000_000, outputTokens: 500_000 }, "known"), "s1"), "model", (k) => k, info);
+    // 100 万输入 × $1 + 50 万输出 × $2 = 1 + 1 = $2
+    expect(row.estimatedCost).toBe(2);
+    expect(formatTotal(row)).toContain("按目录单价估");
+  });
+
+  it("拿不到单价就**不给数**（不编一个像账单的 0）", () => {
+    const info = () => ({ registered: false });
+    const [row] = rollup(ledgerOf(turn(1, { inputTokens: 100, outputTokens: 10 }, "mystery"), "s1"), "model", (k) => k, info);
+    expect(row.estimatedCost).toBeUndefined();
+    expect(formatTotal(row)).not.toContain("$");
+  });
+
+  it("不给目录查询时只报 provider 报过的 token（那部分一定不编）", () => {
+    const [row] = rollup(ledgerOf(turn(1, { inputTokens: 100, outputTokens: 10 }, "x"), "s1"), "model");
+    expect(row.totalTokens).toBe(110);
+    expect(row.estimatedCost).toBeUndefined();
+    expect(row.unregistered).toBeUndefined();
+  });
+
   it("缺失的字段写成 `-`，**不写成 0**（0 是真没花，- 是 provider 没说）", () => {
     const line = formatTotal({ key: "s", label: "s", turns: 1, usage: { outputTokens: 5 }, totalTokens: 5 });
     expect(line).toContain("↑-");
