@@ -56,10 +56,16 @@ const FOLD_CALL_SITES = new Set([
  * - `engine/runtime/subagent.ts`：把投影出来的留痕**收窄**成上报形状
  *   （`SubagentBlocked`：只要 id/名字/参数，因为父级要拿它就地放行）。
  *   它是投影的**下游消费者**，不是另一份解析。
+ * - `engine/core/gates.ts`：把留痕**收窄**成待办形状（`GateRequest`）——
+ *   同样是下游消费者（"现在有哪些待办"），不是自己重新折叠事件流。
  *
  * 把这两处一起骂，守卫就会逼人把翻译写得很绕 —— 而最后被删掉的往往是守卫。
  */
-const TOOLCALL_ID_OK = new Set(["engine/runtime/loop.ts", "engine/runtime/subagent.ts"]);
+const TOOLCALL_ID_OK = new Set([
+  "engine/runtime/loop.ts",
+  "engine/runtime/subagent.ts",
+  "engine/core/gates.ts",
+]);
 
 /**
  * 允许出现这些痕迹的地方，以及**为什么它们不是"第二份解析"**。

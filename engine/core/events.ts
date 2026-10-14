@@ -5,6 +5,7 @@ import {
   type ToolTrace,
 } from "../../shared/agentTools";
 import type { AiStreamEvent } from "../../shared/ipc";
+import { pendingGates } from "./gates";
 
 /**
  * 会话事件日志 + **一轮对话的投影**（C2）。
@@ -614,18 +615,12 @@ export type ResumedSession = {
  */
 export function resumeSession(records: readonly LogRecord[], opts: ProjectOptions = {}): ResumedSession {
   const turns = splitTurns(records, opts);
-  const pending: PendingApproval[] = [];
-  for (const chunk of turns) {
-    for (const trace of chunk.view.traces) {
-      if (trace.pending !== true) continue;
-      pending.push({
-        toolCallId: trace.toolCallId,
-        name: trace.name,
-        ...(trace.input === undefined ? {} : { input: trace.input }),
-      });
-    }
-  }
-  return { turns, pending };
+  /*
+   * ⚠️ 待办清单由 `engine/core/gates.ts` 挑（那里是这个语义的负责人）。
+   * 这里原来自己写了一段 for —— 而"审批闸门的语义"只能有一处，
+   * 否则界面上的待办与本函数还原出来的清单会慢慢分叉。
+   */
+  return { turns, pending: pendingGates(turns) };
 }
 
 /* ────────────────────── 落盘：一行一条 ────────────────────── */
