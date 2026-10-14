@@ -1,8 +1,10 @@
 import type { ToolSet } from "ai";
 
-import { applyEvent, emptyTurn, finishTurn } from "../../engine/core/events";
+import type { HealthStore } from "../ports/health";
+
+import { applyEvent, emptyTurn, finishTurn } from "../core/events";
 import type { SubagentBlocked, SubagentReport } from "../../shared/agentTools";
-import { runTurn } from "./runTurn";
+import { runTurn } from "./loop";
 
 /**
  * 子智能体（§150）。
@@ -31,7 +33,7 @@ import { runTurn } from "./runTurn";
  * 那些动作要由父级（或用户）另起一次调用才会出现确认按钮。
  * 这比"子智能体静默地绕过了闸门"好得多：**宁可办不成，不能不问就办**。
  *
- * ── C2-3（2026-10-13）：主循环收进 `./runTurn` ──
+ * ── C2-3（2026-10-13）：主循环收进 `engine/runtime/loop.ts`（曾名 `./runTurn`）──
  *
  * 这里原来自己写了一份 `streamText` + `fullStream` 循环，于是它**少了父级有的四样**：
  * 中止信号、`tool-error` 分支、provider 健康标记、模型可用性校验。
@@ -63,6 +65,8 @@ export async function runSubagent(input: {
   tools: ToolSet;
   maxSteps?: number;
   signal?: AbortSignal;
+  /** 宿主的健康账本（沿父级那一份 —— 子智能体跑通/跑砸同样算这一家的健康）。 */
+  health?: HealthStore;
 }): Promise<SubagentReport> {
   /** 这一轮的事件（用投影收集报告：正文/工具/拦下的调用都在里面）。 */
   let turn = emptyTurn();
@@ -83,6 +87,8 @@ export async function runSubagent(input: {
       turn = applyEvent(turn, event);
       if (event.type === "step-finish") finishes += 1;
     },
+    /* 健康账本沿父级那一份传下去：子智能体跑通/跑砸同样是在验这一家 provider。 */
+    { ...(input.health ? { health: input.health } : {}) },
   );
 
   const view = finishTurn(turn);

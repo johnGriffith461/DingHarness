@@ -62,7 +62,7 @@ import { nothingFoundNote } from "./searchTool";
 import { callMcpTool, mcpToolBindings } from "./mcpStore";
 import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "./searchTool";
 import { listDrive, ownedDirs } from "./driveStore";
-import { runSubagent } from "./subagent";
+import { runSubagent } from "../../engine/runtime/subagent";
 
 /**
  * 工具的**执行**绑定（§141）。

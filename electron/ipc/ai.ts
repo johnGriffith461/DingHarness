@@ -1,9 +1,9 @@
 import { ipcMain, type WebContents } from "electron";
-import { listProvidersWithProbe, probeProviders } from "./aiProbe";
+import { healthStore, listProvidersWithProbe, probeProviders } from "./aiProbe";
 import { getSessionLogger } from "./sessionStore";
 import { agentTools, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
-import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "./runTurn";
+import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "../../engine/runtime/loop";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 import type { ConfirmMode } from "../../shared/ipc";
 
@@ -291,6 +291,8 @@ export function registerAiIpc(): void {
             const mapped = toStreamEvent(e);
             if (mapped) emit(mapped);
           },
+          /* 宿主注入的记账：内核不 import 主进程的任何东西（Phase 1 D1 的端口）。 */
+          { health: healthStore },
         );
         flush();
         /*

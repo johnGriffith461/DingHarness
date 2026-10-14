@@ -178,7 +178,7 @@ export type TurnInput = LogRecord | LogInput | ProjectableEvent | AiStreamEvent;
  * 投影**真正需要**的最小形状：一个判别字段 + 各分支的字段。
  *
  * ⚠️ 刻意**不含 `requestId`**：那个字段是 IPC 归并用的（`aiClient` 按它认自己那次请求），
- * 而主循环（`electron/ipc/runTurn.ts`）与子智能体压根没有它 ——
+ * 而主循环（`engine/runtime/loop.ts`）与子智能体压根没有它 ——
  * 若投影要求带上它，两条路就得往事件里塞一个假 id（"为了通过类型检查而编数据"）。
  */
 export type ProjectableEvent =

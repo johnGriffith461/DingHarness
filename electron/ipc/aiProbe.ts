@@ -3,6 +3,7 @@ import { app } from "electron";
 import type { ProviderInfo } from "../../shared/ipc";
 import { getProvider, listProviders, PROVIDERS } from "../../engine/runtime/providers";
 import { createJsonStore } from "./jsonStore";
+import type { HealthStore } from "../../engine/ports/health";
 
 /**
  * provider 可用性探测。
@@ -107,6 +108,17 @@ async function readProbes(): Promise<ProbeRecord> {
   if (got.foreign) console.error("[probe] 磁盘上的探测记录读不动（保留原样）：", got.note);
   return got.data;
 }
+
+/**
+ * 给内核用的健康账本（Phase 1 D1 的端口适配）。
+ *
+ * 内核只知道"跑通了叫我一声 / 跑砸了说原因"（`engine/ports/health.ts`）；
+ * **落到哪儿**是这里的事（Electron 的 userData）。这个对象就是那句"落到哪儿"。
+ */
+export const healthStore: HealthStore = {
+  markOk: (providerId) => markProviderOk(providerId),
+  markFailed: (providerId, note) => markProviderFailed(providerId, note),
+};
 
 /** 记一次"真实调用成功"。 */
 export function markProviderOk(providerId: string): void {

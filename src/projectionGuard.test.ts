@@ -39,7 +39,27 @@ const FOLD_CALL_SITES = new Set([
   "src/ai/chatStore.ts",
   "src/workbench/taskRuntime.ts", // C6-4：工作台那处折叠随运行时搬去了 taskRuntime.ts
   "src/workbench/FloatingAssistant.tsx",
+  // 子智能体：它 fold 出**自己的报告**（正文/调过哪些工具/哪些被拦下）。
+  // 这正是 C2-3 把"手写三个累加变量"换成同一份投影的那一步 —— 见它的文件头。
+  "engine/runtime/subagent.ts",
 ]);
+
+/**
+ * 允许出现 `toolCallId: <x>.toolCallId` 的地方（两处，理由各不相同）。
+ *
+ * 上面那条判据（"不许手搓留痕"）防的是"有人自己造一条 ToolTrace 拿去显示"。
+ * 这一条正则只能看出"有个对象的 toolCallId 取自另一个对象"，所以下面两处会误报 ——
+ * 而它们都**不是**第二份投影：
+ *
+ * - `engine/runtime/loop.ts`：**事件的产出方**。它把 SDK 的 `part` 翻成事件
+ *   （`onEvent({ type: "tool-call", toolCallId: part.toolCallId, … })`），那是投影的**上游**。
+ * - `engine/runtime/subagent.ts`：把投影出来的留痕**收窄**成上报形状
+ *   （`SubagentBlocked`：只要 id/名字/参数，因为父级要拿它就地放行）。
+ *   它是投影的**下游消费者**，不是另一份解析。
+ *
+ * 把这两处一起骂，守卫就会逼人把翻译写得很绕 —— 而最后被删掉的往往是守卫。
+ */
+const TOOLCALL_ID_OK = new Set(["engine/runtime/loop.ts", "engine/runtime/subagent.ts"]);
 
 /**
  * 允许出现这些痕迹的地方，以及**为什么它们不是"第二份解析"**。
@@ -96,7 +116,8 @@ describe("C2 结构守卫：事件流只有一份解析", () => {
     const offenders: string[] = [];
     for (const file of files) {
       const rel = path.relative(ROOT, file).replace(/\\/g, "/");
-      if (SHAPE_OWNERS.has(rel)) continue; // 见上面 SHAPE_OWNERS 的理由
+      // 见上面 SHAPE_OWNERS / TOOLCALL_ID_OK 的理由
+      if (SHAPE_OWNERS.has(rel) || TOOLCALL_ID_OK.has(rel)) continue;
       const marks = secondParserMarks(readFileSync(file, "utf8"));
       if (marks.length) offenders.push(`${rel} → ${marks.join("、")}`);
     }

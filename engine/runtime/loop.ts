@@ -2,9 +2,10 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { stepCountIs, streamText, type ToolSet } from "ai";
 
 import type { StepUsage } from "../../shared/cost";
-import { getProvider } from "../../engine/runtime/providers";
-import { resolveSecret } from "../../engine/runtime/credentials";
-import { markProviderFailed, markProviderOk } from "./aiProbe";
+import type { HealthStore } from "../ports/health";
+import { noopHealth } from "../ports/health";
+import { getProvider } from "./providers";
+import { resolveSecret } from "./credentials";
 
 /**
  * **一份主循环**（C2-3）。
@@ -137,7 +138,19 @@ export function resolveTurnTarget(
 }
 
 /**
- * 跑一轮（**主进程里唯一的主循环**）。
+ * 主循环要用到的**外部能力**（Phase 1 D1：内核不再直接 import 宿主的东西）。
+ *
+ * ⚠️ 只放"内核不能自己造"的东西：现在只有 provider 健康账本 ——
+ * 记到哪儿是宿主的事（桌面写 userData、CLI 单跑不必记、测试给假的）。
+ * **可选**是因为它纯属记账，缺了不影响跑一轮；默认 `noopHealth` 而不是 `undefined`，
+ * 免得循环里到处 `?.`（那会让"没给"与"不用记"两种意思混在一起）。
+ */
+export type TurnDeps = {
+  health?: HealthStore;
+};
+
+/**
+ * 跑一轮（**内核里唯一的主循环**）。
  *
  * 它负责：解析 provider/密钥/模型 → 建客户端 → 跑 `streamText` → 把 `fullStream`
  * 翻成 `TurnEvent` → 记 provider 健康 → 收尾时把 `usage` 交给调用方。
@@ -146,12 +159,15 @@ export function resolveTurnTarget(
  *
  * @param input 见 `TurnRequestInput`
  * @param onEvent 每个事件的出口（同步调用；抛异常会中断这一轮）
+ * @param deps 见 `TurnDeps`（宿主注入的外部能力）
  * @returns 结局（成败 / 中止 / 真正用的模型）
  */
 export async function runTurn(
   input: TurnRequestInput,
   onEvent: (event: TurnEvent) => void,
+  deps: TurnDeps = {},
 ): Promise<TurnOutcome> {
+  const health = deps.health ?? noopHealth;
   const provider = getProvider(input.provider);
   if (!provider) {
     const message = `未知 provider：${input.provider}`;
@@ -252,12 +268,12 @@ export async function runTurn(
     }
     onEvent({ type: "done", ...(usage ? { usage } : {}) });
     // 真的跑通了 —— 把这家 provider 标成"已验证"（界面上才敢说可用）
-    markProviderOk(provider.id);
+    health.markOk(provider.id);
     return { ok: true, aborted: false, provider: provider.id, model };
   } catch (error) {
     const message = humanError(error);
     const aborted = Boolean(input.abortSignal?.aborted);
-    if (!aborted) markProviderFailed(provider.id, message);
+    if (!aborted) health.markFailed(provider.id, message);
     onEvent({ type: "error", message });
     return { ok: false, error: message, aborted, provider: provider.id, model };
   }
