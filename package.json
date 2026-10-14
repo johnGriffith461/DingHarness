@@ -11,7 +11,7 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",
-    "build": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:web && pnpm electron:build && electron-builder --win nsis && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
+    "build": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:web && pnpm electron:build && pnpm package:win && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -19,7 +19,8 @@
     "verify:packaged": "node scripts/verify-packaged.mjs",
     "verify:accept": "node scripts/verify-acceptances.mjs",
     "lint": "oxlint",
-    "ding": "tsx hosts/cli/ding.ts"
+    "ding": "tsx hosts/cli/ding.ts",
+    "package:win": "node scripts/stage-app.mjs && electron-builder --win nsis"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -70,12 +71,20 @@
     "appId": "com.dingharness.app",
     "productName": "Ding Harness",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "app": "release/app"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "!dist-electron/**/*.map"
+      "!dist-electron/**/*.map",
+      {
+        "from": "node_modules",
+        "to": "node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "extraMetadata": {
       "main": "dist-electron/electron/main.cjs"

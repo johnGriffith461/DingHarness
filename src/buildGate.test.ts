@@ -63,7 +63,15 @@ const EXPECTED_STEPS = [
   // ② 出产物
   "pnpm build:web",
   "pnpm electron:build",
-  "electron-builder --win nsis",
+  /*
+   * ⚠️ 打包**不能**直接 `electron-builder`（2026-10-14 修）：
+   * 必须先 `node scripts/stage-app.mjs` 摆一个只装生产依赖的 app 目录，
+   * 而且 `build.files` 里对 node_modules 要走对象形态（原样拷、绕开收集器）——
+   * 否则嵌套依赖副本会漏进不了包，**打出来的应用启动即崩**
+   * （`Cannot find module 'readable-stream/passthrough'`，开发态看不到）。
+   * 详见 `.npmrc` 顶部与 `scripts/stage-app.mjs` 的文件头。
+   */
+  "pnpm package:win",
   // ③ 拿产物去验（顺序不可换：产物先出来）
   "node scripts/verify-artifacts.mjs",
   "node scripts/verify-packaged.mjs",
@@ -90,12 +98,12 @@ describe("pnpm build 的门禁链", () => {
   it("⚠️ 顺序：先自洽，再打包，最后拿产物去验", () => {
     const at = (needle: string) => build.indexOf(needle);
     // 自洽性必须在出产物之前 —— 反过来的话，几分钟的打包时间换不来任何信息
-    expect(at("pnpm typecheck"), "typecheck 必须在打包之前").toBeLessThan(at("electron-builder"));
-    expect(at("pnpm lint"), "lint 必须在打包之前").toBeLessThan(at("electron-builder"));
-    expect(at("pnpm test"), "test 必须在打包之前").toBeLessThan(at("electron-builder"));
+    expect(at("pnpm typecheck"), "typecheck 必须在打包之前").toBeLessThan(at("pnpm package:win"));
+    expect(at("pnpm lint"), "lint 必须在打包之前").toBeLessThan(at("pnpm package:win"));
+    expect(at("pnpm test"), "test 必须在打包之前").toBeLessThan(at("pnpm package:win"));
     // 产物先出来，再拿产物去验
-    expect(at("electron-builder"), "打包必须在三道门之前").toBeGreaterThan(-1);
-    expect(at("scripts/verify-artifacts.mjs")).toBeGreaterThan(at("electron-builder"));
+    expect(at("pnpm package:win"), "打包必须在三道门之前").toBeGreaterThan(-1);
+    expect(at("scripts/verify-artifacts.mjs")).toBeGreaterThan(at("pnpm package:win"));
     expect(at("scripts/verify-packaged.mjs")).toBeGreaterThan(at("scripts/verify-artifacts.mjs"));
     expect(at("scripts/verify-acceptances.mjs")).toBeGreaterThan(at("scripts/verify-packaged.mjs"));
   });

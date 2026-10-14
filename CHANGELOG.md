@@ -61,20 +61,16 @@
 - 测试抖动：假 provider 的共享计数器跨用例串状态、SQLite 用例的临时目录清理在 Windows 上
   EPERM 判红（都改掉了）。
 
-### ⚠️ 未解决：打包出来的安装包起不来（既有问题，不是这次换代引入的）
+### 打包链修好：安装包能装、能启动
 
-`release/ding-harness-0.1.0-setup.exe` 能打出来，但**装上启动即崩**：
+打出来的安装包先前**启动即崩**（`Cannot find module 'readable-stream/passthrough'`）——
+根因是 electron-builder 的 node_modules 收集路径**每个包只保留一份版本**，
+不带嵌套副本走（`lazystream` 要 `readable-stream@2` 的子路径，而顶层那份是 v3）。
+**开发态看不到它**，CI 也不打包，所以一直没被发现。
 
-```
-ENTRY-LOAD-FAILED Error: Cannot find module 'readable-stream/passthrough'
-```
-
-根因是 electron-builder 的依赖收集器**漏掉嵌套副本**（`lazystream` 要
-`readable-stream@2` 的子路径，而包里顶层那份是 v3，v3 没有这个子路径）。
-**开发态永远看不到**（开发态用的是仓库根那棵完整的树）。
-定位过程与试过、都不行的四种办法记在 `.npmrc` 顶部的注释里；判据是现成的：
-`node scripts/verify-packaged.mjs`（它就是这么逮到这件事的）。
-**在它绿之前不发安装包**，所以这一版**没有打 tag、也没有发 release**。
+修法是 `pnpm package:win` 的两步（缺一不可）：先用 `scripts/stage-app.mjs` 摆一个
+**只装生产依赖**的 app 目录，再让 `build.files` 对 node_modules 走**对象形态**
+（原样拷、绕开收集器）。判据是现成的 `node scripts/verify-packaged.mjs`（起包、等调试端口）。
 
 ### 如实记下的边界
 
@@ -85,3 +81,4 @@ ENTRY-LOAD-FAILED Error: Cannot find module 'readable-stream/passthrough'
   `deepseek-chat` / `deepseek-reasoner` 官方已不再列出，因此如实走"未登记模型"。
 - 插件市场、多 agent 协作、CLI 产品化（npm 分发）尚未开始（Phase 7/8/9）。
 - 品牌字标仍是上一代的字（换名需要重新出图）。
+- 安装包能装能启动，但**装完之后的完整人工验收没做**（只跑了几条跑得动的打包类脚本）。
