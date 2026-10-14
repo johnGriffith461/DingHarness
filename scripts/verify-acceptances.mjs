@@ -334,7 +334,7 @@ function run(file) {
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
-    child.on("close", (code) => resolve({ code: code ?? 1, tail: out.trim().split("\n").slice(-3).join(" | ") }));
+    child.on("close", (code) => resolve({ code: code ?? 1, out, tail: out.trim().split("\n").slice(-3).join(" | ") }));
   });
 }
 
@@ -433,12 +433,33 @@ for (const [file, what] of CASES) {
     }
   }
 
+  /*
+   * ⚠️ 失败时把**完整输出**写成文件（2026-10-14 补）。
+   *
+   * 这条批跑以前只留**最后 3 行** —— 而脚本崩在 Playwright 的 `connectOverCDP` 时，
+   * 最后 3 行是 `} | | Node.js v24.18.0` 这种没信息量的尾巴：
+   * 想弄清"到底哪一步、什么错"只能**重跑那条**（而偶发失败一重跑又是绿的）。
+   * 现在完整 stdout+stderr 落在 `.verify/accept-fail-<脚本名>.log` —— 红了先看文件。
+   */
+  if (code !== 0 && out.trim()) {
+    try {
+      writeFileSync(
+        join(RECORDS_DIR, `accept-fail-${file.replace(/\.mjs$/, "")}.log`),
+        `# ${file}（${what}）失败于 ${new Date().toISOString()}\n\n${out}`,
+        "utf8",
+      );
+    } catch {
+      /* 写不进去不影响判定 */
+    }
+  }
+
   results.push({
     file,
     what,
     ok: code === 0,
     retried,
     note: code === 0 ? "" : tail.slice(0, 160),
+    ...(code === 0 ? {} : { out }),
   });
 }
 await killLeftovers();
@@ -549,6 +570,9 @@ if (stales.length) {
 }
 
 if (failed.length) {
+  /* 把"完整输出在哪"直接说出来 —— 少了这一行，没人会想到 .verify 里有日志。 */
+  console.error("失败脚本的完整输出（红了先看这些文件，别急着重跑）：");
+  for (const f of failed) console.error(`  · ${f.file} → .verify/accept-fail-${f.file.replace(/\.mjs$/, "")}.log`);
   console.error("✗ 有验收没过 —— 先查它是产品坏了还是脚本过期了（§56 撞过后者）");
   process.exit(1);
 }
