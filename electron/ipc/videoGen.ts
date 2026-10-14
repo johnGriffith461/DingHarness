@@ -1,7 +1,7 @@
 import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveSecret } from "./credentials";
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { IMAGE_PROVIDERS } from "./imageGen";
 
 /**

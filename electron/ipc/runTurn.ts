@@ -2,8 +2,8 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { stepCountIs, streamText, type ToolSet } from "ai";
 
 import type { StepUsage } from "../../shared/cost";
-import { getProvider } from "./aiProviders";
-import { resolveSecret } from "./credentials";
+import { getProvider } from "../../engine/runtime/providers";
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { markProviderFailed, markProviderOk } from "./aiProbe";
 
 /**

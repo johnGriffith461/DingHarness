@@ -262,7 +262,7 @@ function normalizeInputImage(raw: Buffer): { buffer: Buffer; note?: string; size
 
 export function registerImageIpc(): void {
   ipcMain.handle(IMAGE_CHANNEL.listModels, async () => {
-    const { resolveSecret } = await import("./credentials");
+    const { resolveSecret } = await import("../../engine/runtime/credentials");
     return IMAGE_PROVIDERS.filter((p) => Boolean(resolveSecret(p.keyRef))).map((p) => ({
       id: p.id,
       label: p.label,
@@ -274,7 +274,7 @@ export function registerImageIpc(): void {
   ipcMain.handle(
     IMAGE_CHANNEL.generate,
     async (_event, request: { prompt: string; model?: string; size?: string }) => {
-      const { resolveSecret } = await import("./credentials");
+      const { resolveSecret } = await import("../../engine/runtime/credentials");
       const provider = IMAGE_PROVIDERS.find((p) => Boolean(resolveSecret(p.keyRef)));
       if (!provider) {
         return {
@@ -359,7 +359,7 @@ export function registerImageIpc(): void {
   });
 
   ipcMain.handle(IMAGE_CHANNEL.edit, async (_event, request: EditImageRequest) => {
-    const { resolveSecret } = await import("./credentials");
+    const { resolveSecret } = await import("../../engine/runtime/credentials");
     const provider = IMAGE_PROVIDERS.find((p) => Boolean(resolveSecret(p.keyRef)));
     if (!provider) {
       return { ok: false, error: "没有可用的图像通道" } satisfies EditImageResult;

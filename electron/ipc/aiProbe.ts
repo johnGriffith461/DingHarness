@@ -1,7 +1,7 @@
 import path from "node:path";
 import { app } from "electron";
 import type { ProviderInfo } from "../../shared/ipc";
-import { getProvider, listProviders, PROVIDERS } from "./aiProviders";
+import { getProvider, listProviders, PROVIDERS } from "../../engine/runtime/providers";
 import { createJsonStore } from "./jsonStore";
 
 /**
@@ -149,7 +149,7 @@ export type ProbeOutcome = { id: string; ok: boolean; ms: number; error?: string
 export async function probeProviders(timeoutMs = 8000): Promise<ProbeOutcome[]> {
   const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
   const { generateText } = await import("ai");
-  const { resolveSecret } = await import("./credentials");
+  const { resolveSecret } = await import("../../engine/runtime/credentials");
 
   const out: ProbeOutcome[] = [];
   for (const def of PROVIDERS) {
