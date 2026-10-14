@@ -1,0 +1,374 @@
+/* ============================================================
+   DINGWORK — 设计令牌 v1.0
+   ------------------------------------------------------------
+   项目：DoubaoWorkClone → Dingwork（Electron 44 + React 19）
+   来源：C:\Users\Administrator\WorkBuddy\2026-10-14-06-01-04\font-preview\dingwork\
+         （proposal.html §07 全文 + dingwork-tokens.css）
+   接入：整文件放在 src/styles/，在 styles.css 的 @import 串里
+   加到 theme.css **之后**（后导入者覆盖先导入者）。
+
+   主题切换机制与项目现状逐字一致，切换逻辑一行不用改：
+       · 日间 Daylight（默认）  作用域 .wb
+       · 黑夜 Night             作用域 [data-theme="dark"] .wb
+   颜色变量沿用项目现有名（--bg / --fg / --accent …），
+   Dingwork 新增令牌一律带 --dw- 前缀，不撞车。
+
+   对比度（WCAG 2.1，实测计算）：
+       日间  --fg-dim 4.9:1  --fg-faint 4.6:1  --accent 5.6:1
+       黑夜  --fg-dim 5.5:1  --accent 5.0:1
+
+   ⚠️ 接入必读（提案 §08 对 D:\DoubaoWorkClone 的勘察实测）：
+     1. `.wb` 在 workbench.css 有一行**自带的 font 声明**
+        （font: 13px/1.6 "Microsoft YaHei", …），它覆盖 body 继承 ——
+        只改 body 的 font 不起作用，必须同时把 .wb 那行改为
+        `13px/1.6 var(--dw-font-text)`。**本工程两处都改了。**
+     2. 三个颜色作用域：.wb（浅色域，贴本文件即变纸白）/
+        .app·.side 外壳（取 :root 深色值，不在 .wb 内）/
+        .wb-canvas（画布深色孤岛）。后两者不会因本文件变浅，
+        这是产品决策，不是缺陷。
+     3. 旧蓝硬编码 rgba(59,130,246,…) 共 46 处，其中 43 处位于
+        上述两个深色域内、与深色自洽，可不动；需改的只有
+        tokens.css :root 与 theme.css 共 3 处。
+
+   ⚠️⚠️ 本地适配（相对提案原文**有五处**不同，都标在出现的位置上）：
+     A. 字体三族挂 `:root` 而**不是** `.wb`（原因见下面那段注释里）——
+        提案第 3 步要给 `body` 换字体，body 在 .wb 之外，取不到 .wb 上的变量。
+     B. 补一条 `--dw-i: 0` 默认值（`.dw-head` / `.dw-rise` 的 stagger 序号）——
+        它只有 var() 兜底（`calc(var(--dw-i, 0) * 90ms)`），而本仓的
+        `uiCraft.test.ts ⑨` 要求「用到的变量必须有人定义」。
+     C. 文件尾补了一段：项目既有的 `--tint-blue*`（选中底色，21 处规则在用）
+        重指到朱红族 —— 只换 --accent 会留下「淡蓝底 + 深红字」，违反原则 02。
+     D. 再一段：浅色域里漏着的 5 条冷色令牌（文字/描边，见那一段的注释）也接过来；
+        文件类型/节点身份色（kind-* / violet）**刻意不动**。
+     E. 把「表达」族接到首页大标题与整页标题上（原先全仓无一处在用它）。
+     F. 6 个装饰性渐变令牌（头像 / 圆球 / 插画底 / 图标底 / 样机底）整族换暖 ——
+        这类令牌含 `linear-gradient(...)`，上一轮的色相清点把它们漏掉了。
+   ============================================================ */
+
+/* ---------- 字体三族（职责见提案 §03）----------
+   ⚠️ 本地适配 A：提案原文把这三行挂在 `.wb` 上。这里改挂 `:root`，理由是
+   接入步骤要给 `body` 换字体（`font: 13px/1.5 var(--dw-font-text)`），
+   而 **body 在 `.wb` 之外** —— 自定义属性只往下继承，body 取不到 `.wb` 上的值，
+   `var()` 落空的后果不是"回退到链上的下一个字体"，而是**整条 font 简写作废**
+   （invalid at computed-value time），正文会掉回浏览器默认字体。
+   挂 :root 之后 `.wb`、外壳、画布三处一起生效，也只剩这一处真源。 */
+:root {
+  --dw-font-display: "Noto Serif SC Variable", "Noto Serif SC", "Songti SC", SimSun, serif;
+  --dw-font-text: "MiSans VF", "MiSans", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --dw-font-mono: "Martian Mono Variable", "Martian Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- 字阶（语义名，不叫 sm/md）---------- */
+.wb {
+  --dw-text-hero: clamp(34px, 4.2vw, 54px);   /* AI 回复头条：衬线 600 */
+  --dw-text-title: 20px;                       /* 区块标题 */
+  --dw-text-lead: 16px;                        /* 导语 */
+  --dw-text-body: 14px;                        /* 正文（>=14px 保 400 字重） */
+  --dw-text-ui: 13px;                          /* 控件 */
+  --dw-text-meta: 11.5px;                      /* mono：状态行 / meta */
+  --dw-text-micro: 10.5px;                     /* mono：编号 / 脚注 */
+  --dw-leading-tight: 1.24;                    /* 衬线大头条（中文需比西文 1.1 透气） */
+  --dw-leading-body: 1.6;                      /* 正文 */
+  --dw-tracking-display: -0.02em;              /* 大标题轻微负字距 */
+}
+
+/* ---------- 间距与圆角 ----------
+   圆角遵从 better-ui 同心法则：外半径 = 内半径 +  padding。
+   嵌套时用 calc() 现算，例如外壳 12px + padding 4px → 内容 8px。 */
+.wb {
+  --dw-space-1: 4px;
+  --dw-space-2: 8px;
+  --dw-space-3: 12px;
+  --dw-space-4: 16px;
+  --dw-space-6: 24px;
+  --dw-space-8: 32px;
+  --dw-radius-sm: 6px;
+  --dw-radius-md: 8px;
+  --dw-radius-lg: 12px;
+  --dw-radius-pill: 999px;
+}
+
+/* ---------- 动效令牌 ----------
+   时长区间出自 animation-systems；--ease-icon 出自 better-ui。 */
+.wb {
+  --dur-instant: 120ms;                          /* 高频交互瞬态（按压/计数） */
+  --dur-quick: 140ms;                            /* hover / 颜色 / 透明度 */
+  --dur: 200ms;                                  /* 控件状态变化 */
+  --dur-slow: 320ms;                             /* 浮层 / 面板 */
+  --dur-reveal: 560ms;                           /* 头条 / 区块入场 */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1); /* 默认：柔和减速 */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); /* 仅限微反馈（chip 弹出） */
+  --ease-dw: cubic-bezier(0.65, 0, 0.35, 1);     /* 遮罩上浮：对称 ease-in-out */
+  --ease-icon: cubic-bezier(0.2, 0, 0, 1);       /* 图标 cross-fade 专用 */
+  --dw-i: 0;                                     /* 本地适配 B：stagger 序号默认值 */
+}
+
+/* ============================================================
+   日间 Daylight —「纸白 + 墨」
+   ============================================================ */
+.wb {
+  --bg: #fbfaf7;
+  --bg-1: #f5f3ed;
+  --bg-2: #efede5;
+  --bg-3: #e9e6dc;
+  --bg-4: #e4e0d3;
+  --bg-5: #f7f5ef;
+  --line: #e3dfd3;
+  --line-soft: #ece8de;
+  --line-strong: #d6d1c1;
+  --line-mid: #c4bda9;
+  --fg: #1b1a14;
+  --fg-3: #3a372c;
+  --fg-2: #57534a;
+  --fg-dim: #6e6a5c;
+  --fg-faint: #767165;
+  --fg-ghost: #948e7d;
+  --fg-deep: #111008;
+  --accent: #9a2f1c;
+  --accent-strong: #7d2515;
+  --on-accent: #fbfaf7;          /* 朱红上的字用纸白，不用纯白 */
+  --accent-tint: #f6e9e4;        /* 选中态：淡朱底，不反白 */
+  --surface-hover: #f1eee6;
+  --surface-active: #e8e4d8;
+  --surface-soft: #f4f1ea;
+  --surface-selected: #f6e9e4;
+  --surface-tint: #f4f1ea;
+  --ok: #3d7a4d;
+  --ok-soft: #e4f2e7;
+  --warn: #a35a0c;
+  --warn-soft: #f9eedd;
+  --danger: #b02a24;
+  --scrim: rgba(27, 26, 20, 0.32);
+  --focus-ring: rgba(27, 26, 20, 0.42);
+  color-scheme: light;
+
+  /* 分层阴影：口径出自 beautiful-shadows（发丝环 + 贴身 + 越大越淡），
+     色相暖墨化 rgba(27,26,20,…) 与纸白底协调；纯黑投影是反面教材。 */
+  --shadow-chip:
+    0 0 0 1px rgba(27, 26, 20, 0.05),
+    0 1px 1px -0.5px rgba(27, 26, 20, 0.06),
+    0 3px 3px -1.5px rgba(27, 26, 20, 0.05),
+    0 6px 6px -3px rgba(27, 26, 20, 0.04);
+  --shadow-card:
+    0 0 0 1px rgba(27, 26, 20, 0.05),
+    0 1px 1px -0.5px rgba(27, 26, 20, 0.06),
+    0 3px 3px -1.5px rgba(27, 26, 20, 0.05),
+    0 6px 6px -3px rgba(27, 26, 20, 0.05),
+    0 12px 12px -6px rgba(27, 26, 20, 0.04),
+    0 24px 24px -12px rgba(27, 26, 20, 0.04);
+  --shadow-popover:
+    0 0 0 1px rgba(27, 26, 20, 0.05),
+    0 1px 2px -1px rgba(27, 26, 20, 0.06),
+    0 4px 8px -3px rgba(27, 26, 20, 0.06),
+    0 12px 24px -10px rgba(27, 26, 20, 0.08),
+    0 24px 40px -20px rgba(27, 26, 20, 0.08);
+  --shadow-menu:
+    0 0 0 1px rgba(27, 26, 20, 0.05),
+    0 2px 4px -2px rgba(27, 26, 20, 0.08),
+    0 8px 16px -6px rgba(27, 26, 20, 0.09),
+    0 20px 36px -16px rgba(27, 26, 20, 0.10);
+  /* 板块边界：右侧的投向左，左侧的投向右（项目既有口径，保留） */
+  --edge-shadow-right:
+    1px 0 0 0 rgba(27, 26, 20, 0.04),
+    1px 0 2px -1px rgba(27, 26, 20, 0.06),
+    4px 0 10px -3px rgba(27, 26, 20, 0.06);
+  --edge-shadow-left:
+    -1px 0 0 0 rgba(27, 26, 20, 0.04),
+    -1px 0 2px -1px rgba(27, 26, 20, 0.06),
+    -4px 0 10px -3px rgba(27, 26, 20, 0.06);
+}
+
+/* ============================================================
+   黑夜 Night —「暖墨 + 纸白字」
+   注意不是冷黑（#0f1115 发蓝），是带暖意的墨。
+   朱红在暗底必须提亮保色相（#9a2f1c → #d9603a），否则糊成一片。
+   ============================================================ */
+[data-theme="dark"] .wb {
+  --bg: #17160f;
+  --bg-1: #201e15;
+  --bg-2: #292619;
+  --bg-3: #322d1d;
+  --bg-4: #3a3423;
+  --bg-5: #221f14;
+  --line: #3a3527;
+  --line-soft: #2c281d;
+  --line-strong: #4a442f;
+  --line-mid: #57503a;
+  --fg: #ece7d6;
+  --fg-3: #d8d2bd;
+  --fg-2: #b8b19a;
+  --fg-dim: #948d76;
+  --fg-faint: #837c66;
+  --fg-ghost: #5c5647;
+  --fg-deep: #f4efdf;
+  --accent: #d9603a;
+  --accent-strong: #e87a56;
+  --on-accent: #17160f;          /* 暗底上亮朱红配深墨字，反差更挺 */
+  --accent-tint: #382119;
+  --surface-hover: #262217;
+  --surface-active: #302b1a;
+  --surface-soft: #221f14;
+  --surface-selected: #382119;
+  --surface-tint: #262217;
+  --ok: #8cc179;
+  --ok-soft: #22301d;
+  --warn: #d8a45e;
+  --warn-soft: #332615;
+  --danger: #e08a78;
+  --scrim: rgba(8, 7, 4, 0.55);
+  --focus-ring: rgba(236, 231, 214, 0.5);
+  color-scheme: dark;
+
+  /* 深色底上浅阴影等于没有：每层更实，色相仍走暖 */
+  --shadow-chip:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 1px 2px -1px rgba(0, 0, 0, 0.45),
+    0 3px 6px -2px rgba(0, 0, 0, 0.35);
+  --shadow-card:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 1px 2px -1px rgba(0, 0, 0, 0.45),
+    0 4px 8px -3px rgba(0, 0, 0, 0.38),
+    0 12px 24px -10px rgba(0, 0, 0, 0.35);
+  --shadow-popover:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 2px 4px -2px rgba(0, 0, 0, 0.48),
+    0 8px 16px -8px rgba(0, 0, 0, 0.42),
+    0 20px 36px -18px rgba(0, 0, 0, 0.4);
+  --shadow-menu:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 2px 4px -2px rgba(0, 0, 0, 0.5),
+    0 10px 20px -8px rgba(0, 0, 0, 0.46),
+    0 24px 44px -20px rgba(0, 0, 0, 0.44);
+  --edge-shadow-right:
+    0 0 0 1px rgba(255, 255, 255, 0.055),
+    2px 0 14px -6px rgba(0, 0, 0, 0.5);
+  --edge-shadow-left:
+    0 0 0 1px rgba(255, 255, 255, 0.055),
+    -2px 0 14px -6px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================================
+   本地适配 E：把「表达」族接到**区块标题**上（按元素，不按类名）
+   ------------------------------------------------------------
+   提案 §03 把 Noto Serif SC 的职责写成「AI 回复头条、区块标题、logo 字、
+   右栏关键数字」，但真机上**一处都没用到** —— 实测：全仓没有任何规则引用
+   `--dw-font-display`，浏览器里那一族（101 个分片）始终停在 unloaded。
+   交付了三族、界面只看得见两族，这正是"半成品相"的一种。
+
+   ⚠️ 第一版只接了带类名的那两处（`.wb-home-title` / `.wb-page-h2`），
+   一查才发现**那是个坑**：页面标题里只有手机遥控电脑那条带类名，
+   其余（编码 / 任务中心 / 图片 / 视频 / 云盘）全是**裸 `<h2>`**，
+   走的是浏览器默认样式。只接类名等于让界面出现"一个衬线标题 + 一堆无衬线标题"。
+   现在按**元素**来：工作台里所有 h1/h2 都是「区块标题」，都用表达族。
+
+   画布（`.wb-canvas`）是深色孤岛，里面的 h1/h2 是 markdown 节点的正文标题
+   （用户/模型写进去的内容，不是界面标题）—— 那条**显式排除**，保持原族。
+
+   只换族，不动字号/字重/结构；衬线中文与无衬线的字宽一致（全角一格），
+   所以版式不会因此挪位。
+
+   ⚠️ **刻意没接 `.wb-assistant-text`**（提案 §09 第 3 步那半句）：
+   实测本机模式的一条真实回复是 **1 个段落、50 字、纯对话句**
+   （"周报要能写实，关键信息还缺一些——比如是哪个产品……我先问两点"）——
+   把 hero（`clamp(34px, 4.2vw, 54px)` 衬线）套上去，等于把**整条回复**变成巨型标题。
+   那半句要等回复真的长出"头条 + 正文"的结构才谈得上，不是加个类的事。
+   工具类 `.dw-head` 已交付，届时直接用。
+   ============================================================ */
+.wb h1,
+.wb h2 {
+  font-family: var(--dw-font-display);
+}
+
+/* 画布内部（markdown 节点的标题）保持原族 —— 上面那条特异性同为 0,1,1，靠**顺序**压回 */
+.wb-canvas h1,
+.wb-canvas h2 {
+  font-family: inherit;
+}
+
+/* ============================================================
+   本地适配 F：6 个**装饰性渐变**令牌 → 暖墨 / 朱红族
+   ------------------------------------------------------------
+   上一轮清点冷色令牌时我漏了一整族：分类器只认 `#hex`，而
+   `linear-gradient(...)` 的值被跳过了。真机上它长这样 ——
+   手机遥控电脑页右侧那块**大片浅蓝**（`--grad-phone-mock`）、
+   头像的蓝紫红、首页圆球的朱红→蓝、功能插画底与插件图标底的蓝灰。
+
+   处置：全部改用**已交付的令牌**拼（没有新造任何色值），两种主题共用
+   同一条表达式 —— 表达式里引用的 `--accent/--accent-strong/--warn/--bg-*`
+   本身就是分主题的，所以在日/夜各自解析成暖墨系与暖朱系。
+   装饰件保留各自的原性格：面板类走「纸白三级」（bg-2/3/4），
+   身份类（头像、首页圆球）走「朱红→暗朱→赭」（accent/strong/warn）。
+
+   ⚠️ 选择器写成 `.wb, [data-theme="dark"] .wb` 是**必须的**：
+   theme.css 里黑夜那一套挂在 `[data-theme="dark"] .wb`（特异性 0,1,1），
+   单写 `.wb`（0,1,0）会**被它压掉** —— 而我这两条特异性相等、且本文件后导入，
+   才压得住。
+   ============================================================ */
+.wb,
+[data-theme="dark"] .wb {
+  /* 身份类：头像的两档与首页圆球（原来的蓝→紫→红换成朱红→暗朱→赭） */
+  --grad-avatar: linear-gradient(135deg, var(--accent), var(--accent-strong) 60%, var(--warn));
+  --grad-avatar-xs: linear-gradient(135deg, var(--accent), var(--warn));
+  --grad-blob: linear-gradient(140deg, var(--accent), var(--accent-strong) 45%, var(--warn));
+  /* 面板类：功能插画底 / 插件图标底 / 手机样机底（原来的浅蓝蓝灰换成纸白三级） */
+  --grad-feature-art: linear-gradient(135deg, var(--bg-3), var(--bg-4));
+  --grad-plugin-icon: linear-gradient(135deg, var(--bg-2), var(--bg-3));
+  --grad-phone-mock: linear-gradient(160deg, var(--bg-2) 0%, var(--bg-3) 55%, var(--bg-4) 100%);
+}
+
+/* ============================================================
+   本地适配 D：浅色域里**还漏着的 5 条冷色令牌** → Dingwork 暖墨族
+   ------------------------------------------------------------
+   怎么找出来的：把 `theme.css` 的 `.wb` 块里 74 个变量减去本文件覆盖的 45 个，
+   剩下的按色相过一遍 —— 5 条的取值是**冷灰/蓝灰**，而且角色是「文字 / 描边」
+   （调色板该管的那类），所以它们落在纸白上会显脏（提案 §04 的同一条道理）。
+   取值全部取自本文件已有的暖墨令牌，**没有新造任何色值**。
+
+   刻意**没动**的：`--kind-docx / --kind-html / --kind-canvas / --kind-icon-html / --violet`
+   —— 那是**文件类型 / 节点的身份色**（doc 蓝、html 紫、画布青、图片天蓝），
+   语义色不属于调色板；提案 §08 对画布那批旧蓝的处置同理。
+   ============================================================ */
+.wb {
+  --fg-disabled: var(--fg-ghost); /* 禁用态「弱但可读」：3.13:1（禁用文字不受正文 AA 约束） */
+  --fg-slate: var(--fg-dim); /* `.wb-kind.is-code` 的文字 */
+  --fg-deep-2: var(--fg-deep); /* `.wb-page-btn-primary:hover` 的底 */
+  --line-faint: var(--line-mid); /* 预设 / 输入框 focus 的描边 */
+  --line-faint-2: var(--line-strong); /* ★ 推荐卡 hover 的描边（设计这轮刚做过的那件） */
+}
+
+[data-theme="dark"] .wb {
+  --fg-disabled: var(--fg-ghost);
+  --fg-slate: var(--fg-dim);
+  --fg-deep-2: var(--fg-deep);
+  --line-faint: var(--line-mid);
+  --line-faint-2: var(--line-strong);
+}
+
+/* ============================================================
+   本地适配 C：项目既有「蓝色族」令牌 → Dingwork 朱红族
+   ------------------------------------------------------------
+   `--tint-blue` / `-2` / `-3` 是旧 accent（蓝）时期的**选中底色**，
+   被 21 处规则用着（`.wb-icon.is-on` / `.wb-voice-item.is-on` /
+   `.wb-mock-menu-row.is-on` / `--tint-blue-3` 当描边 …）—— 它们不在提案
+   §08 数的那 46 处 rgba 里（那批是**字面量**，这批是**命名令牌**）。
+
+   只换 --accent 不换这一族，屏幕上就是「淡蓝底 + 深红字」——
+   正好违反提案原则 02（一处强调）。取值按原蓝族的三档明度重配。
+   ⚠️ 名字里的 blue 已是历史：重命名要动 21 处规则，另开一轮。
+   ============================================================ */
+.wb {
+  --tint-blue: var(--accent-tint);
+  --tint-blue-2: #f1ded6;
+  --tint-blue-3: #e2c6bb;
+}
+
+[data-theme="dark"] .wb {
+  --tint-blue: var(--accent-tint);
+  --tint-blue-2: #43271b;
+  --tint-blue-3: #5c3626;
+}
+
+/* ============================================================
+   画布深色孤岛（.wb-canvas 在 .wb 内，项目既有机制）
+   Dingwork 暖墨令牌在此同样成立，无需另配。
+   ============================================================ */

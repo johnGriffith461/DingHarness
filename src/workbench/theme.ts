@@ -81,6 +81,37 @@ const TITLEBAR = {
   dark: { color: "#11141a", symbolColor: "#c9d1d9" },
 } as const;
 
+/**
+ * Dingwork 提案 §05「主题切换：为什么不是渐变过去」（motion.css THREE-A）。
+ *
+ * 翻转主题会同时改掉几乎每个元素的 color / background / border / shadow ——
+ * **所有** transition 一起触发，整页不是"干脆地换"而是"糊"一下。
+ * 做法：改属性之前注入一条全局掐断过渡的样式，改完强制 reflow（让新主题
+ * 在这一帧就落地），再把那条样式摘掉（下一帧过渡自然恢复）。
+ *
+ * ⚠️ 全部对 DOM 能力做**防御性判断**：`theme.test.ts` 用的是手搭的极简
+ * `document` 替身（没有 `createElement`、没有 `body`）。而"切主题"这件事本身
+ * 不该因为"这个环境没有注入 style 标签的能力"而整个失效 —— 兜底成"直接切"。
+ *
+ * @param fn 真正改属性的动作
+ */
+function withTransitionsSuppressed(fn: () => void): void {
+  const canInject =
+    typeof document !== "undefined" && typeof document.createElement === "function";
+  const kill = canInject ? document.createElement("style") : null;
+  if (kill) {
+    kill.textContent = "*,*::before,*::after{transition:none !important;animation:none !important}";
+    if (document.head) document.head.appendChild(kill);
+  }
+  try {
+    fn();
+    /* 强制 reflow：不读一次布局，浏览器会把"注入 + 摘掉"合成同一帧，等于没做 */
+    if (typeof document !== "undefined" && document.body) void document.body.offsetWidth;
+  } finally {
+    kill?.remove();
+  }
+}
+
 export function applyDark(dark: boolean): void {
   /*
    * 载体是 **`<html data-theme>`**，与本体一致（recovered-src 的 profile-theme.ts）。
@@ -92,7 +123,14 @@ export function applyDark(dark: boolean): void {
    */
   const root = document.documentElement;
   if (!root) return;
-  root.setAttribute("data-theme", dark ? "dark" : "light");
+
+  /*
+   * 放在这里而不是各个调用点，是因为 `applyDark` 是本仓改主题的**唯一收口**：
+   * 三档外观设置、跟随系统的变化、启动时那一次，全都从这条路过去。
+   */
+  withTransitionsSuppressed(() => {
+    root.setAttribute("data-theme", dark ? "dark" : "light");
+  });
 
   /*
    * 标题栏覆盖层是**主进程**的窗口选项，改不了 CSS —— 得走 IPC。

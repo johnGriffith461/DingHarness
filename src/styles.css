@@ -14,3 +14,14 @@
 @import "./styles/panels.css";
 @import "./styles/features.css";
 @import "./styles/craft.css";
+/*
+ * ── Dingwork 视觉系统（2026-10-14，提案 §09 第 2 步）────────────────────
+ * 追加在**全串末尾**：令牌是覆盖块，排在 craft.css 之后才压得住既有规则。
+ * 三个字体 css 的 url() 与 woff2 **同层**（src/assets/fonts/），不另建目录
+ * 结构 → Vite 照常解析并打进 dist，运行期零外部请求（离线可用）。
+ */
+@import "./assets/fonts/notoserif.css";
+@import "./assets/fonts/misans.css";
+@import "./assets/fonts/martian.css";
+@import "./styles/dingwork-tokens.css";
+@import "./styles/dingwork-motion.css";

@@ -160,10 +160,18 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
     );
     /* 内层输入框不许再套第二圈：必须显式写掉 */
     expect(css, "输入区里的 textarea 没有取消第二圈焦点环").toContain(".wb-composer-input:focus-visible");
-    /* 焦点环取值必须中性（rgba 的黑/白），不能用彩色 */
+    /* 焦点环取值必须中性（rgba 的黑/白），不能用彩色。
+     *
+     * ⚠️ 2026-10-14 Dingwork 落地：允许的"中性"从两组扩到四组 ——
+     * 新增暖墨 rgba(27,26,20,…)（日间）与暖纸白 rgba(236,231,214,…)（黑夜）。
+     * 这两组出自 `dingwork-tokens.css`，且它们就是本仓 `--focus-ring` 的**新取值**
+     * （同选择器、后导入覆盖）—— 所以 `css.match` 拿到的第一处已经是它们。
+     * **判据没变**：仍然只认中性色、不许出现品牌色（朱红 / 旧蓝都不行）。 */
     const token = css.match(/--focus-ring:\s*([^;]+);/);
     expect(token, "没有 --focus-ring 令牌").not.toBeNull();
-    expect(token![1], `焦点环颜色不是中性的：${token![1]}`).toMatch(/rgba\(\s*(16,\s*24,\s*40|255,\s*255,\s*255)/);
+    expect(token![1], `焦点环颜色不是中性的：${token![1]}`).toMatch(
+      /rgba\(\s*(16,\s*24,\s*40|27,\s*26,\s*20|236,\s*231,\s*214|255,\s*255,\s*255)/,
+    );
   });
 
   /*
@@ -262,8 +270,21 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
     const used = new Map<string, Set<string>>();
     const defined = new Set<string>();
     const files = ["styles.css", ...readdirSync(STYLE_DIR).filter((f) => f.endsWith(".css")).map((f) => `styles/${f}`)];
+    /*
+     * ⚠️ 2026-10-14 起**先去掉注释再扫**。
+     *
+     * 起因：Dingwork 提案交付的 `dingwork-motion.css` 把"可选进阶"的 View Transitions
+     * 配方整段写在注释里（`clip-path: circle(var(--dw-r) at --dw-x --dw-y)` 那套）——
+     * 那些 `var()` 是**文档**，不是活的声明，永远不会"落空失效"，
+     * 但正则会把它们数成"用了没定义"。
+     *
+     * 判据本来就该是「**活代码里**用到的变量必须有人定义」，所以按注释切掉最准；
+     * 同理，注释里写的 `--x: …` 也不算定义。
+     * （下面 `--markmap-` 那条过滤留着 —— 它是**活代码**里的外部变量，性质不同。）
+     */
+    const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
     for (const f of files) {
-      const text = readFileSync(path.join(ROOT, "src", f), "utf8");
+      const text = strip(readFileSync(path.join(ROOT, "src", f), "utf8"));
       for (const m of text.matchAll(/var\((--[a-zA-Z0-9-]+)/g)) {
         if (!used.has(m[1])) used.set(m[1], new Set());
         used.get(m[1])!.add(f);

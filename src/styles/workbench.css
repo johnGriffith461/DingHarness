@@ -17,7 +17,9 @@
   display: flex;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.6 "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  /* ⚠️ 工作台字体的**实际生效点**：这一行覆盖 body 的继承（提案 §08 冲突点 1）。
+     只改 body 不改这里 = 工作台里所有文字都不跟着变。 */
+  font: 13px/1.6 var(--dw-font-text);
   overflow: hidden;
 }
 

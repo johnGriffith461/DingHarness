@@ -1,0 +1,201 @@
+/* ============================================================
+   DINGWORK — 动效规范 v1.0（dingwork-motion.css）
+   ------------------------------------------------------------
+   与 dingwork-tokens.css 配套使用；引入顺序在其后。
+   来源：C:\Users\Administrator\WorkBuddy\2026-10-14-06-01-04\font-preview\dingwork\
+         （proposal.html §07 全文 + dingwork-motion.css，逐字一致）
+
+   ── 准入五问（animation-systems）──────────────────────────
+   每个动画必须至少回答其中一条，答不上来就删掉：
+     1. 解释层级   2. 确认动作   3. 引导注意
+     4. 保持连续（空间关系）      5. 添加质感
+   Motion 永远不是唯一反馈通道 —— 每个动效都配静态补偿
+   （颜色 / 图标 / 标签）。（better-ui）
+
+   ── 实现纪律 ──────────────────────────────────────────────
+   · 交互态一律 transition（可中途打断）；keyframes 只做一次性编排
+   · 只动 transform / opacity / color；禁 width/height/top/left
+   · transition 只写具名属性，禁 transition: all
+   · 高频交互 ≤150ms 或瞬态；按压恒定 scale(0.96)
+   · 图标 cross-fade 用 --ease-icon；blur 4px→0
+   · 主题切换先抑制过渡再瞬切（见文件尾部 THREE）
+   · backdrop-filter 只给 fixed/sticky，不给滚动容器
+   · will-change 只加在真正卡帧的元素上，限 transform/opacity
+   ============================================================ */
+
+/* ============================================================
+   ONE — 关键帧
+   ============================================================ */
+
+/* 头条入场：fade + rise（animation-systems 默认入场原型）
+   14px 上浮 + 560ms 对称 ease-in-out，配遮罩感由 opacity 承担。
+   中文衬线大字不用 clip-path 动画（长文本性能差），保 transform+opacity。 */
+@keyframes dw-head-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 区块上浮：scroll-in / 次级内容入场，比头条轻（8px / 300ms） */
+@keyframes dw-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 打字光标：流式回复的「还在写」信号（静态补偿：旁边必有状态文字） */
+@keyframes dw-caret {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+/* chip 弹出：输入框 chips / 标签入场，spring 只配这种微反馈 */
+@keyframes dw-chip-pop {
+  from { opacity: 0; transform: scale(0.86); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* 侧栏选中指示条：从上方生长出来（解释「选中移到了这一行」） */
+@keyframes dw-rail {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+/* 流式逐字光标滚动：数字/计数翻转的极简版（可选） */
+@keyframes dw-tick {
+  from { opacity: 0; transform: translateY(-0.5em); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   TWO — 工具类
+   ============================================================ */
+
+/* 头条入场。stagger 由 --dw-i 驱动（90ms/条，animation-systems 区间内），
+   行号在 HTML 里写：style="--dw-i:0" / 1 / 2 …
+   一次性编排，用 keyframes；进页面后重复出现用 .dw-rise。 */
+.dw-head {
+  animation: dw-head-in var(--dur-reveal) var(--ease-dw) both;
+  animation-delay: calc(var(--dw-i, 0) * 90ms);
+}
+
+/* 通用上浮：scroll-in / 面板内容。
+   触发方式：进入视口时加 class，或直接用于一次性挂载。 */
+.dw-rise {
+  animation: dw-rise 300ms var(--ease-out) both;
+  animation-delay: calc(var(--dw-i, 0) * 90ms);
+}
+
+/* 按压反馈：恒定 0.96（better-ui 原值，再小就夸张）。
+   active 时才缩放，不影响布局；配 transition 可被中途打断。 */
+.dw-pressable {
+  transition: transform var(--dur-instant) var(--ease-out),
+              background-color var(--dur-quick) var(--ease-out),
+              color var(--dur-quick) var(--ease-out),
+              box-shadow var(--dur-quick) var(--ease-out);
+}
+.dw-pressable:active { transform: scale(0.96); }
+
+/* hover 抬升：-2px + 阴影微增（animation-systems「lift + glow」静音版） */
+.dw-lift {
+  transition: transform var(--dur-quick) var(--ease-out),
+              box-shadow var(--dur-quick) var(--ease-out);
+}
+.dw-lift:hover { transform: translateY(-2px); }
+
+/* 图标 cross-fade：两颗图标都在 DOM，一颗绝对定位叠层，
+   opacity + scale(0.25→1) + blur(4px→0)，曲线 --ease-icon。 */
+.dw-icon-swap { position: relative; display: inline-grid; place-items: center; }
+.dw-icon-swap > * { grid-area: 1 / 1; transition: opacity var(--dur-quick) var(--ease-icon),
+                    transform var(--dur-quick) var(--ease-icon),
+                    filter var(--dur-quick) var(--ease-icon); }
+.dw-icon-swap > .dw-icon-out { opacity: 0; transform: scale(0.25); filter: blur(4px); }
+.dw-icon-swap:hover > .dw-icon-in,
+.dw-icon-swap:focus-visible > .dw-icon-in { opacity: 0; transform: scale(0.25); filter: blur(4px); }
+.dw-icon-swap:hover > .dw-icon-out,
+.dw-icon-swap:focus-visible > .dw-icon-out { opacity: 1; transform: scale(1); filter: blur(0); }
+
+/* 侧栏选中指示条：transform-origin 顶部，scaleY 生长 */
+.dw-rail-ind {
+  transform-origin: top;
+  animation: dw-rail var(--dur) var(--ease-out) both;
+}
+
+/* 流式光标：宽 2px 朱红竖线，1s 一跳 */
+.dw-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  translate: 0 0.14em;
+  animation: dw-caret 1s steps(1) infinite;
+}
+
+/* ============================================================
+   THREE — 主题切换（日间 ⇄ 黑夜）
+   ------------------------------------------------------------
+   ⚠️ 这一整段是**说明**，写在注释里。CSS 注释**不能嵌套** ——
+   所以段内任何地方都不许出现 `*` + `/` 这对字符（连示例代码里的
+   "把上面函数注释掉"那种写法都不行）：它会**提前把这段注释收掉**，
+   后面的说明文字就变成了交给浏览器解析的规则（本仓第一版照抄提案原文时
+   就带着这个毛病，`.verify` 的 var 扫描因此把文档里的变量当成了活的）。
+   示例里要写注释就写 JS 的 `//`。
+   ------------------------------------------------------------
+   两条路，按项目现状选 A；想要「圆形扩散」彩蛋再上 B。
+
+   A. 瞬切（默认，better-ui 原样规则）：
+      主题翻转会同时改变几乎每个元素的 color/background/border/
+      shadow，所有 transition 一起触发 → 整页「糊」一下而不是干脆地换。
+      做法：切之前全局掐断 transition，强制 reflow，下一帧恢复。
+      **本工程已按 A 落地**：包在 `src/workbench/theme.ts` 的 `applyDark()` 里
+      （那是本仓切主题的唯一收口，三档外观设置与"跟随系统"都从那里过）。
+
+   B. 圆形扩散（可选，beui.dev Theme Toggle 同款，View Transitions API）：
+      从点击点扩散的 clip-path reveal， Chromium/Electron 44 可用；
+      不支持时静默回退到 A。接入：把上面函数换成——
+
+        function setTheme(next, ev) {
+          if (!document.startViewTransition) {
+            // 回退 A：return setThemeInstant(next);
+          }
+          const x = ev ? ev.clientX : innerWidth / 2;
+          const y = ev ? ev.clientY : 0;
+          const r = Math.hypot(Math.max(x, innerWidth - x),
+                               Math.max(y, innerHeight - y));
+          document.documentElement.style.setProperty('--dw-x', x + 'px');
+          document.documentElement.style.setProperty('--dw-y', y + 'px');
+          document.documentElement.style.setProperty('--dw-r', r + 'px');
+          const vt = document.startViewTransition(() => {
+            document.documentElement.dataset.theme = next;
+          });
+        }
+      配 CSS：
+        ::view-transition-old(root),
+        ::view-transition-new(root) {
+          animation: none;
+          mix-blend-mode: normal;
+        }
+        ::view-transition-old(root) { z-index: 1; }
+        ::view-transition-new(root) { z-index: 2; }
+        [data-theme="dark"]::view-transition-new(root) {
+          clip-path: circle(var(--dw-r) at var(--dw-x) var(--dw-y));
+          animation: dw-clip-grow 420ms var(--ease-out);
+        }
+        @keyframes dw-clip-grow {
+          from { clip-path: circle(0 at var(--dw-x) var(--dw-y)); }
+        }
+   ============================================================ */
+
+/* ============================================================
+   FOUR — 减少动态效果（prefers-reduced-motion）
+   口径：过渡瞬结；无限动画只播一次，保证终态可见 ——
+   而不是简单 display:none 让用户什么都看不到。
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .wb *,
+  .wb *::before,
+  .wb *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

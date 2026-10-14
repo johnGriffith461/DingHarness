@@ -1,0 +1,30 @@
+/*
+ * Martian Mono Variable —— Dingwork 三族里的「数据」族（Dingwork 提案 §03）。
+ *
+ * 来源：`font-preview/fonts/martian.css`（SIL OFL 1.1，可商用）。
+ *
+ * ⚠️ 落地时删掉了原文件的前两个 @font-face（cyrillic-ext / cyrillic）：
+ * 它们的 `src` 指向 `./files/…`，而**这一批字体根本没有那个目录**
+ * （实际文件与本文件同层）。留着就是两条跑到就 404 的死规则 ——
+ * 8/16 两段是 latin 覆盖的范围，本项目（中英混排）用不到西里尔子集。
+ */
+
+/* martian-mono-latin-ext-wght-normal */
+@font-face {
+  font-family: 'Martian Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url(martian-mono-latin-ext-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+/* martian-mono-latin-wght-normal */
+@font-face {
+  font-family: 'Martian Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url(martian-mono-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}

@@ -13,7 +13,13 @@
   --line: #262c38;
   --fg: #c9d1d9;
   --fg-dim: #7d8794;
-  --accent: #3b82f6;
+  /*
+   * 2026-10-14 Dingwork 落地：旧 accent 蓝 #3b82f6 → 朱红。
+   * 这里取的是**黑夜档**（#d9603a），因为 `:root` 是外壳（.app / .side / 标题栏）
+   * 的地盘，它们不在 `.wb` 的浅色域里、底色本来就是 #0f1115。
+   * 日间那一档在 theme.css / dingwork-tokens.css 的 `.wb` 上。
+   */
+  --accent: #d9603a;
   color-scheme: dark;
 }
 
@@ -31,7 +37,9 @@ body,
 body {
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  /* Dingwork：三族里的「阅读」族。字面定义在 dingwork-tokens.css 的 :root
+     （挂 :root 是为了这里 —— body 在 .wb 之外，取不到 .wb 上的自定义属性）。 */
+  font: 13px/1.5 var(--dw-font-text);
   overflow: hidden;
 }
 
