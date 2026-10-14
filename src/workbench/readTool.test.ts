@@ -105,6 +105,52 @@ describe("readFileForModel", () => {
   });
 });
 
+describe("按文件名找（模型经常只知道名字，不知道路径）", () => {
+  it("名字唯一时找得到 —— 于是「云盘里的季度总结.md」这种说法也能读", async () => {
+    const got = await readFileForModel("季度总结.md", dirs());
+    expect(got.ok).toBe(true);
+    if (got.ok) expect(got.text).toContain("营收增长 12%");
+  });
+
+  it("带子目录也能对（`子目录/文件名`）", async () => {
+    const sub = path.join(ROOT, "drive", "报告");
+    fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(sub, "月报.md"), "月报正文", "utf8");
+    const got = await readFileForModel("报告/月报.md", dirs());
+    expect(got.ok).toBe(true);
+    if (got.ok) expect(got.text).toContain("月报正文");
+  });
+
+  it("⭐ 同名多个**不猜** —— 把候选列出来让模型挑（猜错会读错文件还理直气壮）", async () => {
+    const sub = path.join(ROOT, "drive", "旧版");
+    fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(sub, "季度总结.md"), "旧版内容", "utf8");
+    const got = await readFileForModel("季度总结.md", dirs());
+    expect(got.ok).toBe(false);
+    if (!got.ok) {
+      expect(got.error).toContain("同名");
+      expect(got.error).toContain("旧版");
+    }
+  });
+
+  it("名字找不到时如实说（并提示可以给完整路径）", async () => {
+    const got = await readFileForModel("查无此件.md", dirs());
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.error).toContain("没找到");
+  });
+
+  it("**绝对路径优先**：即便同名文件存在，给的路径说了算", async () => {
+    const got = await readFileForModel(path.join(ROOT, "drive", "旧版", "季度总结.md"), dirs());
+    expect(got.ok).toBe(true);
+    if (got.ok) expect(got.text).toContain("旧版内容");
+  });
+
+  it("绝对路径但目录外 → 仍然读不到（按名字那条路不能把边界放松）", async () => {
+    const got = await readFileForModel(path.join(OUTSIDE, "别人的文件.md"), dirs());
+    expect(got.ok).toBe(false);
+  });
+});
+
 describe("describeReadResult（界面留痕与给模型的说法是同一句）", () => {
   it("成功：说清读了哪个文件、多少字", async () => {
     const got = await readFileForModel(path.join(ROOT, "drive", "季度总结.md"), dirs());

@@ -28,6 +28,51 @@ export type ReadFileResult =
   | { ok: true; text: string; chars: number; truncated: boolean; totalChars: number }
   | { ok: false; error: string };
 
+/** 按文件名找文件时最多往下看几层目录（云盘是浅结构，深挖没意义）。 */
+const NAME_SEARCH_DEPTH = 3;
+
+/**
+ * 按**文件名**在可读目录里找文件（2026-10-14 补）。
+ *
+ * ## 为什么需要
+ * `read_file` 一开始只认绝对路径 —— 可模型**根本不知道路径**：
+ * 用户说"把云盘里的季度总结.md 读一下"，模型手上只有这个名字，
+ * 而文件实际在 `<userData>/drive/季度总结.md`。于是这个工具在真实场景里用不起来
+ * （只有"用户把完整路径给了它"这一种情况能 work）。
+ *
+ * @param name 文件名；可以带子目录（如 `报告/季度.md`）
+ * @param dirs 可读目录白名单
+ * @returns 命中的绝对路径（可能多个；由调用方决定"多个怎么办"）
+ */
+export async function findByFileName(name: string, dirs: readonly string[]): Promise<string[]> {
+  const wanted = name.replace(/\\/g, "/").replace(/^\.\//, "");
+  const hits: string[] = [];
+
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > NAME_SEARCH_DEPTH) return;
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return; /* 读不了的目录跳过（不是错误：可能刚被删） */
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full, depth + 1);
+        continue;
+      }
+      const normalized = full.replace(/\\/g, "/");
+      if (wanted.includes("/") ? normalized.endsWith(`/${wanted}`) : entry.name === wanted) {
+        hits.push(full);
+      }
+    }
+  };
+
+  for (const dir of dirs) await walk(dir, 1);
+  return hits;
+}
+
 /**
  * 读一个用户目录里的文本文件，读成"给模型看的样子"。
  *
@@ -45,15 +90,48 @@ export async function readFileForModel(
   dirs: readonly string[],
   maxChars: number = MODEL_MAX_CHARS,
 ): Promise<ReadFileResult> {
-  const target = insideDirs(rawPath, dirs);
-  if (!target) {
+  /*
+   * 先按路径认；认不出来、而且给的**不是绝对路径**时，再按文件名找一次。
+   * 顺序很重要：路径能认出来就别用名字搜（同名文件可能有多个）。
+   * 为什么需要这一步见 `findByFileName` 的说明 —— 模型经常只知道文件名。
+   */
+  const byPath = insideDirs(rawPath, dirs);
+  if (!byPath && !path.isAbsolute(rawPath)) {
+    const hits = await findByFileName(rawPath, dirs);
+    if (hits.length === 1) return readResolved(hits[0], maxChars);
+    if (hits.length > 1) {
+      /*
+       * ⚠️ 同名多个**不猜**：把候选原样给模型（它才知道该读哪一个）。
+       * 猜一个读下去是最坏的结果 —— 读错了文件还理直气壮地总结。
+       */
+      return {
+        ok: false,
+        error: `找到 ${hits.length} 个同名文件，请用完整路径指定一个：${hits.join(" / ")}`,
+      };
+    }
+    return { ok: false, error: `没找到叫「${rawPath}」的文件（也可以直接给完整路径）` };
+  }
+  if (!byPath) {
     /*
      * 不说"权限不足"这种含糊话：把**能读的范围**讲清楚，
      * 模型才知道下一步该找用户要文件、还是从文件列表里挑一个。
      */
     return { ok: false, error: "这个路径不在可读范围内（只能读用户的云盘 / 产物 / 导出目录）" };
   }
+  return readResolved(byPath, maxChars);
+}
 
+/**
+ * 读一个**已经通过校验**的绝对路径。
+ *
+ * 抽出来是为了让两条入口（给的路径 / 按名字找到的路径）共用同一段
+ * "stat → 大小 → 读 → 二进制判定 → 截断" —— 否则"按名字找"那条迟早会少一步检查。
+ *
+ * @param target 已通过白名单校验的绝对路径
+ * @param maxChars 给模型的正文上限
+ * @returns 读到的正文，或者一条说清原因的失败
+ */
+async function readResolved(target: string, maxChars: number): Promise<ReadFileResult> {
   let stat;
   try {
     stat = await fs.stat(target);
