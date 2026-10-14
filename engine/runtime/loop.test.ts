@@ -283,6 +283,29 @@ describe("主循环 · 工具往返", () => {
 });
 
 describe("主循环 · 步数上限是参数（Phase 3.2）", () => {
+  it("⭐ 步数按 AI SDK 的**每步边界**数（不是整轮结束）", async () => {
+    /*
+     * ⚠️ 这条是 Phase 6 的 PoC 逮出来的：循环原来只认 `finish`（整轮结束），
+     * 于是 maxSteps=3 的一轮也只发 1 个 step-finish —— 步数统计一直偏小。
+     * 现在认 `finish-step`（每步一个）。判据用"工具调用数"与"step-finish 数"**双双**对齐，
+     * 因为这两者在"每步一次工具调用"的假 provider 下必须相等。
+     */
+    let i = 0;
+    script = () => [toolChunk(`s${(i += 1)}`, "read_file", '{"path":"a.md"}'), finish("tool_calls")];
+    const tools = buildToolSet({
+      registry: createToolRegistry(),
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true, output: { line: "ok" } }) },
+      ctx: { mode: "全部允许", provider: "strata" },
+    });
+    const events: TurnEvent[] = [];
+    await run((e) => events.push(e), { tools, maxSteps: 3 });
+    const calls = events.filter((e) => e.type === "tool-call").length;
+    const steps = events.filter((e) => e.type === "step-finish").length;
+    expect(calls).toBe(3);
+    expect(steps, "step-finish 应当每步一个").toBe(3);
+  });
+
   it("⭐ 父 4 / 子 6：同一个循环，只有这个参数不同", async () => {
     /*
      * 假 provider **每次都回工具调用** —— 于是唯一的刹车就是步数上限。

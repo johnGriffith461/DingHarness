@@ -8,19 +8,21 @@
   "main": "dist-electron/electron/main.cjs",
   "packageManager": "pnpm@10.34.1",
   "scripts": {
-    "dev:web": "vite",
-    "build:web": "vite build",
-    "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",
     "build": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:web && pnpm electron:build && pnpm package:win && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
-    "verify:artifacts": "node scripts/verify-artifacts.mjs",
-    "typecheck": "tsc --noEmit",
+    "build:web": "vite build",
+    "dev:web": "vite",
+    "ding": "tsx hosts/cli/ding.ts",
+    "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",
+    "lint": "oxlint",
+    "package:win": "node scripts/stage-app.mjs && electron-builder --win nsis",
+    "poc:sdk": "tsx scripts/poc-sdk.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify:packaged": "node scripts/verify-packaged.mjs",
+    "typecheck": "tsc --noEmit",
+    "vendor:models": "node scripts/vendor-models.mjs",
     "verify:accept": "node scripts/verify-acceptances.mjs",
-    "lint": "oxlint",
-    "ding": "tsx hosts/cli/ding.ts",
-    "package:win": "node scripts/stage-app.mjs && electron-builder --win nsis"
+    "verify:artifacts": "node scripts/verify-artifacts.mjs",
+    "verify:packaged": "node scripts/verify-packaged.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

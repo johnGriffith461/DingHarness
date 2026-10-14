@@ -259,6 +259,9 @@ export async function runTurn(
         : {}),
     });
 
+    /** 这一轮有没有见过"一步结束"（见下面 `finish-step` 那段）。 */
+    let sawStepFinish = false;
+
     for await (const part of result.fullStream) {
       if (input.abortSignal?.aborted) break;
       if (part.type === "text-delta") {
@@ -286,8 +289,29 @@ export async function runTurn(
         });
         continue;
       }
-      if (part.type === "finish") {
+      /*
+       * ⭐ **一步结束**（2026-10-15 修，Phase 6 的 PoC 逮出来的）。
+       *
+       * ⚠️ 这里原来认的是 `finish` —— 而 `finish` 是**整轮结束**，不是"一步结束"。
+       * 于是 `step-finish` 一次调用只发一次，数出来的步数永远是 1
+       * （子智能体的"几步"因此靠 `工具调用数 + 1` 兜底，是个近似值）。
+       *
+       * AI SDK 的 fullStream 里，**每步**的边界是 `finish-step`（前面配 `start-step`）。
+       * 实测：maxSteps=3 的一轮里发了 3 次请求、3 个 `finish-step`、末尾才 1 个 `finish`。
+       *
+       * `step-finish` 是"数步数用"的事件（投影会忽略它，所以计数修正不影响界面与日志）。
+       */
+      if (part.type === "finish-step") {
+        sawStepFinish = true;
         onEvent({ type: "step-finish" });
+        continue;
+      }
+      /*
+       * 末尾的 `finish`：**兜底**用 —— 万一某个 provider/SDK 版本不发 `finish-step`，
+       * 至少还有一次计数（否则会报 0 步，比多报一步更坏）。
+       */
+      if (part.type === "finish") {
+        if (!sawStepFinish) onEvent({ type: "step-finish" });
         continue;
       }
       if (part.type === "error") throw part.error;
