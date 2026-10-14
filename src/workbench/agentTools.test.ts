@@ -25,6 +25,9 @@ import {
   toolLine,
   toolSpec,
   unknownToolNotice,
+  WRITE_FILE_DESC,
+  WRITE_FILE_INPUT,
+  WRITE_FILE_TOOL,
   type ToolTrace,
 } from "@shared/agentTools";
 import { MEMORY_TEXT_LIMIT } from "@shared/memory";
@@ -438,5 +441,56 @@ describe("mergeToolTraces（C2 期间逮到的一个真回归）", () => {
 
   it("界面为空时就是投影那一份", () => {
     expect(mergeToolTraces([], [pending("a")])).toEqual([pending("a")]);
+  });
+});
+
+/*
+ * 「写文件」（2026-10-14，§224）。
+ *
+ * 这一组钉的是**声明层**：模型看得到的说明与参数校验。
+ * 真正"写不写得进去"由 `writeTool.test.ts`（纯函数）与验收脚本管 ——
+ * 分工与本项目其它工具一致：声明归声明，行为归行为。
+ */
+describe("write_file 的声明", () => {
+  it("参数：路径去空白、正文必填、overwrite 可选", () => {
+    const got = WRITE_FILE_INPUT.parse({ path: "  D:/x/云盘/纪要.md  ", content: "正文" });
+    expect(got.path).toBe("D:/x/云盘/纪要.md");
+    expect(got.content).toBe("正文");
+    expect(got.overwrite).toBeUndefined();
+    expect(WRITE_FILE_INPUT.parse({ path: "a.md", content: "x", overwrite: true }).overwrite).toBe(true);
+  });
+
+  it("空路径 / 缺正文都拒（让模型在参数层就被拦下，别到执行体才失败）", () => {
+    expect(WRITE_FILE_INPUT.safeParse({ path: "   ", content: "x" }).success).toBe(false);
+    expect(WRITE_FILE_INPUT.safeParse({ path: "a.md" }).success).toBe(false);
+  });
+
+  it("⭐ 说明里必须写着「默认不覆盖」与「只写文本」—— 丢了它模型会瞎试", () => {
+    expect(WRITE_FILE_DESC).toContain("不覆盖");
+    expect(WRITE_FILE_DESC).toContain("overwrite");
+    expect(WRITE_FILE_DESC).toContain("文本");
+    /* 上限也得在说明里：不然模型按自己的想象写长文，然后被拒 */
+    expect(WRITE_FILE_DESC).toContain("字");
+  });
+
+  it("短标签是「写文件」（界面留痕用）", () => {
+    expect(toolLabel(WRITE_FILE_TOOL)).toBe("写文件");
+  });
+
+  it("参数摘要要说清**写哪儿、多少字** —— 批准之前用户就得看见", () => {
+    const line = toolArgsSummary(WRITE_FILE_TOOL, { path: "D:/x/云盘/纪要.md", content: "甲乙丙" });
+    expect(line).toContain("纪要.md");
+    expect(line).toContain("3 字");
+    /* 不把整条路径摊出来：前半截是同一串 userData，占地方 */
+    expect(line).not.toContain("D:/x");
+  });
+
+  it("要求覆盖时摘要里写明「覆盖」（用户要能一眼看出这次会动已有文件）", () => {
+    const line = toolArgsSummary(WRITE_FILE_TOOL, { path: "D:/x/云盘/纪要.md", content: "x", overwrite: true });
+    expect(line).toContain("覆盖");
+  });
+
+  it("没有路径就给空串（说不出来就别说，别硬编一句「已执行」）", () => {
+    expect(toolArgsSummary(WRITE_FILE_TOOL, { content: "只有正文" })).toBe("");
   });
 });

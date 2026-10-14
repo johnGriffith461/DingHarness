@@ -30,6 +30,9 @@ import {
   READ_FILE_INPUT,
   READ_FILE_TOOL,
   unknownToolNotice,
+  WRITE_FILE_DESC,
+  WRITE_FILE_INPUT,
+  WRITE_FILE_TOOL,
 } from "../../shared/agentTools";
 import { formatFileList } from "../../shared/fileList";
 import { addMemory, MEMORY_MAX } from "../../shared/memory";
@@ -38,6 +41,7 @@ import { readMemory, writeMemory } from "./memoryStore";
 import { broadcastScheduleChanged, loadJobs, saveJobs } from "./scheduleStore";
 import { sendCanvasCommand } from "./canvas";
 import { describeReadResult, readFileForModel } from "./readTool";
+import { describeWriteResult, writeFileForModel } from "./writeTool";
 import { listDrive, ownedDirs } from "./driveStore";
 import { runSubagent } from "./subagent";
 
@@ -184,6 +188,25 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       ok: result.ok,
       line: describeReadResult(result, path),
       ...(result.ok ? { text: result.text, chars: result.chars, truncated: result.truncated } : { error: result.error }),
+    };
+  },
+
+  /**
+   * 写文件（2026-10-14）。
+   *
+   * 与「读文件」配成一套：能读不能写，agent 就只能把产出吐在对话里。
+   * 所有"写不写得进去"的判断都在 `writeTool.ts`（纯函数、有单测）：
+   * 目录白名单、默认拒绝覆盖、二进制扩展名、正文上限 —— 一条都不在这里现写。
+   */
+  [WRITE_FILE_TOOL]: async (input) => {
+    const { path, content, overwrite } = input as { path: string; content: string; overwrite?: boolean };
+    const result = await writeFileForModel(path, content, ownedDirs(), overwrite === true);
+    return {
+      ok: result.ok,
+      line: describeWriteResult(result, path),
+      ...(result.ok
+        ? { path: result.path, chars: result.chars, bytes: result.bytes, created: result.created }
+        : { error: result.error }),
     };
   },
 
@@ -352,6 +375,16 @@ export function agentTools(env: ToolEnv): ToolSet {
       inputSchema: READ_FILE_INPUT,
       execute: gated<{ path: string }>(READ_FILE_TOOL, mode, (input) => EXECUTORS[READ_FILE_TOOL](input, env), env),
     }),
+    [WRITE_FILE_TOOL]: tool({
+      description: WRITE_FILE_DESC,
+      inputSchema: WRITE_FILE_INPUT,
+      execute: gated<{ path: string; content: string; overwrite?: boolean }>(
+        WRITE_FILE_TOOL,
+        mode,
+        (input) => EXECUTORS[WRITE_FILE_TOOL](input, env),
+        env,
+      ),
+    }),
     [SPAWN_AGENT_TOOL]: tool({
       description: SPAWN_AGENT_DESC,
       inputSchema: SPAWN_AGENT_INPUT,
@@ -393,4 +426,5 @@ export const TOOL_NAMES = [
   SPAWN_AGENT_TOOL,
   READ_FILE_TOOL,
   LIST_FILES_TOOL,
+  WRITE_FILE_TOOL,
 ] as const;

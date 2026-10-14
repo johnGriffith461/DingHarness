@@ -35,6 +35,16 @@ describe("策略表", () => {
     // 定时任务是"会反复自己跑"的东西，必须算写类（按需确认档要拦它）
     expect(policyOf("schedule_create").kind).toBe("write");
     expect(policyOf("schedule_list").kind).toBe("read");
+    /*
+     * ⭐ 写文件必须是**写**类（2026-10-14 补）。
+     *
+     * 这是这张表里最"硬"的一条：`memory_save` 写的是本产品自己的记忆库、
+     * `canvas_add_node` 改的是画布，而 `write_file` **在用户的文件目录里建/覆盖真文件** ——
+     * 覆盖不可逆。写成 read 就等于"按需确认档下不问"，那正是这道闸存在的意义。
+     * 上面那圈通用检查只能保证"声明过"，保证不了"声明的对不对"，所以单列一条。
+     */
+    expect(policyOf("write_file").kind).toBe("write");
+    expect(decide("按需确认", "write_file")).toBe("ask");
   });
 });
 

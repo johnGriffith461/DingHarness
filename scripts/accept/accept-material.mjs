@@ -157,7 +157,13 @@ try {
   if (!Array.isArray(report.toolsOffered)) {
     bad.push("会话日志里没记这一轮下发了哪些工具（tools 字段缺失）");
   } else {
-    for (const need of ["read_file", "list_files", "memory_save", "canvas_add_node"]) {
+    /*
+     * `write_file` 也在里面（2026-10-14，§224）：它与 read_file / list_files 是一套 ——
+     * 能读不能写的 agent 只能把产出吐在对话里。这里只断言"**这一轮真的下发给模型了**"
+     * （不需要模型真去调用）；"写不写得进去"由 `writeTool.test.ts` 与
+     * `shared/permissions.ts` 的 write 声明管。
+     */
+    for (const need of ["read_file", "list_files", "write_file", "memory_save", "canvas_add_node"]) {
       if (!report.toolsOffered.includes(need)) {
         bad.push(`这一轮没给模型「${need}」（实际：${JSON.stringify(report.toolsOffered)}）`);
       }

@@ -30,6 +30,14 @@ export type AgentToolSpec = {
  * 给太少模型看不到关键段，给太多会把上下文顶爆。
  */
 export const READ_FILE_MODEL_CHARS = 8000;
+/**
+ * 「写文件」的正文上限（与 `writeTool.WRITE_MAX_CHARS` 同一个数）。
+ *
+ * 为什么放在 shared 里：这个数要**同时**出现在工具说明（给模型看）与执行体（真拦）里。
+ * 两处各写一份的话，"说明里 200000、执行体 20000"这种错没人会立刻发现 ——
+ * 模型照着说明写、被拒绝，然后开始瞎猜。
+ */
+export const WRITE_FILE_MODEL_CHARS = 200_000;
 
 export const MEMORY_SAVE_TOOL = "memory_save";
 export const MEMORY_LIST_TOOL = "memory_list";
@@ -176,6 +184,42 @@ export const READ_FILE_DESC = [
 
 export const READ_FILE_INPUT = z.object({
   path: z.string().trim().min(1).describe("要读的文件的绝对路径"),
+});
+
+export const WRITE_FILE_TOOL = "write_file";
+
+/**
+ * 「写文件」的说明（2026-10-14）。
+ *
+ * ## 为什么要有这个工具
+ * `read_file` / `list_files` 之后，agent 能**看**用户的文件了，但仍然**写不了** ——
+ * 于是"把云盘里的调研内容整理成一份纪要""把这几个要点存成 markdown"这类任务
+ * 只能把内容吐在对话里，让用户自己复制粘贴。
+ * 界面上早就有对它的期待：「从对话创建文档」、AI 文档、画布产物 ——
+ * 都是"产出要落到用户能再打开的地方"，而不是留在聊天记录里。
+ *
+ * ## 边界（在 description 里对模型说清楚，它会因此少撞墙）
+ * 只能写到用户的**云盘 / 产物 / 导出目录**（与 `read_file` 同一道墙）；
+ * **默认不覆盖** —— 同名文件存在就报错，要覆盖必须显式 `overwrite: true`；
+ * 只写 UTF-8 文本（图片/压缩包/音视频这类二进制格式明确拒绝）。
+ *
+ * ⚠️ 与 `read_file` 同一个口径：名字与参数是本机版自己定的（本体那侧没有可引用的工具名）。
+ * 这条工具在**审批闸门**里声明为 **write**（`shared/permissions.ts`）——
+ * 「按需确认」档下会先问一次，因为新建/覆盖是用户目录里**不可逆**的改动。
+ */
+export const WRITE_FILE_DESC = [
+  "在用户的**云盘 / 产物 / 导出目录**里写一个文本文件（UTF-8），返回落点。",
+  "适合：把整理好的内容落成一份文件（纪要 / 清单 / 报告 / 代码片段）留给他以后打开。",
+  "**默认不覆盖**：已经存在同名文件时会返回失败；确实要覆盖就再调一次并把 overwrite 设成 true。",
+  "只写文本：图片、压缩包、音视频这类二进制格式会被拒绝（那些要用生成或上传）。",
+  `单次正文上限 ${WRITE_FILE_MODEL_CHARS} 字，超了先拆成几个文件。`,
+  "目录之外的路径写不了；写不进去会把原因说清楚，别换个相近的路径反复试。",
+].join("");
+
+export const WRITE_FILE_INPUT = z.object({
+  path: z.string().trim().min(1).describe("目标文件的绝对路径（或只给文件名，会写到云盘根目录）"),
+  content: z.string().describe("要写入的正文（UTF-8 文本）"),
+  overwrite: z.boolean().optional().describe("允许覆盖同名文件；不传即不允许（默认拒绝覆盖）"),
 });
 
 export const SPAWN_AGENT_TOOL = "spawn_agent";
@@ -370,6 +414,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: SPAWN_AGENT_TOOL, description: SPAWN_AGENT_DESC, schema: SPAWN_AGENT_INPUT },
   { name: READ_FILE_TOOL, description: READ_FILE_DESC, schema: READ_FILE_INPUT },
   { name: LIST_FILES_TOOL, description: LIST_FILES_DESC, schema: LIST_FILES_INPUT },
+  { name: WRITE_FILE_TOOL, description: WRITE_FILE_DESC, schema: WRITE_FILE_INPUT },
 ];
 
 /** 按名字取声明；没有就是 `undefined`（→ 走"未知工具"那条路）。 */
@@ -403,6 +448,7 @@ export function toolLabel(name: string): string {
   if (name === SPAWN_AGENT_TOOL) return "子智能体";
   if (name === READ_FILE_TOOL) return "读文件";
   if (name === LIST_FILES_TOOL) return "列文件";
+  if (name === WRITE_FILE_TOOL) return "写文件";
   return name;
 }
 
@@ -477,6 +523,20 @@ export function toolArgsSummary(name: string, input: unknown): string {
   if (name === SPAWN_AGENT_TOOL) {
     const task = cut(obj.task, 40);
     return task ? `任务：${task}` : "";
+  }
+  if (name === WRITE_FILE_TOOL) {
+    /*
+     * 写文件的留痕要说清**写哪儿**：光写"写文件"等于什么都没说 ——
+     * 用户最关心的正是"它要动我哪个文件"，而这在**批准之前**就得看得见。
+     *
+     * ⚠️ 自己切最后一段，不用 `node:path`：这个模块**也打进渲染层**，
+     * 在那边 `node:path` 是拿不到的（`shared/` 不许依赖 node 内建）。
+     */
+    const raw = cut(obj.path, 80);
+    const file = raw ? (raw.split(/[\\/]/).pop() ?? "") : "";
+    const n = typeof obj.content === "string" ? obj.content.length : 0;
+    if (!file) return "";
+    return obj.overwrite === true ? `覆盖「${file}」（${n} 字）` : `「${file}」（${n} 字）`;
   }
   // 其余工具没有值得说的参数（`memory_list` / `schedule_list` 之类）
   return "";

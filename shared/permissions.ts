@@ -73,6 +73,13 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   read_file: { kind: "read" },
   /* 列文件同样是只读（只读文件名与大小，不读正文）。 */
   list_files: { kind: "read" },
+  /*
+   * 写文件是**写**，而且是这里最"硬"的一个写：
+   * `memory_save` 写的是本产品自己的记忆库、`canvas_add_node` 改的是画布，
+   * 而这一条**在用户的文件目录里建/覆盖真文件** —— 覆盖是不可逆的。
+   * 所以「按需确认」档下必须问一次，而且**不能**像 `read_file` 那样走"默认只读放行"。
+   */
+  write_file: { kind: "write" },
 };
 
 /** 取一个工具的策略；没声明就当只读。 */
