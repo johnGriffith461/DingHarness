@@ -108,5 +108,3 @@ pnpm test        # vitest
 ## 许可
 
 [MIT](./LICENSE)
-
-## 说明
