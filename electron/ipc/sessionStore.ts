@@ -1,233 +1,10 @@
-import { appendFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
 
-import {
-  conversationIdOf,
-  conversationTitle,
-  isChatSessionId,
-  logLine,
-  parseLog,
-  type LogInput,
-  type LogRecord,
-} from "../../engine/core/events";
+import { parseLog, type LogInput } from "../../engine/core/events";
+import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import type { SessionStore } from "../../engine/ports/store";
-import { retryAsync } from "../../shared/persist";
-
-/**
- * 会话事件日志的落盘（C2）。
- *
- * ## 为什么要有它（而不是只靠 `tasks.json`）
- *
- * 现在落盘的只有渲染层那份"任务/消息数组"（`electron/ipc/taskStore.ts`），
- * 它是**渲染后的样子**：工具输出被折成一行小字、`pending` 只剩一个标记、
- * usage 直接丢了。于是"**模型这一轮到底看见了什么**"在事后**重建不出来** ——
- * 而上下文压缩（C3）、真实用量（C5）、"谁批的"审计（INV-3）全都要靠这件事。
- *
- * 这个文件记的是**事件本身**（一行一条），不加工、不折行。
- *
- * ## 两条与 C1 一致、但形态不同的要求
- *
- * - **追加写**：不是"整文件覆盖 + 信封"（那是 `jsonStore` 的形态）。
- *   一次会话的事件是连续增长的，每次重写整个文件既慢又危险。一行一条时
- *   **坏掉的只是那一行**（`parseLog` 会跳过它并在坏行数里报出来）。
- * - **写失败要重试**：与 C1 同一条理由（Windows 上"文件被占用"大多是一次性冲突）。
- *   所以这里也走 `retryAsync`。
- *
- * ## ⚠️ 安全：会话 id 是**渲染进程给的**
- *
- * 它要当文件名用，所以必须收窄成 `[A-Za-z0-9._-]`（并拒掉以 `.` 开头的）
- * —— 否则 `../../` 这种 id 能把日志写到 userData 之外（`safeSessionId`）。
- * 收不窄就直接**不记日志**，不报错、不影响对话本身。
- */
-
-/** 日志目录（在最外层 `sessions/` 下，便于整目录清理）。 */
-function sessionsDir(): string {
-  return path.join(app.getPath("userData"), "sessions");
-}
-
-/**
- * 会话 id 收窄。
- *
- * @param raw 渲染进程给的 id（不可信）
- * @returns 可安全当文件名的 id；不合法返回 null
- */
-export function safeSessionId(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const id = raw.trim();
-  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/.test(id)) return null;
-  // `..` 由上面的正则已经排掉（不含连续点也不以点开头），这里只是把意图写明白
-  if (id.includes("..")) return null;
-  return id;
-}
-
-/**
- * 某个会话的日志文件路径。
- *
- * @param sessionId 会话 id（会被收窄）
- * @returns 绝对路径；id 不合法返回 null
- */
-export function sessionLogPath(sessionId: unknown): string | null {
-  const id = safeSessionId(sessionId);
-  return id ? path.join(sessionsDir(), `${id}.jsonl`) : null;
-}
-
-/** IPC 通道名（preload 与主进程共用）。 */
-export const SESSION_CHANNEL = {
-  /** 列聊天会话（F3：重启后把对话列表恢复出来）。 */
-  list: "session:list",
-  /** 读回一整段会话的记录（渲染层自己投影成消息）。 */
-  load: "session:load",
-} as const;
-
-/** 一个会话的写入器。 */
-export type SessionLogger = {
-  /**
-   * 追加一批记录，返回**落盘形态**（带 `seq`/`at`）。
-   *
-   * ⚠️ 编号在**队列内部**分配（不是调用时就分配）：同一个会话会被多处写入
-   * （`ai:chat` 写事件、用户点「允许」之后 `ai:runTool` 写决策记录），
-   * 谁先入队谁拿小号 —— 这是"两个写入器从 1 各数一遍"那个老毛病唯一的结构性解法。
-   *
-   * @param records 还没编号的记录
-   * @returns 落盘形态（顺序与入参一致）
-   */
-  append: (records: readonly LogInput[]) => Promise<LogRecord[]>;
-  /** 记一条（同步入队，不关心编号时用）。 */
-  log: (record: LogInput) => void;
-  /** 等已入队的写入全部落盘（验收与排错用）。 */
-  flush: () => Promise<void>;
-  /** 已记了几条（验收断言"日志行数 = 事件数"时用）。 */
-  count: () => number;
-  /** 日志文件路径（给人看/给验收读）。 */
-  file: string;
-};
-
-/**
- * 建一个会话日志写入器。
- *
- * 写入**串行化**（内部一条 promise 链）：并发追加同一文件虽然多数情况没事，
- * 但顺序就成了运气 —— 而日志的价值恰恰在顺序。
- *
- * ⚠️ 写失败**不抛给调用方**：对话本身不该因为"日志写不进去"而失败（磁盘满、
- * 目录被占）。失败会打一条错误日志，并让 `flush()` 的 promise 以成功收尾
- * （否则 `void` 掉它会产生 unhandled rejection）。
- *
- * @param sessionId 会话 id（渲染进程给的，会被收窄）
- * @returns 写入器；id 不合法时返回 null（调用方据此跳过记日志）
- */
-export function createSessionLogger(
-  sessionId: unknown,
-  opts: { maxBytes?: number } = {},
-): SessionLogger | null {
-  const file = sessionLogPath(sessionId);
-  if (!file) return null;
-  const maxBytes = opts.maxBytes ?? SESSION_RETENTION.maxSessionBytes;
-
-  let seq = 0;
-  let queue: Promise<void> = Promise.resolve();
-  /** 目录建过一次就够（文本按 ~40ms 一批发，每次都 `mkdir` 是白花的系统调用）。 */
-  let dirReady = false;
-
-  /**
-   * `seq` 从**已有文件的末号**接着数（惰性、只算一次）。
-   *
-   * ## 为什么必须这样（真验收抓到的）
-   *
-   * `seq` 是"这条记录在**这个文件**里的位置"，而文件是**跨进程**的：
-   * 用户重启应用、或者在重启之后点「允许」，写入方是**新的进程**。
-   * 每个进程从 1 开始数的话，新记录会与旧记录**撞号** ——
-   * 读回来按 `seq` 排序时，"批准"会排到它对应的那一轮**前面**，
-   * 于是回溯找不到那条留痕、那条留痕永远是"等确认"
-   * （实测：`accept-chathistory` 第二次重启后按钮还在）。
-   */
-  const ready = (async () => {
-    /*
-     * 单会话过大就**轮转**（改名留档，见 `SESSION_RETENTION`）：`.old` 不以 `.jsonl` 结尾，
-     * 所以不会再被当成会话列出来；新文件从 `seq = 1` 重新数起（下面的 reduce 读到空文件）。
-     */
-    const info = await stat(file).catch(() => null);
-    if (info && info.size > maxBytes) {
-      await rename(file, `${file}.${Date.now()}.old`).catch(() => undefined);
-      console.error(`[session] 日志超过 ${Math.round(maxBytes / 1024 / 1024)}MB，已轮转留档：${path.basename(file)}.old`);
-    }
-    const { records } = await readRecords(file);
-    seq = records.reduce((max, r) => Math.max(max, r.seq), 0);
-  })();
-
-  const append = async (line: string): Promise<void> => {
-    try {
-      if (!dirReady) {
-        await mkdir(path.dirname(file), { recursive: true });
-        dirReady = true;
-      }
-      await retryAsync(async () => appendFile(file, line, "utf8"));
-    } catch (error) {
-      console.error("[session] 日志写入失败（不影响对话）：", error instanceof Error ? error.message : error);
-    }
-  };
-
-  /**
-   * 追加一批：编号与写入都在**同一条队列**里，所以编号顺序 = 落盘顺序。
-   *
-   * 编号**必须**在队列内部做：`seq` 的起点要等 `ready`（读旧文件的末号）才知道，
-   * 在调用侧分配就只能先摸一次文件，那等于绕开这条队列。
-   */
-  const appendBatch = async (records: readonly LogInput[]): Promise<LogRecord[]> => {
-    const stored: LogRecord[] = [];
-    queue = queue
-      .then(() => ready)
-      .then(async () => {
-        for (const record of records) {
-          seq += 1;
-          const at = Date.now();
-          stored.push({ seq, at, ...record } as LogRecord);
-          await append(logLine(record, seq, at));
-        }
-      });
-    await queue;
-    return stored;
-  };
-
-  return {
-    file,
-    flush: () => queue,
-    count: () => seq,
-    append: appendBatch,
-    log: (record) => {
-      void appendBatch([record]);
-    },
-  };
-}
-
-/**
- * 取一个会话的写入器（**同一会话共用一个**）。
- *
- * ## 为什么必须有这个"共用"
- *
- * `seq` 是**每个文件**的位置编号，不是每个写入器的。而同一个会话会被**多处**写入：
- * 一轮对话由 `ai:chat` 写（request/事件），用户点「允许」之后由 `ai:runTool` 写决策记录 ——
- * 那是**另一个**调用点。如果各自 `createSessionLogger`（各自从 1 开始数），
- * 后写的记录会带着**已经用过的 seq** 落进同一个文件：读回来按 seq 排序时，
- * "批准"就会排到它对应的那一轮**前面去**（表现是重启后那条留痕又变成"等确认"）。
- *
- * ⚠️ 进程内缓存，不淘汰：本机版同时开着的会话是**个位数**，而淘汰带来的
- * "同一个文件两个计数器"正是这里要避免的事。
- *
- * @param sessionId 会话 id（渲染进程给的，会被收窄）
- * @returns 该会话的写入器；id 不合法时 null（调用方据此跳过记日志）
- */
-const loggers = new Map<string, SessionLogger>();
-
-export function getSessionLogger(sessionId: unknown): SessionLogger | null {
-  const id = safeSessionId(sessionId);
-  if (!id) return null;
-  const existing = loggers.get(id);
-  if (existing) return existing;
-  const created = createSessionLogger(id);
-  if (created) loggers.set(id, created);
-  return created;
-}
 
 /*
  * ⚠️ `SessionSummary` **定义在契约里**（`shared/ipc.ts`）—— 这里只转发。
@@ -238,209 +15,173 @@ export function getSessionLogger(sessionId: unknown): SessionLogger | null {
 import type { SessionSummary } from "../../shared/ipc";
 export type { SessionSummary };
 
-/** 读一个文件并解析（内部共用；坏行只跳过它自己）。 */
-async function readRecords(file: string): Promise<{ records: LogRecord[]; skipped: number }> {
-  try {
-    return parseLog(await readFile(file, "utf8"));
-  } catch {
-    /* 文件不存在 / 读不了：都当"还没有日志"，不算错误 */
-    return { records: [], skipped: 0 };
-  }
+/**
+ * 桌面的会话存储与它的读接口（Phase 4.3：**换成了 SQLite**）。
+ *
+ * ## 换代前后变了什么（这一段是这次改动的核心，别跳过）
+ *
+ * | | 换代前 | 现在 |
+ * |---|---|---|
+ * | 落盘 | 一段会话一个 `.jsonl`，主进程自己追加 | `userData/sessions.db`（`node:sqlite`），由**内核**经 store 端口写 |
+ * | 读 | 整文件读进来 + 逐行 parse | 带索引的查询（`WHERE session_id = ? ORDER BY seq`） |
+ * | 写 | 主进程两处各抓一个写入器（`ai:chat` 与 `ai:runTool`），靠"进程内共用"避免 seq 撞号 | 一个 store，编号在它内部串行分配 |
+ * | 事务 | 无（写第 2 条时崩，第 1 条已落下去） | 一次 `append` 整批一个事务 |
+ * | 保留 | 按天删文件 / 按条数删文件 / 单文件超 4MB **轮转**（会话被截成两半） | 按天、按条数、按容量，**整会话淘汰**（见 `engine/adapters/sqliteStore.ts`） |
+ * | 旧数据 | —— | 启动时**一次性搬进库**（只读旧、写新、不删旧，幂等） |
+ *
+ * ## 为什么读接口要 `await ready`
+ *
+ * 迁移与收口是"首屏之前必须完成的事"：不等的话，老用户升级上来的**第一眼是空列表**
+ * （"我的对话都没了"），几百毫秒后它又自己冒出来。那种闪一下比慢一点难解释得多。
+ *
+ * ## ⚠️ 安全：会话 id 是**渲染进程给的**
+ *
+ * 它进 SQL（参数化，不会注入）也进磁盘路径（迁移时读旧文件），所以**仍然**要收窄成
+ * `[A-Za-z0-9._-]`（并拒掉以 `.` 开头的）—— 否则 `../../` 这种 id 能让旧日志的读取
+ * 跑到 userData 之外（`safeSessionId`）。收不窄就当成"没给"，不报错、不影响对话。
+ */
+
+/** 旧的 `.jsonl` 日志目录（**只读**：迁移完留在原地，见 `migrateLegacyJsonl`）。 */
+function sessionsDir(): string {
+  return path.join(app.getPath("userData"), "sessions");
 }
 
 /**
- * 列出**聊天**会话（F3）。
+ * 会话 id 收窄。
  *
- * ⚠️ 只列聊天会话：工作台任务也往同一个目录写日志（前缀 `task-`），
- * 而任务的"恢复"走的是 `tasks.json` 那条路 —— 混进来会让聊天侧多出一堆假对话。
- *
- * @returns 会话摘要，按最后写入时间倒序（最近的在前面）
+ * @param raw 渲染进程给的 id（不可信）
+ * @returns 可安全当路径用的 id；不合法返回 null
  */
-export async function listChatSessions(): Promise<SessionSummary[]> {
-  let names: string[] = [];
-  try {
-    names = await readdir(sessionsDir());
-  } catch {
-    return []; // 目录还没建过 = 还没有任何会话
+export function safeSessionId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const id = raw.trim();
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/.test(id)) return null;
+  // `..` 由上面的正则已经排掉（不含连续点也不以点开头），这里只是把意图写明白
+  if (id.includes("..")) return null;
+  return id;
+}
+
+/** IPC 通道名（preload 与主进程共用）。 */
+export const SESSION_CHANNEL = {
+  /** 列聊天会话（F3：重启后把对话列表恢复出来）。 */
+  list: "session:list",
+  /** 读回一整段会话的记录（渲染层自己投影成消息）。 */
+  load: "session:load",
+} as const;
+
+/* ────────────────────── 桌面会话库 ────────────────────── */
+
+let desktopStore: SessionStore | null = null;
+
+/**
+ * 桌面的会话存储：**SQLite**（`userData/sessions.db`）。
+ *
+ * ⚠️ **惰性**创建，不能在模块加载时就建 —— 主进程的 `configureDataDir()` 会
+ * `app.setPath("userData", …)`（`DSH_CANVAS_DATA_DIR` 覆盖、开发态指向工程根的 `data/`），
+ * 而 ESM 的 import 全部在 `main.ts` 的顶层语句**之前**求值。
+ * 模块加载时就建库的话，库会落到**默认** userData 里 —— 而应用其余数据在新目录，
+ * 表现是"日志在另一个地方"，那种错要翻很久。
+ */
+export function desktopSessionStore(): SessionStore {
+  if (!desktopStore) {
+    desktopStore = createSqliteSessionStore(app.getPath("userData"), "sessions.db");
   }
-  const out: SessionSummary[] = [];
-  for (const name of names) {
-    if (!name.endsWith(".jsonl")) continue;
-    const sessionId = name.slice(0, -".jsonl".length);
-    if (!isChatSessionId(sessionId) || !safeSessionId(sessionId)) continue;
-    const full = path.join(sessionsDir(), name);
-    const info = await stat(full).catch(() => null);
-    if (!info?.isFile()) continue;
-    const { records } = await readRecords(full);
-    out.push({
-      sessionId,
-      conversationId: conversationIdOf(sessionId),
-      title: conversationTitle(records),
-      updatedAt: info.mtimeMs,
-      bytes: info.size,
+  return desktopStore;
+}
+
+/** 首屏之前必须完成的事（迁移 + 收口），只做一次。 */
+let readyPromise: Promise<void> | null = null;
+
+function ready(): Promise<void> {
+  if (!readyPromise) {
+    readyPromise = (async () => {
+      const store = desktopSessionStore();
+      const migrated = await migrateLegacyJsonl(store);
+      if (migrated.files) {
+        const bad = migrated.skipped ? `，跳过 ${migrated.skipped} 条坏行` : "";
+        console.log(`[session] 已从旧 jsonl 迁移 ${migrated.files} 个会话（${migrated.records} 条记录${bad}）`);
+      }
+      const { deleted } = await store.prune();
+      if (deleted.length) console.log(`[session] 收口时淘汰了 ${deleted.length} 个过期会话`);
+    })().catch((error) => {
+      // 迁移失败不该拦住应用起来；下次启动会再试（迁移是幂等的）
+      console.error("[session] 迁移/收口失败（下次启动重试）：", error instanceof Error ? error.message : error);
     });
   }
-  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  return readyPromise;
+}
+
+/**
+ * 把旧的 `.jsonl` 会话日志一次性搬进 SQLite。
+ *
+ * ## 三条边界
+ *
+ * - **只读旧、写新、不删旧**：迁到一半崩掉时，损失上限只是"重跑一次"。
+ *   旧文件留在 `userData/sessions/` 里，用户自己也翻得到（也是排查现场的原料）。
+ * - **幂等**：库里已经有那个会话就跳过 —— 所以它可以每次启动都跑，跑不坏。
+ * - **坏行只跳过它自己**（与 `parseLog` 同一个口径），并计入 `skipped` 报出来。
+ *
+ * @param store 目标库
+ * @returns 迁了几个文件、几条记录、几个坏行
+ */
+async function migrateLegacyJsonl(store: SessionStore): Promise<{ files: number; records: number; skipped: number }> {
+  let names: string[] = [];
+  try {
+    names = (await readdir(sessionsDir())).filter((n) => n.endsWith(".jsonl"));
+  } catch {
+    return { files: 0, records: 0, skipped: 0 }; // 目录还没建过 = 没有旧数据
+  }
+  if (!names.length) return { files: 0, records: 0, skipped: 0 };
+
+  // 库里已有的会话（迁移幂等的关键：重跑不会把老会话再灌一遍）
+  const existing = new Set((await store.list()).map((x) => x.sessionId));
+
+  let files = 0;
+  let records = 0;
+  let skipped = 0;
+  for (const name of names) {
+    const sessionId = name.slice(0, -".jsonl".length);
+    if (!safeSessionId(sessionId) || existing.has(sessionId)) continue;
+    let text = "";
+    try {
+      text = await readFile(path.join(sessionsDir(), name), "utf8");
+    } catch {
+      continue; // 读不了就跳过（下次启动再试）
+    }
+    const parsed = parseLog(text);
+    skipped += parsed.skipped;
+    if (!parsed.records.length) continue;
+    /*
+     * 旧编号只用来排序：新库的编号由 store 自己发 ——
+     * 让外部决定编号正是"两个写入器撞号"的来源（换代前实测过那个毛病）。
+     */
+    const ordered = [...parsed.records]
+      .sort((a, b) => a.seq - b.seq)
+      .map(({ seq: _seq, at: _at, ...rest }) => rest);
+    await store.append(sessionId, ordered as LogInput[]);
+    files += 1;
+    records += ordered.length;
+  }
+  return { files, records, skipped };
 }
 
 /**
  * 注册会话日志 IPC（F3）。
  *
- * ⚠️ 只回**记录**，不回"投影好的消息"：投影是纯函数（`shared/sessionLog.ts`），
+ * ⚠️ 只回**记录**，不回"投影好的消息"：投影是纯函数（`engine/core/events.ts`），
  * 渲染层自己调就行 —— 主进程再算一遍等于把"一份实现"变成两份。
  *
  * @param ipcMain Electron 的 ipcMain
  */
 export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
-  /*
-   * 启动时清一次（补完②）：日志只增不减，这里按天数/条数收口。
-   * 不 await、失败也不拦启动 —— 清理是"顺手做的事"，不该挡住应用起来。
-   */
-  void pruneSessions().then(({ deleted }) => {
-    if (deleted.length) console.log(`[session] 清理了 ${deleted.length} 个过期会话日志`);
+  ipcMain.handle(SESSION_CHANNEL.list, async () => {
+    await ready();
+    return desktopSessionStore().list({ kind: "chat" });
   });
-  ipcMain.handle(SESSION_CHANNEL.list, () => listChatSessions());
   ipcMain.handle(SESSION_CHANNEL.load, async (_event, sessionId: unknown) => {
-    const got = await readSessionLog(sessionId);
-    return got;
+    await ready();
+    const id = safeSessionId(sessionId);
+    if (!id) return { records: [], skipped: 0 };
+    return desktopSessionStore().load(id);
   });
-}
-
-
-/**
- * 会话日志的保留策略（补完②）。
- *
- * ## 为什么必须有
- *
- * 日志是**只增不减**的（每一轮都往里追加），而一条会话里"请求记录会重复带上历史"，
- * 所以单个会话的体积是**平方级**增长：一轮带工具约 1.5–2KB，
- * 二十来轮约 100KB，上百轮就是几 MB。放在 userData 里不清理，几年下来会很难看。
- *
- * ## 口径（都是"到点就清、清得掉就清"）
- *
- * - **按天数**：超过 `maxAgeDays` 没动过的会话，删；
- * - **按条数**：会话数超过 `maxFiles` 时，从最旧的开始删；
- * - **单个会话过大**（`maxSessionBytes`）：**轮转**（改名成 `<id>.<时间戳>.jsonl.old` 留在原地，
- *   不删 —— 那是用户自己的对话记录），新的一轮从新文件开始。
- *   ⚠️ 轮转之后，聊天恢复只能看到轮转之后的部分（`.old` 仍在磁盘上，用户自己找得到）。
- *   这是**刻意的取舍**：不轮转的话，一条马拉松对话会让每次读写都拖着几 MB 的历史。
- *
- * ⚠️ 只清 `sessions/` 里的 `.jsonl`（会话日志）。**不碰** 12 个实体文件、也不碰产物。
- */
-export const SESSION_RETENTION = {
-  maxAgeDays: 30,
-  maxFiles: 200,
-  maxSessionBytes: 4 * 1024 * 1024,
-} as const;
-
-/**
- * 清理过期/超量的会话日志。
- *
- * @param opts 覆盖保留策略（测试用）
- * @returns 删掉的文件名与剩下的条数
- */
-export async function pruneSessions(
-  opts: { maxAgeDays?: number; maxFiles?: number } = {},
-): Promise<{ deleted: string[]; kept: number }> {
-  const maxAgeDays = opts.maxAgeDays ?? SESSION_RETENTION.maxAgeDays;
-  const maxFiles = opts.maxFiles ?? SESSION_RETENTION.maxFiles;
-  let names: string[] = [];
-  try {
-    names = (await readdir(sessionsDir())).filter((n) => n.endsWith(".jsonl"));
-  } catch {
-    return { deleted: [], kept: 0 }; // 目录还没建过
-  }
-
-  const alive: { name: string; at: number }[] = [];
-  const deleted: string[] = [];
-  const cutoff = Date.now() - maxAgeDays * 86400000;
-
-  for (const name of names) {
-    const info = await stat(path.join(sessionsDir(), name)).catch(() => null);
-    if (!info?.isFile()) continue;
-    if (info.mtimeMs < cutoff) {
-      await rm(path.join(sessionsDir(), name), { force: true }).catch(() => undefined);
-      deleted.push(name);
-      continue;
-    }
-    alive.push({ name, at: info.mtimeMs });
-  }
-
-  // 还超量就从最旧的开始删
-  alive.sort((a, b) => b.at - a.at);
-  for (const item of alive.slice(maxFiles)) {
-    await rm(path.join(sessionsDir(), item.name), { force: true }).catch(() => undefined);
-    deleted.push(item.name);
-  }
-
-  return { deleted, kept: Math.min(alive.length, maxFiles) };
-}
-
-/**
- * 读回一个会话的事件日志。
- *
- * ⚠️ 坏行**只跳过它自己**（`parseLog` 负责），并把跳过数报出来 ——
- * "写入被打断"不该让整段历史消失，也不该被静默吞掉。
- *
- * @param sessionId 会话 id
- * @returns 记录（含首行 `request`）与坏行数；文件不存在时给空（第一次跑是正常的）
- */
-export async function readSessionLog(sessionId: unknown): Promise<{ records: LogRecord[]; skipped: number }> {
-  const file = sessionLogPath(sessionId);
-  if (!file) return { records: [], skipped: 0 };
-  try {
-    const text = await readFile(file, "utf8");
-    return parseLog(text);
-  } catch {
-    /* 文件不存在 / 读不了：都当"还没有日志"，不算错误 */
-    return { records: [], skipped: 0 };
-  }
-}
-
-/* ────────────────────── 会话存储端口（Phase 4.1） ────────────────────── */
-
-/**
- * `SessionStore` 端口的 **JSONL 实现**。
- *
- * ## 为什么要有它（而不是直接换 SQLite）
- *
- * `engine/ports/store.ts` 是"按意图定下来"的接口，SQLite 是它的第一个实现。
- * 但**只有一个实现**的端口没法证明"存储可换"—— 而这正是端口存在的全部理由。
- *
- * 这一份把桌面**已经在用**的那套 JSONL 落盘（上面的写入器 + 读取 + 列举 + 保留策略）
- * 接到同一个接口上。于是：
- *   · 桌面切到 `createEngine` 时**存储行为一个字没变**（零回归）；
- *   · 端口有了第二个实现，`engine` 里没有任何一行代码知道"现在存的是 JSONL 还是 SQLite"；
- *   · 换成 SQLite 变成**一次纯粹的替换**（Phase 4.3），而不是"连执行路径一起改"。
- *
- * ⚠️ 语义差异（如实记，都是 JSONL 那一套本来就有的）：
- *   · `append` 不是**事务**：写第 2 条时崩了，第 1 条已经落下去（SQLite 那份是整批一个事务）。
- *     这是既有行为，不是这次引入的；
- *   · 坏行由 `parseLog` 跳过并计数（与 SQLite 那份同一个 `parseLogLine`）。
- *
- * @returns 满足 `SessionStore` 的实现
- */
-export function createJsonlSessionStore(): SessionStore {
-  return {
-    async append(sessionId: string, records: readonly LogInput[]): Promise<LogRecord[]> {
-      if (!records.length) return [];
-      const logger = getSessionLogger(sessionId);
-      // id 不合法：**抛**（不是静默跳过）。落盘的最后一道闸，静默等于"日志悄悄没了"。
-      if (!logger) throw new Error(`会话 id 不合法，拒绝落盘：${sessionId}`);
-      return logger.append(records);
-    },
-
-    async load(sessionId: string): Promise<{ records: LogRecord[]; skipped: number }> {
-      return readSessionLog(sessionId);
-    },
-
-    async list(opts?: { kind?: "chat" | "task" | "cli" }): Promise<SessionSummary[]> {
-      const chats = await listChatSessions();
-      return opts?.kind && opts.kind !== "chat" ? [] : chats;
-    },
-
-    close(): void {
-      // JSONL 没有句柄要放；保留策略在启动时那次 `pruneSessions` 里做
-    },
-  };
 }

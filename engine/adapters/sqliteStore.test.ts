@@ -168,6 +168,59 @@ describe("SQLite 会话库", () => {
     rmSync(legacy, { recursive: true, force: true });
   });
 
+  it("⭐ 保留策略：超条数从**最旧的整会话**淘汰（不是把一个会话截成半截）", async () => {
+    /*
+     * ⚠️ 收口发生在**打开时**（与 JSONL 那版"启动时清理"同一个时机），
+     * 不在每次 append 之后 —— 所以这里显式调一次 `prune()`。
+     * 开着应用跑一整天时，库会略微超过上限，下一次启动收回来；
+     * 这与既有行为一致（JSONL 那版也不在每次写入后扫目录）。
+     */
+    const store = createSqliteSessionStore(dir, "sessions.db", { maxSessions: 2 });
+    for (const id of ["c1", "c2", "c3"]) {
+      await store.append(chatSessionId(id), [request(`对话 ${id}`)]);
+      await new Promise((r) => setTimeout(r, 3)); // 让 updated_at 拉开，好判"最旧"
+    }
+    expect((await store.list()).map((x) => x.conversationId)).toEqual(["c3", "c2", "c1"]);
+
+    const got = await store.prune();
+    expect(got.deleted, "淘汰的必须是最旧的那个（整会话）").toEqual([chatSessionId("c1")]);
+    expect(got.kept).toBe(2);
+    // 被淘汰的会话连事件一起走（不留孤儿行）
+    expect((await store.load(chatSessionId("c1"))).records).toEqual([]);
+
+    // 重开一次：打开时又收一次口，仍然只有 2 个（不会因为重开而漂移）
+    store.close();
+    const again = createSqliteSessionStore(dir, "sessions.db", { maxSessions: 2 });
+    expect((await again.list()).map((x) => x.conversationId)).toEqual(["c3", "c2"]);
+    again.close();
+  });
+
+  it("保留策略：容量超限时整会话淘汰（被淘汰的会话连事件一起走）", async () => {
+    const store = createSqliteSessionStore(dir);
+    await store.append(chatSessionId("old"), [request("老的")]);
+    await new Promise((r) => setTimeout(r, 3));
+    await store.append(chatSessionId("new"), [request("新的")]);
+    const rows = await store.list();
+    const newestBytes = rows.find((r) => r.conversationId === "new")?.bytes ?? 0;
+
+    // 只留得下"新的"那一个 → 打开时收口就会把 old 整会话淘汰
+    store.close();
+    const tight = createSqliteSessionStore(dir, "sessions.db", { maxBytes: newestBytes + 10 });
+    expect((await tight.list()).map((x) => x.conversationId)).toEqual(["new"]);
+    // 事件也一起删了（不是留下孤儿行）
+    expect((await tight.load(chatSessionId("old"))).records).toEqual([]);
+    tight.close();
+  });
+
+  it("保留策略：年龄超限删掉（maxAgeDays: 0 等价于'只留此刻之后写的'）", async () => {
+    const store = createSqliteSessionStore(dir);
+    await store.append(chatSessionId("ancient"), [request("很久以前")]);
+    store.close();
+    const aggressive = createSqliteSessionStore(dir, "sessions.db", { maxAgeDays: 0 });
+    expect(await aggressive.list()).toEqual([]);
+    aggressive.close();
+  });
+
   it("迁移一个不存在的目录：当成'没有旧数据'，不是错误", async () => {
     const store = openStore();
     mkdirSync(dir, { recursive: true });

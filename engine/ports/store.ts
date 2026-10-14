@@ -62,6 +62,20 @@ export type SessionStore = {
   list(opts?: { kind?: SessionKind }): Promise<SessionSummary[]>;
 
   /**
+   * 按保留策略收口一次（年龄 / 条数 / 容量）。
+   *
+   * ⚠️ 实现之间**语义不同**，端口只承诺"这一类的清理会发生"：
+   * SQLite 那版是**整会话淘汰**（从最旧的删），JSONL 那版是"按年龄/条数删文件 +
+   * 单文件超限轮转"。所以宿主调它时**不要**依赖"具体删了谁"。
+   *
+   * 异步是刻意的：JSONL 那版要 `stat` 每个文件，同步做会把主进程卡住；
+   * SQLite 那版内部是同步的，包一层 Promise 即可。**端口不该由实现的快慢决定形状**。
+   *
+   * @returns 删掉的会话 id 与剩下的条数
+   */
+  prune(): Promise<{ deleted: string[]; kept: number }>;
+
+  /**
    * 放开句柄。
    *
    * ⚠️ 端口里必须有它，不是"实现细节"：SQLite 的库文件在句柄没放之前**删不掉**

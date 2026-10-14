@@ -1,9 +1,10 @@
 import { ipcMain, type WebContents } from "electron";
 import { healthStore, listProvidersWithProbe, probeProviders } from "./aiProbe";
-import { createJsonlSessionStore } from "./sessionStore";
+import { desktopSessionStore } from "./sessionStore";
 import { hostExecutor, mcpToolEntries, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
 import { createEngine } from "../../engine/index";
+import type { LogInput } from "../../engine/core/events";
 import { humanError, resolveTurnTarget, type TurnEvent } from "../../engine/runtime/loop";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 
@@ -51,14 +52,14 @@ type LiveStream = { controller: AbortController };
 
 const liveStreams = new Map<string, LiveStream>();
 
-/**
- * 桌面的会话存储（Phase 4.1：经端口）。
+/*
+ * 会话存储从**端口**拿（`electron/ipc/sessionStore.ts`）。Phase 4.3 起它是 SQLite；
+ * 换实现时这里一行都不用改 —— 这正是端口存在的理由。
  *
- * ⚠️ 这里拿到的是 **JSONL 实现**（`createJsonlSessionStore`）—— 桌面的落盘行为
- * 一个字没变，换的只是"谁在写它"：从主进程手写变成内核统一写。
- * 换成 SQLite 是**一次替换**（`createSqliteSessionStore`），执行路径不用动。
+ * ⚠️ 用**函数**而不是模块级常量：库的路径取决于 `app.getPath("userData")`，
+ * 而主进程要先 `app.setPath`（数据目录覆盖 / 开发态）才定下来，
+ * 那一步发生在模块求值**之后**。模块加载时就建库 = 库落到默认目录里。
  */
-const sessionStore = createJsonlSessionStore();
 
 /**
  * 往会话日志补一条记录（宿主侧的唯一补记入口：闸门决策）。
@@ -69,10 +70,10 @@ const sessionStore = createJsonlSessionStore();
  * @param sessionId 会话 id（可能没给）
  * @param record 要补记的记录
  */
-async function storeAppend(sessionId: string | undefined, record: Parameters<typeof sessionStore.append>[1][number]): Promise<void> {
+async function storeAppend(sessionId: string | undefined, record: LogInput): Promise<void> {
   if (!sessionId) return;
   try {
-    await sessionStore.append(sessionId, [record]);
+    await desktopSessionStore().append(sessionId, [record]);
   } catch (error) {
     console.error("[session] 补记失败（不影响这次操作）：", error instanceof Error ? error.message : error);
   }
@@ -193,7 +194,9 @@ export function registerAiIpc(): void {
        * 连 provider 都没解析出来 —— 这一轮**没跑**，引擎不会介入（它连注册表都没见过）。
        * 所以这条错误由宿主自己记：不记的话，日志里会缺一次"用户发了话、什么都没发生"。
        */
-      await sessionStore.append(request.sessionId ?? "", [{ requestId, type: "error", message: target.error }]).catch(() => undefined);
+      await desktopSessionStore()
+        .append(request.sessionId ?? "", [{ requestId, type: "error", message: target.error }])
+        .catch(() => undefined);
       safeSend(sender, { requestId, type: "error", message: target.error });
       return { requestId, ok: false, error: target.error };
     }
@@ -243,7 +246,7 @@ export function registerAiIpc(): void {
        * 而注册表在 `createEngine` 时快照一次。装配本身不碰 IO，代价可忽略。
        */
       const engine = createEngine({
-        store: sessionStore,
+        store: desktopSessionStore(),
         executor: hostExecutor,
         health: healthStore,
         tools: mcpToolEntries(),

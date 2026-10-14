@@ -72,6 +72,40 @@ const KIND_PREFIX: Record<SessionKind, string> = {
   cli: SESSION_PREFIX.cli,
 };
 
+/**
+ * 保留策略（默认值）。
+ *
+ * ## 与 JSONL 那套的**一处语义变化**（如实记）
+ *
+ * JSONL 版在"单个会话超过 4MB"时做的是**轮转**：把整个文件改名成 `<id>.ts.jsonl.old`
+ * 留在原地。后果是**那个会话被截断** —— 新文件里只剩后半段，前半段虽然还在磁盘上，
+ * 但应用读不到（`.old` 不以 `.jsonl` 结尾）。也就是说：轮转过的会话**恢复不完整**。
+ *
+ * SQLite 版不再那么做，改成**按容量淘汰整个会话**（从最旧的开始），理由两条：
+ *   ① SQLite 的读是带索引的查询（`WHERE session_id = ? ORDER BY seq`），
+ *      不像 JSONL 那样必须整文件读进来 —— 单会话大不再是"每次读写都拖几 MB"；
+ *   ② "半个会话"是**救不回来**的状态（`splitTurns` 拿不到首轮的 `request`，
+ *      于是恢复出来的第一截没有输入记录）。整会话淘汰至少是干净的。
+ *
+ * ⚠️ 代价要说清：**被淘汰的是整个会话**（用户看不到那段历史了），而不是"看得到一部分"。
+ * 容量上限因此给得比 4MB 宽得多（默认 64MB），它防的是"几年不清理"，不是日常回收。
+ */
+export const SQLITE_RETENTION = {
+  /** 多久没动过就删。 */
+  maxAgeDays: 30,
+  /** 最多留几个会话（超了从最旧的删）。 */
+  maxSessions: 400,
+  /** 会话正文总字节上限（超了从最旧的整会话淘汰）。 */
+  maxBytes: 64 * 1024 * 1024,
+} as const;
+
+/** 保留策略（可覆盖）。 */
+export type RetentionPolicy = {
+  maxAgeDays?: number;
+  maxSessions?: number;
+  maxBytes?: number;
+};
+
 /** 一次写入里 `sessions.bytes` 的增量口径（与 .jsonl 的行字节数同义）。 */
 function lineBytes(payload: string): number {
   return Buffer.byteLength(payload, "utf8") + 1;
@@ -82,9 +116,14 @@ function lineBytes(payload: string): number {
  *
  * @param dir 数据目录（不存在就建）
  * @param file 库文件名（默认 `sessions.db`；测试要并行时各给各的）
+ * @param retention 保留策略（默认 `SQLITE_RETENTION`）；打开时就收口一次
  * @returns 满足 `SessionStore` 的实现
  */
-export function createSqliteSessionStore(dir: string, file = "sessions.db"): SessionStore {
+export function createSqliteSessionStore(
+  dir: string,
+  file = "sessions.db",
+  retention: RetentionPolicy = {},
+): SessionStore {
   mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(path.join(dir, file));
   db.exec(SCHEMA);
@@ -104,6 +143,64 @@ export function createSqliteSessionStore(dir: string, file = "sessions.db"): Ses
   const selectSessions = db.prepare(
     "SELECT id, title, updated_at, bytes FROM sessions ORDER BY updated_at DESC",
   );
+  const countSessions = db.prepare("SELECT COUNT(*) AS n FROM sessions");
+  const totalBytes = db.prepare("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions");
+  const oldestSessions = db.prepare("SELECT id FROM sessions ORDER BY updated_at ASC LIMIT ?");
+  const deleteSessionRow = db.prepare("DELETE FROM sessions WHERE id = ?");
+  const deleteSessionEvents = db.prepare("DELETE FROM events WHERE session_id = ?");
+  const staleSessions = db.prepare("SELECT id FROM sessions WHERE updated_at < ? ORDER BY updated_at ASC");
+
+  /** 删掉一个会话（它的会话行与全部事件）。**整会话**，不截断。 */
+  const dropSession = (id: string): void => {
+    deleteSessionEvents.run(id);
+    deleteSessionRow.run(id);
+  };
+
+  /**
+   * 收口一次（年龄 → 条数 → 容量，三道都在这里）。
+   *
+   * ⚠️ 顺序有意义：先按年龄删（那是真的没人看了），再按条数，最后按容量 ——
+   * 反过来的话，容量那道会把"很老但条数不多"的会话先淘汰掉，
+   * 而它本来该由年龄那道更早、更便宜地处理掉。
+   *
+   * @returns 删掉的会话 id 与剩下的条数
+   */
+  const pruneStore = (): { deleted: string[]; kept: number } => {
+    const policy = { ...SQLITE_RETENTION, ...retention };
+    const deleted: string[] = [];
+
+    const cutoff = Date.now() - policy.maxAgeDays * 86_400_000;
+    for (const row of staleSessions.all(cutoff) as { id: string }[]) {
+      dropSession(row.id);
+      deleted.push(row.id);
+    }
+
+    const count = Number((countSessions.get() as { n: number }).n);
+    if (count > policy.maxSessions) {
+      for (const row of oldestSessions.all(count - policy.maxSessions) as { id: string }[]) {
+        dropSession(row.id);
+        deleted.push(row.id);
+      }
+    }
+
+    let bytes = Number((totalBytes.get() as { n: number }).n);
+    while (bytes > policy.maxBytes) {
+      const row = (oldestSessions.all(1) as { id: string }[])[0];
+      if (!row) break;
+      const rowBytes = Number(
+        (db.prepare("SELECT bytes FROM sessions WHERE id = ?").get(row.id) as { bytes: number } | undefined)?.bytes ?? 0,
+      );
+      dropSession(row.id);
+      deleted.push(row.id);
+      bytes -= rowBytes;
+    }
+
+    const kept = Number((countSessions.get() as { n: number }).n);
+    return { deleted, kept };
+  };
+
+  // 打开时收口一次（与 JSONL 那版"启动时清理"同一个时机）
+  pruneStore();
 
   /** 会话种类（按前缀判；`SESSION_PREFIX` 是唯一那份口径）。 */
   function kindOf(sessionId: string): SessionKind {
@@ -162,6 +259,8 @@ export function createSqliteSessionStore(dir: string, file = "sessions.db"): Ses
       records.sort((a, b) => a.seq - b.seq);
       return { records, skipped };
     },
+
+    prune: async () => pruneStore(),
 
     close(): void {
       db.close();
