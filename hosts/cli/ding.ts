@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { createEngine, type Engine, type EngineRunRequest } from "../../engine/index";
-import { cliSessionId, splitTurns, type LogRecord } from "../../engine/core/events";
+import { cliSessionId, logLine, splitTurns, type LogRecord } from "../../engine/core/events";
 import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
@@ -281,7 +281,12 @@ async function cmdSessions(p: Parsed): Promise<number> {
     const exportId = flag(p, "export");
     if (exportId) {
       const { records, skipped } = await store.load(exportId);
-      for (const record of records) process.stdout.write(`${JSON.stringify(record)}\n`);
+      /*
+       * 用 `logLine` 而不是自己 `JSON.stringify(record)`：那一行是 `.jsonl` 的**格式定义**
+       * （`parseLog` 是它的读侧），自己拼一遍就等于把这个格式写了两份 ——
+       * 而迁移路径吃的正是这个格式，两份一旦不一致，"导出的文件导不回去"。
+       */
+      for (const record of records) process.stdout.write(logLine(record, record.seq, record.at));
       process.stderr.write(`\x1b[2m导出了 ${records.length} 条${skipped ? `（跳过 ${skipped} 条坏行）` : ""}\x1b[0m\n`);
       return 0;
     }
