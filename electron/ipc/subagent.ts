@@ -1,6 +1,6 @@
 import type { ToolSet } from "ai";
 
-import { applyEvent, emptyTurn, finishTurn } from "../../shared/sessionLog";
+import { applyEvent, emptyTurn, finishTurn } from "../../engine/core/events";
 import type { SubagentBlocked, SubagentReport } from "../../shared/agentTools";
 import { runTurn } from "./runTurn";
 

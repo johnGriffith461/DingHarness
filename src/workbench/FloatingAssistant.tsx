@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Minus, MoreHorizontal, Phone, Plus, Sparkles, Volume2 } from "lucide-react";
 import { abortStream, streamChat } from "@/ai/aiClient";
-import { applyEvent, emptyTurn, finishTurn } from "@shared/sessionLog";
+import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import type { ShellBridge } from "@shared/ipc";
 import { extractFilePaths, fileContextBlock } from "./fileContext";
 import type { PathRead } from "./fileContextTypes";

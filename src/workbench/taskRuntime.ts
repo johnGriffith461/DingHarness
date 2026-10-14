@@ -29,7 +29,7 @@ import { artifactFileName, extractArtifacts, type Artifact } from "./artifact";
 import { enabledPromptBlock } from "@shared/library";
 import { fallbackNote } from "@shared/settings";
 import { toolLabel, type ToolTrace } from "@shared/agentTools";
-import { applyEvent, emptyTurn, finishTurn } from "@shared/sessionLog";
+import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import { assembleSystem } from "@engine/core/assembly";
 import { fabricatedCost, type StepUsage } from "@shared/cost";
 import { calibrationOf, estimateTokens, totalTokens } from "@engine/core/context";

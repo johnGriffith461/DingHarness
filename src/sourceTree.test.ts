@@ -23,11 +23,18 @@ import { describe, expect, it } from "vitest";
  * 所以这里把它钉死：同名 `.js` 与 `.ts` 不许共存。
  */
 const ROOT = path.resolve(__dirname, "..");
-const DIRS = ["src", "shared", "electron"];
+const DIRS = ["src", "shared", "electron", "engine", "hosts"];
 const SKIP_DIRS = new Set(["node_modules", "dist", "dist-electron", "release", "data", ".verify", ".git"]);
 
 function collect(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    // 目录还不存在（例如 `hosts/` 在 CLI 宿主落地之前）—— 跳过，不当成失败
+    return out;
+  }
+  for (const entry of entries) {
     if (SKIP_DIRS.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) collect(full, out);

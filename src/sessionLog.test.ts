@@ -15,7 +15,7 @@ import {
   conversationIdOf,
   type LogRecord,
   type ApprovalRecord,
-} from "@shared/sessionLog";
+} from "@engine/core/events";
 
 /**
  * C2：会话事件的投影（**一份实现，两条路径共用**）。

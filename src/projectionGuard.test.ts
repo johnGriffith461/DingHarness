@@ -12,16 +12,20 @@ import { describe, expect, it } from "vitest";
  * 主进程构造事件那一处），而且**已经漂移过**：工作台漏接 `usage`（`done` 分支都没有）、
  * 聊天不展开子智能体上交的调用、两处各有一个 `Map` 自己配对工具参数。
  *
- * C2 把答案收成一份（`shared/sessionLog.ts` 的 `applyEvent`）。收完了**得有人看着** ——
+ * C2 把答案收成一份（`engine/core/events.ts` 的 `applyEvent`）。收完了**得有人看着** ——
  * 否则下一个人想加个"顺便显示一下工具参数"，最自然的做法就是在回调里再写一遍
  * `toolCallId: event.toolCallId`。那一步不会报错，只会让两个答案重新出现。
  *
- * ## 判据（三条，都在 `src/` 里查）
+ * ⚠️ Phase 1 内迁之后，投影住在 `engine/core/events.ts`（内核），所以这份守卫的扫描范围
+ * 也扩到 `engine/` —— 守卫**只扫 src/ 与 shared/** 的话，迁完之后它就在空转了
+ * （这正是 C6-3 拆样式文件时踩过的那个形状：检查还在跑，只是什么都查不到）。
+ *
+ * ## 判据（三条）
  *
  * 1. **不许手搓留痕**：`toolCallId: <什么>.toolCallId` —— 留痕只能来自投影。
  * 2. **不许自己判"待确认"**：`output as { pending` / `pending === true` ——
- *    判据只有 `shared/sessionLog.ts` 的 `isPendingOutput`（判错会让用户以为事做完了）。
- * 3. **折叠入口白名单**：`applyEvent(` 只许出现在这三个界面路径 + 投影自己那里。
+ *    判据只有 `engine/core/events.ts` 的 `isPendingOutput`（判错会让用户以为事做完了）。
+ * 3. **折叠入口白名单**：`applyEvent(` 只许出现在这几个界面路径 + 投影自己那里。
  *
  * ⚠️ 与 C1 的 JSON 落盘守卫同一套写法：**先去掉注释再判**（说明文字里会提到这些词），
  * 并且守卫自己带自测 —— 判定抓不到样例、或守着一堆不存在的文件，它就已经在空转了。
@@ -31,7 +35,7 @@ const ROOT = path.resolve(__dirname, "..");
 
 /** 允许调用 `applyEvent` 的文件（相对仓库根，正斜杠）。 */
 const FOLD_CALL_SITES = new Set([
-  "shared/sessionLog.ts", // 定义 + projectTurn 内部折叠
+  "engine/core/events.ts", // 定义 + fold/projectTurn 内部折叠
   "src/ai/chatStore.ts",
   "src/workbench/taskRuntime.ts", // C6-4：工作台那处折叠随运行时搬去了 taskRuntime.ts
   "src/workbench/FloatingAssistant.tsx",
@@ -40,14 +44,14 @@ const FOLD_CALL_SITES = new Set([
 /**
  * 允许出现这些痕迹的地方，以及**为什么它们不是"第二份解析"**。
  *
- * - `shared/sessionLog.ts`：这就是那一份投影。
+ * - `engine/core/events.ts`：这就是那一份投影。
  * - `shared/agentTools.ts`：它定义**留痕的形状与文案**（`ToolTrace` 类型、
  *   `describeToolResult` 生成那一行、`blockedToTraces` 造待批准项、
  *   `normalizeToolTraces` 恢复落盘数据）。投影是**调用**它们，不是与它们并列 ——
  *   它不折叠事件流，所以不属于要防的那件事。
  *   （把这里删掉会让守卫连"唯一那份实现"一起骂，那它就废了。）
  */
-const SHAPE_OWNERS = new Set(["shared/sessionLog.ts", "shared/agentTools.ts"]);
+const SHAPE_OWNERS = new Set(["engine/core/events.ts", "shared/agentTools.ts"]);
 
 /** 去掉块注释与整行注释（判定前必须先做：说明文字里就会提到这些词）。 */
 function stripComments(src: string): string {
@@ -76,7 +80,9 @@ function secondParserMarks(src: string): string[] {
 }
 
 describe("C2 结构守卫：事件流只有一份解析", () => {
-  const files = sources(path.join(ROOT, "src")).concat(sources(path.join(ROOT, "shared")));
+  const files = sources(path.join(ROOT, "src"))
+    .concat(sources(path.join(ROOT, "shared")))
+    .concat(sources(path.join(ROOT, "engine")));
 
   it("判定本身有效（注释不误报、真痕迹必须抓到）", () => {
     expect(secondParserMarks("// 以前这里写 toolCallId: event.toolCallId")).toEqual([]);
@@ -96,7 +102,7 @@ describe("C2 结构守卫：事件流只有一份解析", () => {
     }
     expect(
       offenders,
-      `这些地方在自己解析事件流 —— 请改用 shared/sessionLog.ts 的投影：\n${offenders.join("\n")}`,
+      `这些地方在自己解析事件流 —— 请改用 engine/core/events.ts 的投影：\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 

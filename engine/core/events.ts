@@ -3,8 +3,8 @@ import {
   blockedToTraces,
   describeToolResult,
   type ToolTrace,
-} from "./agentTools";
-import type { AiStreamEvent } from "./ipc";
+} from "../../shared/agentTools";
+import type { AiStreamEvent } from "../../shared/ipc";
 
 /**
  * 会话事件日志 + **一轮对话的投影**（C2）。
@@ -448,16 +448,34 @@ export function conversationTitle(records: readonly LogRecord[], max = 24): stri
 }
 
 /**
- * 把一串记录投影成一轮（`applyEvent` 的折叠）。
+ * **state = fold(events)**（不变量 1）。
+ *
+ * 与 `projectTurn` 的区别只在于**收没收尾**：这里给的是**累积状态**
+ * （`TurnState`，里面还留着"只有调用、还没结果"的 `waiting`），
+ * 而 `projectTurn` 会再过一遍 `finishTurn` 把它变成可显示的成品。
+ *
+ * ⚠️ 两者必须都从这一个函数出去。原来是各写一遍 reduce —— 只要有两处，
+ * 就会有一天"fold 认某条事件、projectTurn 不认"（本项目在"同一状态两处算"上
+ * 栽过的次数已经够多了）。
+ *
+ * @param records 记录（按发生顺序；`request` 这类输入记录会被 `applyEvent` 跳过）
+ * @returns 累积状态
+ */
+export function fold(records: readonly TurnInput[]): TurnState {
+  let state = emptyTurn();
+  for (const record of records) state = applyEvent(state, record);
+  return state;
+}
+
+/**
+ * 把一串记录投影成一轮（`fold` + 收尾）。
  *
  * @param records 这一轮的记录（按发生顺序；`request` 记录会被跳过）
  * @param opts 见 `ProjectOptions`
  * @returns 投影
  */
 export function projectTurn(records: readonly TurnInput[], opts: ProjectOptions = {}): TurnView {
-  let state = emptyTurn();
-  for (const record of records) state = applyEvent(state, record);
-  return finishTurn(state, opts);
+  return finishTurn(fold(records), opts);
 }
 
 /** 一段会话里的一轮：它的**输入**（模型看见了什么）与它的**投影**。 */
@@ -545,6 +563,59 @@ export function splitTurns(records: readonly LogRecord[], opts: ProjectOptions =
     feed(current, record);
   }
   return chunks;
+}
+
+/**
+ * 一次「被拦下、还没处置」的调用（`resume` 要把它们重新摆到界面上）。
+ *
+ * ⚠️ 与 `ToolTrace.pending` 的区别：那是**留痕上的一个标记**，这是**待办本身** ——
+ * 带上 `input` 是因为放行时要**原样执行**那份参数（参数丢了就只能重问用户一次）。
+ */
+export type PendingApproval = {
+  toolCallId: string;
+  name: string;
+  input?: unknown;
+};
+
+/** 从一整段日志还原出来的会话（`resume` 的纯逻辑那一半）。 */
+export type ResumedSession = {
+  /** 按轮切的片段（顺序与日志一致）。 */
+  turns: TurnChunk[];
+  /** 还没处置的待确认调用（重启之后要重新摆到界面上，别让用户以为自己的决定丢了）。 */
+  pending: PendingApproval[];
+};
+
+/**
+ * **从日志还原会话**（`resume` 的纯逻辑那一半 —— 读盘那一半在引擎里）。
+ *
+ * ## 它替代了什么
+ *
+ * 原来是"从日志**翻译**回消息列表"：渲染层拿一堆记录自己拼，拼出来的东西与
+ * 日志里的真相可以不一致（谁也没法证明它俩相等）。
+ * 现在没有任何"翻译"：`splitTurns` 就是日志本身的形状，界面显示的就是它。
+ *
+ * ⚠️ `pending` 是从**收尾后**的留痕里挑的 —— 因为决策记录会**回溯**应用到它对应的
+ * 那一轮（用户可能在那轮结束很久之后才点允许），所以已经批过的那条**不再是 pending**。
+ * 从原始事件流里挑会挑出一堆"其实早就批过"的假待办。
+ *
+ * @param records 整段会话日志（按 `seq` 升序）
+ * @param opts 见 `ProjectOptions`
+ * @returns 按轮切片 + 待确认清单
+ */
+export function resumeSession(records: readonly LogRecord[], opts: ProjectOptions = {}): ResumedSession {
+  const turns = splitTurns(records, opts);
+  const pending: PendingApproval[] = [];
+  for (const chunk of turns) {
+    for (const trace of chunk.view.traces) {
+      if (trace.pending !== true) continue;
+      pending.push({
+        toolCallId: trace.toolCallId,
+        name: trace.name,
+        ...(trace.input === undefined ? {} : { input: trace.input }),
+      });
+    }
+  }
+  return { turns, pending };
 }
 
 /* ────────────────────── 落盘：一行一条 ────────────────────── */

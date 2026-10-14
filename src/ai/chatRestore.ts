@@ -1,7 +1,7 @@
 import { artifactFileName, extractArtifacts } from "@/workbench/artifact";
 import type { ChatMessageRecord } from "./chatStore";
 import { nextId } from "./ids";
-import { splitTurns, type LogRecord } from "@shared/sessionLog";
+import { splitTurns, type LogRecord } from "@engine/core/events";
 import type { ShellBridge } from "@shared/ipc";
 
 /** 正文与工具行之间的分隔（恢复时把两者拼回一段正文）。 */

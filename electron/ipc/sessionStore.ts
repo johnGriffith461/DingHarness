@@ -10,7 +10,7 @@ import {
   parseLog,
   type LogInput,
   type LogRecord,
-} from "../../shared/sessionLog";
+} from "../../engine/core/events";
 import { retryAsync } from "../../shared/persist";
 
 /**

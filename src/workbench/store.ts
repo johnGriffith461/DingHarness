@@ -7,7 +7,7 @@ import {
   rejectedLine,
   type ToolTrace,
 } from "@shared/agentTools";
-import { taskSessionId } from "@shared/sessionLog";
+import { taskSessionId } from "@engine/core/events";
 import { fabricatedCost } from "@shared/cost";
 import { branchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";

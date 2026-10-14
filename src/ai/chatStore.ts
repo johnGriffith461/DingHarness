@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { AiStreamEvent, ChatMessage, ProviderInfo } from "@shared/ipc";
 import { mergeToolTraces, rejectedLine, type ToolTrace } from "@shared/agentTools";
-import { applyEvent, chatSessionId, emptyTurn, finishTurn, type LogRecord } from "@shared/sessionLog";
+import { applyEvent, chatSessionId, emptyTurn, finishTurn, type LogRecord } from "@engine/core/events";
 import { artifactFileName, extractArtifacts, type Artifact } from "@/workbench/artifact";
 import { enabledPromptBlock } from "@shared/library";
 import { memoryPromptBlock } from "@shared/memory";
