@@ -242,4 +242,39 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
     walk(path.join(ROOT, "src"));
     expect(offenders, "这些图标按钮没有可访问名（补 aria-label）").toEqual([]);
   });
+
+  /*
+   * ⑨ `var(--x)` 用了就必须有人定义它（2026-10-14）。
+   *
+   * 起因是**技能面板一直透明**：它的 `background: var(--surface)` 里的 `--surface`
+   * **全仓没有定义** —— `var()` 落空 = 那条声明静默失效，面板就透过去了，
+   * 字压在下面的推荐卡上，用户根本读不了（截图对比：`c34c674` 那版就是这样）。
+   * 这类错**没有任何东西会报**：CSS 不报错、界面不崩、验收也不红
+   * （`accept-chips` 当时只量了宽高，量不出"背景是透明的"）。
+   *
+   * 扫描一次发现 5 个：`--surface` / `--surface-sunken` / `--muted` / `--text`
+   * （还有一个 `--markmap-` 是注释里的误报，判据里排掉）。
+   *
+   * ⚠️ 画布的变量由 `.wb-canvas` 自己声明（见 `canvasThemeVars`），所以**全文扫**即可；
+   * 深浅主题各一份也算"定义过"，这里只要求"至少有一处定义"。
+   */
+  it("⑨ 样式里 `var(--x)` 用的每个变量都有人定义", () => {
+    const used = new Map<string, Set<string>>();
+    const defined = new Set<string>();
+    const files = ["styles.css", ...readdirSync(STYLE_DIR).filter((f) => f.endsWith(".css")).map((f) => `styles/${f}`)];
+    for (const f of files) {
+      const text = readFileSync(path.join(ROOT, "src", f), "utf8");
+      for (const m of text.matchAll(/var\((--[a-zA-Z0-9-]+)/g)) {
+        if (!used.has(m[1])) used.set(m[1], new Set());
+        used.get(m[1])!.add(f);
+      }
+      for (const m of text.matchAll(/^\s*(--[a-zA-Z0-9-]+)\s*:/gm)) defined.add(m[1]);
+    }
+    const missing = [...used.entries()]
+      .filter(([name]) => !defined.has(name))
+      /* 注释里提到的外部变量（如 markmap 自带的 `var(--markmap-*)`）不算 */
+      .filter(([name]) => !name.startsWith("--markmap-"))
+      .map(([name, where]) => `${name}（用在 ${[...where].join(" / ")}）`);
+    expect(missing, "这些变量用了但没人定义 —— `var()` 落空会让那条声明静默失效").toEqual([]);
+  });
 });
