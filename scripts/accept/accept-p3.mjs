@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
-import { openCanvas, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
 
 const OUT = "D:/DoubaoWorkClone/.verify/shots-p3";
 mkdirSync(OUT, { recursive: true });
@@ -32,7 +32,7 @@ child.stderr.on("data", (d) => {
 
 await new Promise((r) => setTimeout(r, 6000));
 
-const browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+const browser = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
 const contexts = browser.contexts();
 // 主进程开了 devtools（detach），CDP 里会多一个 devtools:// 页面，要挑出真正的主窗口
 const pages = contexts[0].pages();

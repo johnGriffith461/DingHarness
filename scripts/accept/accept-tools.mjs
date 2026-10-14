@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 验收：**工具协议端到端**（§141）。
@@ -47,7 +47,7 @@ if (!ok) {
 
 const out = {};
 try {
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2000);

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**子智能体上交的调用能被就地批准**（§176）+ 放行真的执行（§144 那套）。
@@ -119,7 +119,7 @@ try {
     process.exit(1);
   }
 
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

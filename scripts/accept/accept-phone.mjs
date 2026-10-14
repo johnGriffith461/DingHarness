@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 11.26 验收：手机遥控电脑页的两个开关是**真状态**。
@@ -35,7 +35,7 @@ async function launch(port) {
     console.error(`✗ 应用起了但调试端口 ${port} 没开 —— 看下面这段日志：\n${getLog()}`.slice(0, 1200));
     process.exit(1);
   }
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  const browser = await connectWithRetry(chromium, `http://127.0.0.1:${port}`);
   const page = await waitForPage(browser);
   if (!page) {
     console.error("✗ " + NO_PAGE_HINT);

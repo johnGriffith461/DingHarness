@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
 
 /**
  * 验收：**AI 智能体的人设真的生效**（§156）。
@@ -38,7 +38,7 @@ if (!ok) {
 
 const out = {};
 try {
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

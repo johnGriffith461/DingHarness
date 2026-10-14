@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile, shot, verdict } from "./harness.mjs";
+import { connectWithRetry, readStoreFile, shot, verdict } from "./harness.mjs";
 
 /**
  * 11.14 验收：云盘行右键菜单 + 插件「管理」子页。
@@ -39,7 +39,7 @@ const child = spawn(
 );
 await new Promise((r) => setTimeout(r, 8000));
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9600");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:9600");
 const ctx = browser.contexts()[0];
 await ctx.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
 const pages = ctx.pages();

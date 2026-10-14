@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 验收：记忆（对应本体 `chat/memory/list|clear|delete`）。
@@ -37,7 +37,7 @@ const openSettings = async (page) => {
 await new Promise((r) => setTimeout(r, 13000));
 let browser;
 try {
-  browser = await chromium.connectOverCDP("http://127.0.0.1:9994");
+  browser = await connectWithRetry(chromium, "http://127.0.0.1:9994");
   const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2200);

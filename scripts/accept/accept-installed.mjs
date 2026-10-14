@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { verdict } from "./harness.mjs";
+import { connectWithRetry, verdict } from "./harness.mjs";
 
 /**
  * 验证**安装出来的**应用能跑（而不是只验证 unpacked 目录能跑）。
@@ -34,7 +34,7 @@ const child = spawn(EXE, ["--remote-debugging-port=9855"], {
 await new Promise((r) => setTimeout(r, 22000));
 
 try {
-  const browser = await chromium.connectOverCDP("http://127.0.0.1:9855");
+  const browser = await connectWithRetry(chromium, "http://127.0.0.1:9855");
   const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   report.connected = true;
   report.url = page.url();

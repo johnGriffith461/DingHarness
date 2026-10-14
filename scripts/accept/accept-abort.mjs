@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, freshDir, killTree, shot, verdict, waitForPage } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**工作台里能"停止"正在跑的任务**（补完⑤）。
@@ -34,7 +34,7 @@ try {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
   child = r.child;
   if (!r.ok) throw new Error(`调试端口 ${PORT} 没开：\n` + (r.getLog() || "(空)").slice(-800));
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(1200);

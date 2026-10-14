@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { openCanvas, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
 
 /**
  * 画布重渲染**测量**工具（不是验收 —— 它没有判定，只出数字）。
@@ -67,7 +67,7 @@ if (!connected) {
   process.exit(0);
 }
 
-const browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+const browser = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

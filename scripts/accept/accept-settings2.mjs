@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**设置里新增的「通用」与「关于」两页**（§182）。
@@ -53,7 +53,7 @@ try {
     process.exit(1);
   }
 
-  const b1 = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b1 = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b1);
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
@@ -102,7 +102,7 @@ try {
     await killTree(child);
     process.exit(1);
   }
-  const b2 = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b2 = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page2 = await waitForPage(b2);
   if (!page2) throw new Error(NO_PAGE_HINT);
   await page2.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

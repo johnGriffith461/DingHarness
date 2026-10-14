@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile } from "./harness.mjs";
+import { connectWithRetry, readStoreFile } from "./harness.mjs";
 
 /**
  * 11.34 验收：添加自定义能力，并确认它**真的走到任务侧**。
@@ -29,7 +29,7 @@ const child = spawn(
 );
 await new Promise((r) => setTimeout(r, 8000));
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9740");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:9740");
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
@@ -147,7 +147,7 @@ try {
     { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
   );
   await new Promise((r) => setTimeout(r, 14000));
-  const b2 = await chromium.connectOverCDP("http://127.0.0.1:9751");
+  const b2 = await connectWithRetry(chromium, "http://127.0.0.1:9751");
   const p2 = b2.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await p2.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await p2.waitForTimeout(2000);

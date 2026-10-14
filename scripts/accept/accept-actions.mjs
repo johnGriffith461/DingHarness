@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readStoreFile, shot } from "./harness.mjs";
+import { connectWithRetry, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 11.19 验收：消息操作栏的六个动作**全部真的能用**。
@@ -25,7 +25,7 @@ const child = spawn(
 );
 await new Promise((r) => setTimeout(r, 8000));
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9630");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:9630");
 const ctx = browser.contexts()[0];
 await ctx.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
 const pages = ctx.pages();

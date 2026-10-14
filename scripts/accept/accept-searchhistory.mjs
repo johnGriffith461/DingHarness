@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**搜索历史**（§162，对应 `search_history` / `清空全部搜索记录`）。
@@ -44,7 +44,7 @@ const boot = async () => {
 };
 
 const page1 = async () => {
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

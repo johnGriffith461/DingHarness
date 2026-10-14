@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
 
 /**
  * 验收：首页「为你推荐」的卡片形态（§139）。
@@ -26,7 +26,7 @@ if (!ok) {
 
 const out = {};
 try {
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2000);

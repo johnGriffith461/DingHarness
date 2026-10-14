@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { openCanvas, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
 
 /**
  * 写作助手**端到端**验收（对标原版 `canvas_writing_shortcuts_*`）。
@@ -39,7 +39,7 @@ const child = spawn(
 );
 await new Promise((r) => setTimeout(r, 8000));
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9370");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:9370");
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });

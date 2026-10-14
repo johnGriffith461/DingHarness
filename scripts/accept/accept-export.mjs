@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { openCanvas, verdict } from "./harness.mjs";
+import { connectWithRetry, openCanvas, verdict } from "./harness.mjs";
 import path from "node:path";
 
 /**
@@ -27,7 +27,7 @@ const child = spawn(
 );
 await new Promise((r) => setTimeout(r, 8000));
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9450");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:9450");
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });

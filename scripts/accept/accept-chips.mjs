@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { shot } from "./harness.mjs";
+import { connectWithRetry, shot } from "./harness.mjs";
 
 /**
  * 验收：输入区三个 chip（用户报的三个问题）。
@@ -29,7 +29,7 @@ const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe"
 const out = {};
 await new Promise((r) => setTimeout(r, 13000));
 try {
-  const b = await chromium.connectOverCDP("http://127.0.0.1:9971");
+  const b = await connectWithRetry(chromium, "http://127.0.0.1:9971");
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2200);

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, killLeftovers, killTree, openCanvas, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, killLeftovers, killTree, openCanvas, shot } from "./harness.mjs";
 
 /**
  * 持久化端到端验收（PLAN 4.2 / 4.3 / 4.5）。
@@ -52,7 +52,7 @@ async function boot(port) {
     console.error(`[诊断] ${port} 端口 30 秒内没打开。应用输出尾部：\n` + (getLog() || "(空)").slice(-1200));
     throw new Error(`实例没起来：调试端口 ${port} 30 秒内没打开`);
   }
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  const browser = await connectWithRetry(chromium, `http://127.0.0.1:${port}`);
   const pages = browser.contexts()[0].pages();
   const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
   await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });

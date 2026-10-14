@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, openCanvas, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openCanvas, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**聊天里产出的文件会变成卡片**（§186）。⚠️ **这条调模型**（1 次调用）。
@@ -36,7 +36,7 @@ try {
     process.exit(1);
   }
 
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

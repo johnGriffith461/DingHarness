@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { freshDir, killTree, shot } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
 
 /** 验：设置里「标准套餐」→ 个人资料页、「账号」→ 账号页，且能返回。 */
 const DATA = "D:/DoubaoWorkClone/.verify/setp-data";
@@ -22,7 +22,7 @@ const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe"
 const out = {};
 await new Promise((r) => setTimeout(r, 13000));
 try {
-  const b = await chromium.connectOverCDP("http://127.0.0.1:9995");
+  const b = await connectWithRetry(chromium, "http://127.0.0.1:9995");
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2200);

@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**几条「一个人都没来过」的空态**（2026-10-13 补，§208 那类"没人点过的界面"）。
@@ -36,7 +36,7 @@ if (!ok) {
 
 const out = {};
 try {
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

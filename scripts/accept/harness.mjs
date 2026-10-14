@@ -414,7 +414,13 @@ export async function pickPort(candidates) {
       srv.on("error", () => resolve(false));
       srv.listen(port, "127.0.0.1", async () => {
         try {
-          const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) });
+          /*
+           * ⚠️ 超时 400ms 而不是 2 秒（2026-10-14）：回环连接要么**瞬间**成功、
+           * 要么**永远**不通（死端口会一直等到超时）。用 2 秒的话，
+           * 一台机器上有一整段死端口时，每条验收在挑端口上就要多花 ~20 秒 ——
+           * 实测批跑因此从 ~40 秒/条 变成 ~4.5 分钟/条。
+           */
+          const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(400) });
           resolve(res.ok);
         } catch {
           resolve(false);
@@ -443,7 +449,7 @@ export async function pickPort(candidates) {
         srv.on("error", () => resolve(false));
         srv.listen(port, "127.0.0.1", async () => {
           try {
-            const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1200) });
+            const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(400) });
             resolve(res.ok);
           } catch {
             resolve(false);

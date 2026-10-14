@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { freshDir, killTree, shot } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
 
 /**
  * 验收：左栏的全局快捷键**真的能用**（§136）。
@@ -46,7 +46,7 @@ const activeNav = (page) =>
 
 try {
   await new Promise((r) => setTimeout(r, 13000));
-  const b = await chromium.connectOverCDP("http://127.0.0.1:9992");
+  const b = await connectWithRetry(chromium, "http://127.0.0.1:9992");
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(1500);

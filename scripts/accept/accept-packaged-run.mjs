@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { openCanvas, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
 
 /**
  * 打包产物端到端验收（阶段 9.4 / 9.5）。
@@ -48,7 +48,7 @@ await new Promise((r) => setTimeout(r, 12000));
 
 let browser;
 try {
-  browser = await chromium.connectOverCDP("http://127.0.0.1:9480");
+  browser = await connectWithRetry(chromium, "http://127.0.0.1:9480");
 } catch (error) {
   console.log("连不上调试口：", String(error).slice(0, 200));
   console.log("启动日志：", bootLog.slice(-800));

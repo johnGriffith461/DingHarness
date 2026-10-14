@@ -10,7 +10,7 @@
 ﻿import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { shot } from "./harness.mjs";
+import { connectWithRetry, shot } from "./harness.mjs";
 
 /**
  * 验收：设置里的「外观」是真开关 —— 点了会变、刷新后记住、能切回来。
@@ -46,7 +46,7 @@ const read = (page) =>
 await new Promise((r) => setTimeout(r, 13000));
 let browser;
 try {
-  browser = await chromium.connectOverCDP("http://127.0.0.1:9888");
+  browser = await connectWithRetry(chromium, "http://127.0.0.1:9888");
   const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2200);

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { openCanvas, shot, verdict } from "./harness.mjs";
+import { connectWithRetry, openCanvas, shot, verdict } from "./harness.mjs";
 
 /**
  * 聊天失败后的「重试」（§187 界面体检 P1 点名的两处接线之一）。
@@ -43,7 +43,7 @@ const child = spawn(
 );
 await new Promise((r) => setTimeout(r, 9000));
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9740");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:9740");
 const ctx = browser.contexts()[0];
 const pages = ctx.pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];

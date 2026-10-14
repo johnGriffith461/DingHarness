@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import path from "node:path";
-import { bootApp, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 验收：**AI 文档的操作条**（§153）—— 缩写 / 扩写 / 润色 / 总结概括。
@@ -38,7 +38,7 @@ const ORIGINAL =
 
 const out = {};
 try {
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

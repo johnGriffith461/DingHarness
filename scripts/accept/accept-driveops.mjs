@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
 
 /**
  * 验收：**云盘的证据层**（§157，对应 `drive_*` 201 条里补的那一层）。
@@ -70,7 +70,7 @@ try {
     process.exit(1);
   }
 
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const ctx = b.contexts()[0];
   let page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

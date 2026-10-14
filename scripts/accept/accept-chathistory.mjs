@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, freshDir, killTree, openCanvas, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openCanvas, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**聊天历史活过重启**（F3）+ **谁批的能查证**（C2 / INV-3）。
@@ -51,7 +51,7 @@ async function openChat() {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
   child = r.child;
   if (!r.ok) throw new Error(`调试端口 ${PORT} 没开：\n` + (r.getLog() || "(空)").slice(-800));
-  b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });

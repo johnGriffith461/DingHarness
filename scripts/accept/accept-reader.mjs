@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
-import { bootApp, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
 
 /**
  * 验收：**AI 阅读**（§155，对应 `chat/read-web`）。
@@ -67,7 +67,7 @@ try {
     process.exit(1);
   }
 
-  let b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  let b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   let ctx = b.contexts()[0];
   let page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
@@ -174,7 +174,7 @@ try {
   if (!(await boot())) {
     out.error = "重启失败：" + (getLog() || "(空)").slice(-300);
   } else {
-    b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+    b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
     ctx = b.contexts()[0];
     page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
     await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
