@@ -15,7 +15,10 @@ import {
   conversationIdOf,
   type LogRecord,
   type ApprovalRecord,
+  fold,
+  resumeSession,
 } from "@engine/core/events";
+import { diffSnapshot, snapshotOf } from "@engine/core/snapshot";
 
 /**
  * C2：会话事件的投影（**一份实现，两条路径共用**）。
@@ -461,5 +464,107 @@ describe("splitTurns · 参数不能丢（真验收抓到的那一条）", () =>
     expect(chunks[0].view.traces[0].input).toEqual({ text: "幸运数字是 42" });
     expect(chunks[0].view.traces[0].pending).toBeUndefined();
     expect(chunks[1].view.traces).toHaveLength(0);
+  });
+});
+
+/**
+ * Phase 1 D2-D3：**事件溯源**（state = fold(events)）与 `resume`。
+ *
+ * 这三条是"换代"最实质的那部分：恢复不再靠"从日志翻译回消息列表"，
+ * 而是**重放事件流**。所以判据必须是"往返一致"，而不是"函数被调用过"。
+ */
+describe("fold · 事件溯源（state = fold(events)）", () => {
+  it("⭐ fold 与 projectTurn 的累积部分一致（同一份折叠，不是两份实现）", () => {
+    const records = [
+      ev({ type: "text", text: "答案" }),
+      ev({ type: "text", text: "是 42" }),
+      ev({ type: "tool-call", toolCallId: "c1", toolName: "memory_save", input: { text: "42" } }),
+      ev({ type: "done", usage: { inputTokens: 3, outputTokens: 4 } }),
+    ];
+    const state = fold(records);
+    const view = projectTurn(records);
+    // projectTurn = fold + finishTurn：两者的正文/用量/结束标记必须一致
+    expect(state.text).toBe(view.text);
+    expect(state.usage).toEqual(view.usage);
+    expect(state.done).toBe(view.done);
+  });
+
+  it("fold 保留**还没配对**的调用（那是 finishTurn 才剔掉的东西）", () => {
+    const state = fold([ev({ type: "tool-call", toolCallId: "c1", toolName: "read_file", input: { path: "a" } })]);
+    expect(state.waiting).toHaveLength(1);
+    expect(state.traces).toHaveLength(0); // "调了一半"不是发生过的事
+  });
+
+  it("⭐ 重放往返一致：fold(events) 的结果可再次折叠而不变（幂等 + 确定性）", () => {
+    const records = [
+      ev({ type: "text", text: "先读一下" }),
+      ev({ type: "tool-call", toolCallId: "c1", toolName: "read_file", input: { path: "a.md" } }),
+      ev({ type: "tool-result", toolCallId: "c1", toolName: "read_file", output: { ok: true, text: "内容" } }),
+      ev({ type: "text", text: "读到了" }),
+      ev({ type: "done", usage: { inputTokens: 10, outputTokens: 5 } }),
+    ];
+    const once = fold(records);
+    const twice = fold(records);
+    expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
+    // 再折一遍同一批（重放的典型形状：日志被读第二遍）结果不变
+    expect(JSON.stringify(fold([...records]))).toBe(JSON.stringify(once));
+  });
+});
+
+describe("resume · 从日志还原会话", () => {
+  it("⭐ 待办清单 = 收尾后仍 pending 的那些（已批过的不算）", () => {
+    const records = [
+      { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "写个文件" }] },
+      { seq: 2, at: T(2), requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "write_file", input: { path: "a.md", content: "x" } },
+      { seq: 3, at: T(3), requestId: "r1", type: "tool-result", toolCallId: "c1", toolName: "write_file", output: { pending: true } },
+      { seq: 4, at: T(4), requestId: "r1", type: "tool-call", toolCallId: "c2", toolName: "write_file", input: { path: "b.md", content: "y" } },
+      { seq: 5, at: T(5), requestId: "r1", type: "tool-result", toolCallId: "c2", toolName: "write_file", output: { pending: true } },
+      { seq: 6, at: T(6), requestId: "r1", type: "done" },
+      // 用户只批了第一条
+      { seq: 7, at: T(7), type: "approval", toolCallId: "c1", name: "write_file", approved: true, ok: true, line: "✎ 写文件：已写入 a.md" },
+    ] as unknown as LogRecord[];
+
+    const resumed = resumeSession(records);
+    expect(resumed.turns).toHaveLength(1);
+    // 只有 c2 还等着 —— 从**原始事件**里挑会挑出两条假待办（c1 早就批过了）
+    expect(resumed.pending).toHaveLength(1);
+    expect(resumed.pending[0]).toMatchObject({ toolCallId: "c2", name: "write_file" });
+    expect(resumed.pending[0].input).toEqual({ path: "b.md", content: "y" });
+  });
+
+  it("空日志还原成空会话（不是报错）", () => {
+    expect(resumeSession([])).toEqual({ turns: [], pending: [] });
+  });
+});
+
+describe("快照 · 重放 diff（重构零漂移的验收器）", () => {
+  const records = [
+    { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "你好" }] },
+    { seq: 2, at: T(2), requestId: "r1", type: "text", text: "你好" },
+    { seq: 3, at: T(3), requestId: "r1", type: "done", usage: { inputTokens: 1, outputTokens: 2 } },
+  ] as unknown as LogRecord[];
+
+  it("⭐ 同一批记录重放：diff 为零", () => {
+    const fixture = snapshotOf("chat-1", records, 123);
+    expect(diffSnapshot(fixture, snapshotOf("chat-1", fixture.records, fixture.recordedAt))).toEqual({
+      equal: true,
+      differences: [],
+    });
+  });
+
+  it("投影变了就报出来，并说清差在第几轮的哪里", () => {
+    const fixture = snapshotOf("chat-1", records, 123);
+    const tampered = { ...fixture, turns: [{ ...fixture.turns[0]!, view: { ...fixture.turns[0]!.view, text: "改过了" } }] };
+    const diff = diffSnapshot(fixture, tampered);
+    expect(diff.equal).toBe(false);
+    expect(diff.differences.some((d) => d.includes("第 1 轮"))).toBe(true);
+  });
+
+  it("轮数对不上也要报（少了一轮是最危险的回归）", () => {
+    const fixture = snapshotOf("chat-1", records, 123);
+    const missing = { ...fixture, turns: [] };
+    const diff = diffSnapshot(fixture, missing);
+    expect(diff.equal).toBe(false);
+    expect(diff.differences.some((d) => d.includes("轮数"))).toBe(true);
   });
 });

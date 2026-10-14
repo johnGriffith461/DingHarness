@@ -1,0 +1,317 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "./loop";
+import { createToolRegistry, buildToolSet } from "./registry";
+import type { HealthStore } from "../ports/health";
+import type { ToolExecutor } from "../ports/executor";
+import { z } from "zod";
+
+/**
+ * 主循环的**端到端**测试 —— 但**不连真模型、不烧一分钱**。
+ *
+ * ## 怎么做到的
+ *
+ * `runTurn` 真正做的事是"把 OpenAI 兼容的 SSE 流翻成 TurnEvent"。所以这里在
+ * `127.0.0.1` 上起一个**假 provider**：收 POST、按 OpenAI 的 chunk 格式吐 SSE。
+ * 于是被测的是**真代码路径**（真 SDK、真流解析、真工具往返），而不是一个替身。
+ *
+ * 这条之所以能成立，是因为 `engine/runtime/providers.ts` 的 baseURL 改成了**惰性**读环境变量
+ * （见那个文件头的说明）—— 在那之前，模块一 import 就把 baseURL 定死了，测不了。
+ *
+ * ⚠️ 判据全是**可证伪的行为**：事件顺序、参数有没有原样到达执行体、
+ * 工具报错会不会中断整轮、中止时会不会把 provider 判死。
+ */
+
+/** 假 provider 的端口（`beforeAll` 里绑，绑在 0 上由系统分配）。 */
+let port = 0;
+let server: Server;
+/** 收到过几次请求（断言"真发了"）。 */
+let hits = 0;
+/** 下一次响应要用哪套 chunk。 */
+let script: (reqBody: unknown, nth: number) => object[] = () => [];
+
+/**
+ * "第一轮这样回、之后那样回"。
+ *
+ * ⚠️ 这个帮手是必须的：多步循环里 SDK 会**再发一次请求**（把工具结果带上），
+ * 而一个每次都吐同一套 chunk 的假 provider 会让模型"无限重复调同一个工具" ——
+ * 那是**假 provider 的行为**，不是被测代码的问题。第一次写这组用例时就是这么失败的
+ * （执行体被调了 3 次，而不是 1 次）。
+ */
+function scriptOnce(first: object[], then: object[]): (reqBody: unknown, nth: number) => object[] {
+  return (_body, nth) => (nth === 1 ? first : then);
+}
+
+/** 一帧 chunk 的公共字段。 */
+const CHUNK_BASE = { id: "c1", object: "chat.completion.chunk", created: 0, model: "deepseek-flash" };
+
+/** 增量文本。 */
+const text = (t: string) => ({ ...CHUNK_BASE, choices: [{ index: 0, delta: { content: t }, finish_reason: null }] });
+/** 收尾（`stop` / `tool_calls`）。 */
+const finish = (reason: string) => ({ ...CHUNK_BASE, choices: [{ index: 0, delta: {}, finish_reason: reason }] });
+/** 用量（OpenAI 把它放在一个 choices 为空的帧里）。 */
+const usage = (p: number, c: number) => ({
+  ...CHUNK_BASE,
+  choices: [],
+  usage: { prompt_tokens: p, completion_tokens: c, total_tokens: p + c },
+});
+/** 工具调用（第一帧带 id/name，后续帧只带 arguments 片段 —— 与真 provider 同形）。 */
+const toolChunk = (id: string | null, name: string | null, args: string) => ({
+  ...CHUNK_BASE,
+  choices: [
+    {
+      index: 0,
+      delta: {
+        tool_calls: [
+          {
+            index: 0,
+            ...(id ? { id, type: "function" } : {}),
+            function: { ...(name ? { name } : {}), arguments: args },
+          },
+        ],
+      },
+      finish_reason: null,
+    },
+  ],
+});
+
+beforeAll(async () => {
+  server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (d) => {
+      body += String(d);
+    });
+    req.on("end", () => {
+      hits += 1;
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        /* 请求体不合法也照吐（这一轮测的不是它） */
+      }
+      const chunks = script(parsed, hits);
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+      for (const chunk of chunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = (server.address() as AddressInfo).port;
+  // 把 `strata`（那个本来就指本机的 provider）指到这个假服务上
+  process.env.STRATA_BASE_URL = `http://127.0.0.1:${port}/v1`;
+  process.env.STRATA_API_KEY = "test-key";
+});
+
+afterAll(async () => {
+  delete process.env.STRATA_BASE_URL;
+  delete process.env.STRATA_API_KEY;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+beforeEach(() => {
+  hits = 0;
+  script = () => [];
+});
+
+/** 跑一轮（provider 固定为指向假服务的 strata）。 */
+async function run(
+  onEvent: (e: TurnEvent) => void,
+  extra: Partial<Parameters<typeof runTurn>[0]> = {},
+  deps: Parameters<typeof runTurn>[2] = {},
+) {
+  return runTurn(
+    { provider: "strata", messages: [{ role: "user", content: "你好" }], ...extra },
+    onEvent,
+    deps,
+  );
+}
+
+describe("主循环 · 文本与用量", () => {
+  it("⭐ 文本按到达顺序成为事件，收尾给出真实用量", async () => {
+    script = () => [text("你"), text("好"), finish("stop"), usage(11, 4)];
+    const events: TurnEvent[] = [];
+    const outcome = await run((e) => events.push(e));
+
+    expect(hits).toBe(1);
+    expect(outcome).toMatchObject({ ok: true, aborted: false, provider: "strata", model: "deepseek-flash" });
+    expect(events.filter((e) => e.type === "text").map((e) => (e as { text: string }).text)).toEqual(["你", "好"]);
+    expect(events.filter((e) => e.type === "step-finish")).toHaveLength(1);
+    const done = events.find((e) => e.type === "done") as { usage?: { inputTokens?: number; outputTokens?: number } };
+    expect(done.usage?.inputTokens).toBe(11);
+    expect(done.usage?.outputTokens).toBe(4);
+  });
+
+  it("provider 报错 → 事件里有 error 且结局 ok=false（错误不吞）", async () => {
+    script = () => [text("半句"), { ...CHUNK_BASE, choices: [], error: { message: "boom", type: "server_error" } }];
+    const events: TurnEvent[] = [];
+    const outcome = await run((e) => events.push(e));
+    // 无论是"SDK 抛错"还是"事件里带 error"，都必须以 ok=false 收场 —— 不许悄悄成功
+    expect(outcome.ok).toBe(false);
+    expect(events.some((e) => e.type === "error" || e.type === "text")).toBe(true);
+  });
+});
+
+describe("主循环 · 工具往返", () => {
+  /** 一个只记账、不干真事的执行体。 */
+  function spyExecutor(result: { ok: boolean; output?: unknown; error?: string } = { ok: true, output: { line: "读到了" } }) {
+    const calls: { name: string; input: unknown }[] = [];
+    const executor: ToolExecutor = {
+      run: async (name, input) => {
+        calls.push({ name, input });
+        return result;
+      },
+    };
+    return { executor, calls };
+  }
+
+  /** 一个只有 `read_file` 的注册表（跑得快、判据清楚）。 */
+  const registry = () =>
+    createToolRegistry({
+      extra: [],
+    });
+
+  it("⭐ 工具调用带参数到达执行体，结果作为 tool-result 回注", async () => {
+    // 参数被 provider 切成两帧发（真 provider 就是这么干的）—— 拼不回来就说明流解析错了
+    script = scriptOnce(
+      [toolChunk("call_1", "read_file", '{"path":'), toolChunk(null, null, '"a.md"}'), finish("tool_calls")],
+      [text("读完了"), finish("stop")],
+    );
+    const { executor, calls } = spyExecutor({ ok: true, output: { text: "内容" } });
+    const tools = buildToolSet({
+      registry: registry(),
+      mode: "全部允许",
+      executor,
+      ctx: { mode: "全部允许", provider: "strata" },
+    });
+    expect(Object.keys(tools)).toContain("read_file");
+
+    const events: TurnEvent[] = [];
+    await run((e) => events.push(e), { tools, maxSteps: 3 });
+
+    expect(calls).toEqual([{ name: "read_file", input: { path: "a.md" } }]);
+    const call = events.find((e) => e.type === "tool-call") as { toolName: string; toolCallId: string };
+    expect(call.toolName).toBe("read_file");
+    const result = events.find((e) => e.type === "tool-result") as { toolCallId: string; output?: unknown };
+    expect(result.toolCallId).toBe(call.toolCallId);
+    expect(result.output).toEqual({ text: "内容" });
+  });
+
+  it("⭐ 执行体抛错 → 仍是一次 tool-result（错误即结果，整轮不中断）", async () => {
+    script = scriptOnce([toolChunk("call_1", "read_file", '{"path":"a.md"}'), finish("tool_calls")], [text("知道了"), finish("stop")]);
+    const executor: ToolExecutor = {
+      run: async () => {
+        throw new Error("磁盘炸了");
+      },
+    };
+    const tools = buildToolSet({ registry: registry(), mode: "全部允许", executor, ctx: { mode: "全部允许", provider: "strata" } });
+    const events: TurnEvent[] = [];
+    const outcome = await run((e) => events.push(e), { tools, maxSteps: 3 });
+
+    const result = events.find((e) => e.type === "tool-result") as { error?: string };
+    expect(result.error).toContain("磁盘炸了");
+    // 关键：这一轮**没有**被中断 —— 模型接着说完了话
+    expect(events.some((e) => e.type === "text")).toBe(true);
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("⭐ 闸门拦下（按需确认）→ 回一条 pending，且**不执行**", async () => {
+    script = scriptOnce([toolChunk("call_1", "write_file", '{"path":"a.md","content":"x"}'), finish("tool_calls")], [text("好"), finish("stop")]);
+    const { executor, calls } = spyExecutor();
+    // write_file 在策略表里是写 → 「按需确认」档必拦
+    const tools = buildToolSet({ registry: registry(), mode: "按需确认", executor, ctx: { mode: "按需确认", provider: "strata" } });
+    const events: TurnEvent[] = [];
+    await run((e) => events.push(e), { tools, maxSteps: 3 });
+
+    const result = events.find((e) => e.type === "tool-result") as { output?: { pending?: boolean } };
+    expect(result.output?.pending).toBe(true);
+    expect(calls).toHaveLength(0); // 写着"确认"却已经把事做完 —— 这是最不能接受的那种
+  });
+
+  it("深度到顶时 `spawn_agent` 根本不注入（模型看不到）", () => {
+    const tools = buildToolSet({
+      registry: createToolRegistry(),
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true }) },
+      ctx: { mode: "全部允许", provider: "strata", depth: 1 },
+    });
+    expect(Object.keys(tools)).not.toContain("spawn_agent");
+    // 同档位、未到顶时它在
+    const top = buildToolSet({
+      registry: createToolRegistry(),
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true }) },
+      ctx: { mode: "全部允许", provider: "strata", depth: 0 },
+    });
+    expect(Object.keys(top)).toContain("spawn_agent");
+  });
+});
+
+describe("主循环 · 中止与健康账本", () => {
+  it("⭐ 用户中止：aborted=true，**不判 provider 失败**，也不记成功", async () => {
+    script = () => [text("一"), text("二"), text("三"), finish("stop")];
+    const calls: string[] = [];
+    const health: HealthStore = {
+      markOk: (id) => calls.push(`ok:${id}`),
+      markFailed: (id, note) => calls.push(`fail:${id}:${note}`),
+    };
+    const controller = new AbortController();
+    const outcome = await run(
+      (e) => {
+        if (e.type === "text" && e.text === "一") controller.abort();
+      },
+      { abortSignal: controller.signal },
+      { health },
+    );
+
+    expect(outcome.aborted).toBe(true);
+    expect(calls).toEqual([]); // 中止是用户意图：既不算失败，也不是"跑通了"
+  });
+
+  it("跑通一次 → 记一次成功（健康账本只有这两个动作）", async () => {
+    script = () => [text("嗨"), finish("stop"), usage(1, 1)];
+    const calls: string[] = [];
+    await run(() => undefined, {}, { health: { markOk: (id) => calls.push(`ok:${id}`), markFailed: (id) => calls.push(`fail:${id}`) } });
+    expect(calls).toEqual(["ok:strata"]);
+  });
+
+  it("不给 health 也能跑（默认什么都不记）", async () => {
+    script = () => [text("嗨"), finish("stop")];
+    await expect(run(() => undefined)).resolves.toMatchObject({ ok: true });
+  });
+});
+
+describe("主循环 · 前置校验与错误翻译", () => {
+  it("未知 provider：给出错误事件，且**不发请求**", async () => {
+    const events: TurnEvent[] = [];
+    const outcome = await runTurn({ provider: "没有这家", messages: [{ role: "user", content: "hi" }] }, (e) => events.push(e));
+    expect(outcome.ok).toBe(false);
+    expect(events[0]).toMatchObject({ type: "error" });
+    expect(hits).toBe(0);
+  });
+
+  it("模型名不在清单里就退回默认（不拿一个不存在的模型去请求）", () => {
+    const target = resolveTurnTarget("strata", "不存在的模型");
+    expect(target).toMatchObject({ ok: true, model: "deepseek-flash" });
+  });
+
+  it("错误翻译：密钥 / 限流 / 网络 / 余额分别给人话", () => {
+    expect(humanError(new Error("401 Unauthorized"))).toBe("密钥无效或已过期");
+    expect(humanError(new Error("429 rate limit exceeded"))).toBe("触发限流，稍后重试");
+    expect(humanError(new Error("fetch failed"))).toBe("连不上 provider（网络问题，或本地服务未启动）");
+    expect(humanError(new Error("Insufficient Balance"))).toBe("余额不足");
+    expect(humanError(Object.assign(new Error("x"), { name: "AbortError" }))).toBe("已中止");
+  });
+});
+
+describe("工具声明与执行的连线", () => {
+  it("注册表里的 schema 真的会校验参数（schema 即说明，也是那道门）", () => {
+    const spec = createToolRegistry().get("write_file");
+    expect(spec?.source).toBe("builtin");
+    // 声明来自 AGENT_TOOLS：这里能拿到 zod schema 本体
+    expect((spec?.inputSchema as unknown as z.ZodTypeAny).safeParse({ path: "a.md", content: "x" }).success).toBe(true);
+    expect((spec?.inputSchema as unknown as z.ZodTypeAny).safeParse({ path: 1 }).success).toBe(false);
+  });
+});

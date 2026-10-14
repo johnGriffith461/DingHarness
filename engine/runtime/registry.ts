@@ -148,7 +148,21 @@ export function buildToolSet(input: {
         if (decide(mode, entry.name) === "ask") {
           return { pending: true, notice: pendingApprovalNotice(entry.name, mode) };
         }
-        return executor.run(entry.name, value, ctx);
+        const result = await executor.run(entry.name, value, ctx);
+        /*
+         * ⭐ 成功时返回执行体的**原始载荷**，不要那层 `{ ok, output }` 信封。
+         *
+         * 两处都认原始载荷：模型看到的就是它，而留痕那一行由
+         * `describeToolResult(name, ok, output, …)` 生成 —— 那个函数读 `o.count` /
+         * `o.title` / `o.pending`。套一层信封的后果不是"多包一层"，是**留痕全部退化成
+         * "已完成"**（读不到字段），同时模型多看到一个它没要求的结构。
+         *
+         * 失败则**抛**出去：SDK 把它变成一次 `tool-error`，主循环再当成 tool result 回注
+         * （不变量 3：错误即结果）。只有走这条路，投影才会算出 `ok=false`、
+         * 留痕才会写"失败"；返回一个 ok:false 的**正常**载荷会被当成"工具跑成功了"。
+         */
+        if (result.ok) return result.output;
+        throw new Error(result.error ?? `${entry.name} 执行失败`);
       },
     });
   }

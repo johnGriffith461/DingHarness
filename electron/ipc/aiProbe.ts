@@ -1,7 +1,7 @@
 import path from "node:path";
 import { app } from "electron";
 import type { ProviderInfo } from "../../shared/ipc";
-import { getProvider, listProviders, PROVIDERS } from "../../engine/runtime/providers";
+import { allProviders, getProvider, listProviders } from "../../engine/runtime/providers";
 import { createJsonStore } from "./jsonStore";
 import type { HealthStore } from "../../engine/ports/health";
 
@@ -164,7 +164,7 @@ export async function probeProviders(timeoutMs = 8000): Promise<ProbeOutcome[]> 
   const { resolveSecret } = await import("../../engine/runtime/credentials");
 
   const out: ProbeOutcome[] = [];
-  for (const def of PROVIDERS) {
+  for (const def of allProviders()) {
     const info = listProviders().find((p) => p.id === def.id);
     if (!info?.available) continue;
     const key = resolveSecret(def.keyRef);
