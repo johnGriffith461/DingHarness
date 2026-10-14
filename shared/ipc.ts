@@ -77,14 +77,26 @@ export type ChatRequest = {
   sessionId?: string;
 };
 
-/** 输入区那个 chip 的档位（定义在 `permissions.ts`，这里只引用，避免两处各写一份）。 */
-import type { ConfirmMode } from "./permissions";
-export type { ConfirmMode };
+/**
+ * 输入区那个 chip 的三个档位（**词表属于契约，判定属于内核**）。
+ *
+ * 定义放在契约里而不是 `engine/core/policy.ts`：它出现在 `ChatRequest.toolPolicy`
+ * 这类跨进程字段上，而"有哪些档位"是界面与内核都要认的**同一个词表** ——
+ * 让契约去引内核会把依赖方向倒过来（shared ← engine ← hosts/src）。
+ * 至于"这个档位下某个工具该 run / ask / hide"，那是策略，在 `engine/core/policy.ts`。
+ */
+export const CONFIRM_MODES = ["全部允许", "按需确认", "每步确认"] as const;
+export type ConfirmMode = (typeof CONFIRM_MODES)[number];
+
+/** 档位是否合法（从磁盘/本地存储读回来的东西一律不可信）。 */
+export function normalizeConfirmMode(raw: unknown): ConfirmMode {
+  return CONFIRM_MODES.includes(raw as ConfirmMode) ? (raw as ConfirmMode) : "全部允许";
+}
 
 /**
  * 会话日志的两条读接口（F3）。
  *
- * ⚠️ 回的是**记录**不是"投影好的消息"：投影是纯函数（`shared/sessionLog.ts`），
+ * ⚠️ 回的是**记录**不是"投影好的消息"：投影是纯函数（`engine/core/events.ts`），
  * 渲染层自己算 —— 主进程再算一遍就等于两份实现（C2 刚把它们并成一份）。
  */
 export type SessionSummary = {

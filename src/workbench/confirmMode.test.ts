@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
 import { readConfirmMode, saveConfirmMode } from "./confirmMode";
-import { CONFIRM_MODES } from "@shared/permissions";
+import { CONFIRM_MODES } from "@shared/ipc";
 
 /**
  * 审批档位的持久化（§143）。

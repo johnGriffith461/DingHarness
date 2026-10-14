@@ -16,7 +16,7 @@ import { WORKSPACE_LABELS, addedNote, workspaceLabel } from "@shared/workspace";
 import { fileContextBlock } from "./fileContext";
 import { useLibraryStore } from "./libraryStore";
 import { findItemIn } from "./libraryStore";
-import { type ConfirmMode } from "@shared/permissions";
+import { type ConfirmMode } from "@shared/ipc";
 import { useDocStore } from "./docStore";
 import { readConfirmMode, saveConfirmMode } from "./confirmMode";
 import { Square } from "lucide-react";

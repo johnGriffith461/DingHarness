@@ -1,4 +1,4 @@
-import { normalizeConfirmMode, type ConfirmMode } from "@shared/permissions";
+import { normalizeConfirmMode, type ConfirmMode } from "@shared/ipc";
 
 /**
  * 审批档位的持久化（§143）。

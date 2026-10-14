@@ -5,7 +5,7 @@ import { agentTools, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
 import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "./runTurn";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
-import type { ConfirmMode } from "../../shared/permissions";
+import type { ConfirmMode } from "../../shared/ipc";
 
 /**
  * AI IPC（PLAN 3.1 / 3.2）。

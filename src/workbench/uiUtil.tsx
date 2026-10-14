@@ -10,7 +10,7 @@
  * 见 `docs/PLAN-C6-结构拆分.md`：自动搬运只保证"**删掉 + 挪走**"两种 diff，
  * **import 的正确性由 `tsc` 兜底** —— 这一步就是被 tsc 抓出来的。
  */
-import { CONFIRM_MODES as PERMISSION_MODES } from "@shared/permissions";
+import { CONFIRM_MODES as PERMISSION_MODES } from "@shared/ipc";
 
 export function setNoteIfAny(message: string): void {
   const el = document.querySelector('[data-testid="wb-project-name"]') as HTMLInputElement | null;
@@ -43,7 +43,7 @@ export function PenIcon() {
  * ============================================================ */
 
 /*
- * 三个档位的文案与判定**同源**（`@shared/permissions`）——
+ * 三个档位的文案与判定**同源**（词表 `@shared/ipc`、判定 `@engine/core/policy`）——
  * 原来这里自己写了一份 `CONFIRM_MODES`，而"判定"要用的也是同一张表：
  * 两处各写一份的话，改文案不会改到判定（本项目栽过多次的形态）。
  *

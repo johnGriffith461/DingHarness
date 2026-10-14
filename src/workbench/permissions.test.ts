@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { CONFIRM_MODES, normalizeConfirmMode } from "@shared/ipc";
 import {
-  CONFIRM_MODES,
   TOOL_POLICY,
   decide,
   injectableTools,
-  normalizeConfirmMode,
   pendingApprovalNotice,
   policyOf,
-} from "@shared/permissions";
+} from "@engine/core/policy";
 import { AGENT_TOOLS } from "@shared/agentTools";
 
 /**

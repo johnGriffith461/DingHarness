@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CONFIRM_MODES, decide, policyOf } from "@shared/permissions";
+import { CONFIRM_MODES } from "@shared/ipc";
+import { decide, policyOf } from "@engine/core/policy";
 import {
   MAX_MCP_SERVERS,
   MCP_LABELS,

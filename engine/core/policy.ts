@@ -1,5 +1,5 @@
 /**
- * 审批闸门的判定层（§143，优化计划批次 2）。
+ * 审批闸门的**判定层**（§143，优化计划批次 2；Phase 1 D5 内迁进内核）。
  *
  * ## 为什么要有这一层
  *
@@ -20,13 +20,13 @@
  * | `run` | 直接执行（今天的行为） |
  * | `ask` | **不执行**，把这次调用交给用户确认 |
  * | `hide` | 工具根本不注入给模型（它看不到，也就不会试） |
+ *
+ * ⚠️ **档位词表在契约里**（`shared/ipc.ts` 的 `CONFIRM_MODES` / `ConfirmMode`）：
+ * 它出现在跨进程字段上，"有哪些档位"是界面与内核都要认的同一份。
+ * 这里管的是**策略**："这个档位下，这个工具该 run / ask / hide"。
  */
-
-/** 输入区那个 chip 的三个档位（文案照本体实机截图，§130）。 */
-import { MCP_TOOL_PREFIX } from "./mcp";
-
-export const CONFIRM_MODES = ["全部允许", "按需确认", "每步确认"] as const;
-export type ConfirmMode = (typeof CONFIRM_MODES)[number];
+import { MCP_TOOL_PREFIX } from "../../shared/mcp";
+import type { ConfirmMode } from "../../shared/ipc";
 
 /** 工具的读写性质 —— 决定"按需确认"档要不要拦它。 */
 export type ToolKind = "read" | "write";
@@ -155,10 +155,10 @@ export function injectableTools(mode: ConfirmMode, all: readonly string[]): stri
   return all.filter((name) => decide(mode, name) !== "hide");
 }
 
-/** 档位是否合法（从磁盘/本地存储读回来的东西一律不可信）。 */
-export function normalizeConfirmMode(raw: unknown): ConfirmMode {
-  return CONFIRM_MODES.includes(raw as ConfirmMode) ? (raw as ConfirmMode) : "全部允许";
-}
+/*
+ * ⚠️ `normalizeConfirmMode` 搬到契约里了（`shared/ipc.ts`）—— 它只是"读回来的值
+ * 是不是那三个档位之一"，属于词表的守卫，不属于策略判定。
+ */
 
 /**
  * 被拦下时回给模型的那句话。

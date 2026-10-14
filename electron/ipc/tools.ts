@@ -22,7 +22,8 @@ import {
   SPAWN_AGENT_TOOL,
   subagentPrompt,
 } from "../../shared/agentTools";
-import { decide, injectableTools, pendingApprovalNotice, type ConfirmMode } from "../../shared/permissions";
+import type { ConfirmMode } from "../../shared/ipc";
+import { decide, injectableTools, pendingApprovalNotice } from "../../engine/core/policy";
 import {
   LIST_FILES_DESC,
   LIST_FILES_INPUT,
