@@ -271,6 +271,23 @@ html[data-kb="1"] .wb-composer:focus-within {
   outline: none;
 }
 
+/* ---------- 折行：标题均匀、说明不留孤儿（better-typography 的两条硬规矩）----------
+ *
+ * 这两条不是"当前看得见的坏"，是规则本身要求的补位（体检时按领域 skill 逐条对照发现的）：
+ *   · 标题：`text-wrap: balance` —— 两行标题不被拉成一长一短；
+ *   · 说明：`text-wrap: pretty` —— 末行不留一个孤零零的词。
+ * 长文本（助手正文那种）**不加** —— skill 明确说 balance/pretty 别用在长文上。
+ */
+.wb h1,
+.wb h2 {
+  text-wrap: balance;
+}
+
+.wb-page-p,
+.wb-feature-text span {
+  text-wrap: pretty;
+}
+
 /* ---------- 输入区里的 chip：2026-10-14 照 Dingwork 原型重做外形 ----------
  *
  * 原来是**填充式浅灰块**（`background: var(--surface-hover)`、`border: 0`、8px 圆角）。

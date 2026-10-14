@@ -4,6 +4,7 @@
  */
 
 import { type CatalogItem } from "./catalog";
+import { catalogIcon } from "./catalogIcon";
 
 export function PluginCard({
   item,
@@ -18,9 +19,17 @@ export function PluginCard({
   onInstall: () => void;
   onEnable: () => void;
 }) {
+  /*
+   * 左侧那枚图标：2026-10-14 之前这里是 `<span className="wb-plugin-icon" />` ——
+   * **一个空的色块**。15 张卡长得一模一样，扫不动，而且和卡片底色同调、读起来像断图。
+   * 现在按 id 取一枚（`catalogIcon`，未登记的回落中性方块 —— 不回落到别的条目的图标）。
+   */
+  const Icon = catalogIcon(item);
   return (
     <div className="wb-plugin" data-testid={`wb-plugin-${item.id}`}>
-      <span className="wb-plugin-icon" />
+      <span className="wb-plugin-icon" aria-hidden>
+        <Icon size={17} />
+      </span>
       <span className="wb-plugin-text">
         <b>{item.name}</b>
         <em>{item.hint}</em>

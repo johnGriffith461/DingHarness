@@ -5,7 +5,7 @@
  */
 
 import { useState } from "react";
-import { ChevronRight, FolderOpen, PanelRight, Plus, Settings } from "lucide-react";
+import { FolderOpen, PanelRight, PanelRightClose, Plus, Settings } from "lucide-react";
 import { useWorkbenchStore, openArtifact, revealArtifact } from "./store";
 import { ARTIFACT_TITLE_GENERATING, SUMMARY_RECENT_FILES, SUMMARY_RECENT_LIMIT_NOTE, SUMMARY_SESSION_FILES, SUMMARY_TABS, type SummaryTabId } from "./copy";
 import { resourceTypeOf } from "@shared/artifactProto";
@@ -56,13 +56,18 @@ export function SummaryPanel() {
           <Settings size={14} />
         </button>
         <button
-          className="wb-icon"
+          className="wb-summary-collapse"
           data-testid="wb-summary-collapse"
           aria-label="收起对话摘要"
           title="收起对话摘要"
           onClick={() => setCollapsed(true)}
         >
-          <ChevronRight size={14} />
+          {/* ⚠️ 2026-10-14 主人报的原话：「点一下面板按钮就打开了，然后怎么关呢？」
+              —— 第一版这里只有一枚**没字的右向箭头**（`.wb-icon` + ChevronRight），
+              它太像"往右导航"，没人会当成"收起"。现在**带字**（图标 + 「收起」）。
+              浮标按设计在面板打开时隐藏（原型 `.rail-open .rail-edge { display: none }` 同款），
+              所以关的入口必须在面板自己头上，而且必须一眼看得出来。 */}
+          <PanelRightClose size={13} /> 收起
         </button>
       </header>
 

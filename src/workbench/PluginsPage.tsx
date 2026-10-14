@@ -12,6 +12,7 @@ import { useSearchHistoryStore } from "./searchHistoryStore";
 import { Check, ChevronDown, List, Plus, Search, Settings2, X } from "lucide-react";
 import { ADMIN_TABS } from "./copy";
 import { FEATURED_ITEMS, RECOMMENDED_PLUGINS, SKILL_GROUPS, type CatalogItem } from "./catalog";
+import { catalogIcon } from "./catalogIcon";
 import { findItemIn, useLibraryStore } from "./libraryStore";
 import { useWorkbenchStore } from "./store";
 
@@ -529,23 +530,29 @@ export function PluginsPage() {
         ) : null}
 
             <div className="wb-featured">
-              {FEATURED_ITEMS.map((item) => (
-                <div className="wb-feature-card" key={item.id}>
-                  <span className="wb-feature-text">
-                    <em>必备精选</em>
-                    <b>{item.name}</b>
-                    <span>{item.hint}</span>
-                  </span>
-                  <span className="wb-feature-art" />
-                  <button
-                    className={`wb-install${installedSet.has(item.id) ? " is-done" : ""}`}
-                    data-testid={`wb-install-${item.id}`}
-                    onClick={() => install(item.id)}
-                  >
-                    {installedSet.has(item.id) ? "已安装" : "安装"}
-                  </button>
-                </div>
-              ))}
+              {FEATURED_ITEMS.map((item) => {
+                /* 大卡右侧那块也一样：原来是空渐变块（体检同一处发现的）。 */
+                const FeatureIcon = catalogIcon(item);
+                return (
+                  <div className="wb-feature-card" key={item.id}>
+                    <span className="wb-feature-text">
+                      <em>必备精选</em>
+                      <b>{item.name}</b>
+                      <span>{item.hint}</span>
+                    </span>
+                    <span className="wb-feature-art" aria-hidden>
+                      <FeatureIcon size={22} />
+                    </span>
+                    <button
+                      className={`wb-install${installedSet.has(item.id) ? " is-done" : ""}`}
+                      data-testid={`wb-install-${item.id}`}
+                      onClick={() => install(item.id)}
+                    >
+                      {installedSet.has(item.id) ? "已安装" : "安装"}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="wb-page-label">特别推荐</div>

@@ -76,6 +76,15 @@ export function TaskCenterPage() {
       {isEmpty ? (
         <p className="wb-center-empty" data-testid="wb-center-empty">
           {CENTER_LABELS.empty}
+          {/*
+            空态给一个**明确动作**（2026-10-14 界面体检：原来只说了"这里会展示什么"，
+            没说下一步干什么）。⚠️ 本体那句原话**一个字没动** ——
+            `taskCenter.ts` 的文件头写着「界面文案（逐字取自证据），别顺手改措辞」，
+            所以这里是**加**一句，不是改一句。
+          */}
+          <button className="wb-center-start" data-testid="wb-center-start" onClick={() => setView("home")}>
+            开始一个新任务
+          </button>
         </p>
       ) : null}
 

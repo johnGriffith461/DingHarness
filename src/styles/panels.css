@@ -316,6 +316,28 @@
 
 .wb-center-empty { margin: 18px 0 0; color: var(--fg-3); font-size: 13px; }
 
+/*
+ * 空态里的"下一步"。2026-10-14 界面体检：空态只说了"这里会展示什么"，
+ * **没有下一步**（better-writing：空态要说清这是什么、怎么填、并给一个明确动作）。
+ *
+ * ⚠️ 只**加**这一个动作，**不动**本体那句原话 —— `taskCenter.ts` 的文件头写着
+ * 「界面文案（逐字取自证据），别顺手改措辞」。
+ */
+.wb-center-start {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  /* 与本体那句话之间留一口气：不加就会读成"……将展示在这里开始一个新任务"。
+     用逻辑属性（`margin-inline-start`）而不是 `margin-left` ✓ better-layout 的规矩。 */
+  margin-inline-start: 6px;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.wb-center-start:hover {
+  text-decoration: underline;
+}
+
 .wb-center-section { margin-top: 20px; }
 .wb-center-section h3 {
   margin: 0 0 8px;

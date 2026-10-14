@@ -708,13 +708,13 @@
 .wb-feature-text em { font-style: normal; font-size: 11px; color: var(--fg-dim); }
 .wb-feature-text b { font-size: 14.5px; }
 .wb-feature-text span { font-size: 12px; color: var(--fg-2); line-height: 1.5; }
-.wb-feature-art { width: 66px; height: 50px; border-radius: 8px; background: var(--grad-feature-art); flex: 0 0 auto; }
+.wb-feature-art { width: 66px; height: 50px; border-radius: 8px; background: var(--grad-feature-art); flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-2); }
 
 .wb-group-title { display: flex; align-items: center; gap: 3px; margin: 18px 0 10px; font-size: 14.5px; font-weight: 600; }
 
 .wb-plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .wb-plugin { display: flex; align-items: center; gap: 10px; padding: 10px 4px; }
-.wb-plugin-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--grad-plugin-icon); flex: 0 0 auto; }
+.wb-plugin-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--grad-plugin-icon); flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-2); }
 .wb-plugin-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .wb-plugin-text b { font-size: 13px; font-weight: 500; }
 .wb-plugin-text em { font-style: normal; font-size: 11px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
