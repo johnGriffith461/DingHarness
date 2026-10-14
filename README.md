@@ -9,7 +9,7 @@
 Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无限画布」放在同一个工作台里。
 它本机运行、本机存数据，模型走你自己配置的 OpenAI 兼容通道——不依赖任何后端服务。
 
-> 状态：**v0.1.0，早期版本**。目前仅提供 Windows 构建。
+> 状态：**v0.2.0，早期版本**。目前仅提供 Windows 构建。
 
 ---
 
@@ -50,7 +50,7 @@ pnpm electron:build && pnpm exec electron .
 打包（含 typecheck / lint / test 全门禁）：
 
 ```bash
-pnpm build   # → release/ding-harness-0.1.0-setup.exe
+pnpm build   # → release/ding-harness-0.2.0-setup.exe
 ```
 
 ### 配置模型
@@ -130,7 +130,7 @@ pnpm test        # vitest（内核测试在 engine/**/*.test.ts，与渲染层�
 
 `scripts/accept/` 下是浏览器端验收脚本，`scripts/verify-*.mjs` 是产物与打包校验。
 
-## 已知边界（v0.1.0）
+## 已知边界（v0.2.0）
 
 - 仅 Windows 构建；macOS / Linux 尚未验证。
 - `run_command` 与用户同权限运行，**没有沙箱**。
