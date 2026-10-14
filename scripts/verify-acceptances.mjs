@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 
@@ -389,6 +389,18 @@ function countLeftovers() {
     return (s.match(new RegExp(name.replace(".", "\\."), "gi")) ?? []).length;
   };
   return n("electron.exe") + n("工作台.exe");
+}
+
+/*
+ * 开跑前清掉上一次的失败日志（2026-10-14）。
+ * 不清的话 `accept-fail-*.log` 会把几轮的失败混在一起 —— 看的人会以为"这次也红了那些"。
+ */
+try {
+  for (const name of readdirSync(RECORDS_DIR)) {
+    if (name.startsWith("accept-fail-") && name.endsWith(".log")) unlinkSync(join(RECORDS_DIR, name));
+  }
+} catch {
+  /* 目录还不存在就算了 */
 }
 
 const results = [];

@@ -332,7 +332,7 @@ export async function closeCanvas(page) {
  * @param attempts 最多试几次
  * @returns 连上的 browser
  */
-export async function connectWithRetry(browserType, url, attempts = 4) {
+export async function connectWithRetry(browserType, url, attempts = 8) {
   let last = null;
   for (let i = 0; i < attempts; i += 1) {
     try {
