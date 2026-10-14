@@ -111,7 +111,6 @@ process.env.STRATA_BASE_URL = `http://127.0.0.1:${port}/v1`;
 process.env.STRATA_API_KEY = "poc-key";
 process.env.ANTHROPIC_BASE_URL_FOR_POC = `http://127.0.0.1:${port}`;
 
-const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
 const { createAnthropic } = await import("@ai-sdk/anthropic");
 const { generateText } = await import("ai");
 const { runTurn } = await import("../engine/runtime/loop.ts");
@@ -158,8 +157,9 @@ try {
   const hits = [];
   for (const shape of shapes) {
     seen.bodies.length = 0;
-    let err = null;
-    await shape.call().catch((e) => { err = e; });
+    // 假端点回 400，SDK 会抛 —— 这里只关心"请求体发出去没有"，所以吞掉错误并说明
+    await shape.call().catch((e) => process.stdout.write(`    （${shape.name} 收到预期内的失败：${String(e).slice(0, 60)}）
+`));
     const sent = seen.bodies.find((b) => b.url?.includes("/messages"));
     const body = typeof sent?.body === "string" ? sent.body : JSON.stringify(sent?.body ?? "");
     if (body.includes("cache_control") && body.includes("ephemeral")) hits.push(shape.name);
