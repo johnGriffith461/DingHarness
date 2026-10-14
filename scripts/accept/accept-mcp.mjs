@@ -102,7 +102,7 @@ try {
   out.statusLine = await page.locator('[data-testid="wb-mcp-line-fake"]').textContent().catch(() => null);
   out.toolNames = await page.locator('[data-testid="wb-mcp-tools-fake"]').textContent().catch(() => null);
   out.configShown = await page.locator('[data-testid="wb-mcp-file"]').textContent().catch(() => null);
-  out.emptyShown = await page.locator('[data-testid="wb-mcp-empty"]').count();
+  out.emptyShown = await page.locator('[data-testid="wb-manage-empty"]').count();
   out.shot = await shot(page, "mcp-connectors.png");
 
   /* ── ③④⑤ 真调一次（走"用户批准"那条通道）── */

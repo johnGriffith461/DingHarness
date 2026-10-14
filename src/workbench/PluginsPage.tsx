@@ -208,7 +208,13 @@ export function PluginsPage() {
              */
             <div className="wb-mcp" data-testid="wb-mcp">
               {(mcp?.servers ?? []).length === 0 ? (
-                <div className="wb-manage-empty" data-testid="wb-mcp-empty">
+                /*
+                 * 空态**沿用原来那个 testid**（`wb-manage-empty`）：它就是"管理页的空态"，
+                 * 只是文案从"本机版不含连接器体系"换成了**该怎么做**。
+                 * 另起一个 testid 会让"这条页签有没有空态说明"这类既有断言白红一次 ——
+                 * 而它们要证的其实是同一件事。
+                 */
+                <div className="wb-manage-empty" data-testid="wb-manage-empty">
                   {mcp?.empty ?? "还没有连接器"}
                 </div>
               ) : (
