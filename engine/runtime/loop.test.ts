@@ -27,21 +27,47 @@ import { z } from "zod";
 /** 假 provider 的端口（`beforeAll` 里绑，绑在 0 上由系统分配）。 */
 let port = 0;
 let server: Server;
-/** 收到过几次请求（断言"真发了"）。 */
-let hits = 0;
-/** 下一次响应要用哪套 chunk。 */
-let script: (reqBody: unknown, nth: number) => object[] = () => [];
+/** 收到过的请求体（按到达顺序）。 */
+let bodies: unknown[] = [];
+/** 造一份响应：**由请求体自己决定**（见下面的说明）。 */
+let script: (reqBody: unknown) => object[] = () => [];
 
 /**
- * "第一轮这样回、之后那样回"。
+ * ⚠️ 假 provider 必须**无状态** —— 这条是踩出来的。
+ *
+ * 第一版用一个共享的"第几次请求"计数器来选分支，于是**跨用例串了**：
+ * 上一个用例的迟到请求（循环在步数上限处停下时，最后一次请求可能还在飞）
+ * 会涨到下一个用例的计数器上，让它拿到错误的那一支 ——
+ * 表现为"同样的代码，一次红一次绿"（实测：同一份测试连跑两次，一次 3 红一次全绿）。
+ *
+ * 现在响应只由**请求体**决定（体里带没带工具结果），于是迟到请求落在哪个用例里
+ * 都只会拿到"它自己该拿的"那一支。断言也按用例的**独有 token** 过滤，不看总数。
+ */
+function bodyText(body: unknown): string {
+  return JSON.stringify(body ?? "");
+}
+
+/** 请求体里有没有工具结果（有 = 模型已经看过工具输出，该收尾了）。 */
+function hasToolResult(body: unknown): boolean {
+  return bodyText(body).includes('"role":"tool"');
+}
+
+/** 用例 token（每条请求的 system 里都带上，用它把"我的请求"和迟到请求分开）。 */
+let token = "";
+/** 本用例真正打到假 provider 的请求数。 */
+function hitsOf(t: string): number {
+  return bodies.filter((b) => bodyText(b).includes(t)).length;
+}
+
+/**
+ * "第一轮这样回、之后那样回"（**按请求体判断**，不按计数器）。
  *
  * ⚠️ 这个帮手是必须的：多步循环里 SDK 会**再发一次请求**（把工具结果带上），
  * 而一个每次都吐同一套 chunk 的假 provider 会让模型"无限重复调同一个工具" ——
- * 那是**假 provider 的行为**，不是被测代码的问题。第一次写这组用例时就是这么失败的
- * （执行体被调了 3 次，而不是 1 次）。
+ * 那是**假 provider 的行为**，不是被测代码的问题。
  */
-function scriptOnce(first: object[], then: object[]): (reqBody: unknown, nth: number) => object[] {
-  return (_body, nth) => (nth === 1 ? first : then);
+function scriptOnce(first: object[], then: object[]): (reqBody: unknown) => object[] {
+  return (body) => (hasToolResult(body) ? then : first);
 }
 
 /** 一帧 chunk 的公共字段。 */
@@ -84,14 +110,14 @@ beforeAll(async () => {
       body += String(d);
     });
     req.on("end", () => {
-      hits += 1;
       let parsed: unknown = null;
       try {
         parsed = JSON.parse(body);
       } catch {
         /* 请求体不合法也照吐（这一轮测的不是它） */
       }
-      const chunks = script(parsed, hits);
+      bodies.push(parsed);
+      const chunks = script(parsed);
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       for (const chunk of chunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       res.write("data: [DONE]\n\n");
@@ -112,18 +138,24 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  hits = 0;
+  bodies = [];
   script = () => [];
+  token = `tk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 });
 
-/** 跑一轮（provider 固定为指向假服务的 strata）。 */
+/**
+ * 跑一轮（provider 固定为指向假服务的 strata）。
+ *
+ * system 里带上本用例的 token —— 断言据此只数**自己的**请求，
+ * 上一个用例的迟到请求不会再冒充成这一次的。
+ */
 async function run(
   onEvent: (e: TurnEvent) => void,
   extra: Partial<Parameters<typeof runTurn>[0]> = {},
   deps: Parameters<typeof runTurn>[2] = {},
 ) {
   return runTurn(
-    { provider: "strata", messages: [{ role: "user", content: "你好" }], ...extra },
+    { provider: "strata", system: `用例 ${token}`, messages: [{ role: "user", content: "你好" }], ...extra },
     onEvent,
     deps,
   );
@@ -135,7 +167,7 @@ describe("主循环 · 文本与用量", () => {
     const events: TurnEvent[] = [];
     const outcome = await run((e) => events.push(e));
 
-    expect(hits).toBe(1);
+    expect(hitsOf(token)).toBe(1);
     expect(outcome).toMatchObject({ ok: true, aborted: false, provider: "strata", model: "deepseek-flash" });
     expect(events.filter((e) => e.type === "text").map((e) => (e as { text: string }).text)).toEqual(["你", "好"]);
     expect(events.filter((e) => e.type === "step-finish")).toHaveLength(1);
@@ -181,7 +213,7 @@ describe("主循环 · 工具往返", () => {
     );
     const { executor, calls } = spyExecutor({ ok: true, output: { text: "内容" } });
     const tools = buildToolSet({
-      registry: registry(),
+      registry: createToolRegistry(),
       mode: "全部允许",
       executor,
       ctx: { mode: "全部允许", provider: "strata" },
@@ -249,6 +281,34 @@ describe("主循环 · 工具往返", () => {
   });
 });
 
+describe("主循环 · 步数上限是参数（Phase 3.2）", () => {
+  it("⭐ 父 4 / 子 6：同一个循环，只有这个参数不同", async () => {
+    /*
+     * 假 provider **每次都回工具调用** —— 于是唯一的刹车就是步数上限。
+     * 这条比"读源码断言 maxSteps: 4"强得多：它证明那个数**真的**在起作用
+     * （4 与 6 各自的经验值不许被顺手统一，理由见 runTurn 的文件头）。
+     */
+    // 假 provider 每次都给一个工具调用（无状态）→ 唯一的刹车就是步数上限
+    let n = 0;
+    script = () => [toolChunk(`call_${(n += 1)}`, "read_file", '{"path":"a.md"}'), finish("tool_calls")];
+    const tools = buildToolSet({
+      registry: createToolRegistry(),
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true, output: { line: "ok" } }) },
+      ctx: { mode: "全部允许", provider: "strata" },
+    });
+
+    const four: TurnEvent[] = [];
+    await run((e) => four.push(e), { tools, maxSteps: 4 });
+    expect(four.filter((e) => e.type === "tool-call"), "父级应当跑 4 步就停").toHaveLength(4);
+
+    const six: TurnEvent[] = [];
+    // 子智能体那条路（`runSubagent`）用的就是这个数
+    await run((e) => six.push(e), { tools, maxSteps: 6 });
+    expect(six.filter((e) => e.type === "tool-call"), "子智能体应当跑 6 步才停").toHaveLength(6);
+  });
+});
+
 describe("主循环 · 中止与健康账本", () => {
   it("⭐ 用户中止：aborted=true，**不判 provider 失败**，也不记成功", async () => {
     script = () => [text("一"), text("二"), text("三"), finish("stop")];
@@ -289,7 +349,7 @@ describe("主循环 · 前置校验与错误翻译", () => {
     const outcome = await runTurn({ provider: "没有这家", messages: [{ role: "user", content: "hi" }] }, (e) => events.push(e));
     expect(outcome.ok).toBe(false);
     expect(events[0]).toMatchObject({ type: "error" });
-    expect(hits).toBe(0);
+    expect(hitsOf(token)).toBe(0);
   });
 
   it("模型名不在清单里就退回默认（不拿一个不存在的模型去请求）", () => {
