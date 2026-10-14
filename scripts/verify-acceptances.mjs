@@ -409,7 +409,7 @@ for (const [file, what] of CASES) {
    */
   await killLeftovers();
 
-  let { code, tail } = await run(file);
+  let { code, tail, out } = await run(file);
   let retried = false;
 
   /*
@@ -430,6 +430,8 @@ for (const [file, what] of CASES) {
       code = 0;
     } else {
       tail = second.tail;
+      /* ⚠️ 重试失败时**换成第二次的输出**（第一次那份已经没有诊断价值了） */
+      out = second.out;
     }
   }
 
