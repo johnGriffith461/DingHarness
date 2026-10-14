@@ -33,8 +33,15 @@ import { describe, expect, it } from "vitest";
  * 放进 vitest 才会在 `pnpm test` 里拦下来。
  */
 
-/** 当前基线：不许超过这个数（改小了就把这里也改小）。 */
-const MAX_HARDCODED_RULES = 1;
+/**
+ * 当前基线：不许超过这个数（改小了就把这里也改小）。
+ *
+ * ⚠️ 2026-10-14 从 1 降到 **0**：最后那一处是 `.wb-media-cell.is-broken::before`
+ * 的斜纹底（第二档写死 `#e6eaf3` —— 还是个冷蓝灰），已换成令牌 `var(--bg-3)`。
+ * 至此**工作台里没有任何一处硬编码颜色**：深色主题不再是"欠着一笔账"，
+ * 而是"新增一处就红"。
+ */
+const MAX_HARDCODED_RULES = 0;
 
 
 /** 粗略切规则：`选择器 { 声明 }`。 */
@@ -58,8 +65,8 @@ const RGB = /rgba?\(/;
  *
  * @returns 各计数
  */
-function count(): { wbRules: number; hardRules: number; varRules: number } {
-  const all = rules(readAllCss());
+function count(text: string = readAllCss()): { wbRules: number; hardRules: number; varRules: number } {
+  const all = rules(text);
   let wbRules = 0;
   let hardRules = 0;
   let varRules = 0;
@@ -89,11 +96,19 @@ describe("主题棘轮：深色主题的成本不许再涨", () => {
     ).toBeLessThanOrEqual(MAX_HARDCODED_RULES);
   });
 
-  it("**两类都要非平凡**（否则说明切规则的正则坏了、这条棘轮是假的）", () => {
-    const { wbRules, hardRules } = count();
+  it("**切规则的正则真的在工作**（拿构造的样式验它，不靠仓库里恰好还剩一条）", () => {
+    const { wbRules } = count();
     // 基线与实测规模对得上，否则说明切规则的正则坏了、这条棘轮是假的
     expect(wbRules).toBeGreaterThan(300);
-    expect(hardRules).toBeGreaterThan(0);
+    /*
+     * ⚠️ 2026-10-14：棘轮降到 0 之后，原来那条 `expect(hardRules).toBeGreaterThan(0)`
+     * 就**立不住了** —— 它靠"仓库里恰好还剩一条硬编码"来证明正则没坏。
+     * 而"希望仓库里长期留着一条坏样本"本身就是个坏判据（它逼你为了测试而留脏东西），
+     * 所以换成拿一段**构造**的样式直接验解析：该数出来的必须数出来。
+     */
+    const sample = count(".wb-sample { background: #abcdef; }\n.wb-sample2 { color: var(--fg); }");
+    expect(sample.hardRules, "含 #hex 的规则没被数成硬编码 —— 这条棘轮在空转").toBe(1);
+    expect(sample.varRules, "走变量的规则没被数出来").toBe(1);
   });
 
   /**

@@ -318,6 +318,33 @@ export async function closeCanvas(page) {
 }
 
 /**
+ * 展开右侧「对话摘要」面板（幂等）—— 右栏已经展开就直接返回。
+ *
+ * ## 为什么要有它（2026-10-14）
+ * 右栏从这天起**默认收起**（照 Dingwork 原型的口径：塌成右缘一条竖直把手 `wb-summary-expand`，
+ * 点开才展开），而**4 条脚本原来直接点 `wb-summary-tab-*`**
+ * （`accept-artifacts` / `accept-emptystates` / `accept-media` / `accept-workbench`）。
+ * 不先展开，它们会一起红。
+ *
+ * 与 `openCanvas` 同一个理由：**别让 4 处各写一遍"先展开再点"** —— 写四遍就会漂
+ * （画布那次就是 41 处各写一遍，最后收敛成 `openCanvas`）。
+ *
+ * @param page 页面
+ * @returns 面板是否处于展开态
+ */
+export async function openSummary(page) {
+  const aside = page.locator('[data-testid="wb-summary"]');
+  if ((await aside.count()) === 0) return false;
+  const isCollapsed = () => aside.first().evaluate((el) => el.classList.contains("is-collapsed"));
+  if (!(await isCollapsed())) return true;
+  const handle = page.locator('[data-testid="wb-summary-expand"]');
+  if ((await handle.count()) === 0) return false;
+  await handle.first().click();
+  await page.waitForTimeout(400);
+  return !(await isCollapsed());
+}
+
+/**
  * 连 CDP，失败**重试几次**（2026-10-14）。
  *
  * 这台机器上偶发 `connectOverCDP` 抖动：HTTP 端点答得出来、WebSocket 却

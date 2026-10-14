@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, openCanvas, openSummary, pickPort, shot, waitForPort } from "./harness.mjs";
 
 /**
  * 工作台外壳验收（阶段 10）。
@@ -134,6 +134,8 @@ report.canvasAfterToggle = await page.locator('[data-testid="wb-canvas"]').count
   await page.waitForTimeout(1500);
 
 // 5b) 右侧面板是四个 tab（上位 sidePanel_summary_tab_*）
+// 右栏 2026-10-14 起默认收起（照原型）→ 先展开
+report.summaryOpened = await openSummary(page);
 report.summaryTabs = await page.$$eval('[data-testid^="wb-summary-tab-"]', (els) =>
   els.map((e) => e.textContent.trim()),
 );

@@ -35,7 +35,7 @@ export const SETTINGS_LABELS = {
   /** `settings_modelSelection_useLast` */
   useLast: "记忆上次",
   /** `settings_item_doubaoWebsite_cn` */
-  website: "豆包官网",
+  website: "项目主页",
   /** `settings_label_user_policy_cn` */
   userPolicy: "用户协议",
 } as const;

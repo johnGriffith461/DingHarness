@@ -1,6 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { stepCountIs, streamText, type ToolSet } from "ai";
 
+import type { StepUsage } from "../../shared/cost";
 import { getProvider } from "./aiProviders";
 import { resolveSecret } from "./credentials";
 import { markProviderFailed, markProviderOk } from "./aiProbe";
@@ -32,7 +33,7 @@ import { markProviderFailed, markProviderOk } from "./aiProbe";
  */
 
 /** 这一轮的用量（provider 给的；拿不到就是 undefined —— **不编**）。 */
-export type TurnUsage = { inputTokens?: number; outputTokens?: number };
+export type TurnUsage = StepUsage;
 
 /**
  * 循环吐出的事件（**与 `AiStreamEvent` 分开**）。
@@ -173,6 +174,11 @@ export async function runTurn(
 
   try {
     const client = createOpenAICompatible({ name: provider.id, baseURL: provider.baseURL, apiKey });
+    /*
+     * 这一轮**真的**花了多久 —— 吞吐量（tok/s）的分母。
+     * 量的是"从发请求到 provider 把用量交回来"这一段；界面上那个数因此是实测，不是估的。
+     */
+    const startedAt = Date.now();
     const result = streamText({
       model: client(model),
       messages: input.messages,
@@ -226,7 +232,21 @@ export async function runTurn(
     let usage: TurnUsage | undefined;
     try {
       const final = await result.usage;
-      usage = { inputTokens: final.inputTokens, outputTokens: final.outputTokens };
+      /*
+       * ⚠️ 除了输入/输出，还要把 provider 的**缓存明细**带回去（2026-10-14）：
+       * AI SDK 给了 `inputTokenDetails.noCacheTokens / cacheReadTokens / cacheWriteTokens`，
+       * 而这里**原来只取了两个字段就把对象丢了** —— 于是界面上"缓存命中/缓存读取"永远没有数据，
+       * 不是"provider 没给"，是我们没接。缺字段照旧**不编**（有就带上，没有就不带）。
+       */
+      const d = final.inputTokenDetails;
+      usage = {
+        inputTokens: final.inputTokens,
+        outputTokens: final.outputTokens,
+        ...(typeof d?.noCacheTokens === "number" ? { noCacheTokens: d.noCacheTokens } : {}),
+        ...(typeof d?.cacheReadTokens === "number" ? { cacheReadTokens: d.cacheReadTokens } : {}),
+        ...(typeof d?.cacheWriteTokens === "number" ? { cacheWriteTokens: d.cacheWriteTokens } : {}),
+        elapsedMs: Date.now() - startedAt,
+      };
     } catch {
       usage = undefined; // 拿不到就不给（**不编**）
     }

@@ -34,6 +34,48 @@
   gap: 8px;
 }
 
+/*
+ * 主页那一条列的对齐（2026-10-14）：推荐区与上面那行「为你推荐」跟着输入框的 780 列走。
+ *
+ * 原来它们是 `align-self: flex-start` + `margin-left: 12%`（本体截图的口径）。
+ * 输入区收成 780 居中之后，按 12% 走的推荐区会与输入框的左边缘**错开**，
+ * 所以改成"同一条居中列 + 左对齐"。
+ *
+ * ⚠️ `accept-suggestions` 钉的是"标签左边缘 == 卡片左边缘"这条**相对**关系 ——
+ * 两者一起搬，它照样成立（实测 423/423，收列后一起变）。
+ */
+.wb-home-label,
+.wb-suggestions {
+  align-self: center;
+  margin-left: 0;
+  width: 780px;
+  max-width: calc(100% - 48px);
+}
+
+/*
+ * 入场编排（2026-10-14，照 Dingwork 原型的口径：**网格 stagger 70ms 入场**）。
+ *
+ * 在此之前这一区只有"悬停抬升"（下面那条 `.wb-suggestion:hover`）—— 交互态有、**入场态没有**：
+ * 卡片是"啪"地一起出来。原型把这条当规格写在界面上（"卡片 hover 抬升 -2px + 阴影加深；
+ * 网格 stagger 70ms 入场"）。
+ *
+ * 用的是 Dingwork 交付的关键帧 `dw-rise`（`dingwork-motion.css`：opacity + translateY(8px)，
+ * 300ms `--ease-out`）。静态补偿天然成立：只动 opacity/transform，终态就是常态；
+ * `prefers-reduced-motion` 时由 motion.css 那一段压成瞬结。
+ *
+ * ⚠️ 位置有讲究：必须排在下面那条 `.wb-suggestion { … }` **之前**。
+ * `uiCraft.test.ts ③` 取的是"**最后一处** `.wb-suggestion {` 块"（它是为覆盖块写的取法）,
+ * 我这段若排在后面，会被它当成那条基础规则、因为里面没有 `--dur-quick` 而判红。
+ */
+.wb-suggestions > .wb-suggestion {
+  animation: dw-rise 300ms var(--ease-out) both;
+}
+.wb-suggestions > .wb-suggestion:nth-child(1) { animation-delay: 0ms; }
+.wb-suggestions > .wb-suggestion:nth-child(2) { animation-delay: 70ms; }
+.wb-suggestions > .wb-suggestion:nth-child(3) { animation-delay: 140ms; }
+.wb-suggestions > .wb-suggestion:nth-child(4) { animation-delay: 210ms; }
+.wb-suggestions > .wb-suggestion:nth-child(n + 5) { animation-delay: 280ms; }
+
 .wb-suggestion {
   display: inline-flex;
   align-items: center;
@@ -229,23 +271,69 @@ html[data-kb="1"] .wb-composer:focus-within {
   outline: none;
 }
 
-/* 输入区里的 chip：悬停/按下都要有回应 */
+/* ---------- 输入区里的 chip：2026-10-14 照 Dingwork 原型重做外形 ----------
+ *
+ * 原来是**填充式浅灰块**（`background: var(--surface-hover)`、`border: 0`、8px 圆角）。
+ * 原型（`dingwork-app.html` 的 `.chip`）是**描边胶囊**：
+ *   font-size 11.5px / padding 3px 11px / border-radius 999px /
+ *   `border: 1px solid var(--line)` / 透明底 / 字色 `--fg-dim`；
+ *   hover → 描边与字色都变强调色；入场 `dw-chip-pop` 60ms 错峰；选中 `.on` → `--accent-tint` 底。
+ *
+ * ⚠️ 顺带修活了一条一直没生效的规则：选中态 `.wb-chip.is-on` 本来就写着
+ * `border-color: var(--accent)`（theme.css），但**旧基础规则是 `border: 0`** ——
+ * 没有边框，那条等于不存在。现在基础边框有了 1px，它才真的看得见。
+ */
 .wb-chip {
+  font-size: 11.5px;
+  padding: 3px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--dw-radius-pill);
+  background: transparent;
+  color: var(--fg-dim);
   transition:
+    transform var(--dur-instant) var(--ease-out),
     background-color var(--dur-quick) var(--ease-out),
     border-color var(--dur-quick) var(--ease-out),
-    transform var(--dur-quick) var(--ease-out);
+    color var(--dur-quick) var(--ease-out);
 }
 
 .wb-chip:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--line-strong);
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .wb-chip:active:not(:disabled) {
   /* 同上：按下一律 0.96（原来 0.97，几乎看不出来 —— 等于没有触感） */
   transform: scale(0.96);
 }
+
+/* 选中态：原型 `.chip.on` 是"淡朱底 + 朱红描边与字"（theme.css 已有边框/字色那半，这里补底） */
+.wb-chip.is-on {
+  background: var(--accent-tint);
+}
+
+/* 档位 chip：原型是**虚线**描边（`style="--i:4;border-style:dashed"`），表示"自动"不是选项 */
+.wb-chip-auto {
+  border-style: dashed;
+}
+
+/*
+ * 入场编排：原型在每个 chip 上写 `--i`（0..4）驱动 60ms 错峰。
+ * 真机的 chips 分散在几个 wrap/env 容器里（不在同一个父下），所以按**输入条的直接子元素**
+ * 排队 —— 效果等价，但不用改 6 处 JSX 去塞 `--i`。
+ */
+.wb-composer-bar .wb-chip {
+  animation: dw-chip-pop var(--dur) var(--ease-spring) both;
+}
+.wb-composer-bar > *:nth-child(3) .wb-chip { animation-delay: 60ms; }
+.wb-composer-bar > *:nth-child(4) .wb-chip { animation-delay: 120ms; }
+.wb-composer-bar > *:nth-child(5) .wb-chip { animation-delay: 180ms; }
+.wb-composer-bar > *:nth-child(n + 6) .wb-chip { animation-delay: 240ms; }
+/* ⚠️ 档位那颗 chip 是输入条的**直接子元素**（没包在 wrap 里），
+   上面那几条要的是"子元素**里面**的 chip"，够不着它 —— 补一条自身命中的。
+   实测抓到：它的 animation-delay 是 0s，而不是该有的 240ms。 */
+.wb-composer-bar > .wb-chip:nth-child(n + 6) { animation-delay: 240ms; }
 
 /* ---------- 流式光标（2026-10-14）：正文末尾那根闪动的竖条 ---------- */
 
@@ -542,9 +630,21 @@ html[data-kb="1"] .wb-searchbox:focus-within {
 /*
  * 输入区：它是"浮在工作区上的一块卡片"，原来只有描边 + 和背景同色（`--bg`），
  * 于是看着像地上画了个框。给它卡片级阴影，读起来才是"可以打字的那一块"。
+ *
+ * 2026-10-14 补**列宽**：照 Dingwork 原型，主页/对话是**一条 780 宽的居中列**
+ * （原型口径：字标 460、输入框 780，推荐与它们同边）；真机原来把中栏铺满（~1074 宽），
+ * 输入框宽到像在写论文。
+ * ⚠️ 收在 `.wb-composer` 上（而不是只收主页那一处）是因为**左右两栏用的是同一个组件** ——
+ * 只收主页会让"发出第一条消息"时输入框**跳一下**（主页 780 ↔ 任务页铺满）。
  */
 .wb-composer {
   box-shadow: var(--shadow-card);
+  /* ⚠️ `width: 100%` 必须写：给 flex 项加 `margin: auto` 会**取消它在交叉轴上的 stretch**，
+     盒子于是缩成内容宽（实测只有 528，而不是 780）。100% + max-width 才是"撑满但不超过 780"。 */
+  width: 100%;
+  max-width: 780px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* ---------- 输入区的「资料」附件（2026-10-14）----------

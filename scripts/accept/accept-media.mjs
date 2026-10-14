@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, openSummary, pickPort, shot, waitForPort } from "./harness.mjs";
 
 /**
  * 11.13 验收：右栏「图片与视频」画廊 + 另两个 tab 的如实空态。
@@ -48,6 +48,9 @@ await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
 await page.waitForTimeout(1500);
 
 const report = {};
+
+/* 右栏 2026-10-14 起默认收起（照 Dingwork 原型：塌成右缘一条竖直把手）→ 先展开再点页签 */
+report.summaryOpened = await openSummary(page);
 
 /* ---------- 图片与视频 ---------- */
 await page.locator('[data-testid="wb-summary-tab-media"]').click();

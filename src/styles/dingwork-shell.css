@@ -1,0 +1,204 @@
+/* ============================================================
+ * Dingwork 原型里那几处**外壳行为**在本机版的落地（2026-10-14）
+ * ------------------------------------------------------------
+ * 为什么单独一个文件：这几块原来是加在 `workbench.css` 里的，**当场被结构守卫拦下**
+ * （C6-5：`.css ≤ 1500`，加完 1609 行）—— 与当初 `craft.css` 分出来的原因一模一样
+ * （见它的文件头）。守卫拦得对：它要的就是"再长出一个巨石"变成一件会失败的事。
+ *
+ * 为什么**不**塞进 `craft.css`：那个文件的定位是"**既有组件的**手艺
+ * （间距/层级/状态/过渡）"；而这里两条都不是手艺 ——
+ *   ① 右栏收起：照原型新加的一处**行为**（默认收起 + 右缘浮标）；
+ *   ② 输入区用量弹层：照原型新加的一个**组件**的样式。
+ * 所以单独成文件，名字直说它是什么。
+ *
+ * 引入位置：`src/styles.css` 的 @import 串**末尾**（与 craft.css 同层，压轴生效）。
+ * ============================================================ */
+
+/* ============================================================
+   一、右栏收起（照 Dingwork 原型的**几何**）
+   ------------------------------------------------------------
+   原型那边（`dingwork-app.html` 的 `.rail-edge` / `.side.right`）是这么定的：
+     · 收起 = 右栏 `display: none` —— **一点都不占列**，主区一直铺到窗口右缘；
+     · 同时右缘浮一颗**竖直居中**的胶囊（`right: 0; top: 50%; translateY(-50%)`，
+       `border-right: 0` + 左侧圆角，像从边上"长"出来的一条）；
+     · 展开时那颗浮标自动隐藏（`.rail-open .rail-edge { display: none }`）。
+ 
+   ⚠️ 我第一版做成了"44px 一条竖带 + 胶囊贴顶" —— 那与原型不是一回事（截图比对过），
+   这里按原型的几何重做：胶囊用 `position: fixed`，所以它**放在 `.wb-summary` 里面**
+   也照样能浮到右缘（收起的栏宽为 0，fixed 元素不受影响）。
+ 
+   默认值是**收起**（主人 2026-10-14 点名），代价见 `SummaryPanel.tsx` 的注释
+   （4 条验收原来直接点 `wb-summary-tab-*`，已在 `harness.openSummary` 里补齐）。
+   ============================================================ */
+.wb-summary.is-collapsed {
+  width: 0;
+  flex: 0 0 0;
+  /* 收起时不留边界阴影：那道阴影是"两栏分界"的信号，栏都没了就不该有 */
+  box-shadow: none;
+}
+
+.wb-summary.is-collapsed > *:not(.wb-summary-handle) {
+  display: none;
+}
+
+/* 右缘浮标（原型的 `.rail-edge`）：竖直居中、贴右缘、左侧圆角 */
+.wb-summary-handle {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30; /* 工作台层内的浮层（仓库的 z 阶梯：100 模态 / 200 悬浮窗 / 300 工作台菜单） */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 6px 11px 5px;
+  border: 1px solid var(--line-strong);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  background: var(--surface);
+  color: var(--fg-dim);
+  cursor: pointer;
+  box-shadow: var(--shadow-chip);
+  transition:
+    color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out),
+    background-color var(--dur-quick) var(--ease-out),
+    padding var(--dur-quick) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+/* ⚠️ 竖排只给**文字**（图标要保持正立）—— 原型就是这么分的（`.re-ic` / `.re-tx`） */
+.wb-summary-handle > span {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  writing-mode: vertical-rl;
+}
+
+/* hover 时整体向右"让"一点 + 变强调色（原型同款，含 padding 的过渡） */
+.wb-summary-handle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  padding-right: 9px;
+}
+
+.wb-summary-handle:active {
+  transform: translateY(-50%) scale(0.96);
+}
+
+/* ============================================================
+   二、输入区里的「用量」弹层（主人 2026-10-14 点名要的）
+   ------------------------------------------------------------
+   形态照 Dingwork 原型的上下文容量弹层（`.ctx-pop`）：272px / 12px 圆角 / 卡片阴影；
+   值走等宽字体 + `tabular-nums`（数一变就左右跳的毛病在这条上最明显）。
+ 
+   ⚠️ 方向与原型**相反**，这是有意的：原型那边输入框悬在页面下半屏、**下方还留着一大块**，
+   所以它 `top: calc(100% + 10px)` 向下开；本机版的输入框贴在窗口底部（下方只剩 ~20px），
+   向下开等于直接开出屏幕。所以这里 `bottom: calc(100% + 10px)` **向上开** ——
+   与输入区其它几个弹层（`.wb-chip-pop` / `.wb-env-pop`）同一套方向。
+   向上在这里不会被裁：输入区是滚动区的**兄弟**（`.wb-home-scroll` 才是滚动容器），
+   不是它的子元素 —— 原型那条"向上会被 `.page` 裁掉"的隐患在本机版不成立。
+   ============================================================ */
+.wb-usage-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: -6px;
+  z-index: 40;
+  width: 272px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transform-origin: bottom right;
+  animation: wb-pop-up var(--dur) var(--ease-spring) both;
+}
+
+/* 原型的 `dw-pop-down` 没随 `dingwork-motion.css` 交付（那份只有 8 条动效），
+   所以这里按同一个意图补一条本地的「弹层上浮」：位移 4px + 淡入。 */
+@keyframes wb-pop-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.wb-usage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.wb-usage-head b {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.wb-usage-head .mono {
+  font-family: var(--dw-font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+}
+
+.wb-usage-empty {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  line-height: 1.6;
+}
+
+.wb-usage-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 行：值在右（等宽 + tabular-nums），标签在左，末位一枚小圆点当分组记号 */
+.wb-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+.wb-usage-row .v {
+  margin-left: auto;
+  order: 2;
+  font-family: var(--dw-font-mono);
+  font-size: 10.5px;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-usage-row .point {
+  order: 3;
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.wb-usage-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+
+.wb-usage-foot .mono {
+  font-family: var(--dw-font-mono);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}

@@ -23,6 +23,8 @@ import { Square } from "lucide-react";
 import SkillPanel from "./SkillPanel";
 
 import { CONFIRM_MODES } from "./uiUtil";
+import { UsagePopover } from "./UsagePopover";
+import { sumUsage } from "@shared/cost";
 
 /**
  * 把导入失败的原因转成一句人话。
@@ -63,6 +65,12 @@ export function Composer({
   const setCanvasOpen = useWorkbenchStore((s) => s.setCanvasOpen);
   const setView = useWorkbenchStore((s) => s.setView);
   const setPluginsIntent = useWorkbenchStore((s) => s.setPluginsIntent);
+  /*
+   * 当前任务（用量弹层要读它各步的 `usage`）。
+   * ⚠️ 选的是**任务对象**本身：在 selector 里返回 `steps.map(...)` 之类的**新数组**
+   * 会让每次渲染都被判成"变了"，很容易转成重渲染环。
+   */
+  const activeTask = useWorkbenchStore((s) => s.tasks.find((t) => t.id === s.activeTaskId));
   const [text, setText] = useState("");
 
   /**
@@ -121,7 +129,7 @@ export function Composer({
    * 换成单值之后，"最多只有一个开着"是**结构上保证的**，不靠每处记得去关别人。
    * 以后再加 chip 也不会重犯这个问题。
    */
-  const [openPop, setOpenPop] = useState<null | "project" | "confirm" | "skill" | "plugin" | "add">(null);
+  const [openPop, setOpenPop] = useState<null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage">(null);
   /*
    * 工作区（2026-10-14）：用户授权给 agent 干活的目录。
    * 列表在**菜单打开时**才拉（它是主进程的磁盘状态，没必要一直挂着）。
@@ -153,7 +161,7 @@ export function Composer({
    *
    * @param which 要切换的下拉
    */
-  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add"): void =>
+  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage"): void =>
     setOpenPop((cur) => (cur === which ? null : which));
 
   const installed = useLibraryStore((s) => s.lib.installed);
@@ -730,9 +738,23 @@ export function Composer({
 
           所以属于"参考里有、我还没做"，按标准禁用并记进待做。
         */}
-        <button className="wb-chip" title="模型档位（本机版还没做档位选择）" disabled>
-          自动 <ChevronDown size={12} /> 低
+        <button className="wb-chip wb-chip-auto" title="模型档位（本机版还没做档位选择）" disabled>
+          {/* 文案与形态照 Dingwork 原型：`AUTO · LOW`、**虚线**描边（表示"自动"不是可选项）。
+              原来写的是「自动 ⌄ 低」并带一个下拉箭头 —— 而它是 disabled 的，
+              带箭头等于承诺一个不存在的菜单（"假按钮"的另一种长相）。 */}
+          AUTO · LOW
         </button>
+
+        {/*
+          Token 用量（2026-10-14）：数从**当前任务的各步真实用量**合计来
+          （`sumUsage` 逐项求和，吞吐量由 `usageRows` 用"总输出 ÷ 总耗时"现算）。
+          没有任务、或 provider 没给用量时它显示空态 —— **不编数**。
+        */}
+        <UsagePopover
+          usage={sumUsage((activeTask?.steps ?? []).map((s) => s.usage))}
+          open={openPop === "usage"}
+          onToggle={() => togglePop("usage")}
+        />
         {/*
           ⚠️ **流式过程中这里是「停止」**（补完⑤）。
           在此之前，工作台**没有任何停止入口**：`store.abort()` 实现了却只有提问卡的"关闭"

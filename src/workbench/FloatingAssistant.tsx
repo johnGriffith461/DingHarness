@@ -196,7 +196,7 @@ ${block}` : value;
         </button>
         <span className="wb-spacer" />
         <span className="wb-float-user" data-testid="wb-float-user">
-          按时吃饭450 ›
+          本机用户 ›
         </span>
         <button className="wb-icon" aria-label="语音通话" title="语音通话（按用户口径不做）" disabled>
           <Phone size={14} />

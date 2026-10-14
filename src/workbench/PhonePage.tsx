@@ -60,7 +60,7 @@ export function PhonePage() {
           <div className="wb-mini-label">远程控制</div>
           <h2 className="wb-page-h2">出门也能操作电脑</h2>
           <p className="wb-page-p">
-            用手机豆包在工作任务中，连接此电脑后，可远程继续任务，接收进度提醒，并调用这台电脑上的文件和工具。
+            用手机端在工作任务中，连接此电脑后，可远程继续任务，接收进度提醒，并调用这台电脑上的文件和工具。
           </p>
 
           <div className="wb-switch-list">
@@ -98,7 +98,7 @@ export function PhonePage() {
             <div className="wb-step">
               <span className="wb-step-num">1</span>
               <span>
-                <b>打开手机豆包 App</b>
+                <b>打开手机端 App</b>
                 <em>登录与当前电脑相同账号</em>
               </span>
             </div>
@@ -111,7 +111,7 @@ export function PhonePage() {
             </div>
             <div className="wb-qr">
               {/*
-                实机这里是一张真的二维码（扫了去下手机豆包）。
+                实机这里是一张真的二维码（扫了去下手机端）。
                 本机版**没有配套手机端**，所以不画一张假的二维码 ——
                 假码扫出来什么都没有，比一块说明更误导。
               */}
@@ -119,7 +119,7 @@ export function PhonePage() {
                 <Smartphone size={26} />
                 <em>本机版不含手机端</em>
               </div>
-              <em className="wb-qr-cap">下载或打开豆包 APP</em>
+              <em className="wb-qr-cap">下载或打开手机端 APP</em>
             </div>
           </div>
         </div>

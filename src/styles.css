@@ -25,3 +25,9 @@
 @import "./assets/fonts/martian.css";
 @import "./styles/dingwork-tokens.css";
 @import "./styles/dingwork-motion.css";
+/*
+ * Dingwork 原型那几处**外壳行为**的落地（右栏收起 / 输入区用量弹层）。
+ * 单独一个文件的原因写在它自己的文件头：加在 workbench.css 里会顶破结构守卫的 1500 行。
+ * 放在最后 = 与 craft.css 同层压轴生效。
+ */
+@import "./styles/dingwork-shell.css";

@@ -25,7 +25,7 @@ describe("设置文案（逐字）", () => {
   });
 
   it("关于页那几项", () => {
-    expect(SETTINGS_LABELS.website).toBe("豆包官网");
+    expect(SETTINGS_LABELS.website).toBe("项目主页");
     expect(SETTINGS_LABELS.userPolicy).toBe("用户协议");
   });
 
@@ -36,7 +36,7 @@ describe("设置文案（逐字）", () => {
   });
 
   it("关于标题按 `关于%s` 拼", () => {
-    expect(aboutTitle("豆包工作")).toBe("关于豆包工作");
+    expect(aboutTitle("Dingwork")).toBe("关于Dingwork");
     expect(aboutTitle("  ")).toBe("关于");
   });
 

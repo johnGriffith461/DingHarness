@@ -429,7 +429,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     if (!task) return "";
     const lines = [`# ${task.title}`, "", `> ${task.brief}`, ""];
     for (const step of task.steps) {
-      lines.push(step.role === "user" ? `**我：** ${step.text}` : `**豆包工作：** ${step.text}`, "");
+      lines.push(step.role === "user" ? `**我：** ${step.text}` : `**Dingwork：** ${step.text}`, "");
     }
     for (const artifact of task.artifacts) {
       lines.push(`- 产物：${artifact.title}（${artifact.filePath ?? "未落盘"}）`);

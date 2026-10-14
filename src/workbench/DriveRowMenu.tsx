@@ -55,7 +55,7 @@ export function DriveRowMenu({
 
   const items: MenuItem[] = [
     {
-      label: "问问豆包",
+      label: "问问助手",
       icon: <MessageCircle size={13} />,
       run: () => openFloat(`读一下这个文件：${entry.path}\n然后用一句话说清它讲了什么。`),
     },

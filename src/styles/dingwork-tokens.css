@@ -306,14 +306,26 @@
    ============================================================ */
 .wb,
 [data-theme="dark"] .wb {
-  /* 身份类：头像的两档与首页圆球（原来的蓝→紫→红换成朱红→暗朱→赭） */
+  /* 身份类：头像两档（原来的蓝→紫→红换成朱红→暗朱→赭） */
   --grad-avatar: linear-gradient(135deg, var(--accent), var(--accent-strong) 60%, var(--warn));
   --grad-avatar-xs: linear-gradient(135deg, var(--accent), var(--warn));
-  --grad-blob: linear-gradient(140deg, var(--accent), var(--accent-strong) 45%, var(--warn));
   /* 面板类：功能插画底 / 插件图标底 / 手机样机底（原来的浅蓝蓝灰换成纸白三级） */
   --grad-feature-art: linear-gradient(135deg, var(--bg-3), var(--bg-4));
   --grad-plugin-icon: linear-gradient(135deg, var(--bg-2), var(--bg-3));
   --grad-phone-mock: linear-gradient(160deg, var(--bg-2) 0%, var(--bg-3) 55%, var(--bg-4) 100%);
+}
+
+/* 首页圆球（品牌主角）单独来 —— 两种主题的**明度结构**不一样：
+   日间那套朱红族为了正文对比度必须压深（`--accent` #9a2f1c 本身就是暗的），
+   照抄同一条表达式会得到一块**闷砖**（实测截图对比过：夜间那颗是发光的）。
+   所以日间借夜间的亮朱红 `#d9603a`（同一个调色板里的值）当亮端，暗端收在 accent-strong。 */
+.wb {
+  --grad-blob: linear-gradient(140deg, #d9603a, var(--accent) 55%, var(--accent-strong));
+}
+
+/* 黑夜档：三个都取 token，本身就是「亮朱红→更亮→赭」 */
+[data-theme="dark"] .wb {
+  --grad-blob: linear-gradient(140deg, var(--accent), var(--accent-strong) 45%, var(--warn));
 }
 
 /* ============================================================

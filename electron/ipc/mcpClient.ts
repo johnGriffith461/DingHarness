@@ -167,7 +167,7 @@ export class McpClient {
         {
           protocolVersion: "2024-11-05",
           capabilities: {},
-          clientInfo: { name: "doubao-work-clone", version: "0.1.0" },
+          clientInfo: { name: "dingwork", version: "0.1.0" },
         },
         this.timeouts.handshakeMs,
       );

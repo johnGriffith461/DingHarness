@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openSummary, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**几条「一个人都没来过」的空态**（2026-10-13 补，§208 那类"没人点过的界面"）。
@@ -63,6 +63,9 @@ try {
   /* ③④ 右侧「对话摘要」：没开对话 → 产物页签「暂无」；媒体页签给那句"去哪生成" */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(900);
+  /* 右栏 2026-10-14 起默认收起（照原型）→ 先展开，下面读的 `wb-summary-*` 才在 */
+  out.summaryOpened = await openSummary(page);
+  await page.waitForTimeout(600);
   out.artifactsEmpty = await readEmpty("wb-artifacts-empty");
   await page.locator('[data-testid="wb-summary-tab-media"]').click();
   await page.waitForTimeout(1500);

@@ -46,7 +46,7 @@ export const FEATURED_ITEMS: CatalogItem[] = [
 
 /** 「特别推荐」的 15 个插件。 */
 export const RECOMMENDED_PLUGINS: CatalogItem[] = [
-  ["feishu", "飞书", "豆包直接完成飞书文档、日历…", "16.4 万人在用"],
+  ["feishu", "飞书", "直接完成飞书文档、日历…", "16.4 万人在用"],
   ["wecom", "企业微信", "通过企业微信 CLI …", "50.4 万人在用"],
   ["dingtalk", "钉钉", "通过钉钉 CLI 使用…", "41 万人在用"],
   ["tencent-meeting", "腾讯会议", "预约和管理会议，…", "14.7 万人在用"],

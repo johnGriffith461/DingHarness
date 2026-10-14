@@ -5,7 +5,7 @@
  */
 
 import { useState } from "react";
-import { FolderOpen, MoreHorizontal, Plus, Settings } from "lucide-react";
+import { ChevronRight, FolderOpen, PanelRight, Plus, Settings } from "lucide-react";
 import { useWorkbenchStore, openArtifact, revealArtifact } from "./store";
 import { ARTIFACT_TITLE_GENERATING, SUMMARY_RECENT_FILES, SUMMARY_RECENT_LIMIT_NOTE, SUMMARY_SESSION_FILES, SUMMARY_TABS, type SummaryTabId } from "./copy";
 import { resourceTypeOf } from "@shared/artifactProto";
@@ -19,18 +19,50 @@ export function SummaryPanel() {
   const [tab, setTab] = useState<SummaryTabId>("artifacts");
   const [opening, setOpening] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
+  /*
+   * 面板收起（2026-10-14）。这一颗按钮原来写着 `disabled` + "本机版还没做面板折叠" ——
+   * Dingwork 原型里右栏是**默认收起**的（塌成右缘一条竖直把手，点开才展开），
+   * 主人 2026-10-14 点名要这个口径，所以默认值取 `true`。
+   *
+   * ⚠️ 代价是**4 条验收脚本原来直接点 `wb-summary-tab-*`**（artifacts / emptystates /
+   * media / workbench），默认收起会让它们一起红 —— 已在 `harness.mjs` 里加了
+   * `openSummary(page)`（与 `openCanvas` 同一个理由：别让 4 处各写一遍"先展开再点"），
+   * 那 4 条各调一次。
+   */
+  const [collapsed, setCollapsed] = useState(true);
 
   const artifacts = task?.artifacts ?? [];
 
   return (
-    <aside className="wb-summary" data-testid="wb-summary">
+    <aside className={`wb-summary${collapsed ? " is-collapsed" : ""}`} data-testid="wb-summary">
+      {collapsed ? (
+        <button
+          className="wb-summary-handle"
+          data-testid="wb-summary-expand"
+          aria-label="展开对话摘要"
+          title="展开对话摘要"
+          onClick={() => setCollapsed(false)}
+        >
+          {/* 图标正立、文字竖排 —— 原型就是分两段做的（`.re-ic` / `.re-tx`）；
+              图标走 lucide（`uiCraft.test.ts ⑦` 明令不许用 Unicode 字形顶图标） */}
+          <PanelRight size={14} />
+          <span>面板</span>
+        </button>
+      ) : null}
+
       <header className="wb-summary-head">
         <span>对话摘要</span>
         <button className="wb-icon" aria-label="摘要设置" title="摘要设置（本机版没有后端）" disabled>
           <Settings size={14} />
         </button>
-        <button className="wb-icon" aria-label="收起" title="收起（本机版还没做面板折叠）" disabled>
-          <MoreHorizontal size={14} />
+        <button
+          className="wb-icon"
+          data-testid="wb-summary-collapse"
+          aria-label="收起对话摘要"
+          title="收起对话摘要"
+          onClick={() => setCollapsed(true)}
+        >
+          <ChevronRight size={14} />
         </button>
       </header>
 

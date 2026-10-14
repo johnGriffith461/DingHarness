@@ -129,10 +129,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </button>
         <div className="wb-modal-avatar" />
         <div className="wb-modal-name">
-          按时吃饭450 <ChevronRight size={13} />
+          本机用户 <ChevronRight size={13} />
         </div>
-        <div className="wb-modal-id">豆包号: user_QVqiCFv60</div>
-        <button className="wb-modal-primary" disabled title="本机版没有账号服务端">豆包账号管理</button>
+        <div className="wb-modal-id">本机模式 · 未登录</div>
+        <button className="wb-modal-primary" disabled title="本机版没有账号服务端">账号管理</button>
 
         {subPage ? (
           <SettingsPages

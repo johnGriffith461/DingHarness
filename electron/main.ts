@@ -73,7 +73,7 @@ function bootLog(message: string): void {
   const line = `[${new Date().toISOString()} pid=${process.pid}] ${message}\n`;
   const targets = [
     path.join(app.getPath("userData"), "boot.log"),
-    path.join(os.tmpdir(), "doubao-work-clone-boot.log"),
+    path.join(os.tmpdir(), "dingwork-boot.log"),
   ];
   for (const file of targets) {
     try {
@@ -92,7 +92,7 @@ function bootLog(message: string): void {
 function rawLog(message: string): void {
   try {
     fs.appendFileSync(
-      path.join(os.tmpdir(), "doubao-work-clone-boot.log"),
+      path.join(os.tmpdir(), "dingwork-boot.log"),
       `[${new Date().toISOString()} pid=${process.pid}] RAW ${message}\n`,
       "utf8",
     );

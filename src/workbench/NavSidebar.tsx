@@ -29,6 +29,7 @@ import { startTheme } from "./theme";
 import { shortcutFor } from "./shortcuts";
 import AccountMenu from "./AccountMenu";
 import ContextMenu, { clampMenu } from "./ContextMenu";
+import { BrandMark } from "./brandMark";
 
 import { setNoteIfAny } from "./uiUtil";
 import { SettingsDialog } from "./SettingsDialog";
@@ -120,7 +121,7 @@ export function NavSidebar() {
   return (
     <aside className="wb-nav" data-testid="wb-nav">
       <div className="wb-nav-head">
-        <span className="wb-brand">豆包工作</span>
+        <BrandMark />
         <button className="wb-icon" aria-label="后退" title="后退" disabled>
           <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
         </button>
@@ -374,7 +375,7 @@ export function NavSidebar() {
       <button className="wb-account" data-testid="wb-account" onClick={() => setAccountMenuOpen((v) => !v)}>
         <span className="wb-avatar" />
         <span className="wb-account-text">
-          <b>按时吃饭450</b>
+          <b>本机用户</b>
           <em>标准套餐</em>
         </span>
         <Settings size={14} />

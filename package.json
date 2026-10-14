@@ -1,8 +1,9 @@
 {
-  "name": "doubao-work-clone",
+  "name": "dingwork",
   "version": "0.1.0",
   "private": true,
-  "description": "AI 工作台 + 无限画布（对标豆包工作 2.32.1 ai-views 形态与核心机制）",
+  "description": "Dingwork —— AI 工作台 + 无限画布",
+  "license": "MIT",
   "type": "module",
   "main": "dist-electron/electron/main.cjs",
   "packageManager": "pnpm@10.34.1",
@@ -65,8 +66,8 @@
     "zustand": "^5.0.0"
   },
   "build": {
-    "appId": "com.doubaoworkclone.app",
-    "productName": "工作台",
+    "appId": "com.dingwork.app",
+    "productName": "Dingwork",
     "directories": {
       "output": "release"
     },

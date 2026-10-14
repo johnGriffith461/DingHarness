@@ -88,10 +88,10 @@ await page.waitForTimeout(1500);
 report.duplicateOnDisk = fs.readdirSync(path.join(DATA, "drive")).sort();
 report.rowsAfterDuplicate = await page.locator(".wb-tr:not(.wb-th)").count();
 
-// 问问豆包 —— 应调起悬浮窗并带预填问题
+// 问问助手 —— 应调起悬浮窗并带预填问题
 await page.locator('[data-testid="wb-file-封面图.png"]').click({ button: "right" });
 await page.waitForTimeout(600);
-await page.locator('[data-testid="wb-drive-menu-问问豆包"]').click();
+await page.locator('[data-testid="wb-drive-menu-问问助手"]').click();
 await page.waitForTimeout(2500);
 report.floatFromDrive = await page.locator('[data-testid="wb-float"]').count();
 report.floatBubble = await page.locator(".wb-float-user-bubble").first().textContent().catch(() => null);
@@ -193,7 +193,7 @@ report.installedAfterRemove = lib.installed;
   for (const item of menu) {
     if (item.disabled && !item.reason) bad.push(`菜单项「${item.label}」置灰但没写原因`);
   }
-  for (const need of ["复制链接", "创建副本", "删除", "问问豆包", "AI 阅读", "下载"]) {
+  for (const need of ["复制链接", "创建副本", "删除", "问问助手", "AI 阅读", "下载"]) {
     /* 用原始文字比：`label` 把英文滤掉了，「AI 阅读」在那里会变成「 阅读」。 */
     if (!menu.some((m) => (m.raw ?? "").includes(need))) bad.push(`菜单里没有「${need}」`);
   }
@@ -209,8 +209,8 @@ report.installedAfterRemove = lib.installed;
   if (dup.length !== 3) bad.push(`创建副本后目录里应 3 个文件，实际 ${JSON.stringify(dup)}`);
   if (!dup.some((f) => f.includes("副本"))) bad.push("⭐ 创建副本没在磁盘上生成带「副本」的文件");
 
-  /* ④ 问问豆包：调起悬浮窗且带上文件名 */
-  if (!report.floatFromDrive) bad.push("「问问豆包」没有调起悬浮窗");
+  /* ④ 问问助手：调起悬浮窗且带上文件名 */
+  if (!report.floatFromDrive) bad.push("「问问助手」没有调起悬浮窗");
   if (!String(report.floatBubble ?? "").includes("封面图")) bad.push("悬浮窗里没有预填这个文件（点了跟没点一样）");
 
   /* ⑤ 删除：确认框先说清删谁；取消不能删；确认才删 */

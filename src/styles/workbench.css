@@ -46,11 +46,24 @@
   padding: 14px 12px 10px;
 }
 
+/*
+ * 品牌位：2026-10-14 从「豆包工作」四个字换成 **Dingwork 标识**（二合一：盯 + Dingwork）。
+ *
+ * 尺寸 132×34 出自提案 §06（"在 250px 左栏里显示为 132×34"；本机左栏 270px，
+ * 留出右边那三颗浏览器式按钮的位置）。字标是已转路径的 SVG，不依赖字体；
+ * 墨/朱红两种填充由 `brandMark.tsx` 注入时接上 `--fg` / `--accent`，**日夜共用一份资产**。
+ */
 .wb-brand {
   flex: 1;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  color: var(--fg);
+}
+
+.wb-brand > svg {
+  width: 132px;
+  height: 34px;
+  display: block;
 }
 
 .wb-icon {
@@ -1337,7 +1350,9 @@
   width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 6px;
-  background: repeating-linear-gradient(45deg, var(--surface-soft) 0 6px, #e6eaf3 6px 12px);
+  /* 缩略图取不到时的斜纹底：两个色阶都走令牌（原来第二档是硬编码 #e6eaf3，
+     既是个冷蓝灰、又是工作台里最后一处硬编码颜色 —— 见 themeRatchet 的棘轮） */
+  background: repeating-linear-gradient(45deg, var(--surface-soft) 0 6px, var(--bg-3) 6px 12px);
 }
 
 .wb-media-name {

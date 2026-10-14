@@ -139,7 +139,7 @@ export default function AccountMenu({ onClose, onOpenSettings, onOpenStarred }: 
 
       <button className={item} disabled data-testid="wb-acct-site" title="本机版没有跳转目标">
         <Globe size={15} />
-        <span>豆包工作官网</span>
+        <span>Dingwork 官网</span>
       </button>
 
       <button className={item} disabled data-testid="wb-acct-update" title="本机版没有更新服务端">

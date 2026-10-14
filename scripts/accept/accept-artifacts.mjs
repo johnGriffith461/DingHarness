@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openSummary, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**坏掉的产物 / 澄清卡不许把这段对话带崩**（§179）。
@@ -153,6 +153,10 @@ try {
       .filter((x) => !x.includes("-body-") && !x.includes("-open-"))
       .map((x) => x.replace("wb-artcard-", "")),
   );
+
+  /* 右栏 2026-10-14 起默认收起（照原型）→ 先展开，下面读的 `wb-summary-*` 才在 */
+  out.summaryOpened = await openSummary(page);
+  await page.waitForTimeout(600);
 
   /*
    * ── 右侧「对话摘要」面板（2026-10-13 补）──

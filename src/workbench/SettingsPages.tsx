@@ -2,6 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import { SETTINGS_LABELS, aboutTitle, memoryStateLabel, settingsSections } from "@shared/settings";
 import { useMemoryStore } from "./memoryStore";
 import { useAppSettings } from "./appSettings";
+import { spacing } from "../utils/spacing";
 
 /**
  * 设置里的两个**子页**：个人资料 / 账号。
@@ -40,7 +41,12 @@ const META: Record<SettingsSubPage, { title: string; note: string }> = {
     note: "本机版的通用设置：能真起作用的才放上来（记忆开关真的会停掉注入，开启新话题真的会开一段新对话）。",
   },
   about: {
-    title: aboutTitle("豆包工作"),
+    /*
+     * 产品名 2026-10-14 从「豆包工作」换成 `Dingwork` —— 拼接出来是 `关于Dingwork`，
+     * 中英之间缺空格。这里过仓库自己的 `spacing()`（对标原版 `pangu.spacing()`）：
+     * 排版规则归它管，`aboutTitle` 保持"只拼接"的纯函数（它的单测也就一行不用动）。
+     */
+    title: spacing(aboutTitle("Dingwork")),
     note: "本机版没有服务端，所以这里只说本机这一份的事实。",
   },
   account: {
@@ -140,9 +146,9 @@ export default function SettingsPages({
           </div>
           <div className="wb-setpage-row">
             <span className="wb-setpage-label">{SETTINGS_LABELS.website}</span>
-            {/* 官网是真实存在的外部站点，照实给链接 */}
-            <a className="wb-setpage-btn" href="https://www.doubao.com" target="_blank" rel="noreferrer">
-              doubao.com
+            {/* 本机版没有官网，指到项目仓库 */}
+            <a className="wb-setpage-btn" href="https://github.com/johnGriffith461/Dingwork" target="_blank" rel="noreferrer">
+              github.com/johnGriffith461/Dingwork
             </a>
           </div>
         </div>
@@ -152,11 +158,11 @@ export default function SettingsPages({
         <div className="wb-setpage-body">
           <div className="wb-setpage-row">
             <span className="wb-setpage-label">昵称</span>
-            <em>按时吃饭450</em>
+            <em>本机用户</em>
           </div>
           <div className="wb-setpage-row">
-            <span className="wb-setpage-label">豆包号</span>
-            <em>user_QVqiCFv60</em>
+            <span className="wb-setpage-label">账号</span>
+            <em>本机模式</em>
           </div>
           <div className="wb-setpage-row">
             <span className="wb-setpage-label">套餐</span>

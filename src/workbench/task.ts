@@ -15,6 +15,7 @@ export type TaskStage = "running" | "awaiting" | "done" | "failed";
 
 import { ARTIFACT_FORMATS, type Artifact, type ArtifactKind } from "./artifact";
 import { normalizeToolTraces, type ToolTrace } from "@shared/agentTools";
+import type { StepUsage } from "@shared/cost";
 
 /** 对话里的一条。 */
 export type TaskStep = {
@@ -30,7 +31,7 @@ export type TaskStep = {
    * ⚠️ 它与 `cost` 是**两个不同的东西**：`cost` 是界面那个数（估的、为了与本体形态一致），
    * `usage` 是真的。一起留着，"显示的数是估的"这件事才说得清、也才有的对照。
    */
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: StepUsage;
   /**
    * 产出这条 AI 回复时**实际发出去的用户内容**。
    *
@@ -410,15 +411,23 @@ export const STEP_NOTE_LIMIT = 200;
  * @param raw 落盘的那一项
  * @returns 干净的用量；一个数字都没有时返回 null
  */
-export function usageOf(raw: unknown): { inputTokens?: number; outputTokens?: number } | null {
+export function usageOf(raw: unknown): StepUsage | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   const num = (v: unknown): number | undefined =>
     typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
-  const inputTokens = num(o.inputTokens);
-  const outputTokens = num(o.outputTokens);
-  if (inputTokens === undefined && outputTokens === undefined) return null;
-  return { ...(inputTokens === undefined ? {} : { inputTokens }), ...(outputTokens === undefined ? {} : { outputTokens }) };
+  /*
+   * 2026-10-14：把 provider 的**缓存明细**与**这一轮的实测耗时**也接住（`runTurn` 现在会带回来）。
+   * 少了它们，界面上「缓存命中 / 缓存读取 / 吞吐量」永远是空的 —— 而那是"我们没接"，不是"没有"。
+   * 判据不变：只认数字，坏的丢掉。
+   */
+  const keys = ["inputTokens", "outputTokens", "noCacheTokens", "cacheReadTokens", "cacheWriteTokens", "elapsedMs"] as const;
+  const out: Record<string, number> = {};
+  for (const k of keys) {
+    const v = num(o[k]);
+    if (v !== undefined) out[k] = v;
+  }
+  return Object.keys(out).length ? (out as StepUsage) : null;
 }
 
 /**
