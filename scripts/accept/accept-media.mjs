@@ -49,7 +49,7 @@ await page.waitForTimeout(1500);
 
 const report = {};
 
-/* 右栏 2026-10-14 起默认收起（照 Dingwork 原型：塌成右缘一条竖直把手）→ 先展开再点页签 */
+/* 右栏 2026-10-14 起默认收起（照 Ding Harness 原型：塌成右缘一条竖直把手）→ 先展开再点页签 */
 report.summaryOpened = await openSummary(page);
 
 /* ---------- 图片与视频 ---------- */

@@ -162,9 +162,9 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
     expect(css, "输入区里的 textarea 没有取消第二圈焦点环").toContain(".wb-composer-input:focus-visible");
     /* 焦点环取值必须中性（rgba 的黑/白），不能用彩色。
      *
-     * ⚠️ 2026-10-14 Dingwork 落地：允许的"中性"从两组扩到四组 ——
+     * ⚠️ 2026-10-14 Ding Harness 落地：允许的"中性"从两组扩到四组 ——
      * 新增暖墨 rgba(27,26,20,…)（日间）与暖纸白 rgba(236,231,214,…)（黑夜）。
-     * 这两组出自 `dingwork-tokens.css`，且它们就是本仓 `--focus-ring` 的**新取值**
+     * 这两组出自 `ding-harness-tokens.css`，且它们就是本仓 `--focus-ring` 的**新取值**
      * （同选择器、后导入覆盖）—— 所以 `css.match` 拿到的第一处已经是它们。
      * **判据没变**：仍然只认中性色、不许出现品牌色（朱红 / 旧蓝都不行）。 */
     const token = css.match(/--focus-ring:\s*([^;]+);/);
@@ -273,8 +273,8 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
     /*
      * ⚠️ 2026-10-14 起**先去掉注释再扫**。
      *
-     * 起因：Dingwork 提案交付的 `dingwork-motion.css` 把"可选进阶"的 View Transitions
-     * 配方整段写在注释里（`clip-path: circle(var(--dw-r) at --dw-x --dw-y)` 那套）——
+     * 起因：Ding Harness 提案交付的 `ding-harness-motion.css` 把"可选进阶"的 View Transitions
+     * 配方整段写在注释里（`clip-path: circle(var(--dh-r) at --dh-x --dh-y)` 那套）——
      * 那些 `var()` 是**文档**，不是活的声明，永远不会"落空失效"，
      * 但正则会把它们数成"用了没定义"。
      *

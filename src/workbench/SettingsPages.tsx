@@ -42,11 +42,11 @@ const META: Record<SettingsSubPage, { title: string; note: string }> = {
   },
   about: {
     /*
-     * 产品名 2026-10-14 从「豆包工作」换成 `Dingwork` —— 拼接出来是 `关于Dingwork`，
+     * 产品名 2026-10-14 从「豆包工作」换成 `Ding Harness` —— 拼接出来是 `关于Ding Harness`，
      * 中英之间缺空格。这里过仓库自己的 `spacing()`（对标原版 `pangu.spacing()`）：
      * 排版规则归它管，`aboutTitle` 保持"只拼接"的纯函数（它的单测也就一行不用动）。
      */
-    title: spacing(aboutTitle("Dingwork")),
+    title: spacing(aboutTitle("Ding Harness")),
     note: "本机版没有服务端，所以这里只说本机这一份的事实。",
   },
   account: {

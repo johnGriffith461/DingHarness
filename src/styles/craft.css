@@ -53,13 +53,13 @@
 }
 
 /*
- * 入场编排（2026-10-14，照 Dingwork 原型的口径：**网格 stagger 70ms 入场**）。
+ * 入场编排（2026-10-14，照 Ding Harness 原型的口径：**网格 stagger 70ms 入场**）。
  *
  * 在此之前这一区只有"悬停抬升"（下面那条 `.wb-suggestion:hover`）—— 交互态有、**入场态没有**：
  * 卡片是"啪"地一起出来。原型把这条当规格写在界面上（"卡片 hover 抬升 -2px + 阴影加深；
  * 网格 stagger 70ms 入场"）。
  *
- * 用的是 Dingwork 交付的关键帧 `dw-rise`（`dingwork-motion.css`：opacity + translateY(8px)，
+ * 用的是 Ding Harness 交付的关键帧 `dh-rise`（`ding-harness-motion.css`：opacity + translateY(8px)，
  * 300ms `--ease-out`）。静态补偿天然成立：只动 opacity/transform，终态就是常态；
  * `prefers-reduced-motion` 时由 motion.css 那一段压成瞬结。
  *
@@ -68,7 +68,7 @@
  * 我这段若排在后面，会被它当成那条基础规则、因为里面没有 `--dur-quick` 而判红。
  */
 .wb-suggestions > .wb-suggestion {
-  animation: dw-rise 300ms var(--ease-out) both;
+  animation: dh-rise 300ms var(--ease-out) both;
 }
 .wb-suggestions > .wb-suggestion:nth-child(1) { animation-delay: 0ms; }
 .wb-suggestions > .wb-suggestion:nth-child(2) { animation-delay: 70ms; }
@@ -288,13 +288,13 @@ html[data-kb="1"] .wb-composer:focus-within {
   text-wrap: pretty;
 }
 
-/* ---------- 输入区里的 chip：2026-10-14 照 Dingwork 原型重做外形 ----------
+/* ---------- 输入区里的 chip：2026-10-14 照 Ding Harness 原型重做外形 ----------
  *
  * 原来是**填充式浅灰块**（`background: var(--surface-hover)`、`border: 0`、8px 圆角）。
  * 原型（`dingwork-app.html` 的 `.chip`）是**描边胶囊**：
  *   font-size 11.5px / padding 3px 11px / border-radius 999px /
  *   `border: 1px solid var(--line)` / 透明底 / 字色 `--fg-dim`；
- *   hover → 描边与字色都变强调色；入场 `dw-chip-pop` 60ms 错峰；选中 `.on` → `--accent-tint` 底。
+ *   hover → 描边与字色都变强调色；入场 `dh-chip-pop` 60ms 错峰；选中 `.on` → `--accent-tint` 底。
  *
  * ⚠️ 顺带修活了一条一直没生效的规则：选中态 `.wb-chip.is-on` 本来就写着
  * `border-color: var(--accent)`（theme.css），但**旧基础规则是 `border: 0`** ——
@@ -304,7 +304,7 @@ html[data-kb="1"] .wb-composer:focus-within {
   font-size: 11.5px;
   padding: 3px 11px;
   border: 1px solid var(--line);
-  border-radius: var(--dw-radius-pill);
+  border-radius: var(--dh-radius-pill);
   background: transparent;
   color: var(--fg-dim);
   transition:
@@ -341,7 +341,7 @@ html[data-kb="1"] .wb-composer:focus-within {
  * 排队 —— 效果等价，但不用改 6 处 JSX 去塞 `--i`。
  */
 .wb-composer-bar .wb-chip {
-  animation: dw-chip-pop var(--dur) var(--ease-spring) both;
+  animation: dh-chip-pop var(--dur) var(--ease-spring) both;
 }
 .wb-composer-bar > *:nth-child(3) .wb-chip { animation-delay: 60ms; }
 .wb-composer-bar > *:nth-child(4) .wb-chip { animation-delay: 120ms; }
@@ -648,7 +648,7 @@ html[data-kb="1"] .wb-searchbox:focus-within {
  * 输入区：它是"浮在工作区上的一块卡片"，原来只有描边 + 和背景同色（`--bg`），
  * 于是看着像地上画了个框。给它卡片级阴影，读起来才是"可以打字的那一块"。
  *
- * 2026-10-14 补**列宽**：照 Dingwork 原型，主页/对话是**一条 780 宽的居中列**
+ * 2026-10-14 补**列宽**：照 Ding Harness 原型，主页/对话是**一条 780 宽的居中列**
  * （原型口径：字标 460、输入框 780，推荐与它们同边）；真机原来把中栏铺满（~1074 宽），
  * 输入框宽到像在写论文。
  * ⚠️ 收在 `.wb-composer` 上（而不是只收主页那一处）是因为**左右两栏用的是同一个组件** ——

@@ -36,7 +36,7 @@ describe("设置文案（逐字）", () => {
   });
 
   it("关于标题按 `关于%s` 拼", () => {
-    expect(aboutTitle("Dingwork")).toBe("关于Dingwork");
+    expect(aboutTitle("Ding Harness")).toBe("关于Ding Harness");
     expect(aboutTitle("  ")).toBe("关于");
   });
 

@@ -19,7 +19,7 @@ import { useNodeActions } from "../useNodeActions";
 
 /*
  * ⚠️ Mermaid 要的是**字面量字体串**（它把这段塞进 SVG 的 style），拿不到 CSS 变量 ——
- * 所以这里是 `--dw-font-text`（Dingwork 三族里的「阅读」族）的**唯一第二份拷贝**。
+ * 所以这里是 `--dh-font-text`（Ding Harness 三族里的「阅读」族）的**唯一第二份拷贝**。
  * 改字体时两处一起改，别让它悄悄退回系统雅黑：图里的字与界面其它字不同族，
  * 一屏里就是两种字形（正是这轮要收掉的那种"半成品相"）。
  */

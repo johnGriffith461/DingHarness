@@ -1,9 +1,9 @@
 /* ============================================================
-   DINGWORK — 动效规范 v1.0（dingwork-motion.css）
+   DING HARNESS — 动效规范 v1.0（ding-harness-motion.css）
    ------------------------------------------------------------
-   与 dingwork-tokens.css 配套使用；引入顺序在其后。
+   与 ding-harness-tokens.css 配套使用；引入顺序在其后。
    来源：C:\Users\Administrator\WorkBuddy\2026-10-14-06-01-04\font-preview\dingwork\
-         （proposal.html §07 全文 + dingwork-motion.css，逐字一致）
+         （proposal.html §07 全文 + ding-harness-motion.css，逐字一致）
 
    ── 准入五问（animation-systems）──────────────────────────
    每个动画必须至少回答其中一条，答不上来就删掉：
@@ -30,37 +30,37 @@
 /* 头条入场：fade + rise（animation-systems 默认入场原型）
    14px 上浮 + 560ms 对称 ease-in-out，配遮罩感由 opacity 承担。
    中文衬线大字不用 clip-path 动画（长文本性能差），保 transform+opacity。 */
-@keyframes dw-head-in {
+@keyframes dh-head-in {
   from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 /* 区块上浮：scroll-in / 次级内容入场，比头条轻（8px / 300ms） */
-@keyframes dw-rise {
+@keyframes dh-rise {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 /* 打字光标：流式回复的「还在写」信号（静态补偿：旁边必有状态文字） */
-@keyframes dw-caret {
+@keyframes dh-caret {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0; }
 }
 
 /* chip 弹出：输入框 chips / 标签入场，spring 只配这种微反馈 */
-@keyframes dw-chip-pop {
+@keyframes dh-chip-pop {
   from { opacity: 0; transform: scale(0.86); }
   to   { opacity: 1; transform: scale(1); }
 }
 
 /* 侧栏选中指示条：从上方生长出来（解释「选中移到了这一行」） */
-@keyframes dw-rail {
+@keyframes dh-rail {
   from { transform: scaleY(0); }
   to   { transform: scaleY(1); }
 }
 
 /* 流式逐字光标滚动：数字/计数翻转的极简版（可选） */
-@keyframes dw-tick {
+@keyframes dh-tick {
   from { opacity: 0; transform: translateY(-0.5em); }
   to   { opacity: 1; transform: translateY(0); }
 }
@@ -69,64 +69,64 @@
    TWO — 工具类
    ============================================================ */
 
-/* 头条入场。stagger 由 --dw-i 驱动（90ms/条，animation-systems 区间内），
-   行号在 HTML 里写：style="--dw-i:0" / 1 / 2 …
-   一次性编排，用 keyframes；进页面后重复出现用 .dw-rise。 */
-.dw-head {
-  animation: dw-head-in var(--dur-reveal) var(--ease-dw) both;
-  animation-delay: calc(var(--dw-i, 0) * 90ms);
+/* 头条入场。stagger 由 --dh-i 驱动（90ms/条，animation-systems 区间内），
+   行号在 HTML 里写：style="--dh-i:0" / 1 / 2 …
+   一次性编排，用 keyframes；进页面后重复出现用 .dh-rise。 */
+.dh-head {
+  animation: dh-head-in var(--dur-reveal) var(--ease-dh) both;
+  animation-delay: calc(var(--dh-i, 0) * 90ms);
 }
 
 /* 通用上浮：scroll-in / 面板内容。
    触发方式：进入视口时加 class，或直接用于一次性挂载。 */
-.dw-rise {
-  animation: dw-rise 300ms var(--ease-out) both;
-  animation-delay: calc(var(--dw-i, 0) * 90ms);
+.dh-rise {
+  animation: dh-rise 300ms var(--ease-out) both;
+  animation-delay: calc(var(--dh-i, 0) * 90ms);
 }
 
 /* 按压反馈：恒定 0.96（better-ui 原值，再小就夸张）。
    active 时才缩放，不影响布局；配 transition 可被中途打断。 */
-.dw-pressable {
+.dh-pressable {
   transition: transform var(--dur-instant) var(--ease-out),
               background-color var(--dur-quick) var(--ease-out),
               color var(--dur-quick) var(--ease-out),
               box-shadow var(--dur-quick) var(--ease-out);
 }
-.dw-pressable:active { transform: scale(0.96); }
+.dh-pressable:active { transform: scale(0.96); }
 
 /* hover 抬升：-2px + 阴影微增（animation-systems「lift + glow」静音版） */
-.dw-lift {
+.dh-lift {
   transition: transform var(--dur-quick) var(--ease-out),
               box-shadow var(--dur-quick) var(--ease-out);
 }
-.dw-lift:hover { transform: translateY(-2px); }
+.dh-lift:hover { transform: translateY(-2px); }
 
 /* 图标 cross-fade：两颗图标都在 DOM，一颗绝对定位叠层，
    opacity + scale(0.25→1) + blur(4px→0)，曲线 --ease-icon。 */
-.dw-icon-swap { position: relative; display: inline-grid; place-items: center; }
-.dw-icon-swap > * { grid-area: 1 / 1; transition: opacity var(--dur-quick) var(--ease-icon),
+.dh-icon-swap { position: relative; display: inline-grid; place-items: center; }
+.dh-icon-swap > * { grid-area: 1 / 1; transition: opacity var(--dur-quick) var(--ease-icon),
                     transform var(--dur-quick) var(--ease-icon),
                     filter var(--dur-quick) var(--ease-icon); }
-.dw-icon-swap > .dw-icon-out { opacity: 0; transform: scale(0.25); filter: blur(4px); }
-.dw-icon-swap:hover > .dw-icon-in,
-.dw-icon-swap:focus-visible > .dw-icon-in { opacity: 0; transform: scale(0.25); filter: blur(4px); }
-.dw-icon-swap:hover > .dw-icon-out,
-.dw-icon-swap:focus-visible > .dw-icon-out { opacity: 1; transform: scale(1); filter: blur(0); }
+.dh-icon-swap > .dh-icon-out { opacity: 0; transform: scale(0.25); filter: blur(4px); }
+.dh-icon-swap:hover > .dh-icon-in,
+.dh-icon-swap:focus-visible > .dh-icon-in { opacity: 0; transform: scale(0.25); filter: blur(4px); }
+.dh-icon-swap:hover > .dh-icon-out,
+.dh-icon-swap:focus-visible > .dh-icon-out { opacity: 1; transform: scale(1); filter: blur(0); }
 
 /* 侧栏选中指示条：transform-origin 顶部，scaleY 生长 */
-.dw-rail-ind {
+.dh-rail-ind {
   transform-origin: top;
-  animation: dw-rail var(--dur) var(--ease-out) both;
+  animation: dh-rail var(--dur) var(--ease-out) both;
 }
 
 /* 流式光标：宽 2px 朱红竖线，1s 一跳 */
-.dw-caret {
+.dh-caret {
   display: inline-block;
   width: 2px;
   height: 1em;
   background: var(--accent);
   translate: 0 0.14em;
-  animation: dw-caret 1s steps(1) infinite;
+  animation: dh-caret 1s steps(1) infinite;
 }
 
 /* ============================================================
@@ -160,9 +160,9 @@
           const y = ev ? ev.clientY : 0;
           const r = Math.hypot(Math.max(x, innerWidth - x),
                                Math.max(y, innerHeight - y));
-          document.documentElement.style.setProperty('--dw-x', x + 'px');
-          document.documentElement.style.setProperty('--dw-y', y + 'px');
-          document.documentElement.style.setProperty('--dw-r', r + 'px');
+          document.documentElement.style.setProperty('--dh-x', x + 'px');
+          document.documentElement.style.setProperty('--dh-y', y + 'px');
+          document.documentElement.style.setProperty('--dh-r', r + 'px');
           const vt = document.startViewTransition(() => {
             document.documentElement.dataset.theme = next;
           });
@@ -176,11 +176,11 @@
         ::view-transition-old(root) { z-index: 1; }
         ::view-transition-new(root) { z-index: 2; }
         [data-theme="dark"]::view-transition-new(root) {
-          clip-path: circle(var(--dw-r) at var(--dw-x) var(--dw-y));
-          animation: dw-clip-grow 420ms var(--ease-out);
+          clip-path: circle(var(--dh-r) at var(--dh-x) var(--dh-y));
+          animation: dh-clip-grow 420ms var(--ease-out);
         }
-        @keyframes dw-clip-grow {
-          from { clip-path: circle(0 at var(--dw-x) var(--dw-y)); }
+        @keyframes dh-clip-grow {
+          from { clip-path: circle(0 at var(--dh-x) var(--dh-y)); }
         }
    ============================================================ */
 

@@ -99,7 +99,7 @@ try {
   report.shareHint = await page.locator(`[data-testid="wb-act-hint-${id}"]`).textContent().catch(() => null);
   const shared = await page.evaluate(() => navigator.clipboard.readText().catch(() => ""));
   report.shareIsMarkdown = shared.startsWith("# ");
-  report.shareHasRoleLabels = shared.includes("**我：**") && shared.includes("**Dingwork：**");
+  report.shareHasRoleLabels = shared.includes("**我：**") && shared.includes("**Ding Harness：**");
   report.shareLength = shared.length;
 
   await shot(page, path.join(shots, "wb-22-actions.png"));

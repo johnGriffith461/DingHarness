@@ -14,7 +14,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreF
  * ③ ⭐ 点一下记忆 → **已关闭**，且 `memory.json` 里真的写了 `enabled: false`
  * ④ ⭐ **重启之后仍然是已关闭**（开关要活过重启，否则就是摆设）
  * ⑤ ⭐ 点「开启新话题」→ 真的回到新工作任务的空状态
- * ⑥ 关于页：标题 `关于 Dingwork`、用户协议、官网链接在
+ * ⑥ 关于页：标题 `关于 Ding Harness`、用户协议、官网链接在
  */
 const DATA = "D:/DoubaoWorkClone/.verify/settings2-data";
 if (!(await freshDir(DATA))) {
@@ -160,7 +160,7 @@ try {
   if (!out.afterNewTopic?.composer) bad.push("点「开启新话题」之后没回到新工作任务");
 
   /* ⑥ */
-  if (out.aboutTitle !== "关于 Dingwork") bad.push(`关于页标题不对：${out.aboutTitle}`);
+  if (out.aboutTitle !== "关于 Ding Harness") bad.push(`关于页标题不对：${out.aboutTitle}`);
   if (!(out.aboutRows ?? []).includes("用户协议")) bad.push(`关于页没有「用户协议」：${JSON.stringify(out.aboutRows)}`);
   if (!out.aboutHasLink) bad.push("关于页没有官网链接");
 

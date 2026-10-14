@@ -73,7 +73,7 @@ function bootLog(message: string): void {
   const line = `[${new Date().toISOString()} pid=${process.pid}] ${message}\n`;
   const targets = [
     path.join(app.getPath("userData"), "boot.log"),
-    path.join(os.tmpdir(), "dingwork-boot.log"),
+    path.join(os.tmpdir(), "ding-harness-boot.log"),
   ];
   for (const file of targets) {
     try {
@@ -92,7 +92,7 @@ function bootLog(message: string): void {
 function rawLog(message: string): void {
   try {
     fs.appendFileSync(
-      path.join(os.tmpdir(), "dingwork-boot.log"),
+      path.join(os.tmpdir(), "ding-harness-boot.log"),
       `[${new Date().toISOString()} pid=${process.pid}] RAW ${message}\n`,
       "utf8",
     );
@@ -102,6 +102,43 @@ function rawLog(message: string): void {
 }
 
 rawLog(`脚本已加载 argv=${JSON.stringify(process.argv.slice(1))} cwd=${process.cwd()}`);
+
+/**
+ * 旧身份的数据目录名（Phase 0.2）。
+ *
+ * 打包态的 userData 是 `%APPDATA%\<productName>`（Electron 的 `app.getName()`
+ * 取 package.json 的 `productName`）。产品从 Dingwork 更名为 Ding Harness 之后
+ * 这个名字就变了 —— 不搬的话，老用户升级上来会看到"数据全没了"。
+ */
+const LEGACY_PRODUCT_DIR = "Dingwork";
+
+/**
+ * 把旧身份的数据目录整体搬到新身份名下（**一次性**）。
+ *
+ * ⚠️ 必须在**第一次写 userData 之前**跑。`bootLog` 会往 `userData/boot.log` 写，
+ * 那一写就把新目录建出来了 —— 于是"新目录不存在"这个前置条件永远不成立，
+ * 迁移静默退化成空操作。这正是迁移类代码最容易骗过自己的形状。
+ *
+ * 三条边界：
+ *   · 只对**打包态**做（开发态的数据目录是工程根的 `data/`，与身份无关）；
+ *   · 新目录**已经存在**就什么都不做（不合并、不覆盖 —— 用户可能已经在新版里用过了）；
+ *   · 旧目录不存在就什么都不做（新装用户，压根没有"旧数据"）。
+ */
+function migrateLegacyUserData(): void {
+  if (!app.isPackaged) return;
+  try {
+    const next = app.getPath("userData");
+    const prev = path.join(path.dirname(next), LEGACY_PRODUCT_DIR);
+    if (next === prev || !fs.existsSync(prev) || fs.existsSync(next)) return;
+    fs.cpSync(prev, next, { recursive: true });
+    bootLog(`已从旧数据目录迁移：${prev} → ${next}`);
+  } catch (error) {
+    // 迁不过去也**不动**旧目录：老数据原样留在原处，用户至少还找得到
+    bootLog(`旧数据目录迁移失败（继续用新目录）：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+migrateLegacyUserData();
 
 bootLog(`main 入口 isPackaged=${app.isPackaged} __dirname=${__dirname}`);
 

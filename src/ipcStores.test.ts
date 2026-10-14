@@ -62,7 +62,7 @@ function tempLeftovers(): string[] {
 }
 
 beforeEach(() => {
-  env.userData = mkdtempSync(path.join(os.tmpdir(), "dwc-ipcstore-"));
+  env.userData = mkdtempSync(path.join(os.tmpdir(), "dh-ipcstore-"));
 });
 
 afterEach(() => {

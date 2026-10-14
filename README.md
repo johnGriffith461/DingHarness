@@ -1,4 +1,4 @@
-# Dingwork
+# Ding Harness
 
 [![CI](https://github.com/johnGriffith461/Dingwork/actions/workflows/ci.yml/badge.svg)](https://github.com/johnGriffith461/Dingwork/actions/workflows/ci.yml)
 
@@ -6,7 +6,7 @@
 >
 > *A local-first desktop agent workbench: AI workspace + infinite canvas.*
 
-Dingwork 是一个 Electron 桌面应用，把「对话式 Agent」和「无限画布」放在同一个工作台里。
+Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无限画布」放在同一个工作台里。
 它本机运行、本机存数据，模型走你自己配置的 OpenAI 兼容通道——不依赖任何后端服务。
 
 > 状态：**v0.1.0，早期版本**。目前仅提供 Windows 构建。
@@ -50,7 +50,7 @@ pnpm electron:build && pnpm exec electron .
 打包（含 typecheck / lint / test 全门禁）：
 
 ```bash
-pnpm build   # → release/Dingwork-0.1.0-setup.exe
+pnpm build   # → release/ding-harness-0.1.0-setup.exe
 ```
 
 ### 配置模型

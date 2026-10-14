@@ -46,8 +46,8 @@
   --fg-ghost: #767e8b;
   /* 禁用态专用：弱但可读（不参与 §71 的保真锁定） */
   --fg-disabled: #6b7280;
-  /* 2026-10-14 Dingwork：旧蓝 #2f6bff → 朱红。
-     ⚠️ 这两行的**生效值其实在 dingwork-tokens.css**（同选择器、后导入覆盖）；
+  /* 2026-10-14 Ding Harness：旧蓝 #2f6bff → 朱红。
+     ⚠️ 这两行的**生效值其实在 ding-harness-tokens.css**（同选择器、后导入覆盖）；
      这里同步一份是为了不出现"同一个语义两处写着两种颜色"——
      只改一处会让下一个读这个文件的人以为还是蓝的。 */
   --accent: #9a2f1c;
@@ -615,7 +615,7 @@
   --fg-deep: #d8dbdf;
   --fg-deep-2: #d9dce0;
   /* 黑夜档的朱红要**提亮保色相**（暗底上用 #9a2f1c 会糊成一片）；
-     同浅色那两行：生效值在 dingwork-tokens.css，这里同步。 */
+     同浅色那两行：生效值在 ding-harness-tokens.css，这里同步。 */
   --accent: #d9603a;
   --accent-strong: #e87a56;
   --ok: #78ca96;

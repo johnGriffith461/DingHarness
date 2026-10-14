@@ -321,7 +321,7 @@ export async function closeCanvas(page) {
  * 展开右侧「对话摘要」面板（幂等）—— 右栏已经展开就直接返回。
  *
  * ## 为什么要有它（2026-10-14）
- * 右栏从这天起**默认收起**（照 Dingwork 原型的口径：塌成右缘一条竖直把手 `wb-summary-expand`，
+ * 右栏从这天起**默认收起**（照 Ding Harness 原型的口径：塌成右缘一条竖直把手 `wb-summary-expand`，
  * 点开才展开），而**4 条脚本原来直接点 `wb-summary-tab-*`**
  * （`accept-artifacts` / `accept-emptystates` / `accept-media` / `accept-workbench`）。
  * 不先展开，它们会一起红。

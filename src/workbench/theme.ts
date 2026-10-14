@@ -82,7 +82,7 @@ const TITLEBAR = {
 } as const;
 
 /**
- * Dingwork 提案 §05「主题切换：为什么不是渐变过去」（motion.css THREE-A）。
+ * Ding Harness 提案 §05「主题切换：为什么不是渐变过去」（motion.css THREE-A）。
  *
  * 翻转主题会同时改掉几乎每个元素的 color / background / border / shadow ——
  * **所有** transition 一起触发，整页不是"干脆地换"而是"糊"一下。

@@ -68,7 +68,7 @@ if (!fs.existsSync(mainPath)) {
       var fs = require("node:fs");
       var os = require("node:os");
       var path = require("node:path");
-      var file = path.join(os.tmpdir(), "dingwork-boot.log");
+      var file = path.join(os.tmpdir(), "ding-harness-boot.log");
       fs.appendFileSync(
         file,
         "[" + new Date().toISOString() + "] ENTRY-LOAD-FAILED " +

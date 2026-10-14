@@ -1,10 +1,10 @@
 import lockup from "../assets/logo-lockup.svg?raw";
 
 /**
- * 品牌标识（二合一：盯 + Dingwork）—— 2026-10-14 换身份时落的第一处。
+ * 品牌标识（二合一：盯 + Ding Harness）—— 2026-10-14 换身份时落的第一处。
  *
  * ## 为什么走"整份注入"而不是把路径抄进来
- * 这份 SVG 里 **「Dingwork」那几个字的路径在外面套了一层 `<g transform>`**
+ * 这份 SVG 里 **「Ding Harness」那几个字的路径在外面套了一层 `<g transform>`**
  * （提案 §06 专门点了这条坑：手抄路径、漏掉外层 transform，肉眼就只剩一个"盯"）。
  * 整份注入天然不会丢结构，也不需要把 16KB 的路径数据塞进源码。
  *
@@ -22,5 +22,5 @@ const svg = lockup
   .replace(/fill="#9a2f1c"/gi, 'style="fill:var(--accent)"');
 
 export function BrandMark() {
-  return <span className="wb-brand" aria-label="Dingwork" role="img" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <span className="wb-brand" aria-label="Ding Harness" role="img" dangerouslySetInnerHTML={{ __html: svg }} />;
 }

@@ -739,7 +739,7 @@ export function Composer({
           所以属于"参考里有、我还没做"，按标准禁用并记进待做。
         */}
         <button className="wb-chip wb-chip-auto" title="模型档位（本机版还没做档位选择）" disabled>
-          {/* 文案与形态照 Dingwork 原型：`AUTO · LOW`、**虚线**描边（表示"自动"不是可选项）。
+          {/* 文案与形态照 Ding Harness 原型：`AUTO · LOW`、**虚线**描边（表示"自动"不是可选项）。
               原来写的是「自动 ⌄ 低」并带一个下拉箭头 —— 而它是 disabled 的，
               带箭头等于承诺一个不存在的菜单（"假按钮"的另一种长相）。 */}
           AUTO · LOW

@@ -5,7 +5,7 @@ import { usageRows, usageTotal, type StepUsage } from "@shared/cost";
  * 输入区里的「用量」：一个按钮 + 一块明细（2026-10-14 主人点名要的）。
  *
  * ## 形态出处
- * 照 Dingwork 原型的**上下文容量弹层**（`dingwork-app.html` 的 `.ctx-btn` / `.ctx-pop`）：
+ * 照 Ding Harness 原型的**上下文容量弹层**（`dingwork-app.html` 的 `.ctx-btn` / `.ctx-pop`）：
  * 输入条右端一颗小按钮，点开一块 **272px** 的弹层，里面是「标题 + 若干行 + 页脚」，
  * 值走等宽字体 + `tabular-nums`（数一变就抖的毛病在这条上最明显）。
  *

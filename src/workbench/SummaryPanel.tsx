@@ -21,7 +21,7 @@ export function SummaryPanel() {
   const [note, setNote] = useState<string>("");
   /*
    * 面板收起（2026-10-14）。这一颗按钮原来写着 `disabled` + "本机版还没做面板折叠" ——
-   * Dingwork 原型里右栏是**默认收起**的（塌成右缘一条竖直把手，点开才展开），
+   * Ding Harness 原型里右栏是**默认收起**的（塌成右缘一条竖直把手，点开才展开），
    * 主人 2026-10-14 点名要这个口径，所以默认值取 `true`。
    *
    * ⚠️ 代价是**4 条验收脚本原来直接点 `wb-summary-tab-*`**（artifacts / emptystates /

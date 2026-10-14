@@ -31,7 +31,7 @@ const { SESSION_RETENTION, createSessionLogger, listChatSessions, pruneSessions,
   await import("../electron/ipc/sessionStore");
 
 beforeEach(() => {
-  env.userData = mkdtempSync(path.join(os.tmpdir(), "dwc-session-"));
+  env.userData = mkdtempSync(path.join(os.tmpdir(), "dh-session-"));
 });
 
 afterEach(() => {

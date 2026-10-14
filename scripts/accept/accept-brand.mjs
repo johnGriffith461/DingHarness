@@ -1,8 +1,8 @@
 /*
- * 验收：Dingwork 视觉系统（字体三族 / 纸白·暖墨双主题 / 一处朱红 / 区块标题族）。
+ * 验收：Ding Harness 视觉系统（字体三族 / 纸白·暖墨双主题 / 一处朱红 / 区块标题族）。
  *
  * ## 为什么需要它
- * 这套东西落地时是**逐条量出来**的（`.verify/probe-dingwork-*.mjs` 那几条探针：
+ * 这套东西落地时是**逐条量出来**的（`.verify/probe-brand-*.mjs` 那几条探针：
  * 字体分片真加载、令牌真解析、渐变真换暖）—— 但那些探针在 `.verify/` 里，
  * 目录整个被 gitignore，**换台机器就没了**，也不会在批跑里跑。
  *
@@ -26,7 +26,7 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 import { openApp, killLeftovers, killTree } from "./harness.mjs";
 
-const DATA = "D:/DoubaoWorkClone/.verify/dingwork-data";
+const DATA = "D:/DoubaoWorkClone/.verify/brand-data";
 fs.rmSync(DATA, { recursive: true, force: true });
 await killLeftovers();
 

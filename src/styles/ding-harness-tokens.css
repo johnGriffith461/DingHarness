@@ -1,9 +1,9 @@
 /* ============================================================
-   DINGWORK — 设计令牌 v1.0
+   DING HARNESS — 设计令牌 v1.0
    ------------------------------------------------------------
-   项目：DoubaoWorkClone → Dingwork（Electron 44 + React 19）
+   项目：DoubaoWorkClone → Ding Harness（Electron 44 + React 19）
    来源：C:\Users\Administrator\WorkBuddy\2026-10-14-06-01-04\font-preview\dingwork\
-         （proposal.html §07 全文 + dingwork-tokens.css）
+         （proposal.html §07 全文 + ding-harness-tokens.css）
    接入：整文件放在 src/styles/，在 styles.css 的 @import 串里
    加到 theme.css **之后**（后导入者覆盖先导入者）。
 
@@ -11,7 +11,7 @@
        · 日间 Daylight（默认）  作用域 .wb
        · 黑夜 Night             作用域 [data-theme="dark"] .wb
    颜色变量沿用项目现有名（--bg / --fg / --accent …），
-   Dingwork 新增令牌一律带 --dw- 前缀，不撞车。
+   Ding Harness 新增令牌一律带 --dh- 前缀，不撞车。
 
    对比度（WCAG 2.1，实测计算）：
        日间  --fg-dim 4.9:1  --fg-faint 4.6:1  --accent 5.6:1
@@ -21,7 +21,7 @@
      1. `.wb` 在 workbench.css 有一行**自带的 font 声明**
         （font: 13px/1.6 "Microsoft YaHei", …），它覆盖 body 继承 ——
         只改 body 的 font 不起作用，必须同时把 .wb 那行改为
-        `13px/1.6 var(--dw-font-text)`。**本工程两处都改了。**
+        `13px/1.6 var(--dh-font-text)`。**本工程两处都改了。**
      2. 三个颜色作用域：.wb（浅色域，贴本文件即变纸白）/
         .app·.side 外壳（取 :root 深色值，不在 .wb 内）/
         .wb-canvas（画布深色孤岛）。后两者不会因本文件变浅，
@@ -33,8 +33,8 @@
    ⚠️⚠️ 本地适配（相对提案原文**有五处**不同，都标在出现的位置上）：
      A. 字体三族挂 `:root` 而**不是** `.wb`（原因见下面那段注释里）——
         提案第 3 步要给 `body` 换字体，body 在 .wb 之外，取不到 .wb 上的变量。
-     B. 补一条 `--dw-i: 0` 默认值（`.dw-head` / `.dw-rise` 的 stagger 序号）——
-        它只有 var() 兜底（`calc(var(--dw-i, 0) * 90ms)`），而本仓的
+     B. 补一条 `--dh-i: 0` 默认值（`.dh-head` / `.dh-rise` 的 stagger 序号）——
+        它只有 var() 兜底（`calc(var(--dh-i, 0) * 90ms)`），而本仓的
         `uiCraft.test.ts ⑨` 要求「用到的变量必须有人定义」。
      C. 文件尾补了一段：项目既有的 `--tint-blue*`（选中底色，21 处规则在用）
         重指到朱红族 —— 只换 --accent 会留下「淡蓝底 + 深红字」，违反原则 02。
@@ -47,45 +47,45 @@
 
 /* ---------- 字体三族（职责见提案 §03）----------
    ⚠️ 本地适配 A：提案原文把这三行挂在 `.wb` 上。这里改挂 `:root`，理由是
-   接入步骤要给 `body` 换字体（`font: 13px/1.5 var(--dw-font-text)`），
+   接入步骤要给 `body` 换字体（`font: 13px/1.5 var(--dh-font-text)`），
    而 **body 在 `.wb` 之外** —— 自定义属性只往下继承，body 取不到 `.wb` 上的值，
    `var()` 落空的后果不是"回退到链上的下一个字体"，而是**整条 font 简写作废**
    （invalid at computed-value time），正文会掉回浏览器默认字体。
    挂 :root 之后 `.wb`、外壳、画布三处一起生效，也只剩这一处真源。 */
 :root {
-  --dw-font-display: "Noto Serif SC Variable", "Noto Serif SC", "Songti SC", SimSun, serif;
-  --dw-font-text: "MiSans VF", "MiSans", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-  --dw-font-mono: "Martian Mono Variable", "Martian Mono", "Cascadia Code", Consolas, monospace;
+  --dh-font-display: "Noto Serif SC Variable", "Noto Serif SC", "Songti SC", SimSun, serif;
+  --dh-font-text: "MiSans VF", "MiSans", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --dh-font-mono: "Martian Mono Variable", "Martian Mono", "Cascadia Code", Consolas, monospace;
 }
 
 /* ---------- 字阶（语义名，不叫 sm/md）---------- */
 .wb {
-  --dw-text-hero: clamp(34px, 4.2vw, 54px);   /* AI 回复头条：衬线 600 */
-  --dw-text-title: 20px;                       /* 区块标题 */
-  --dw-text-lead: 16px;                        /* 导语 */
-  --dw-text-body: 14px;                        /* 正文（>=14px 保 400 字重） */
-  --dw-text-ui: 13px;                          /* 控件 */
-  --dw-text-meta: 11.5px;                      /* mono：状态行 / meta */
-  --dw-text-micro: 10.5px;                     /* mono：编号 / 脚注 */
-  --dw-leading-tight: 1.24;                    /* 衬线大头条（中文需比西文 1.1 透气） */
-  --dw-leading-body: 1.6;                      /* 正文 */
-  --dw-tracking-display: -0.02em;              /* 大标题轻微负字距 */
+  --dh-text-hero: clamp(34px, 4.2vw, 54px);   /* AI 回复头条：衬线 600 */
+  --dh-text-title: 20px;                       /* 区块标题 */
+  --dh-text-lead: 16px;                        /* 导语 */
+  --dh-text-body: 14px;                        /* 正文（>=14px 保 400 字重） */
+  --dh-text-ui: 13px;                          /* 控件 */
+  --dh-text-meta: 11.5px;                      /* mono：状态行 / meta */
+  --dh-text-micro: 10.5px;                     /* mono：编号 / 脚注 */
+  --dh-leading-tight: 1.24;                    /* 衬线大头条（中文需比西文 1.1 透气） */
+  --dh-leading-body: 1.6;                      /* 正文 */
+  --dh-tracking-display: -0.02em;              /* 大标题轻微负字距 */
 }
 
 /* ---------- 间距与圆角 ----------
    圆角遵从 better-ui 同心法则：外半径 = 内半径 +  padding。
    嵌套时用 calc() 现算，例如外壳 12px + padding 4px → 内容 8px。 */
 .wb {
-  --dw-space-1: 4px;
-  --dw-space-2: 8px;
-  --dw-space-3: 12px;
-  --dw-space-4: 16px;
-  --dw-space-6: 24px;
-  --dw-space-8: 32px;
-  --dw-radius-sm: 6px;
-  --dw-radius-md: 8px;
-  --dw-radius-lg: 12px;
-  --dw-radius-pill: 999px;
+  --dh-space-1: 4px;
+  --dh-space-2: 8px;
+  --dh-space-3: 12px;
+  --dh-space-4: 16px;
+  --dh-space-6: 24px;
+  --dh-space-8: 32px;
+  --dh-radius-sm: 6px;
+  --dh-radius-md: 8px;
+  --dh-radius-lg: 12px;
+  --dh-radius-pill: 999px;
 }
 
 /* ---------- 动效令牌 ----------
@@ -98,9 +98,9 @@
   --dur-reveal: 560ms;                           /* 头条 / 区块入场 */
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1); /* 默认：柔和减速 */
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); /* 仅限微反馈（chip 弹出） */
-  --ease-dw: cubic-bezier(0.65, 0, 0.35, 1);     /* 遮罩上浮：对称 ease-in-out */
+  --ease-dh: cubic-bezier(0.65, 0, 0.35, 1);     /* 遮罩上浮：对称 ease-in-out */
   --ease-icon: cubic-bezier(0.2, 0, 0, 1);       /* 图标 cross-fade 专用 */
-  --dw-i: 0;                                     /* 本地适配 B：stagger 序号默认值 */
+  --dh-i: 0;                                     /* 本地适配 B：stagger 序号默认值 */
 }
 
 /* ============================================================
@@ -252,7 +252,7 @@
    ------------------------------------------------------------
    提案 §03 把 Noto Serif SC 的职责写成「AI 回复头条、区块标题、logo 字、
    右栏关键数字」，但真机上**一处都没用到** —— 实测：全仓没有任何规则引用
-   `--dw-font-display`，浏览器里那一族（101 个分片）始终停在 unloaded。
+   `--dh-font-display`，浏览器里那一族（101 个分片）始终停在 unloaded。
    交付了三族、界面只看得见两族，这正是"半成品相"的一种。
 
    ⚠️ 第一版只接了带类名的那两处（`.wb-home-title` / `.wb-page-h2`），
@@ -272,11 +272,11 @@
    （"周报要能写实，关键信息还缺一些——比如是哪个产品……我先问两点"）——
    把 hero（`clamp(34px, 4.2vw, 54px)` 衬线）套上去，等于把**整条回复**变成巨型标题。
    那半句要等回复真的长出"头条 + 正文"的结构才谈得上，不是加个类的事。
-   工具类 `.dw-head` 已交付，届时直接用。
+   工具类 `.dh-head` 已交付，届时直接用。
    ============================================================ */
 .wb h1,
 .wb h2 {
-  font-family: var(--dw-font-display);
+  font-family: var(--dh-font-display);
 }
 
 /* 画布内部（markdown 节点的标题）保持原族 —— 上面那条特异性同为 0,1,1，靠**顺序**压回 */
@@ -329,7 +329,7 @@
 }
 
 /* ============================================================
-   本地适配 D：浅色域里**还漏着的 5 条冷色令牌** → Dingwork 暖墨族
+   本地适配 D：浅色域里**还漏着的 5 条冷色令牌** → Ding Harness 暖墨族
    ------------------------------------------------------------
    怎么找出来的：把 `theme.css` 的 `.wb` 块里 74 个变量减去本文件覆盖的 45 个，
    剩下的按色相过一遍 —— 5 条的取值是**冷灰/蓝灰**，而且角色是「文字 / 描边」
@@ -357,7 +357,7 @@
 }
 
 /* ============================================================
-   本地适配 C：项目既有「蓝色族」令牌 → Dingwork 朱红族
+   本地适配 C：项目既有「蓝色族」令牌 → Ding Harness 朱红族
    ------------------------------------------------------------
    `--tint-blue` / `-2` / `-3` 是旧 accent（蓝）时期的**选中底色**，
    被 21 处规则用着（`.wb-icon.is-on` / `.wb-voice-item.is-on` /
@@ -382,5 +382,5 @@
 
 /* ============================================================
    画布深色孤岛（.wb-canvas 在 .wb 内，项目既有机制）
-   Dingwork 暖墨令牌在此同样成立，无需另配。
+   Ding Harness 暖墨令牌在此同样成立，无需另配。
    ============================================================ */

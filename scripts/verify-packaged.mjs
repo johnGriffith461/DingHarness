@@ -78,7 +78,7 @@ const stop = () => {
 const fail = (message) => {
   console.error("✗ 打包后的应用冒烟测试失败：" + message);
   if (bootTail.trim()) console.error("  应用输出尾部：\n" + bootTail.trim().slice(-800));
-  console.error("  排查看 %TEMP%\\dingwork-boot.log（外壳崩溃兜底会写在那里）");
+  console.error("  排查看 %TEMP%\\ding-harness-boot.log（外壳崩溃兜底会写在那里）");
   stop();
   process.exit(1);
 };

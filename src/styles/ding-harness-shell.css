@@ -1,5 +1,5 @@
 /* ============================================================
- * Dingwork 原型里那几处**外壳行为**在本机版的落地（2026-10-14）
+ * Ding Harness 原型里那几处**外壳行为**在本机版的落地（2026-10-14）
  * ------------------------------------------------------------
  * 为什么单独一个文件：这几块原来是加在 `workbench.css` 里的，**当场被结构守卫拦下**
  * （C6-5：`.css ≤ 1500`，加完 1609 行）—— 与当初 `craft.css` 分出来的原因一模一样
@@ -15,7 +15,7 @@
  * ============================================================ */
 
 /* ============================================================
-   一、右栏收起（照 Dingwork 原型的**几何**）
+   一、右栏收起（照 Ding Harness 原型的**几何**）
    ------------------------------------------------------------
    原型那边（`dingwork-app.html` 的 `.rail-edge` / `.side.right`）是这么定的：
      · 收起 = 右栏 `display: none` —— **一点都不占列**，主区一直铺到窗口右缘；
@@ -120,7 +120,7 @@
 /* ============================================================
    二、输入区里的「用量」弹层（主人 2026-10-14 点名要的）
    ------------------------------------------------------------
-   形态照 Dingwork 原型的上下文容量弹层（`.ctx-pop`）：272px / 12px 圆角 / 卡片阴影；
+   形态照 Ding Harness 原型的上下文容量弹层（`.ctx-pop`）：272px / 12px 圆角 / 卡片阴影；
    值走等宽字体 + `tabular-nums`（数一变就左右跳的毛病在这条上最明显）。
  
    ⚠️ 方向与原型**相反**，这是有意的：原型那边输入框悬在页面下半屏、**下方还留着一大块**，
@@ -145,7 +145,7 @@
   animation: wb-pop-up var(--dur) var(--ease-spring) both;
 }
 
-/* 原型的 `dw-pop-down` 没随 `dingwork-motion.css` 交付（那份只有 8 条动效），
+/* 原型的 `dh-pop-down` 没随 `ding-harness-motion.css` 交付（那份只有 8 条动效），
    所以这里按同一个意图补一条本地的「弹层上浮」：位移 4px + 淡入。 */
 @keyframes wb-pop-up {
   from {
@@ -171,7 +171,7 @@
 }
 
 .wb-usage-head .mono {
-  font-family: var(--dw-font-mono);
+  font-family: var(--dh-font-mono);
   font-size: 10px;
   color: var(--fg-dim);
 }
@@ -200,7 +200,7 @@
 .wb-usage-row .v {
   margin-left: auto;
   order: 2;
-  font-family: var(--dw-font-mono);
+  font-family: var(--dh-font-mono);
   font-size: 10.5px;
   color: var(--fg);
   font-variant-numeric: tabular-nums;
@@ -228,7 +228,7 @@
 }
 
 .wb-usage-foot .mono {
-  font-family: var(--dw-font-mono);
+  font-family: var(--dh-font-mono);
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }

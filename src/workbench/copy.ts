@@ -171,7 +171,7 @@ export const SUMMARY_RECENT_FILES = "最近文件";
 /** 问候与输入区（实机截图文案）。 */
 export const HOME_GREETING = "今天有什么工作要处理?";
 export const COMPOSER_PLACEHOLDER = "发消息或创建任务... / 使用技能 @ 添加资料";
-export const SCHEDULE_COMPOSER_PLACEHOLDER = "给 Dingwork 安排任务";
+export const SCHEDULE_COMPOSER_PLACEHOLDER = "给 Ding Harness 安排任务";
 
 /** 生成中的产物标题（`building_my_artifacts_title_generate_cn`）。 */
 export const ARTIFACT_TITLE_GENERATING = "标题生成中...";

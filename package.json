@@ -1,8 +1,8 @@
 {
-  "name": "dingwork",
+  "name": "ding-harness",
   "version": "0.1.0",
   "private": true,
-  "description": "Dingwork —— AI 工作台 + 无限画布",
+  "description": "Ding Harness —— 本机优先的桌面 Agent 工作台（内核 + GUI/CLI 双宿主）",
   "license": "MIT",
   "type": "module",
   "main": "dist-electron/electron/main.cjs",
@@ -66,8 +66,8 @@
     "zustand": "^5.0.0"
   },
   "build": {
-    "appId": "com.dingwork.app",
-    "productName": "Dingwork",
+    "appId": "com.dingharness.app",
+    "productName": "Ding Harness",
     "directories": {
       "output": "release"
     },
@@ -89,7 +89,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "${productName}-${version}-setup.${ext}"
+      "artifactName": "ding-harness-${version}-setup.${ext}"
     }
   }
 }
