@@ -23,6 +23,8 @@
  */
 
 /** 输入区那个 chip 的三个档位（文案照本体实机截图，§130）。 */
+import { MCP_TOOL_PREFIX } from "./mcp";
+
 export const CONFIRM_MODES = ["全部允许", "按需确认", "每步确认"] as const;
 export type ConfirmMode = (typeof CONFIRM_MODES)[number];
 
@@ -100,6 +102,21 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
 
 /** 取一个工具的策略；没声明就当只读。 */
 export function policyOf(name: string): ToolPolicy {
+  /*
+   * ⭐ **连接器（MCP）来的工具，默认按「写」对待**（2026-10-14）。
+   *
+   * 这条**故意违反**上面"未声明默认只读"的便利：
+   * 那张表能默认放行，是因为**我们自己写的工具我们知道它干什么**；
+   * 而 MCP 工具是**别人写的进程**，名字之下可能是读、也可能是删库、
+   * 发邮件、下单 —— 我们**不知道**。对不知道的东西默认放行，
+   * 等于把"按需确认"这道闸对最有风险的一类工具有效地关掉。
+   *
+   * 「按需确认」档下它们会被问一次，而审批卡片上会显示**要发给哪个连接器的什么参数**
+   * （见 `shared/agentTools.ts` 的 `toolArgsSummary`）。
+   *
+   * 「全部允许」档下它们照样直接跑 —— 那一档的定义就是"用户说他都同意"。
+   */
+  if (name.startsWith(MCP_TOOL_PREFIX)) return { kind: "write" };
   return TOOL_POLICY[name] ?? { kind: "read" };
 }
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isMcpTool, parseMcpToolName } from "./mcp";
 import { MEMORY_TEXT_LIMIT } from "./memory";
 
 /**
@@ -552,6 +553,14 @@ export function toolLabel(name: string): string {
   if (name === LIST_DIR_TOOL) return "看目录";
   if (name === SEARCH_FILES_TOOL) return "找文件";
   if (name === RUN_COMMAND_TOOL) return "跑命令";
+  /*
+   * 连接器（MCP）工具：标签带上**哪个连接器** ——
+   * 留痕里只写"连接器"等于没说，用户要判断的是"它把这个动作交给了谁"。
+   */
+  if (isMcpTool(name)) {
+    const parsed = parseMcpToolName(name);
+    return parsed ? `连接器·${parsed.server}` : "连接器";
+  }
   return name;
 }
 
@@ -627,6 +636,15 @@ export function toolArgsSummary(name: string, input: unknown): string {
     const task = cut(obj.task, 40);
     return task ? `任务：${task}` : "";
   }
+  if (isMcpTool(name)) {
+    /*
+     * ⭐ 连接器工具的留痕要显示**参数全文**（截断到 120 字）：
+     * 审批卡片上这是唯一能让用户判断"要不要让它把这个动作发出去"的东西。
+     * 只写"调用连接器"等于让人在黑箱上点同意。
+     */
+    const args = cut(JSON.stringify(obj ?? {}), 120);
+    return args && args !== "{}" ? args : "";
+  }
   if (name === RUN_COMMAND_TOOL) {
     /*
      * ⭐ 命令**原文**必须出现在留痕里（截到 80 字）：这是审批卡片上唯一能让人
@@ -692,6 +710,21 @@ export function describeToolResult(
    */
   const pending = output as { pending?: boolean } | undefined;
   if (pending?.pending) return withArgs(`⚙ ${toolLabel(name)}：等你确认（还没执行）`);
+  /*
+   * 连接器（MCP）工具：**结果由服务端说了算**（2026-10-14）。
+   *
+   * 特别要注意 `output.ok === false`：服务端把这次调用标成了失败（`isError`），
+   * 但"工具跑到了"这件事是成立的 —— 所以外层的 `ok` 是 true。
+   * 留痕必须按**服务端的结果**写"报错"，否则界面上会显示"已完成"，
+   * 而模型那边拿到的是失败（这正是"界面与真相分叉"的那种毛病）。
+   */
+  if (isMcpTool(name)) {
+    const o = output as { ok?: boolean; error?: string } | undefined;
+    const parsed = parseMcpToolName(name);
+    const who = parsed ? `${parsed.server} · ${parsed.tool}` : name;
+    if (o?.ok === false) return withArgs(`⚙ 连接器报错：${who}${o.error ? `：${String(o.error).slice(0, 60)}` : ""}`);
+    return withArgs(`⚙ 连接器已执行：${who}`);
+  }
   if (name === MEMORY_SAVE_TOOL) {
     const o = output as { count?: number; note?: string } | undefined;
     if (o?.note) return withArgs(toolLine(name, true, o.note));

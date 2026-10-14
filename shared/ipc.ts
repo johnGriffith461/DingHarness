@@ -423,6 +423,30 @@ export type ShellBridge = {
    * ⚠️ `add` **不接受路径参数** —— 它只弹系统目录选择器，选中的才算授权
    * （渲染层能传路径的话，"用户授权"就是假的）。
    */
+  /**
+   * 连接器（MCP server，2026-10-14）。
+   *
+   * 与 goose 的 extensions / opencode 的 mcp 段同一件事：把外部工具接进来。
+   * 配置在 `mcp.json`（界面只做"看状态 + 打开配置文件 + 重连"）。
+   */
+  mcp: {
+    list: () => Promise<{
+      file: string;
+      empty: string;
+      servers: Array<{
+        name: string;
+        command: string;
+        args: string[];
+        enabled: boolean;
+        status: "starting" | "on" | "error" | "off";
+        line: string;
+        error: string;
+        tools: Array<{ localName: string; name: string; description: string }>;
+      }>;
+    }>;
+    reload: () => Promise<unknown>;
+    openConfig: () => Promise<{ ok: boolean; error: string }>;
+  };
   workspace: {
     list: () => Promise<{ dirs: string[] }>;
     /** 弹目录选择器；用户取消时 `dir` 为 null（列表原样返回）。 */

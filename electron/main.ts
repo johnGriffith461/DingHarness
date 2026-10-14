@@ -15,6 +15,7 @@ import { registerReaderIpc } from "./ipc/readerStore";
 import { registerAgentIpc } from "./ipc/agentStore";
 import { registerSearchHistoryIpc } from "./ipc/searchStore";
 import { loadWorkspaces, registerWorkspaceIpc } from "./ipc/workspaceStore";
+import { registerMcpIpc, startAllMcp, stopAllMcp } from "./ipc/mcpStore";
 import { registerLibraryIpc } from "./ipc/libraryStore";
 import { registerTaskIpc } from "./ipc/taskStore";
 import { registerMemoryIpc } from "./ipc/memoryStore";
@@ -266,6 +267,7 @@ try {
   registerAgentIpc();
   registerSearchHistoryIpc();
   registerWorkspaceIpc(() => win);
+  registerMcpIpc();
   registerLibraryIpc(ipcMain);
   registerTaskIpc(ipcMain);
   registerVideoIpc(ipcMain);
@@ -294,6 +296,11 @@ app.whenReady().then(() => {
   void loadWorkspaces().finally(() => {
     void createWindow();
   });
+  /*
+   * 连接器（MCP）**不阻塞建窗口**：某个 server 起不来（命令写错、依赖没装）
+   * 不该让用户看不到界面。连上之后工具自然出现在下一轮请求里。
+   */
+  void startAllMcp().catch((e) => console.error("[mcp] 启动连接器时出错：", e));
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
@@ -301,4 +308,9 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+/* 退出前把连接器的子进程收掉，别在系统里留孤儿进程 */
+app.on("before-quit", () => {
+  stopAllMcp();
 });

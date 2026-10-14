@@ -582,3 +582,15 @@
 }
 .wb-coding-detail-note { margin: 10px 0 0; color: var(--fg-3); font-size: 11.5px; }
 
+/* 连接器（MCP）：一条一个外部进程，状态要看得见、连不上的原因要看得见 */
+.wb-mcp { display: flex; flex-direction: column; gap: 10px; }
+.wb-mcp-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.wb-mcp-error { display: block; margin-top: 2px; color: var(--warn); font-size: 11.5px; }
+.wb-mcp-tools { display: block; margin-top: 4px; color: var(--fg-3); font-size: 11.5px; word-break: break-all; }
+.wb-mcp-actions { display: flex; align-items: center; gap: 8px; }
+.wb-mcp-file { color: var(--fg-dim); font-size: 11.5px; word-break: break-all; }

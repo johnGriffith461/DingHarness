@@ -1,4 +1,5 @@
-import { tool, type ToolSet } from "ai";
+import { jsonSchema, tool, type ToolSet } from "ai";
+import { isMcpTool, parseMcpToolName } from "../../shared/mcp";
 import {
   CANVAS_ADD_NODE_DESC,
   CANVAS_ADD_NODE_INPUT,
@@ -57,6 +58,7 @@ import { describeWriteResult, writeFileForModel } from "./writeTool";
 import { describeEditResult, editFileForModel } from "./editTool";
 import { describeRunResult, runCommandForModel } from "./execTool";
 import { nothingFoundNote } from "./searchTool";
+import { callMcpTool, mcpToolBindings } from "./mcpStore";
 import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "./searchTool";
 import { listDrive, ownedDirs } from "./driveStore";
 import { runSubagent } from "./subagent";
@@ -359,6 +361,26 @@ export async function runToolOnce(
    */
   env: ToolEnv = { mode: "全部允许", provider: "" },
 ): Promise<{ ok: boolean; output?: unknown; error?: string }> {
+  /*
+   * 连接器（MCP）工具**不在 `EXECUTORS` 这个静态表里**（它们是运行时才出现的，
+   * 取决于用户配了哪些 server）。所以先按名字分流：认得出前缀就走连接器。
+   * 这条同时让"用户点批准后再执行"那条路（`ai:runTool`）对 MCP 工具也成立。
+   */
+  if (isMcpTool(name)) {
+    const res = await callMcpTool(name, input);
+    if (!res.ok) return { ok: false, error: res.error };
+    const parsed = parseMcpToolName(name);
+    return {
+      ok: true,
+      output: {
+        ok: !res.isError,
+        line: describeMcpLine(parsed?.server ?? "?", parsed?.tool ?? name, res.isError),
+        text: res.text,
+        ...(res.isError ? { error: res.text } : {}),
+      },
+    };
+  }
+
   const run = EXECUTORS[name];
   // 未知工具：回一句"没有这个工具"，而不是抛异常（口径同 unknownToolNotice）
   if (!run) return { ok: false, error: unknownToolNotice(name) };
@@ -517,6 +539,33 @@ export function agentTools(env: ToolEnv): ToolSet {
   };
 
   /*
+   * **连接器（MCP）的工具**并进来（2026-10-14）。
+   *
+   * 名字是 `mcp__<server>__<tool>`，schema 用服务端给的 JSON Schema 直接转
+   * （`jsonSchema()`）—— 不重新描述一遍：MCP 服务端本来就是按 JSON Schema 暴露参数的。
+   *
+   * 闸门：`decide()` 对 MCP 工具**默认按写对待**（见 `shared/permissions.ts` 的说明），
+   * 所以「按需确认」档下会先问一次。
+   */
+  for (const binding of mcpToolBindings()) {
+    tools[binding.localName] = tool({
+      description: binding.description,
+      inputSchema: jsonSchema((binding.inputSchema as never) ?? { type: "object", properties: {} }),
+      execute: async (input: unknown) => {
+        if (decide(mode, binding.localName) === "ask") {
+          return { pending: true, notice: pendingApprovalNotice(binding.localName, mode) };
+        }
+        const res = await callMcpTool(binding.localName, input);
+        return {
+          ok: res.ok,
+          line: describeMcpLine(binding.server, binding.tool, !res.ok || res.isError),
+          ...(res.ok ? { text: res.text } : { error: res.error }),
+        };
+      },
+    });
+  }
+
+  /*
    * `hide` 的从注入列表里去掉。
    * 与"注入了但一律被拒"是两回事：模型看不到，就不会在回复里说
    * "我来调用 xxx" 然后失败 —— 那种失败会让人以为产品坏了。
@@ -536,6 +585,18 @@ export function agentTools(env: ToolEnv): ToolSet {
     if (keep.has(name)) out[name] = t;
   }
   return out;
+}
+
+/**
+ * 连接器工具执行完的那句话（界面留痕与回给模型共用）。
+ *
+ * @param server 哪个连接器
+ * @param tool 它那边的工具名
+ * @param failed 服务端是否把它标成失败
+ * @returns 一句话
+ */
+function describeMcpLine(server: string, tool: string, failed: boolean): string {
+  return `${failed ? "连接器报错" : "连接器已执行"}：${server} · ${tool}`;
 }
 
 /** 供测试与"未知工具回注"用的清单。 */

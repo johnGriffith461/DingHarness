@@ -3,8 +3,10 @@
  * 拆分理由见 `docs/PLAN-C6-结构拆分.md`（那个文件 1669 行 / 7 个顶层组件）。
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { ShellBridge } from "@shared/ipc";
 import { SEARCH_LABELS, hitLabel, placeholderFor, searchItems } from "@shared/search";
+import { MCP_LABELS } from "@shared/mcp";
 import { SearchHistoryStrip } from "./SearchHistoryStrip";
 import { useSearchHistoryStore } from "./searchHistoryStore";
 import { Check, ChevronDown, List, Plus, Search, Settings2, X } from "lucide-react";
@@ -54,6 +56,47 @@ export function PluginsPage() {
   };
   /** 管理页的三 tab：插件 / 技能 / **连接器**（与市场页的「工作伙伴」不同）。 */
   const [manageTab, setManageTab] = useState<"插件" | "技能" | "连接器">("插件");
+
+  /*
+   * ── 连接器（MCP server，2026-10-14）──
+   *
+   * 这个页签原来写着「本机版不含连接器体系」—— 那是**当时的事实**，不是设计。
+   * 现在 MCP 接上了：一个连接器就是一条命令（stdio），连上之后它把自己的工具交给 agent。
+   * 这里只做三件真事：**看见状态**（连上了没、给了几个工具、为什么没连上）、
+   * 「打开配置文件」、「重新连接」。
+   *
+   * 为什么不在界面里做"填命令/参数"的表单：那要一整套输入校验与编辑体验，
+   * 而当前价值最高的是"能连上、能用"（主人原话：先做功能）。配置在 `mcp.json` 里。
+   */
+  const [mcp, setMcp] = useState<{
+    file: string;
+    empty: string;
+    servers: Array<{
+      name: string;
+      command: string;
+      args: string[];
+      enabled: boolean;
+      status: string;
+      line: string;
+      error: string;
+      tools: Array<{ localName: string; name: string; description: string }>;
+    }>;
+  } | null>(null);
+  const [mcpNote, setMcpNote] = useState("");
+
+  const pullMcp = useCallback(() => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    void shell?.mcp
+      ?.list?.()
+      .then((r) => setMcp(r ?? null))
+      .catch(() => setMcp(null));
+  }, []);
+
+  /* 进「连接器」页签时才拉（它是主进程的状态，没必要一直挂着） */
+  useEffect(() => {
+    if (mode !== "manage" || manageTab !== "连接器") return;
+    pullMcp();
+  }, [mode, manageTab, pullMcp]);
 
   /*
    * 「添加」本机版的诚实对应物：**自己写一条能力**。
@@ -158,9 +201,82 @@ export function PluginsPage() {
             ))}
           </div>
 
-          {listed.length === 0 ? (
+          {manageTab === "连接器" ? (
+            /*
+             * 连接器（MCP）——**与上面的"已安装清单"不是同一类东西**：
+             * 那些是应用内置目录里的条目，这些是用户配的外部进程。
+             */
+            <div className="wb-mcp" data-testid="wb-mcp">
+              {(mcp?.servers ?? []).length === 0 ? (
+                <div className="wb-manage-empty" data-testid="wb-mcp-empty">
+                  {mcp?.empty ?? "还没有连接器"}
+                </div>
+              ) : (
+                (mcp?.servers ?? []).map((srv) => (
+                  <div className="wb-mcp-item" key={srv.name} data-testid={`wb-mcp-${srv.name}`}>
+                    <div className="wb-sched-item-main">
+                      <b>{srv.name}</b>
+                      <em>{[srv.command, ...srv.args].join(" ")}</em>
+                      <span className="wb-sched-meta" data-testid={`wb-mcp-line-${srv.name}`}>
+                        {srv.line}
+                      </span>
+                      {srv.status !== "on" && srv.error ? (
+                        /* 连不上要说清为什么 —— 一片空白等于让人去猜 */
+                        <span className="wb-mcp-error" data-testid={`wb-mcp-error-${srv.name}`}>
+                          {srv.error}
+                        </span>
+                      ) : null}
+                      {srv.tools.length ? (
+                        <span className="wb-mcp-tools" data-testid={`wb-mcp-tools-${srv.name}`}>
+                          {srv.tools.map((t) => t.localName).join("、")}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              )}
+              <div className="wb-mcp-actions">
+                <button
+                  className="wb-page-btn"
+                  data-testid="wb-mcp-open-config"
+                  onClick={() => {
+                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                    void shell?.mcp?.openConfig?.().then((r) => {
+                      if (r && !r.ok) setMcpNote(`打不开配置文件：${r.error}`);
+                    });
+                  }}
+                >
+                  {MCP_LABELS.openConfig}
+                </button>
+                <button
+                  className="wb-page-btn"
+                  data-testid="wb-mcp-reload"
+                  onClick={() => {
+                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                    void shell?.mcp?.reload?.().then(() => {
+                      pullMcp();
+                      setMcpNote("已重新连接");
+                      window.setTimeout(() => setMcpNote(""), 3000);
+                    });
+                  }}
+                >
+                  {MCP_LABELS.reload}
+                </button>
+                {mcpNote ? (
+                  <span className="wb-cloud-note" data-testid="wb-mcp-note">
+                    {mcpNote}
+                  </span>
+                ) : null}
+              </div>
+              {mcp?.file ? (
+                <div className="wb-mcp-file" data-testid="wb-mcp-file">
+                  配置文件：{mcp.file}
+                </div>
+              ) : null}
+            </div>
+          ) : listed.length === 0 ? (
             <div className="wb-manage-empty" data-testid="wb-manage-empty">
-              {manageTab === "连接器" ? "还没有添加连接器（本机版不含连接器体系）" : `你还没有添加${manageTab}`}
+              {`你还没有添加${manageTab}`}
             </div>
           ) : (
             <div className="wb-sched-list">
