@@ -35,7 +35,21 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const store of opened) store.close();
-  rmSync(dir, { recursive: true, force: true });
+  /*
+   * ⚠️ 清理**尽力而为**，不让它把一个通过的用例判红。
+   *
+   * Windows 上 "文件被占用" 是一次性冲突（杀软扫刚写出的文件、句柄还没完全释放），
+   * 表现为 EPERM —— 实测遇到过一次：一整轮里 6 条用例被 afterEach 的 rmSync 判红，
+   * 而那 6 条断言**其实全过了**。这类"测试自己抖"的代价很实在：
+   * 红了先怀疑测试，久了就没人看红了。
+   *
+   * 所以这里吞掉清理失败（临时目录由系统回收），而不是让它冒充"被测代码坏了"。
+   */
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* 占着就占着：系统会回收，不因此判红 */
+  }
 });
 
 /**
