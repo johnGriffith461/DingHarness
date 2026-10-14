@@ -69,6 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
 const KIND_PREFIX: Record<SessionKind, string> = {
   chat: SESSION_PREFIX.chat,
   task: SESSION_PREFIX.task,
+  cli: SESSION_PREFIX.cli,
 };
 
 /** 一次写入里 `sessions.bytes` 的增量口径（与 .jsonl 的行字节数同义）。 */
@@ -106,7 +107,8 @@ export function createSqliteSessionStore(dir: string, file = "sessions.db"): Ses
 
   /** 会话种类（按前缀判；`SESSION_PREFIX` 是唯一那份口径）。 */
   function kindOf(sessionId: string): SessionKind {
-    return isChatSessionId(sessionId) ? "chat" : "task";
+    if (isChatSessionId(sessionId)) return "chat";
+    return sessionId.startsWith(SESSION_PREFIX.cli) ? "cli" : "task";
   }
 
   return {

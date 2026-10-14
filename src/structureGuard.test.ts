@@ -65,7 +65,8 @@ function check(full: string): { rel: string; lines: number; limit: number; over:
 describe("C6-5：巨石文件守卫", () => {
   const files = sources(path.join(ROOT, "src"))
     .concat(sources(path.join(ROOT, "shared")))
-    .concat(sources(path.join(ROOT, "engine")));
+    .concat(sources(path.join(ROOT, "engine")))
+    .concat(sources(path.join(ROOT, "hosts")));
 
   it("判定本身有效（超一行就该判红，例外的文件也要真超）", () => {
     const sample = { rel: "x.ts", lines: LIMIT.code + 1, limit: LIMIT.code };

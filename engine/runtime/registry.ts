@@ -81,9 +81,12 @@ export function builtinToolEntries(): ToolEntry[] {
  * 建一个注册表。
  *
  * @param opts.extra 额外的来源（MCP 的工具、Phase 8 的插件工具）
+ * @param opts.include 只要内置里的这些（**宿主暴露子集**用：CLI 登记不了"记忆"这种
+ *   落到桌面界面 store 上的工具 —— 登记了就是三个必然失败的按钮）。
+ *   省略 = 全部内置。
  * @returns 注册表
  */
-export function createToolRegistry(opts: { extra?: readonly ToolEntry[] } = {}): ToolRegistry {
+export function createToolRegistry(opts: { extra?: readonly ToolEntry[]; include?: readonly string[] } = {}): ToolRegistry {
   const order: string[] = [];
   const byName = new Map<string, ToolEntry>();
 
@@ -98,7 +101,9 @@ export function createToolRegistry(opts: { extra?: readonly ToolEntry[] } = {}):
     },
   };
 
-  registry.add(builtinToolEntries());
+  const builtin = builtinToolEntries();
+  const only = opts.include ? new Set(opts.include) : null;
+  registry.add(only ? builtin.filter((e) => only.has(e.name)) : builtin);
   if (opts.extra?.length) registry.add(opts.extra);
   return registry;
 }

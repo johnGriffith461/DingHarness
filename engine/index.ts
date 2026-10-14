@@ -55,6 +55,8 @@ export type EnginePorts = {
   health?: HealthStore;
   /** 额外的工具来源（MCP 工具 / Phase 8 的插件工具）。 */
   tools?: readonly ToolEntry[];
+  /** 只要内置里的这些（宿主能力不同：CLI 登记不了落到桌面界面 store 上的工具）。省略 = 全部。 */
+  include?: readonly string[];
 };
 
 /** 跑一轮的请求。 */
@@ -115,7 +117,10 @@ export type Engine = {
  */
 export function createEngine(ports: EnginePorts): Engine {
   const health = ports.health ?? noopHealth;
-  const registry = createToolRegistry({ extra: ports.tools ?? [] });
+  const registry = createToolRegistry({
+    ...(ports.tools ? { extra: ports.tools } : {}),
+    ...(ports.include ? { include: ports.include } : {}),
+  });
 
   return {
     tools: registry,

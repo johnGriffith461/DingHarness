@@ -73,7 +73,7 @@ export type SessionStore = {
 };
 
 /** 会话种类。前缀语义取自 `engine/core/events.ts` 的 `SESSION_PREFIX`。 */
-export type SessionKind = "chat" | "task";
+export type SessionKind = "chat" | "task" | "cli";
 
 /**
  * 一步到位建一个 store（宿主按自己的数据位置调它）。

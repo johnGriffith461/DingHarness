@@ -65,36 +65,62 @@ pnpm build   # → release/ding-harness-0.1.0-setup.exe
 
 ## 架构
 
+**内核 + 双宿主**：agent 逻辑住在 `engine/`，桌面与命令行都只是它的宿主。
+
 ```
-渲染进程 (React 19 + zustand + Vite)
-  ├─ src/workbench/   工作台        ├─ src/canvas/  无限画布
-  └─ src/ai/          侧栏对话
-        │  preload 桥（contextIsolation）
-主进程 (Electron)
-  ├─ electron/ipc/runTurn.ts   ★ 唯一的 Agent 主循环（streamText + stepCountIs）
-  ├─ electron/ipc/tools.ts     工具执行绑定
-  ├─ electron/ipc/mcpClient.ts MCP 连接器
-  └─ 其余 store（JSON 落盘）
-shared/  ← 渲染与主进程共用的唯一事实来源
-  ├─ agentTools.ts   工具声明（zod schema = 给模型的说明 + 执行前校验）
-  ├─ sessionLog.ts   ★ 事件投影：界面与日志同一份真相
-  ├─ contextWindow.ts★ 上下文唯一切分 + 用量校准
-  ├─ permissions.ts  ★ 审批闸门（run / ask / hide）
-  └─ turnAssembly.ts 系统提示词装配
+engine/                       内核（不 import electron —— 有守卫盯着）
+├─ core/       纯逻辑，零 IO、零 Electron —— 可整包单测
+│   ├─ events.ts     ★ 事件溯源：state = fold(events)；日志即真相
+│   ├─ context.ts    上下文规划器（唯一切分 + 用量校准）
+│   ├─ policy.ts     审批闸门判定（run / ask / hide）
+│   ├─ assembly.ts   系统提示词装配
+│   └─ snapshot.ts   快照：重放 diff（重构零漂移的验收器）
+├─ runtime/    编排层
+│   ├─ loop.ts       ★ 唯一的主循环（streamText + stepCountIs）
+│   ├─ subagent.ts   子智能体（独立上下文、成本上卷、审批穿透）
+│   ├─ registry.ts   工具注册表（builtin / MCP / 插件三来源）
+│   ├─ providers.ts  provider 表（baseURL 惰性读环境变量）
+│   └─ tools/        与宿主无关的文件工具（read/write/edit/exec/search）
+├─ ports/      宿主适配接口：store / health / executor
+├─ adapters/   SQLite 事件存储（node:sqlite：CLI 与桌面同一份实现）
+└─ index.ts    createEngine(ports) → { run, resume, replay, record }
+
+hosts/
+├─ cli/ding.ts     命令行宿主：run / sessions / record / replay / models
+└─ （桌面宿主暂仍在 electron/，Phase 4 切换）
+
+electron/      桌面宿主：窗口、IPC、各 store（JSON 落盘）、MCP 连接器
+shared/        跨宿主契约：ipc.ts（含档位词表）/ agentTools.ts（工具声明）/ mcp.ts
+src/           渲染进程（React 19 + zustand + Vite）
 ```
 
-几处刻意的设计约束：
+几条刻意的设计约束（写进 code review 口径）：
 
-- **单一事实来源**：Agent 主循环、上下文切分、系统提示词装配、界面状态各自只有一处实现。
-- **错误回注上下文**：工具校验失败、闸门拦截都作为 tool result 回到模型，而不是抛栈。
-- **不编数据**：拿不到 `usage` 就留空，不知道模型上下文上限就不硬编。
+- **状态 = fold(events)**：会话、待办、用量全部由事件流折叠得出 —— 可重放、可恢复。
+- **日志即真相**：界面是事件流的投影，不是第二个真相。
+- **错误即结果**：工具失败 / 未知工具 / 闸门拦截，统一作为 tool result 回注，不中断循环。
+- **单一事实来源**：主循环、上下文切分、提示词装配、工具注册、闸门判定各只有一处实现。
+- **不编**：拿不到 `usage` 就留空；不知道模型上下文上限就不硬编。
+
+## 命令行
+
+```bash
+pnpm ding                          # 等同 tsx hosts/cli/ding.ts
+pnpm ding run "把 demo 里的 md 整理成一份纪要" --dir ./demo
+pnpm ding sessions                 # 列会话（--json / --export <id>）
+pnpm ding record <会话 id>          # 录一份快照（fixture）
+pnpm ding replay <快照文件>         # 重放并与录下来的投影 diff —— 重构零漂移的验收器
+pnpm ding models
+```
+
+数据目录默认 `~/.ding`，可用 `DH_DATA_DIR` 覆盖；`--dir` 可重复给（就是桌面的"工作区授权"）。
 
 ## 开发与验收
 
 ```bash
 pnpm typecheck   # tsc --noEmit
 pnpm lint        # oxlint
-pnpm test        # vitest
+pnpm test        # vitest（内核测试在 engine/**/*.test.ts，与渲染层共跑一个 node 环境）
 ```
 
 `scripts/accept/` 下是浏览器端验收脚本，`scripts/verify-*.mjs` 是产物与打包校验。
@@ -103,8 +129,8 @@ pnpm test        # vitest
 
 - 仅 Windows 构建；macOS / Linux 尚未验证。
 - `run_command` 与用户同权限运行，**没有沙箱**。
-- 只有 OpenAI 兼容一种 provider 通道。
-- 无 headless / CLI 入口；扩展途径只有 MCP 客户端。
+- 只有 OpenAI 兼容一种 provider 通道（协议分层在 Phase 5/6 才做）。
+- 桌面宿主**尚未**切到新内核（Phase 4）；CLI 已经跑在新内核上。
 - 尚无插件机制：能力来自内置工具与 MCP。
 
 ## 许可

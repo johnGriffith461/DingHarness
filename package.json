@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "verify:packaged": "node scripts/verify-packaged.mjs",
     "verify:accept": "node scripts/verify-acceptances.mjs",
-    "lint": "oxlint"
+    "lint": "oxlint",
+    "ding": "tsx hosts/cli/ding.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

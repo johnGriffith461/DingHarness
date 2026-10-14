@@ -139,7 +139,7 @@ export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord;
  * ⚠️ 加前缀之前的旧日志（`c1.jsonl` / `tmv….jsonl`）不会被列出来。
  * 它们是 C2 当天写的、只用于排错，**不当作数据迁移**（要说的话：旧日志不参与恢复）。
  */
-export const SESSION_PREFIX = { chat: "chat-", task: "task-" } as const;
+export const SESSION_PREFIX = { chat: "chat-", task: "task-", cli: "cli-" } as const;
 
 /** 聊天会话的日志 id（由对话 id 得到）。 */
 export function chatSessionId(conversationId: string): string {
@@ -149,6 +149,16 @@ export function chatSessionId(conversationId: string): string {
 /** 工作台任务会话的日志 id（由任务 id 得到）。 */
 export function taskSessionId(taskId: string): string {
   return `${SESSION_PREFIX.task}${taskId}`;
+}
+
+/**
+ * CLI 会话的日志 id（Phase 2）。
+ *
+ * 单独一类而不是蹭 `task-`：`ding run` 与工作台任务是**两件不同的事**，
+ * 混在一个前缀里之后，"列出来的这些到底是 CLI 跑的还是界面里点的"就只能靠猜。
+ */
+export function cliSessionId(runId: string): string {
+  return `${SESSION_PREFIX.cli}${runId}`;
 }
 
 /** 一条日志 id 是不是聊天会话（列会话时用）。 */
