@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, pickPort, shot } from "./harness.mjs";
 
 /**
  * 图片动作端到端验收（阶段 9.3）。
@@ -23,14 +23,16 @@ delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 
 const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
-const child = spawn(EXE, [".", "--remote-debugging-port=9495"], {
+/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
+const __port = await pickPort([12495]);
+const child = spawn(EXE, [".", "--remote-debugging-port=" + __port], {
   cwd: "D:/DoubaoWorkClone",
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });
 await new Promise((r) => setTimeout(r, 8000));
 
-const browser = await connectWithRetry(chromium, "http://127.0.0.1:9495");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });

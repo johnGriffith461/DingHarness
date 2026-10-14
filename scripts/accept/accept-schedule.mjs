@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, readStoreFile, shot, verdict } from "./harness.mjs";
+import { connectWithRetry, pickPort, readStoreFile, shot, verdict } from "./harness.mjs";
 
 /**
  * 定时任务真调度的验收（阶段 11.6）。
@@ -25,6 +25,8 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
 
 async function launch(port) {
+  /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
+  port = await pickPort([port]);
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
     cwd: "D:/DoubaoWorkClone",
     env,
@@ -42,7 +44,7 @@ async function launch(port) {
 const report = {};
 
 /* ---------- 第一次启动：建任务 ---------- */
-let { child, browser, page } = await launch(9560);
+let { child, browser, page } = await launch(12560);
 
 await page.locator('[data-testid="wb-nav-scheduled"]').click();
 await page.waitForTimeout(1200);
@@ -138,7 +140,7 @@ await browser.close();
 child.kill();
 await new Promise((r) => setTimeout(r, 2500));
 
-({ child, browser, page } = await launch(9561));
+({ child, browser, page } = await launch(12561));
 await page.locator('[data-testid="wb-nav-scheduled"]').click();
 await page.waitForTimeout(1500);
 report.afterRestart = {

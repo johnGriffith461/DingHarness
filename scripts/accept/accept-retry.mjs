@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, openCanvas, shot, verdict } from "./harness.mjs";
+import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness.mjs";
 
 /**
  * 聊天失败后的「重试」（§187 界面体检 P1 点名的两处接线之一）。
@@ -36,14 +36,16 @@ delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
 env.DSH_CREDENTIALS_FILE = EMPTY_KEYS;
 
+/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
+const __port = await pickPort([12740]);
 const child = spawn(
   "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe",
-  [".", "--remote-debugging-port=9740"],
+  [".", "--remote-debugging-port=" + __port],
   { cwd: "D:/DoubaoWorkClone", env, stdio: ["ignore", "ignore", "ignore"] },
 );
 await new Promise((r) => setTimeout(r, 9000));
 
-const browser = await connectWithRetry(chromium, "http://127.0.0.1:9740");
+const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const ctx = browser.contexts()[0];
 const pages = ctx.pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];

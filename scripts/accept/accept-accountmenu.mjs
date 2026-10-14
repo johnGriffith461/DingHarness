@@ -1,7 +1,7 @@
 ﻿import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, shot } from "./harness.mjs";
+import { connectWithRetry, pickPort, shot } from "./harness.mjs";
 
 /**
  * 验收：账号菜单 + 「外观设置」子菜单（三选一）。
@@ -20,7 +20,9 @@ delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_DEBUG_PORT = "9921";
 env.DSH_CANVAS_DATA_DIR = DATA;
 
-const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=9921"], {
+/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
+const __port = await pickPort([12921]);
+const child = spawn("D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe", [".", "--remote-debugging-port=" + __port], {
   cwd: "D:/DoubaoWorkClone",
   env,
   stdio: ["ignore", "ignore", "ignore"],
@@ -30,7 +32,7 @@ const out = {};
 await new Promise((r) => setTimeout(r, 13000));
 let browser;
 try {
-  browser = await connectWithRetry(chromium, "http://127.0.0.1:9921");
+  browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2200);

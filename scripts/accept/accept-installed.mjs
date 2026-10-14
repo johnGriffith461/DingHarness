@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, verdict } from "./harness.mjs";
+import { connectWithRetry, pickPort, verdict } from "./harness.mjs";
 
 /**
  * 验证**安装出来的**应用能跑（而不是只验证 unpacked 目录能跑）。
@@ -26,7 +26,9 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 env.DSH_DEBUG_PORT = "9855";
 
 const report = { exeBytes: fs.statSync(EXE).size };
-const child = spawn(EXE, ["--remote-debugging-port=9855"], {
+/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
+const __port = await pickPort([12855]);
+const child = spawn(EXE, ["--remote-debugging-port=" + __port], {
   env,
   stdio: ["ignore", "ignore", "ignore"],
 });
@@ -34,7 +36,7 @@ const child = spawn(EXE, ["--remote-debugging-port=9855"], {
 await new Promise((r) => setTimeout(r, 22000));
 
 try {
-  const browser = await connectWithRetry(chromium, "http://127.0.0.1:9855");
+  const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   report.connected = true;
   report.url = page.url();

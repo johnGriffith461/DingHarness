@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, readStoreFile, shot } from "./harness.mjs";
+import { connectWithRetry, pickPort, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 插件安装（11.7）与项目分组（11.8）的验收。
@@ -22,6 +22,8 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const EXE = "D:/DoubaoWorkClone/node_modules/electron/dist/electron.exe";
 
 async function launch(port) {
+  /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
+  port = await pickPort([port]);
   const child = spawn(EXE, [".", `--remote-debugging-port=${port}`], {
     cwd: "D:/DoubaoWorkClone",
     env,

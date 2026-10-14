@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, pickPort, readStoreFile, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 11.26 验收：手机遥控电脑页的两个开关是**真状态**。
@@ -30,6 +30,8 @@ if (!(await freshDir(DATA))) {
 }
 
 async function launch(port) {
+  /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
+  port = await pickPort([port]);
   const { child, ok, getLog } = await bootApp({ port, dataDir: DATA });
   if (!ok) {
     console.error(`✗ 应用起了但调试端口 ${port} 没开 —— 看下面这段日志：\n${getLog()}`.slice(0, 1200));
@@ -48,7 +50,7 @@ async function launch(port) {
 
 const report = {};
 const shots = "D:/DoubaoWorkClone/.verify/shots-final";
-let { child, browser, page } = await launch(9680);
+let { child, browser, page } = await launch(12680);
 
 try {
   await page.locator('[data-testid="wb-nav-phone"]').click();
@@ -103,7 +105,7 @@ try {
   child.kill();
   await new Promise((r) => setTimeout(r, 2500));
 
-  ({ child, browser, page } = await launch(9681));
+  ({ child, browser, page } = await launch(12681));
   await page.locator('[data-testid="wb-nav-phone"]').click();
   await page.waitForTimeout(2000);
   report.afterRestartConnect = await page.locator('[data-testid="wb-switch-connect"]').getAttribute("aria-pressed");
