@@ -9,6 +9,8 @@ import { Blocks, Check, ChevronDown, Paperclip, Plus, Send, Sparkles, X } from "
 import { useWorkbenchStore } from "./store";
 import { PHRASE_LABELS, applyPhrase, detectAtTrigger, filterPhrases, phraseGroups, type AtTrigger, type Phrase } from "@shared/phrases";
 import { COMPOSER_PLACEHOLDER } from "./copy";
+import { resolveImportedMaterials } from "./materialImport";
+import { UPLOAD_REASON_LABEL } from "@shared/upload";
 import type { ShellBridge } from "@shared/ipc";
 import { fileContextBlock } from "./fileContext";
 import { useLibraryStore } from "./libraryStore";
@@ -20,6 +22,22 @@ import { Square } from "lucide-react";
 import SkillPanel from "./SkillPanel";
 
 import { CONFIRM_MODES } from "./uiUtil";
+
+/**
+ * 把导入失败的原因转成一句人话。
+ *
+ * ⚠️ 渲染侧看到的 `reason` 是 `string`（桥那边的类型比 `UploadFailReason` 宽），
+ * 所以这里按"认识就说、不认识就兜底"，而不是硬转 —— 硬转会写出一个假的 `as`。
+ *
+ * @param reason 桥回来的原因
+ * @returns 界面上要显示的那几个字
+ */
+function importReasonText(reason?: string): string {
+  if (reason && reason in UPLOAD_REASON_LABEL) {
+    return UPLOAD_REASON_LABEL[reason as keyof typeof UPLOAD_REASON_LABEL];
+  }
+  return "没能导入";
+}
 
 export function Composer({
   placeholder = COMPOSER_PLACEHOLDER,
@@ -56,6 +74,13 @@ export function Composer({
   const [material, setMaterial] = useState<Array<{ name: string; path: string }>>([]);
   /** 云盘里的文件（打开 @ 选单时读一次，点选即附着）。 */
   const [driveFiles, setDriveFiles] = useState<Array<{ name: string; path: string }>>([]);
+  /**
+   * 「从本机添加资料」的即时回执（成功几个、哪几个没进来以及为什么）。
+   *
+   * 失败**必须有回执**：选了 3 个文件只进来 1 个却什么都不说，用户只会以为坏了
+   * （云盘那边有逐条状态面板，这里只有一行字，但**不能没有**）。
+   */
+  const [materialNote, setMaterialNote] = useState("");
 
   /** 读一次云盘清单（失败就当没有资料可加 —— 不该因为读不到清单让输入区报错）。 */
   const loadDriveFiles = async (): Promise<void> => {
@@ -259,6 +284,11 @@ export function Composer({
           )}
         </div>
       ) : null}
+      {materialNote ? (
+        <div className="wb-material-note" data-testid="wb-material-note" role="status">
+          {materialNote}
+        </div>
+      ) : null}
       {material.length > 0 ? (
         <div className="wb-material-chips" data-testid="wb-material-chips">
           {material.map((f) => (
@@ -394,7 +424,51 @@ export function Composer({
               >
                 视频生成
               </button>
-              <span className="wb-chip-hint">附件：本机版还没接原生文件对话框</span>
+              {/*
+                「选本地文件当资料」（2026-10-14 接上）。
+                原来这里写的是"本机版还没接原生文件对话框" —— 而 `drive:import` 早就有
+                （云盘页的「上传」走的就是它：`dialog.showOpenDialog` → 拷进云盘目录）。
+                这里复用它：选中之后文件进云盘，然后**直接挂成这一轮的资料** ——
+                于是 agent 既能读到内容（内容随请求过去），云盘里也留了一份。
+              */}
+              <button
+                className="wb-chip-option"
+                data-testid="wb-add-file"
+                onClick={() => {
+                  setOpenPop(null);
+                  void (async () => {
+                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                    const got = await shell?.drive?.importFiles?.();
+                    const items = got?.items ?? [];
+                    if (!items.length) return;
+                    /*
+                     * 解析收在 `materialImport.ts`（纯函数、有单测）：
+                     * 导入 IPC 只回名字与成败，路径要从云盘清单里认回来。
+                     */
+                    const list = (await shell?.drive?.list?.()) ?? [];
+                    const { picked, rejected, unmatched } = resolveImportedMaterials(items, list);
+                    if (picked.length) {
+                      setMaterial((prev) => {
+                        const seen = new Set(prev.map((f) => f.path));
+                        return [...prev, ...picked.filter((f) => !seen.has(f.path))];
+                      });
+                    }
+                    const parts: string[] = [];
+                    if (rejected.length) {
+                      parts.push(
+                        `${rejected.length} 个没进来：${rejected
+                          .map((r) => `${r.name}（${importReasonText(r.reason)}）`)
+                          .join("、")}`,
+                      );
+                    }
+                    if (unmatched.length) parts.push(`${unmatched.length} 个导入后在云盘里没找到：${unmatched.join("、")}`);
+                    setMaterialNote(parts.length ? parts.join("；") : picked.length ? `已添加 ${picked.length} 个文件` : "");
+                    window.setTimeout(() => setMaterialNote(""), 4000);
+                  })();
+                }}
+              >
+                从本机添加资料
+              </button>
             </div>
           ) : null}
         </div>

@@ -566,3 +566,10 @@ html[data-kb="1"] .wb-searchbox:focus-within {
 .wb-job-last {
   font-variant-numeric: tabular-nums;
 }
+
+/* 「从本机添加资料」的回执（失败一定要有回执，否则用户以为坏了）。只用已有令牌。 */
+.wb-material-note {
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  color: var(--warn);
+}

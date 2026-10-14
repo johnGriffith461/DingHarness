@@ -119,6 +119,25 @@ try {
     () => document.querySelector('[data-testid="wb-skill-panel"] .wb-cmd-head')?.textContent?.trim() ?? "",
   );
   /*
+   * ── 输入区 `＋` 菜单：附件那一条（2026-10-14）──
+   *
+   * 它原来写的是"附件：本机版还没接原生文件对话框"（一行灰字）。
+   * 现在接上了 —— 复用的是云盘页「上传」那条 IPC（`drive:import`）：
+   * 选中的文件进云盘，然后直接挂成这一轮的资料。
+   *
+   * ⚠️ **原生对话框本身自动化不了**（模态），所以这里只能断"入口在、不是假按钮"；
+   * 它下游那段（导入结果 → 附着哪些）由 `src/workbench/materialImport.test.ts` 钉住。
+   */
+  await page.locator('[data-testid="wb-composer-add"]').click();
+  await page.waitForTimeout(500);
+  out.addMenu = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="wb-add-file"]');
+    return el ? { label: el.textContent?.trim() ?? "", disabled: el.disabled } : null;
+  });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
+  /*
    * ── 命令区那六条：**能不能点要逐条说清**（2026-10-14）──
    *
    * 原来六条全是死按钮（`onPick` 从来没接）：点了没反应，用户只会以为坏了。
@@ -269,6 +288,13 @@ try {
     bad.push(`管理页没出现面包屑：${JSON.stringify(out.afterManageCmd?.crumb)}`);
   }
   if (!out.afterProjectCmd) bad.push("点「选择项目」没打开项目 chip 的下拉");
+
+  /* ＋ 菜单里"从本机添加资料"要在，且**能点**（不是灰掉的占位） */
+  if (!out.addMenu) bad.push("输入区 ＋ 菜单里没有「从本机添加资料」（wb-add-file）");
+  else {
+    if (!out.addMenu.label.includes("添加资料")) bad.push(`那一项写的不是"添加资料"：${JSON.stringify(out.addMenu.label)}`);
+    if (out.addMenu.disabled) bad.push("「从本机添加资料」是禁用的（那又成了一个占位）");
+  }
 
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
