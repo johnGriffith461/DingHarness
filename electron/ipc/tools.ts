@@ -23,18 +23,22 @@ import {
 } from "../../shared/agentTools";
 import { decide, injectableTools, pendingApprovalNotice, type ConfirmMode } from "../../shared/permissions";
 import {
+  LIST_FILES_DESC,
+  LIST_FILES_INPUT,
+  LIST_FILES_TOOL,
   READ_FILE_DESC,
   READ_FILE_INPUT,
   READ_FILE_TOOL,
   unknownToolNotice,
 } from "../../shared/agentTools";
+import { formatFileList } from "../../shared/fileList";
 import { addMemory, MEMORY_MAX } from "../../shared/memory";
 import { describeNextRun, makeJob, REPEAT_LABEL, validateJob, type RepeatType } from "../../shared/schedule";
 import { readMemory, writeMemory } from "./memoryStore";
 import { broadcastScheduleChanged, loadJobs, saveJobs } from "./scheduleStore";
 import { sendCanvasCommand } from "./canvas";
 import { describeReadResult, readFileForModel } from "./readTool";
-import { ownedDirs } from "./driveStore";
+import { listDrive, ownedDirs } from "./driveStore";
 import { runSubagent } from "./subagent";
 
 /**
@@ -184,6 +188,19 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
   },
 
   /**
+   * 列用户目录里的文件（2026-10-14）。
+   *
+   * 与「读文件」是一对：只读会让 agent"只能处理用户报得出名字的文件" ——
+   * 问"我云盘里有什么""把云盘里的文档整理成目录"就卡住了。
+   * 复用 `listDrive()`（云盘页那份，含同名去重与隐藏文件过滤）——
+   * 不另写一遍扫描，"界面上看到的"与"agent 看到的"才不会分叉。
+   */
+  [LIST_FILES_TOOL]: async () => {
+    const entries = await listDrive();
+    return { count: entries.length, line: `列了 ${entries.length} 个文件`, text: formatFileList(entries) };
+  },
+
+  /**
    * 派一个子智能体（§150）。
    *
    * 这里只做三件事：建**同一档位**的工具集（审批穿透）→ 跑 → 把要点报告回给父级。
@@ -325,6 +342,11 @@ export function agentTools(env: ToolEnv): ToolSet {
         env,
       ),
     }),
+    [LIST_FILES_TOOL]: tool({
+      description: LIST_FILES_DESC,
+      inputSchema: LIST_FILES_INPUT,
+      execute: gated<Record<string, never>>(LIST_FILES_TOOL, mode, (input) => EXECUTORS[LIST_FILES_TOOL](input, env), env),
+    }),
     [READ_FILE_TOOL]: tool({
       description: READ_FILE_DESC,
       inputSchema: READ_FILE_INPUT,
@@ -370,4 +392,5 @@ export const TOOL_NAMES = [
   CANVAS_ADD_NODE_TOOL,
   SPAWN_AGENT_TOOL,
   READ_FILE_TOOL,
+  LIST_FILES_TOOL,
 ] as const;

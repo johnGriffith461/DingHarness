@@ -71,6 +71,8 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
    * （`permissions.test.ts` 盯着这件事）—— 默认放行是个便利，不是让人省掉声明的理由。
    */
   read_file: { kind: "read" },
+  /* 列文件同样是只读（只读文件名与大小，不读正文）。 */
+  list_files: { kind: "read" },
 };
 
 /** 取一个工具的策略；没声明就当只读。 */

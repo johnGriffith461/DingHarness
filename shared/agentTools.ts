@@ -129,6 +129,23 @@ export const CANVAS_ADD_NODE_INPUT = z.object({
  * 做完只回一份**汇合摘要**（不是它整段对话），成本要能上卷到父级。
  * ============================================================ */
 
+export const LIST_FILES_TOOL = "list_files";
+
+/**
+ * 「列文件」的说明（2026-10-14）。
+ *
+ * 与 `read_file` 是一对：只读会让 agent"只能处理用户报了名字的文件" ——
+ * 用户问"我云盘里有哪些东西""把云盘里的文档整理成目录"时会卡住。
+ * 列出来之后，"先看有什么、再决定读哪个"这条路才通。
+ */
+export const LIST_FILES_DESC = [
+  "列出用户**云盘 / 产物 / 导出目录**里的文件（名字、大小、在哪个目录）。",
+  "用户问「我有哪些文件」「帮我看看云盘里有什么」，或者你不知道该读哪个文件时用它。",
+  "只列文件名与大小，**不含正文**；要看内容再对具体文件用 read_file。",
+].join("");
+
+export const LIST_FILES_INPUT = z.object({});
+
 export const READ_FILE_TOOL = "read_file";
 
 /**
@@ -352,6 +369,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: CANVAS_ADD_NODE_TOOL, description: CANVAS_ADD_NODE_DESC, schema: CANVAS_ADD_NODE_INPUT },
   { name: SPAWN_AGENT_TOOL, description: SPAWN_AGENT_DESC, schema: SPAWN_AGENT_INPUT },
   { name: READ_FILE_TOOL, description: READ_FILE_DESC, schema: READ_FILE_INPUT },
+  { name: LIST_FILES_TOOL, description: LIST_FILES_DESC, schema: LIST_FILES_INPUT },
 ];
 
 /** 按名字取声明；没有就是 `undefined`（→ 走"未知工具"那条路）。 */
@@ -384,6 +402,7 @@ export function toolLabel(name: string): string {
   if (name === CANVAS_ADD_NODE_TOOL) return "画布";
   if (name === SPAWN_AGENT_TOOL) return "子智能体";
   if (name === READ_FILE_TOOL) return "读文件";
+  if (name === LIST_FILES_TOOL) return "列文件";
   return name;
 }
 

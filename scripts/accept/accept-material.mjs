@@ -155,7 +155,7 @@ try {
   if (!Array.isArray(report.toolsOffered)) {
     bad.push("会话日志里没记这一轮下发了哪些工具（tools 字段缺失）");
   } else {
-    for (const need of ["read_file", "memory_save", "canvas_add_node"]) {
+    for (const need of ["read_file", "list_files", "memory_save", "canvas_add_node"]) {
       if (!report.toolsOffered.includes(need)) {
         bad.push(`这一轮没给模型「${need}」（实际：${JSON.stringify(report.toolsOffered)}）`);
       }
