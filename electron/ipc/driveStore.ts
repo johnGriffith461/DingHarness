@@ -7,6 +7,7 @@ import { READ_MAX_BYTES } from "../../shared/driveFiles";
 // 生成图落的目录（与 imageGen 同一处，不另写一份路径）
 import { assetsDir } from "./imageGen";
 import { insideDirs } from "./drivePaths";
+import { workspaceDirsSync } from "./workspaceStore";
 
 /**
  * 云盘（阶段 11.5）。
@@ -69,7 +70,17 @@ function exportsDir(): string {
  * "界面上能读的"与"agent 能读的"迟早分叉，而分叉的方向通常是其中一边变松。
  */
 export function ownedDirs(): string[] {
-  return sources().map((s) => s.dir);
+  /*
+   * 加上**用户授权的工作区**（2026-10-14）。
+   *
+   * 这是"agent 能不能真干活"的关键一步：在那之前它能碰的只有本应用自己的四个目录
+   * （云盘 / 产物 / 导出 / 生成图），那些里面是用户导进来的**副本** ——
+   * 于是"帮我整理这个文件夹""在这个项目里跑测试"一件都做不到。
+   *
+   * ⚠️ 工作区排在**最后**：`dirs[0]` 是"没指定目录时的默认落点"，
+   * 默认应该是云盘（用户熟悉的地方），而不是某个被授权的项目目录。
+   */
+  return [...sources().map((s) => s.dir), ...workspaceDirsSync()];
 }
 
 /** 三个来源目录与它们的 origin 标签。 */

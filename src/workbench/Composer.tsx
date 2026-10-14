@@ -12,6 +12,7 @@ import { COMPOSER_PLACEHOLDER } from "./copy";
 import { resolveImportedMaterials } from "./materialImport";
 import { UPLOAD_REASON_LABEL } from "@shared/upload";
 import type { ShellBridge } from "@shared/ipc";
+import { WORKSPACE_LABELS, addedNote, workspaceLabel } from "@shared/workspace";
 import { fileContextBlock } from "./fileContext";
 import { useLibraryStore } from "./libraryStore";
 import { findItemIn } from "./libraryStore";
@@ -121,6 +122,19 @@ export function Composer({
    * 以后再加 chip 也不会重犯这个问题。
    */
   const [openPop, setOpenPop] = useState<null | "project" | "confirm" | "skill" | "plugin" | "add">(null);
+  /*
+   * 工作区（2026-10-14）：用户授权给 agent 干活的目录。
+   * 列表在**菜单打开时**才拉（它是主进程的磁盘状态，没必要一直挂着）。
+   */
+  const [workspaces, setWorkspaces] = useState<string[]>([]);
+  useEffect(() => {
+    if (openPop !== "add") return;
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    void shell?.workspace
+      ?.list?.()
+      .then((r) => setWorkspaces(r?.dirs ?? []))
+      .catch(() => setWorkspaces([]));
+  }, [openPop]);
   const [projectId, setProjectId] = useState<string | null>(null);
   /*
    * 审批档位（§143）：
@@ -468,6 +482,63 @@ export function Composer({
                 }}
               >
                 从本机添加资料
+              </button>
+              {/*
+                「授权文件夹给 agent」（2026-10-14）。
+                这是 agent 真能干活的前提：不授权的话它只能在自己的云盘里活动，
+                而那里放的是**副本** —— "帮我整理这个文件夹"根本无从谈起。
+                ⚠️ 授权走**系统目录选择器**（主进程那边不接受渲染层传路径），
+                所以这里只发一个"弹一下"的请求。
+              */}
+              <div className="wb-chip-title" data-testid="wb-workspace-group">
+                工作区（让 agent 在这些目录里干活）
+              </div>
+              {workspaces.length === 0 ? (
+                <div className="wb-chip-empty" data-testid="wb-workspace-empty">
+                  {WORKSPACE_LABELS.empty}
+                </div>
+              ) : (
+                workspaces.map((dir) => (
+                  <div className="wb-chip-row" key={dir} data-testid={`wb-workspace-${workspaceLabel(dir)}`}>
+                    <span className="wb-chip-row-name" title={dir}>
+                      {workspaceLabel(dir)}
+                    </span>
+                    <button
+                      className="wb-chip-row-x"
+                      type="button"
+                      title={WORKSPACE_LABELS.remove}
+                      aria-label={`${WORKSPACE_LABELS.remove} ${workspaceLabel(dir)}`}
+                      data-testid={`wb-workspace-remove-${workspaceLabel(dir)}`}
+                      onClick={() => {
+                        const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                        void shell?.workspace?.remove?.(dir).then((r) => {
+                          setWorkspaces(r?.dirs ?? []);
+                          setMaterialNote(WORKSPACE_LABELS.removedNote);
+                          window.setTimeout(() => setMaterialNote(""), 4000);
+                        });
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
+              <button
+                className="wb-chip-option"
+                data-testid="wb-add-workspace"
+                onClick={() => {
+                  const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                  void (async () => {
+                    const got = await shell?.workspace?.add?.();
+                    setWorkspaces(got?.list?.dirs ?? []);
+                    /* 用户取消时 `dir` 是 null：不报错、不写回执（他什么都没做） */
+                    if (!got?.dir) return;
+                    setMaterialNote(addedNote(got.dir));
+                    window.setTimeout(() => setMaterialNote(""), 6000);
+                  })();
+                }}
+              >
+                ＋ {WORKSPACE_LABELS.add}
               </button>
             </div>
           ) : null}

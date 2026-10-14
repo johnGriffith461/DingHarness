@@ -26,9 +26,21 @@ import {
   LIST_FILES_DESC,
   LIST_FILES_INPUT,
   LIST_FILES_TOOL,
+  EDIT_FILE_DESC,
+  EDIT_FILE_INPUT,
+  EDIT_FILE_TOOL,
+  LIST_DIR_DESC,
+  LIST_DIR_INPUT,
+  LIST_DIR_TOOL,
   READ_FILE_DESC,
   READ_FILE_INPUT,
   READ_FILE_TOOL,
+  RUN_COMMAND_DESC,
+  RUN_COMMAND_INPUT,
+  RUN_COMMAND_TOOL,
+  SEARCH_FILES_DESC,
+  SEARCH_FILES_INPUT,
+  SEARCH_FILES_TOOL,
   unknownToolNotice,
   WRITE_FILE_DESC,
   WRITE_FILE_INPUT,
@@ -42,6 +54,10 @@ import { broadcastScheduleChanged, loadJobs, saveJobs } from "./scheduleStore";
 import { sendCanvasCommand } from "./canvas";
 import { describeReadResult, readFileForModel } from "./readTool";
 import { describeWriteResult, writeFileForModel } from "./writeTool";
+import { describeEditResult, editFileForModel } from "./editTool";
+import { describeRunResult, runCommandForModel } from "./execTool";
+import { nothingFoundNote } from "./searchTool";
+import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "./searchTool";
 import { listDrive, ownedDirs } from "./driveStore";
 import { runSubagent } from "./subagent";
 
@@ -211,6 +227,78 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
   },
 
   /**
+   * 看目录 / 找文件 / 改文件 / 跑命令（2026-10-14，一批四件）。
+   *
+   * 全部判断都在各自的纯模块里（`searchTool.ts` / `editTool.ts` / `execTool.ts`）：
+   * 目录白名单、上限、跳过的目录、超时与截断 —— 这里只做转接与"说成一句话"。
+   */
+  [LIST_DIR_TOOL]: async (input) => {
+    const { path, depth, pattern } = input as { path?: string; depth?: number; pattern?: string };
+    const result = await listDirForModel({ path, depth, pattern }, ownedDirs());
+    return {
+      ok: result.ok,
+      line: describeListDirResult(result, path ?? "(授权目录)"),
+      ...(result.ok
+        ? {
+            entries: result.entries.length,
+            truncated: result.truncated,
+            text: result.entries.length ? result.entries.join("\n") : nothingFoundNote("这个目录"),
+          }
+        : { error: result.error }),
+    };
+  },
+
+  [SEARCH_FILES_TOOL]: async (input) => {
+    const { pattern, path, include, literal, limit } = input as {
+      pattern: string;
+      path?: string;
+      include?: string;
+      literal?: boolean;
+      limit?: number;
+    };
+    const result = await searchFilesForModel({ pattern, path, include, literal, limit }, ownedDirs());
+    return {
+      ok: result.ok,
+      line: describeSearchResult(result, pattern),
+      ...(result.ok
+        ? {
+            count: result.matches.length,
+            truncated: result.truncated,
+            text: result.matches.length ? result.matches.join("\n") : nothingFoundNote("这一搜"),
+          }
+        : { error: result.error }),
+    };
+  },
+
+  [EDIT_FILE_TOOL]: async (input) => {
+    const { path, oldText, newText, replaceAll } = input as {
+      path: string;
+      oldText: string;
+      newText: string;
+      replaceAll?: boolean;
+    };
+    const result = await editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true);
+    return {
+      ok: result.ok,
+      line: describeEditResult(result, path),
+      /* ⚠️ 字段名不能叫 `line`：那是留痕那一行用的键，重名会被静默覆盖 */
+      ...(result.ok ? { path: result.path, replaced: result.replaced, atLine: result.line } : { error: result.error }),
+    };
+  },
+
+  [RUN_COMMAND_TOOL]: async (input) => {
+    const { command, workdir, timeout } = input as { command: string; workdir?: string; timeout?: number };
+    const result = await runCommandForModel({ command, workdir, timeout }, ownedDirs());
+    return {
+      ok: result.ok,
+      line: describeRunResult(result, command),
+      ...(result.ok
+        ? { exitCode: result.exitCode, cwd: result.cwd, truncated: result.truncated, timedOut: result.timedOut, text: result.output }
+        : { error: result.error }),
+    };
+  },
+
+  /**
    * 列用户目录里的文件（2026-10-14）。
    *
    * 与「读文件」是一对：只读会让 agent"只能处理用户报得出名字的文件" ——
@@ -375,6 +463,40 @@ export function agentTools(env: ToolEnv): ToolSet {
       inputSchema: READ_FILE_INPUT,
       execute: gated<{ path: string }>(READ_FILE_TOOL, mode, (input) => EXECUTORS[READ_FILE_TOOL](input, env), env),
     }),
+    [LIST_DIR_TOOL]: tool({
+      description: LIST_DIR_DESC,
+      inputSchema: LIST_DIR_INPUT,
+      execute: gated<{ path?: string; depth?: number; pattern?: string }>(LIST_DIR_TOOL, mode, (input) =>
+        EXECUTORS[LIST_DIR_TOOL](input, env), env,
+      ),
+    }),
+    [SEARCH_FILES_TOOL]: tool({
+      description: SEARCH_FILES_DESC,
+      inputSchema: SEARCH_FILES_INPUT,
+      execute: gated<{ pattern: string; path?: string; include?: string; literal?: boolean; limit?: number }>(
+        SEARCH_FILES_TOOL,
+        mode,
+        (input) => EXECUTORS[SEARCH_FILES_TOOL](input, env),
+        env,
+      ),
+    }),
+    [EDIT_FILE_TOOL]: tool({
+      description: EDIT_FILE_DESC,
+      inputSchema: EDIT_FILE_INPUT,
+      execute: gated<{ path: string; oldText: string; newText: string; replaceAll?: boolean }>(
+        EDIT_FILE_TOOL,
+        mode,
+        (input) => EXECUTORS[EDIT_FILE_TOOL](input, env),
+        env,
+      ),
+    }),
+    [RUN_COMMAND_TOOL]: tool({
+      description: RUN_COMMAND_DESC,
+      inputSchema: RUN_COMMAND_INPUT,
+      execute: gated<{ command: string; workdir?: string; timeout?: number }>(RUN_COMMAND_TOOL, mode, (input) =>
+        EXECUTORS[RUN_COMMAND_TOOL](input, env), env,
+      ),
+    }),
     [WRITE_FILE_TOOL]: tool({
       description: WRITE_FILE_DESC,
       inputSchema: WRITE_FILE_INPUT,
@@ -427,4 +549,8 @@ export const TOOL_NAMES = [
   READ_FILE_TOOL,
   LIST_FILES_TOOL,
   WRITE_FILE_TOOL,
+  LIST_DIR_TOOL,
+  SEARCH_FILES_TOOL,
+  EDIT_FILE_TOOL,
+  RUN_COMMAND_TOOL,
 ] as const;

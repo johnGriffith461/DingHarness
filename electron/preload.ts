@@ -16,6 +16,7 @@ import { DOC_CHANNEL } from "./ipc/docStore";
 import { READER_CHANNEL } from "./ipc/readerStore";
 import { AGENT_CHANNEL } from "./ipc/agentStore";
 import { SEARCH_HISTORY_CHANNEL } from "./ipc/searchStore";
+import { WORKSPACE_CHANNEL } from "./ipc/workspaceStore";
 import { TASK_CHANNEL } from "./ipc/taskStore";
 import { VIDEO_CHANNEL } from "./ipc/videoGen";
 import { REMOTE_CHANNEL } from "./ipc/remote";
@@ -182,6 +183,12 @@ const api = {
   searchHistory: {
     load: () => ipcRenderer.invoke(SEARCH_HISTORY_CHANNEL.load),
     save: (history: unknown) => ipcRenderer.invoke(SEARCH_HISTORY_CHANNEL.save, history),
+  },
+  /** 工作区（2026-10-14）：授权给 agent 干活的目录。 */
+  workspace: {
+    list: () => ipcRenderer.invoke(WORKSPACE_CHANNEL.list),
+    add: () => ipcRenderer.invoke(WORKSPACE_CHANNEL.add),
+    remove: (dir: string) => ipcRenderer.invoke(WORKSPACE_CHANNEL.remove, dir),
   },
   schedules: {
     /** 读定时任务（重启后恢复）。 */

@@ -14,6 +14,7 @@ import { registerDocIpc } from "./ipc/docStore";
 import { registerReaderIpc } from "./ipc/readerStore";
 import { registerAgentIpc } from "./ipc/agentStore";
 import { registerSearchHistoryIpc } from "./ipc/searchStore";
+import { loadWorkspaces, registerWorkspaceIpc } from "./ipc/workspaceStore";
 import { registerLibraryIpc } from "./ipc/libraryStore";
 import { registerTaskIpc } from "./ipc/taskStore";
 import { registerMemoryIpc } from "./ipc/memoryStore";
@@ -264,6 +265,7 @@ try {
   registerReaderIpc();
   registerAgentIpc();
   registerSearchHistoryIpc();
+  registerWorkspaceIpc(() => win);
   registerLibraryIpc(ipcMain);
   registerTaskIpc(ipcMain);
   registerVideoIpc(ipcMain);
@@ -284,7 +286,14 @@ app.whenReady().then(() => {
   } catch (error) {
     console.error("[asset] 协议接载失败：", error instanceof Error ? error.message : error);
   }
-  void createWindow();
+  /*
+   * 授权目录要先读进来（`ownedDirs()` 是同步的，靠内存缓存）。
+   * 放在建窗口之前：不然第一批工具调用可能跑在"还没加载"的空白名单上 ——
+   * 那会让 write_file 报"不在可写范围内"，而用户明明授权过。
+   */
+  void loadWorkspaces().finally(() => {
+    void createWindow();
+  });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });

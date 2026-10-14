@@ -416,6 +416,19 @@ export type ShellBridge = {
     load: () => Promise<unknown>;
     save: (history: unknown) => Promise<unknown>;
   };
+  /**
+   * 工作区：**用户授权给 agent 的目录**（2026-10-14）。
+   *
+   * 这是「agent 能真干活」的前提：在那之前它能碰的只有应用自己那几个目录。
+   * ⚠️ `add` **不接受路径参数** —— 它只弹系统目录选择器，选中的才算授权
+   * （渲染层能传路径的话，"用户授权"就是假的）。
+   */
+  workspace: {
+    list: () => Promise<{ dirs: string[] }>;
+    /** 弹目录选择器；用户取消时 `dir` 为 null（列表原样返回）。 */
+    add: () => Promise<{ dir: string | null; list: { dirs: string[] } }>;
+    remove: (dir: string) => Promise<{ dirs: string[] }>;
+  };
   /** 本机 AI 智能体（§156）。 */
   agents: {
     load: () => Promise<unknown[]>;

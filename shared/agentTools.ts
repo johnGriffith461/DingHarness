@@ -222,6 +222,102 @@ export const WRITE_FILE_INPUT = z.object({
   overwrite: z.boolean().optional().describe("允许覆盖同名文件；不传即不允许（默认拒绝覆盖）"),
 });
 
+export const LIST_DIR_TOOL = "list_dir";
+
+/**
+ * 「看目录」的说明（2026-10-14）。
+ *
+ * 与 `search_files` 一起补的是同一件事：**干活之前先看清楚有什么**。
+ * 原来只有 `list_files`（列云盘四个目录的顶层），想看一个项目的结构做不到。
+ */
+export const LIST_DIR_DESC = [
+  "看一个目录的结构（缩进树，目录带 `/`、文件带大小）。",
+  "第一次接触一个目录、或者不确定某个文件在哪一层时，先用它看一眼。",
+  "`pattern` 可以按名字过滤（如 `*.ts` / `*.{ts,tsx}`）；`depth` 默认 2、最大 4。",
+  "`.git` / `node_modules` / `dist` / `release` 这类目录**不会进去**（一次列举几十万行没有意义）。",
+].join("");
+
+export const LIST_DIR_INPUT = z.object({
+  path: z.string().trim().optional().describe("要看哪个目录（绝对路径）；不传就用你授权目录的第一个"),
+  depth: z.number().int().min(0).max(4).optional().describe("往下看几层，默认 2"),
+  pattern: z.string().trim().optional().describe("按文件名过滤，如 *.md"),
+});
+
+export const SEARCH_FILES_TOOL = "search_files";
+
+/**
+ * 「找文件」的说明（2026-10-14）。
+ *
+ * 依据 opencode 的 `grep`（正则/字面量、`include` 过滤、默认 100 条上限）。
+ * 它补的是"知道要找什么、但不知道在哪个文件里"这一步 ——
+ * 没有它，agent 只能一个文件一个文件地 `read_file` 试，几轮就把上下文烧光了。
+ */
+export const SEARCH_FILES_DESC = [
+  "在授权目录里按**内容**找（默认正则；`literal: true` 表示按原样文本找）。",
+  "想知道「哪个文件里提到了 X」「这个函数在哪定义」时用它，比逐个 read_file 快得多。",
+  "结果形如 `相对路径:行号: 那一行内容` —— 拿到路径再用 read_file / edit_file。",
+  "`include` 可以只搜某类文件（如 `*.ts`）；默认最多给 100 条命中，超了会说明。",
+].join("");
+
+export const SEARCH_FILES_INPUT = z.object({
+  pattern: z.string().min(1).describe("要找的内容（正则，或 literal:true 时的原样文本）"),
+  path: z.string().trim().optional().describe("在哪个目录里找；不传就用你授权目录的第一个"),
+  include: z.string().trim().optional().describe("只搜匹配这个文件名模式的文件，如 *.ts"),
+  literal: z.boolean().optional().describe("把 pattern 当成普通文本而不是正则（默认 false）"),
+  limit: z.number().int().min(1).max(1000).optional().describe("最多给多少条命中，默认 100"),
+});
+
+export const EDIT_FILE_TOOL = "edit_file";
+
+/**
+ * 「改文件」的说明（2026-10-14）。
+ *
+ * 依据 opencode 的 `edit`：**精确文本替换**，默认必须唯一。
+ * 为什么不让它"整篇重写"：重写要先把全文读回来，中间任何一步出岔子
+ * 就会把用户整个文件毁掉 —— 改一行不该有这种风险。
+ */
+export const EDIT_FILE_DESC = [
+  "在一个**已存在的**文件里把某一段文字换成另一段（精确匹配）。",
+  "改已有文件用这个，别用 write_file 整篇重写 —— 重写要先把全文抄回来，抄错一个字就毁了整个文件。",
+  "`oldText` 必须与文件里**逐字一致**（空格和缩进都算），要带够上下文让它只匹配一处。",
+  "默认要求唯一匹配：命中多处会失败并告诉你在哪几行；确实要全改就传 replaceAll。",
+  "新建文件用 write_file；这里只改已有的。",
+].join("");
+
+export const EDIT_FILE_INPUT = z.object({
+  path: z.string().trim().min(1).describe("要改的文件（绝对路径，或只给文件名）"),
+  oldText: z.string().min(1).describe("要替换掉的原文（逐字，含空格与缩进）"),
+  newText: z.string().describe("换成什么（空串表示删掉这段）"),
+  replaceAll: z.boolean().optional().describe("替换全部命中；不传则必须唯一匹配"),
+});
+
+export const RUN_COMMAND_TOOL = "run_command";
+
+/**
+ * 「跑命令」的说明（2026-10-14）。
+ *
+ * 依据 opencode 的 `bash`（默认 2 分钟超时、输出留尾部、`workdir` 优先于命令里 `cd`、
+ * "优先用专用工具"这句提示）。它是"agent 能干活"与"只能聊天"的分水岭：
+ * 装依赖、跑测试、看环境、调用本机工具，全靠它。
+ *
+ * ⚠️ 说明里必须写清两件事，否则模型会反复撞墙：
+ *   ① 它是**前台同步**的（没有后台任务概念），长任务要调大 timeout；
+ *   ② 别写交互式命令（等输入的那种会一直挂到超时）。
+ */
+export const RUN_COMMAND_DESC = [
+  "在本机跑一条 shell 命令，返回输出与退出码。",
+  "适合：装依赖、跑测试/构建、调用命令行工具、看环境信息、用脚本批量处理文件。",
+  "默认在**你授权的第一个目录**里跑；要换地方就传 workdir（比在命令里 cd 更可靠）。",
+  "默认 2 分钟超时，慢的命令请自己传 timeout（毫秒，0 表示不限时）。输出太长时只保留最后 2000 行。",
+  "**不要用交互式命令**（等输入的那种会一直挂到超时）；要读文件/改文件/找东西，优先用 read_file / edit_file / search_files。",
+].join("");
+
+export const RUN_COMMAND_INPUT = z.object({
+  command: z.string().trim().min(1).describe("要执行的命令行"),
+  workdir: z.string().trim().optional().describe("在哪个目录里执行（绝对路径）；不传就用授权目录的第一个"),
+  timeout: z.number().int().min(0).optional().describe("超时毫秒数，默认 120000；0 表示不限时"),
+});
+
 export const SPAWN_AGENT_TOOL = "spawn_agent";
 
 /**
@@ -412,9 +508,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: SCHEDULE_LIST_TOOL, description: SCHEDULE_LIST_DESC, schema: SCHEDULE_LIST_INPUT },
   { name: CANVAS_ADD_NODE_TOOL, description: CANVAS_ADD_NODE_DESC, schema: CANVAS_ADD_NODE_INPUT },
   { name: SPAWN_AGENT_TOOL, description: SPAWN_AGENT_DESC, schema: SPAWN_AGENT_INPUT },
+  { name: LIST_DIR_TOOL, description: LIST_DIR_DESC, schema: LIST_DIR_INPUT },
+  { name: SEARCH_FILES_TOOL, description: SEARCH_FILES_DESC, schema: SEARCH_FILES_INPUT },
   { name: READ_FILE_TOOL, description: READ_FILE_DESC, schema: READ_FILE_INPUT },
-  { name: LIST_FILES_TOOL, description: LIST_FILES_DESC, schema: LIST_FILES_INPUT },
   { name: WRITE_FILE_TOOL, description: WRITE_FILE_DESC, schema: WRITE_FILE_INPUT },
+  { name: EDIT_FILE_TOOL, description: EDIT_FILE_DESC, schema: EDIT_FILE_INPUT },
+  { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
 ];
 
 /** 按名字取声明；没有就是 `undefined`（→ 走"未知工具"那条路）。 */
@@ -449,6 +548,10 @@ export function toolLabel(name: string): string {
   if (name === READ_FILE_TOOL) return "读文件";
   if (name === LIST_FILES_TOOL) return "列文件";
   if (name === WRITE_FILE_TOOL) return "写文件";
+  if (name === EDIT_FILE_TOOL) return "改文件";
+  if (name === LIST_DIR_TOOL) return "看目录";
+  if (name === SEARCH_FILES_TOOL) return "找文件";
+  if (name === RUN_COMMAND_TOOL) return "跑命令";
   return name;
 }
 
@@ -523,6 +626,30 @@ export function toolArgsSummary(name: string, input: unknown): string {
   if (name === SPAWN_AGENT_TOOL) {
     const task = cut(obj.task, 40);
     return task ? `任务：${task}` : "";
+  }
+  if (name === RUN_COMMAND_TOOL) {
+    /*
+     * ⭐ 命令**原文**必须出现在留痕里（截到 80 字）：这是审批卡片上唯一能让人
+     * 判断"要不要让它跑"的东西。只写"跑命令"三个字，等于让用户在黑箱上点同意。
+     */
+    const cmd = cut(obj.command, 80);
+    const dir = typeof obj.workdir === "string" && obj.workdir.trim() ? ` @${cut(obj.workdir, 40)}` : "";
+    return cmd ? `${cmd}${dir}` : "";
+  }
+  if (name === SEARCH_FILES_TOOL) {
+    const what = cut(obj.pattern, 40);
+    const inc = typeof obj.include === "string" && obj.include.trim() ? `（只看 ${cut(obj.include, 20)}）` : "";
+    return what ? `找「${what}」${inc}` : "";
+  }
+  if (name === LIST_DIR_TOOL) {
+    const where = cut(obj.path, 60);
+    return where ? `看「${where}」` : "";
+  }
+  if (name === EDIT_FILE_TOOL) {
+    const raw = cut(obj.path, 80);
+    const file = raw ? (raw.split(/[\\/]/).pop() ?? "") : "";
+    if (!file) return "";
+    return obj.replaceAll === true ? `全改「${file}」` : `改「${file}」`;
   }
   if (name === WRITE_FILE_TOOL) {
     /*

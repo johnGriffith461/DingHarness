@@ -163,7 +163,17 @@ try {
      * （不需要模型真去调用）；"写不写得进去"由 `writeTool.test.ts` 与
      * `shared/permissions.ts` 的 write 声明管。
      */
-    for (const need of ["read_file", "list_files", "write_file", "memory_save", "canvas_add_node"]) {
+    for (const need of [
+      "read_file",
+      "list_files",
+      "write_file",
+      "edit_file",
+      "search_files",
+      "list_dir",
+      "run_command",
+      "memory_save",
+      "canvas_add_node",
+    ]) {
       if (!report.toolsOffered.includes(need)) {
         bad.push(`这一轮没给模型「${need}」（实际：${JSON.stringify(report.toolsOffered)}）`);
       }
