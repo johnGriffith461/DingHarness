@@ -11,6 +11,7 @@ import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import type { ToolExecutor } from "../../engine/ports/executor";
 import { buildToolSet, createToolRegistry } from "../../engine/runtime/registry";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
+import { describeBudget } from "../../engine/runtime/budget";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
 
@@ -351,9 +352,18 @@ async function cmdReplay(p: Parsed): Promise<number> {
   return 1;
 }
 
+/**
+ * `ding models` —— 列 provider 与模型，并**如实**标出每个模型的上下文数据从哪来。
+ *
+ * ⚠️ "未登记模型"要明说：我们不知道它的上限，走的是保守默认。
+ * 让人以为"这个数是模型的上限"，比不给这个数更坏（见 `engine/runtime/budget.ts`）。
+ */
 function cmdModels(): number {
   for (const provider of allProviders()) {
     process.stdout.write(`${provider.id.padEnd(12)} ${provider.label}  [${provider.models.join(", ")}]\n`);
+    for (const model of provider.models) {
+      process.stdout.write(`             · ${describeBudget(model)}\n`);
+    }
   }
   return 0;
 }

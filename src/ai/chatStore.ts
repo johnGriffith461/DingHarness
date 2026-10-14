@@ -7,13 +7,13 @@ import { enabledPromptBlock } from "@shared/library";
 import { memoryPromptBlock } from "@shared/memory";
 import { assembleSystem } from "@engine/core/assembly";
 import {
-  KEEP_RECENT_TOKENS,
   calibrationOf,
   estimateTokens,
   omittedNote,
   planContext,
   totalTokens,
 } from "@engine/core/context";
+import { keepTokensFor } from "@engine/runtime/budget";
 import type { SessionSummary, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "./aiClient";
 import { readConfirmMode } from "@/workbench/confirmMode";
@@ -536,7 +536,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
      *
      * 当前这句**永远保留**：切分只作用于历史，新消息是切完之后追加的。
      */
-    const { older, recent } = planContext(prior, KEEP_RECENT_TOKENS, { factor: chatCalibration });
+    /* 保留额度按**当前模型**的上限算（未登记模型 = 换代前那个固定值，零漂移） */
+    const { older, recent } = planContext(prior, keepTokensFor(get().model), { factor: chatCalibration });
     const payload: ChatMessage[] = [
       ...recent,
       { role: "user", content: contextBlock ? `${contextBlock}\n\n${trimmed}` : trimmed },

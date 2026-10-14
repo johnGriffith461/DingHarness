@@ -34,12 +34,13 @@ import { assembleSystem } from "@engine/core/assembly";
 import { fabricatedCost, type StepUsage } from "@shared/cost";
 import { calibrationOf, estimateTokens, totalTokens } from "@engine/core/context";
 import { buildHistory } from "./history";
+import { keepTokensFor } from "@engine/runtime/budget";
+import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
 import { useMemoryStore } from "./memoryStore";
 import { resolveChatRoute } from "@/ai/route";
 import {
-  KEEP_TOKENS,
   compactedNote,
   compactPrompt,
   shouldCompact,
@@ -170,10 +171,18 @@ async function enabledBlock(): Promise<string> {
 function compactKeepTokens(): number {
   try {
     const raw = Number(localStorage.getItem("dsh-canvas.compact-keep-tokens"));
-    return Number.isFinite(raw) && raw > 0 ? raw : KEEP_TOKENS;
+    if (Number.isFinite(raw) && raw > 0) return raw;
   } catch {
-    return KEEP_TOKENS;
+    /* 读不到 localStorage（测试/异常）→ 走下面的默认 */
   }
+  /*
+   * 没手动指定额度 → 按**当前模型的上限**算（Phase 1 D4）。
+   *
+   * ⚠️ 未登记模型（含我们默认用的 deepseek-chat）返回的就是换代前那个固定值 ——
+   * **行为零漂移**；登记过的模型里，上限小的会少留一点（避免顶爆），
+   * 上限大的**封顶**在同一额度上（不静默把每轮成本放大，见 `budget.ts` 的说明）。
+   */
+  return keepTokensFor(readSavedRoute().model);
 }
 
 /**
