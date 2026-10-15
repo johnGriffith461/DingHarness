@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: 检出
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 装 Node（版本跟本机一致：24.x LTS）
         uses: actions/setup-node@v7
@@ -123,7 +123,7 @@ jobs:
       DSH_NO_REAL_MODEL: "1"
     steps:
       - name: 检出
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 装 Node（跟本机一致：24.x LTS）
         uses: actions/setup-node@v7
