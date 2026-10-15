@@ -58,6 +58,7 @@ README 补「五分钟上手」与「排错」；`CONTRIBUTING.md` / `CODE_OF_CO
 | **批跑脚本改成"经 IPC 种数据/断言"** | 配置型数据默认进 SQLite 之后，一批脚本（读 `*.json` 断言的那种）会红 —— 那是**脚本读错了地方**（与当年"存储换 SQLite、脚本还在读 jsonl"同一类）。眼下批跑**固定走文件后端**（`verify-acceptances.mjs` 里有说明），KV 那条路由 `accept-kvstore.mjs`（桌面端到端 + 重启 + 回退开关）与 `src/kvStores.test.ts` 盯着。**把那批脚本改成走 IPC 之后这个 pin 就该撤掉** |
 | **桌面端的软限额提示**（13.2） | 限额提示目前只在 CLI（`ding sessions --cost`）；桌面只显示用量，不显示"快到限额了" |
 | **文档站**（18） | 没建站：安装→五分钟→日常→CLI→排错这条内容路径由 README 承载（含「五分钟上手」与「排错」两节），插件开发指南在 `PLUGIN.md` |
+| **remote 模式（客户端）**（17） | 服务端做了（`ding serve`），但 **CLI / 桌面侧「连到远端 agent」的客户端没做** —— 现在只能用 curl / 自己的脚本调那个 HTTP 接口 |
 
 ### Phase 10（用户度量体系）· 第一批
 
