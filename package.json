@@ -33,7 +33,8 @@
     "sandbox:probe": "cargo run --release --manifest-path sandbox/Cargo.toml -- --probe",
     "package:mac": "node scripts/stage-app.mjs && electron-builder --mac dmg",
     "package:linux": "node scripts/stage-app.mjs && electron-builder --linux AppImage deb",
-    "verify:remote": "tsx scripts/verify-remote.ts"
+    "verify:remote": "tsx scripts/verify-remote.ts",
+    "longtask:real": "tsx scripts/longtask-real.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

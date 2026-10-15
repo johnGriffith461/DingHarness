@@ -19,6 +19,16 @@ export type Parsed = {
   command: string;
   args: string[];
   flags: Map<string, string[]>;
+  /**
+   * 参数层面的**错**（2026-10-16，审计 P50/P219）：值旗标缺值、`--k=` 空值这类。
+   * 只在出错时出现；入口拿到就报错退出（静默放行只会表现成"参数没生效"）。
+   */
+  problems?: string[];
+  /**
+   * **不认识的旗标**（审计 P220）：拼错的开关以前完全无声。只在非空时出现；
+   * 入口按它报错（而不是把 `--por 8080` 收成两个无关的东西继续跑）。
+   */
+  unknown?: string[];
 };
 
 /**
@@ -51,41 +61,135 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "token",
   "bind",
   "port",
+  "cwd",
 ]);
+
+/**
+ * **不开关**的旗标（`--json` / `--yes` / `--continue` 这类，出现即可）。
+ *
+ * 这张表只用来判"这个旗标我们认不认识"（拼错要报错 —— 审计 P220），
+ * 不含值语义；值语义在 `VALUE_FLAGS`。
+ *
+ * ⚠️ 加新旗标时这张表也要加（`hosts/cli/args.test.ts` 里那条守卫会扫源码
+ * 把 `flag(p, "x")` / `flags.has("y")` 读过的名字都对一遍，漏了就红）。
+ */
+export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+  "json",
+  "yes",
+  "dev",
+  "continue",
+  "update-baseline",
+  "list",
+  "cost",
+  "sessions",
+  "h",
+  "help",
+]);
+
+/** 全部认识的旗标（值旗标 ∪ 开关）。入口按它拒"不认识"的。 */
+export const KNOWN_FLAGS: ReadonlySet<string> = new Set([...VALUE_FLAGS, ...BOOLEAN_FLAGS]);
 
 /**
  * 极简 argv 解析（不引依赖）：`--k v` / `--k=v` / `-k v` 三种都认，
  * 其余当位置参数。哪些旗标吃值见 `VALUE_FLAGS`。
  *
+ * ## 2026-10-16（审计 P50 / P219 / P220）修掉的三处静默
+ *
+ * 1. **值旗标缺值**原来回填 `"true"` → `Number("true") = NaN` →
+ *    "最多跑几步"这道闸恒不成立（`--steps`）、端口变 NaN（`--port`）。
+ *    现在记进 `problems`，入口报错退出；
+ * 2. `--k=`（空值）同样记进 `problems`；
+ * 3. **不认识的旗标**从前完全无声，现在记进 `unknown`，入口统一拒绝。
+ *
+ * `--` 之后的参数一律当位置参数（`ding run -- --por` 这种要传字面量的场合）。
+ *
  * @param argv 参数（不含 node 与脚本路径）
- * @returns 解析结果
+ * @returns 解析结果（`problems` / `unknown` 只在非空时出现，保持形状最小）
  */
 export function parseArgv(argv: readonly string[]): Parsed {
   const args: string[] = [];
   const flags = new Map<string, string[]>();
+  const problems: string[] = [];
+  const unknown: string[] = [];
   const add = (key: string, value: string) => flags.set(key, [...(flags.get(key) ?? []), value]);
+  const seen = (key: string) => {
+    if (!KNOWN_FLAGS.has(key)) unknown.push(key);
+  };
 
+  let literal = false;
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i]!;
+    if (literal) {
+      args.push(token);
+      continue;
+    }
+    if (token === "--") {
+      literal = true;
+      continue;
+    }
     if (!token.startsWith("-")) {
       args.push(token);
       continue;
     }
     const eq = token.indexOf("=");
     if (eq > 0) {
-      add(token.slice(0, eq).replace(/^-+/, ""), token.slice(eq + 1));
+      const key = token.slice(0, eq).replace(/^-+/, "");
+      const value = token.slice(eq + 1);
+      seen(key);
+      if (VALUE_FLAGS.has(key) && !value.trim()) problems.push(`--${key} 要一个值（现在是空的）`);
+      add(key, value);
       continue;
     }
     const key = token.replace(/^-+/, "");
+    seen(key);
     const next = argv[i + 1];
-    if (VALUE_FLAGS.has(key) && next && !next.startsWith("-")) {
-      add(key, next);
-      i += 1;
-    } else {
-      add(key, "true");
+    if (VALUE_FLAGS.has(key)) {
+      if (next !== undefined && !next.startsWith("-")) {
+        add(key, next);
+        i += 1;
+      } else {
+        add(key, "");
+        problems.push(`--${key} 要一个值（后面没跟值）`);
+      }
+      continue;
     }
+    add(key, "true");
   }
-  return { command: args[0] ?? "", args: args.slice(1), flags };
+  return {
+    command: args[0] ?? "",
+    args: args.slice(1),
+    flags,
+    ...(problems.length ? { problems } : {}),
+    ...(unknown.length ? { unknown } : {}),
+  };
+}
+
+/** 一个整数旗标的取值判定。 */
+export type IntDecision = { ok: true; value: number } | { ok: false; message: string };
+
+/**
+ * 读一个"整数 + 范围"的值旗标（审计 P49 / P111 的同一形状）。
+ *
+ * 坏值**不许**静默变成 `NaN` / `0`：那会让"最多跑几步"这道防失控闸恒不成立，
+ * 而表现是"参数好像没生效"（最难归因的那类错）。这里返回一句能直接展示的话。
+ *
+ * @param raw 旗标原文（`undefined` = 没给）
+ * @param name 旗标名（只用于报错文案）
+ * @param min/max 允许区间（闭区间）
+ * @param fallback 没给时的默认值
+ */
+export function parseIntFlagValue(
+  raw: string | undefined,
+  name: string,
+  opts: { min: number; max: number; fallback: number },
+): IntDecision {
+  if (raw === undefined) return { ok: true, value: opts.fallback };
+  const text = raw.trim();
+  const value = /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isInteger(value) || value < opts.min || value > opts.max) {
+    return { ok: false, message: `--${name} 要 ${opts.min}–${opts.max} 的整数，给了「${raw}」` };
+  }
+  return { ok: true, value };
 }
 
 /** 取一个旗标的全部取值（可重复给）。 */

@@ -82,6 +82,48 @@
 - 用量字段名写错过一次（`usage.input` vs `usage.inputTokens`）：**表里 token 全是 0**。
   0 token 是可疑信号，不是"免费"—— 记这条是因为它长得像成功。
 
+### 四、输入区装真选择器 · 拆声音选择 · 远端客户端 · 长任务真跑（2026-10-16 晚）
+
+**输入区的「模型 · 思考」是真的了**（主人的话：「这是个假按钮吧，没法选择模型、也没法选择
+思考强度，这按钮是必须的呀」）。之前那颗写死 `AUTO · LOW` 的假档位键在 M0 就被拿掉了，
+这一颗真做：
+
+- **模型**：列本机所有 provider 的模型（没密钥的也列，标出来）；选中写进
+  `dsh-canvas.chat-settings` —— 与 `resolveChatRoute` 读**同一个键**，选完下一句真按它发；
+- **思考强度**：默认 / 低 / 中 / 高。**默认 = 一个字段都不发**（各家自己的档，与以前完全一致），
+  选了才发；三家协议怎么写只在 `engine/runtime/protocols/reasoning.ts` 一处
+  （`openaiCompatible.reasoningEffort` / `anthropic.thinking.budgetTokens` / `google.thinkingConfig`）。
+- 端到端真验过：deepseek 真发一轮 —— high 档 35/16 tokens、默认档 9/1（行为没变）。
+  期间 SDK 报弃用警告，才定下 providerOptions 的 key 是 **`openaiCompatible`**（驼峰）。
+- 新增 `accept-modelchip.mjs` 进批跑；结构守卫逮到 Composer 涨到 936 行 → chip 拆成 `ModelChip.tsx`。
+
+**「声音选择」拆了**（主人：「有必要吗，没用啊，不要了」）：设置里整行 + 音色列表 +
+`tts.ts` + `accept-voice.mjs` 一起去掉；朗读还在，用系统默认音色。
+顺手清掉两颗「语音通话」死按钮（TaskView / 浮动助手）。
+
+**`ding connect` —— Phase 17 的另一半**（原来只有服务端）：
+
+```
+ding connect 192.168.1.9:8787                          # 看对面是谁（provider / 档位 / 工作目录）
+ding connect 192.168.1.9:8787 "把那批 csv 合成一张表"    # 跑一轮，正文边收边打（SSE）
+ding connect 192.168.1.9:8787 --sessions --token <口令>
+```
+
+退出码跟着**远端那一轮**走（0 / 1），能直接写进脚本。真跑时逮到两个真 bug：① 用 fetch 读 SSE
+时 undici 的连接池会和进程收尾撞上 libuv 断言（退出码 0xC0000409）→ 改用 `node:http` +
+读完显式 destroy；② `--json` 分支写在最前面并 `continue`，跳过了 `done` 的解析 ——
+远端 ok=true 而退出码是 1（**两条路漂移**，正是本仓最忌讳那类）。
+验收 `pnpm verify:remote` 四条判据全通。
+
+**10.6 的长任务用真模型跑了一遍**（`scripts/longtask-real.ts`，产物落
+`engine/eval/longtask-real.md`）：建 30 个文件 → 逐个读回 → 写汇总，
+**真实测到：65 次工具调用 / 20 秒 / 55952 tokens / $0.0206，磁盘上 30/30 都在**。
+⚠️ **如实说：这不是「小时级」** —— 它只跑了 20 秒。件活的大小（而不是装置）决定耗时，
+真要到一小时得给一件大得多的活；这一条继续算**未达标**，写在文件里不修饰。
+
+**本机产物重建**：Windows 安装包与 Windows 单二进制都按当前源码重打并验收过
+（单二进制五条全通；打包产物启动正常，导航项已从 5 变成 4 —— 云盘没了）。
+
 ## 0.5.0（Phase 10 · 12–18：用户度量 · 开箱即用 · 数据主权 · 说人话 · 沙箱 · 随处可用 · 生态）
 
 > 这一版把《V4 后续篇》的主线（10 → 11 → 12 → 13 → 14 → 15 → 16 → 17 → 18）走完。

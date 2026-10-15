@@ -6,7 +6,7 @@ import { AcpAgent } from "../acp/agent";
 import { authorizeCwd, CwdNotAllowedError } from "../cwd";
 import { startAgentServer } from "../server/agentServer";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
-import { flag, flagAll, type Parsed } from "./args";
+import { flag, flagAll, parseIntFlagValue, type Parsed } from "./args";
 import { buildEngine } from "./assembly";
 import { effectiveConfig } from "./config";
 
@@ -35,12 +35,8 @@ import { effectiveConfig } from "./config";
 export type PortDecision = { ok: true; port: number } | { ok: false; message: string };
 
 export function resolveServePort(raw: string | undefined): PortDecision {
-  if (raw === undefined) return { ok: true, port: 8787 };
-  const text = raw.trim();
-  if (!/^\d+$/.test(text)) return { ok: false, message: `--port 要 0–65535 的整数，给了「${raw}」` };
-  const port = Number(text);
-  if (port > 65535) return { ok: false, message: `--port 超出范围（0–65535）：${raw}` };
-  return { ok: true, port };
+  const got = parseIntFlagValue(raw, "port", { min: 0, max: 65535, fallback: 8787 });
+  return got.ok ? { ok: true, port: got.value } : { ok: false, message: got.message };
 }
 
 /** 这一段宿主侧共用的装配（两个命令一样）。 */

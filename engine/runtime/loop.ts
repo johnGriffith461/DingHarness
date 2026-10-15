@@ -221,6 +221,24 @@ export type TurnDeps = {
 };
 
 /**
+ * 步数上限的**兜底换算**（2026-10-16，审计 P49）。
+ *
+ * `stepCountIs(NaN)` 的判据恒假 —— 上限会**恒不成立**：`ding run --steps` 漏个值，
+ * "最多跑几步"这道防失控闸就等于被拆掉了，而表现只是"参数好像没生效"。
+ *
+ * 校验在 CLI 入口做（坏值报错退出）；这里是**第二道**：非有限值退回默认，
+ * 而不是把闸拆掉。`0` / 负值抬到 1（"只跑一步"仍然比"没有闸"安全）。
+ *
+ * @param raw 宿主给的上限（可能来自命令行/配置，**不可信**）
+ * @returns 真正交给 `stepCountIs` 的有限整数
+ */
+export function effectiveMaxSteps(raw: number | undefined): number {
+  if (raw === undefined) return 6;
+  if (!Number.isFinite(raw)) return 6;
+  return Math.max(1, Math.trunc(raw));
+}
+
+/**
  * 跑一轮（**内核里唯一的主循环**）。
  *
  * 它负责：解析 provider/密钥/模型 → 建客户端 → 跑 `streamText` → 把 `fullStream`
@@ -294,7 +312,7 @@ export async function runTurn(
         : { providerOptions: reasoningProviderOptions(protocolOf(provider.id), input.reasoningEffort) }),
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       ...(input.tools
-        ? { tools: input.tools, stopWhen: stepCountIs(input.maxSteps ?? 6) }
+        ? { tools: input.tools, stopWhen: stepCountIs(effectiveMaxSteps(input.maxSteps)) }
         : {}),
     });
 

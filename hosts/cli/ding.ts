@@ -26,7 +26,7 @@ import { cmdConnect } from "./cmdConnect";
 import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
-import { flag, flagAll, parseArgv, type Parsed } from "./args";
+import { flag, flagAll, KNOWN_FLAGS, parseArgv, parseIntFlagValue, type Parsed } from "./args";
 import {
   auditLedger,
   installFromDir,
@@ -159,7 +159,18 @@ async function buildEngine(dirs: readonly string[]): Promise<{ engine: Engine; c
 async function cmdRun(p: Parsed): Promise<number> {
   const task = p.args.join(" ").trim();
   if (!task) {
-    process.stderr.write('用法：ding run "任务描述" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>]\n');
+    process.stderr.write('用法：ding run "任务描述" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps <整数>]\n');
+    return 2;
+  }
+
+  /*
+   * ⚠️ `--steps` **先验后用**（审计 P49）：坏值原来静默变 `NaN`，
+   * 而 `stepCountIs(NaN)` 的判据恒假 —— "最多跑几步"这道防失控闸会**恒不成立**，
+   * 表现却是"参数好像没生效"。
+   */
+  const steps = parseIntFlagValue(flag(p, "steps"), "steps", { min: 1, max: 1000, fallback: 8 });
+  if (!steps.ok) {
+    process.stderr.write(`${steps.message}\n`);
     return 2;
   }
 
@@ -199,7 +210,7 @@ async function cmdRun(p: Parsed): Promise<number> {
     messages: [{ role: "user", content: task }],
     mode,
     useTools: true,
-    maxSteps: Number(flag(p, "steps") ?? 8),
+    maxSteps: steps.value,
   };
 
   /*
@@ -733,6 +744,23 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
  */
 async function main(): Promise<void> {
   const parsed = parseArgv(process.argv.slice(2));
+
+  /*
+   * ⭐ **参数层面的错在这里拦，不在命令里各自静默**（审计 P50 / P219 / P220）：
+   * 缺值的值旗标、空值、不认识的旗标 —— 从前它们全都无声通过，
+   * 表现成"我明明给了 --provider"或"参数好像没生效"。
+   */
+  if (parsed.problems?.length) {
+    process.stderr.write(`${parsed.problems.map((line) => `参数不对：${line}`).join("\n")}\n`);
+    process.exit(2);
+  }
+  if (parsed.unknown?.length) {
+    process.stderr.write(
+      `不认识的旗标：${parsed.unknown.map((key) => `--${key}`).join(" / ")}（拼错了？要传字面量就用 -- 隔开）\n` +
+        `可用旗标：${[...KNOWN_FLAGS].join(" / ")}\n`,
+    );
+    process.exit(2);
+  }
 
   /* `--dev`：工程模式（Phase 9）。`record` / `replay` 是**验收驱动器**，不是产品表面 ——
    * 它们留在命令行里（脚本要用），但**不出现在默认帮助里**，除非显式 `--dev`。
