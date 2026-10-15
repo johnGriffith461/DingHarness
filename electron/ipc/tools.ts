@@ -131,8 +131,6 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       title,
       prompt,
       repeat,
-      // 本机版没有云端执行环境，如实标成本机（与界面上的默认一致）
-      "localDevice",
       now,
       customMinutes,
       atHour,

@@ -9,7 +9,6 @@ import {
   validateJob,
   type CronJob,
   type RepeatType,
-  type RunEnv,
 } from "@shared/schedule";
 
 /**
@@ -43,7 +42,6 @@ type ScheduleState = {
     title: string;
     prompt: string;
     repeat: RepeatType;
-    env: RunEnv;
     customMinutes?: number;
     /** `daily` / `weekly` 的钟点（Phase 16）。不填 = 老行为（固定间隔）。 */
     atHour?: number;
@@ -60,7 +58,7 @@ type ScheduleState = {
    */
   update: (
     id: string,
-    draft: { title: string; prompt: string; repeat: RepeatType; env: RunEnv; customMinutes?: number; atHour?: number; atMinute?: number },
+    draft: { title: string; prompt: string; repeat: RepeatType; customMinutes?: number; atHour?: number; atMinute?: number },
   ) => string | null;
   /** 暂停 / 继续。 */
   toggle: (id: string) => void;
@@ -121,7 +119,6 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
       draft.title,
       draft.prompt,
       draft.repeat,
-      draft.env,
       Date.now(),
       draft.customMinutes,
       draft.atHour,
@@ -144,7 +141,6 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
         title: draft.title.trim(),
         prompt: draft.prompt.trim(),
         repeat: draft.repeat,
-        env: draft.env,
         // 换回非自定义档时把分钟数清掉，免得下次切回来还留着旧值
         customMinutes: draft.repeat === "custom" ? draft.customMinutes : undefined,
         // 钟点同理：只有 daily / weekly 才有意义
@@ -220,17 +216,19 @@ async function execute(
   set({ runningId: id, note: `正在执行「${job.title}」…` });
   let ok = true;
   let error: string | undefined;
+  let taskId: string | undefined;
   try {
     // 动态引：避免 schedule ↔ workbench store 的循环依赖
     const { useWorkbenchStore } = await import("./store");
-    await useWorkbenchStore.getState().createTask(job.prompt, { background });
+    /* 记下这次跑出来的任务 id —— 任务页靠它算这个定时任务的累计用量（见 `CronRun.taskId`） */
+    taskId = await useWorkbenchStore.getState().createTask(job.prompt, { background });
   } catch (e) {
     ok = false;
     error = e instanceof Error ? e.message : String(e);
   }
 
   const now = Date.now();
-  const jobs = get().jobs.map((j) => (j.id === id ? afterRun(j, now, ok, error) : j));
+  const jobs = get().jobs.map((j) => (j.id === id ? afterRun(j, now, ok, error, taskId) : j));
   set({ jobs, runningId: null, note: ok ? `「${job.title}」执行完成` : `「${job.title}」执行失败：${error}` });
   void persist(jobs);
 }

@@ -52,6 +52,49 @@ if (!/收起/.test(a1.collapseText)) {
   bad.push(`摘要面板的收起入口不带字（实测文字=「${a1.collapseText}」）—— 用户会认成"往右导航"`);
 }
 
+/*
+ * 左缘那条**竖排「收起」**（2026-10-16，主人报的）：
+ *   「点面板是打开，但打开之后根本没有显示关闭的面板按钮；打开画布又有了，
+ *     有了之后你会发现它的面板按钮还在最右侧，没有跟着侧边栏动。」
+ * 收起态那颗「面板」把手点了能打开，打开之后**原位没有对应的收起**。
+ * 判据三条：① 展开时它必须在；② 必须带字（图标 + 「收起」）；
+ *          ③ 它得**贴住面板左缘**（edge.right ≈ panel.x）—— 面板挪到哪，它跟到哪。
+ * 第 ③ 条是"跟着侧边栏动"的可测形态：把窗口改窄，再量一次。
+ */
+const edgeState = () =>
+  page.evaluate(() => {
+    const el = document.querySelector('[data-testid="wb-summary-edge"]');
+    const panel = document.querySelector('[data-testid="wb-summary"]');
+    if (!el || !panel) return { edge: null, panel: panel ? 1 : 0 };
+    const e = el.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    return {
+      edge: { right: Math.round(e.x + e.width), w: Math.round(e.width) },
+      panelX: Math.round(p.x),
+      text: (el.textContent ?? "").replace(/\s+/g, "").trim(),
+      vertical: Math.abs(e.y + e.height / 2 - (p.y + p.height / 2)) <= 2,
+    };
+  });
+const e1 = await edgeState();
+if (!e1.edge) bad.push("摘要面板展开后，左缘没有竖排「收起」（关的入口只在头上那颗）");
+else {
+  if (!/收起/.test(e1.text)) bad.push(`左缘那条收起不带字（实测=「${e1.text}」）`);
+  if (Math.abs(e1.edge.right - e1.panelX) > 2) {
+    bad.push(`左缘那条收起没贴住面板（它的右边 ${e1.edge.right} ≠ 面板左边 ${e1.panelX}）`);
+  }
+  if (!e1.vertical) bad.push("左缘那条收起没有竖直居中");
+  // 改窄窗口 → 还贴不贴（"没有跟着侧边栏动"就是这条的反面）
+  await page.evaluate(() => window.resizeTo(1100, 820));
+  await sleep(700);
+  const e2 = await edgeState();
+  if (!e2.edge || Math.abs(e2.edge.right - e2.panelX) > 2) {
+    bad.push(`窗口改窄之后那条收起没跟着面板走（${JSON.stringify(e2)}）`);
+  }
+  await page.evaluate(() => window.resizeTo(1440, 900));
+  await sleep(700);
+  note(`摘要左缘「收起」：在 ✓ / 带字「${e1.text}」/ 贴边 ${e1.edge.right}≈${e1.panelX} / 改窄后仍贴 ✓`);
+}
+
 // 往返 10 次
 let aRound = 0;
 for (let i = 0; i < 10; i += 1) {

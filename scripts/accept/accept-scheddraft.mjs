@@ -92,6 +92,18 @@ try {
    *   · ⭐ 点一张推荐卡 → **标题与「要做的事」真的被填进表单**（不是点了没反应）；
    *   · 空闲时**不该**挂着一条状态提示（那条 note 是给"执行中/执行完/存盘失败"用的）。
    */
+  /*
+   * 2026-10-16（主人的话：「很多多余的这个东西，就纯摆设，根本没有用」）：
+   * 这条页面上两样摆设被拆掉了，这里探的是**它们还在不在**，判据在下面反过来写：
+   *   · 「运行在：云电脑 / 本地电脑」选择框 —— 存了但**从不影响执行**（没有任何代码读 `job.env`）；
+   *   · 页面底部那条假输入区（`aria-hidden` 里的 云电脑 / AUTO·LOW 一整套）—— 整条是装饰。
+   */
+  report.envSelector = await page.evaluate(() =>
+    document.querySelector('[data-testid="wb-sched-env"]') ? "还在" : null,
+  );
+  report.slimComposer = await page.evaluate(() =>
+    document.querySelector(".wb-composer-slim") ? "还在" : null,
+  );
   report.formBox = await page.evaluate(() => {
     const box = document.querySelector('[data-testid="wb-sched-form"]');
     return {
@@ -100,9 +112,6 @@ try {
       width: box ? Math.round(box.getBoundingClientRect().width) : null,
     };
   });
-  report.envOptions = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-testid="wb-sched-env"] option')).map((o) => (o.textContent ?? "").trim()),
-  );
   report.presetCards = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-testid^="wb-preset-"]')).map((e) => ({
       id: e.getAttribute("data-testid"),
@@ -130,11 +139,11 @@ try {
    */
   const bad = [];
   if (report.formBox?.count !== 1) bad.push("定时任务页没有表单容器（wb-sched-form）");
-  if ((report.formBox?.fields ?? 0) < 3) bad.push(`表单里控件太少（标题/要做的事/运行在）：${report.formBox?.fields}`);
+  if ((report.formBox?.fields ?? 0) < 3) bad.push(`表单里控件太少（标题 / 要做的事 / 重复）：${report.formBox?.fields}`);
   if (!(report.formBox?.width > 200)) bad.push(`⭐ 表单被挤塌了（宽 ${report.formBox?.width}px）`);
-  if (JSON.stringify(report.envOptions) !== JSON.stringify(["云电脑", "本地电脑"])) {
-    bad.push(`「运行在」选项不对：${JSON.stringify(report.envOptions)}`);
-  }
+  /* 该移除的两样东西**不该再出现**（与工单 3 的口径一致：点不动的入口，看不见比看见了强） */
+  if (report.envSelector !== null) bad.push("「运行在」选择框应已移除，但它还在（它从不影响执行）");
+  if (report.slimComposer !== null) bad.push("底部那条假输入区应已移除，但它还在（整条是装饰）");
   if ((report.presetCards ?? []).length < 1) bad.push("没有推荐卡（wb-preset-*）");
   else {
     for (const c of report.presetCards) {
@@ -157,6 +166,6 @@ try {
     console.error("✗ 零覆盖那一组（定时任务表单 / 运行在 / 推荐卡 / 状态行）：" + bad.join("；"));
     process.exitCode = 1;
   } else {
-    console.log("✓ 零覆盖那一组成立：表单齐全 / 「运行在」两档逐字 / 推荐卡点了真填表 / 空闲无状态提示");
+    console.log("✓ 零覆盖那一组成立：表单齐全 / 两样摆设（运行在 + 假输入区）确实不在 / 推荐卡点了真填表 / 空闲无状态提示");
   }
 }

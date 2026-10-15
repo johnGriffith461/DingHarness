@@ -243,4 +243,4 @@ node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
 
 ## 许可
 
-[MIT](./LICENSE)
+[Apache-2.0](./LICENSE)（含明确的专利授权；`package.json` 的 `license` 与它是同一件事）

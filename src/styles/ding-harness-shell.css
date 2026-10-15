@@ -75,6 +75,50 @@
   writing-mode: vertical-rl;
 }
 
+/* ------------------------------------------------------------
+   展开态的**对称位**：面板左缘那条竖排「收起」（2026-10-16，主人报的）
+   ------------------------------------------------------------
+   收起态那颗「面板」把手点了能打开，但打开之后**原位没有对应的收起入口**
+   （原型把它 `display:none` 了）。主人要的是"关的东西还在老地方、并且跟着侧边栏"——
+   所以这里在**面板自己的左缘**挂一条同款胶囊：竖直居中、贴边、圆角朝左，
+   面板在哪儿它就在哪儿（`translate(-100%)` 让它整条挂在左缘**外面**，不压面板内容）。
+   样式与 `.wb-summary-handle` 同源（同一套 padding / 圆角 / 令牌），两态看起来是一颗东西。
+   ============================================================ */
+.wb-summary-edge {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translate(-100%, -50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 6px 11px 5px;
+  border: 1px solid var(--line-strong);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  background: var(--surface);
+  color: var(--fg-dim);
+  cursor: pointer;
+  box-shadow: var(--shadow-chip);
+  transition:
+    color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out),
+    background-color var(--dur-quick) var(--ease-out);
+}
+
+.wb-summary-edge:hover {
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+
+.wb-summary-edge > span {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  writing-mode: vertical-rl;
+}
+
 /* hover 时整体向右"让"一点 + 变强调色（原型同款，含 padding 的过渡） */
 .wb-summary-handle:hover {
   color: var(--accent);

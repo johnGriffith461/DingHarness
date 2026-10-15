@@ -24,12 +24,6 @@ export type RepeatType = "noRepeat" | "hourly" | "daily" | "weekly" | "custom";
  */
 export const REPEAT_VALUES = ["noRepeat", "hourly", "daily", "weekly", "custom"] as const;
 
-/** 运行环境：云电脑 / 本地设备（上位 `runEnv`）。 */
-export type RunEnv = "cloud" | "localDevice";
-
-/** 运行环境的运行时值表。 */
-export const ENV_VALUES = ["cloud", "localDevice"] as const;
-
 /** 任务状态（上位 `jobStatus`）。 */
 export type JobStatus = "running" | "paused" | "finished" | "deleted";
 
@@ -57,7 +51,6 @@ export type CronJob = {
   atHour?: number;
   /** 配合 `atHour` 的分（默认 0）。 */
   atMinute?: number;
-  env: RunEnv;
   status: JobStatus;
   createdAt: number;
   /** 上次执行时间；从未跑过为 null。 */
@@ -74,6 +67,15 @@ export type CronRun = {
   /** 是否成功；失败时 `error` 有说明。 */
   ok: boolean;
   error?: string;
+  /**
+   * 这次跑出来的工作台任务 id。
+   *
+   * 为什么记它：任务页要能算出「这个定时任务累计用了多少」——
+   * 用量挂在任务的各步上（`steps[].usage`），没有这条线就无从算起。
+   * ⚠️ **老记录没有这个字段**（那时还没记），所以它是可选的：
+   * 拿不到就**不显示用量**，不编一个数出来。
+   */
+  taskId?: string;
 };
 
 /** 各档的固定间隔（毫秒）。`custom` 不在表里，它由 `customMinutes` 决定。 */
@@ -94,12 +96,6 @@ export const REPEAT_LABEL: Record<RepeatType, string> = {
   daily: "每天",
   weekly: "每周",
   custom: "自定义间隔",
-};
-
-/** 运行环境的中文名。 */
-export const ENV_LABEL: Record<RunEnv, string> = {
-  cloud: "云电脑",
-  localDevice: "本地电脑",
 };
 
 /**
@@ -219,7 +215,7 @@ export function dueJobs(jobs: CronJob[], now: number): CronJob[] {
  * @param error 失败说明
  * @returns 更新后的任务
  */
-export function afterRun(job: CronJob, now: number, ok: boolean, error?: string): CronJob {
+export function afterRun(job: CronJob, now: number, ok: boolean, error?: string, taskId?: string): CronJob {
   const next = nextRunAt({ ...job, lastRunAt: now }, now);
   return {
     ...job,
@@ -227,7 +223,7 @@ export function afterRun(job: CronJob, now: number, ok: boolean, error?: string)
     nextRunAt: next,
     // 不重复的任务跑一次就结束
     status: next === null ? "finished" : job.status,
-    runs: [{ at: now, ok, ...(error ? { error } : {}) }, ...job.runs].slice(0, 20),
+    runs: [{ at: now, ok, ...(error ? { error } : {}), ...(taskId ? { taskId } : {}) }, ...job.runs].slice(0, 20),
   };
 }
 
@@ -266,7 +262,6 @@ export function makeJob(
   title: string,
   prompt: string,
   repeat: RepeatType,
-  env: RunEnv,
   now: number,
   customMinutes?: number,
   atHour?: number,
@@ -280,7 +275,6 @@ export function makeJob(
     ...(repeat === "custom" ? { customMinutes: clampCustomMinutes(customMinutes) } : {}),
     ...(atHour !== undefined && (repeat === "daily" || repeat === "weekly") ? { atHour: Math.trunc(atHour) } : {}),
     ...(atMinute !== undefined && (repeat === "daily" || repeat === "weekly") ? { atMinute: Math.trunc(atMinute) } : {}),
-    env,
     status: "running",
     createdAt: now,
     lastRunAt: null,
@@ -370,7 +364,6 @@ export function normalizeJobs(raw: unknown): CronJob[] {
       ...(repeat === "custom" && customMinutes !== undefined ? { customMinutes } : {}),
       ...(atHour !== undefined && (repeat === "daily" || repeat === "weekly") ? { atHour } : {}),
       ...(atMinute !== undefined && (repeat === "daily" || repeat === "weekly") ? { atMinute } : {}),
-      env: (ENV_VALUES as readonly string[]).includes(j.env as string) ? (j.env as RunEnv) : "cloud",
       /*
        * ⚠️ 不认识的 status 一律当 `paused`。
        * 当成 running 的话，一个坏字段就能让任务自己跑起来 —— 那比"少跑一次"严重得多。
@@ -384,11 +377,13 @@ export function normalizeJobs(raw: unknown): CronJob[] {
             .filter((r): r is Record<string, unknown> => Boolean(r) && typeof r === "object")
             .filter((r) => typeof r.at === "number" && Number.isFinite(r.at))
             .slice(0, RUNS_KEPT)
-            .map((r) => ({
-              at: r.at as number,
-              ok: r.ok !== false,
-              ...(typeof r.error === "string" ? { error: r.error } : {}),
-            }))
+          .map((r) => ({
+            at: r.at as number,
+            ok: r.ok !== false,
+            ...(typeof r.error === "string" ? { error: r.error } : {}),
+            /* 老记录没有这一项 → 就当没有（不是坏数据） */
+            ...(typeof r.taskId === "string" && r.taskId ? { taskId: r.taskId } : {}),
+          }))
         : [],
     });
   }

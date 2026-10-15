@@ -61,7 +61,29 @@ export function SummaryPanel({
           <PanelRight size={14} />
           <span>面板</span>
         </button>
-      ) : null}
+      ) : (
+        /*
+         * ⚠️ 2026-10-16（主人的话）：「点面板是打开，但打开之后**根本没有显示关闭的面板按钮**；
+         * 打开画布又有了，有了之后你会发现它的面板按钮**还在最右侧，没有跟着侧边栏动**」。
+         *
+         * 收起态那颗「面板」把手点了能打开，但**打开之后原位没有对应的收起入口** ——
+         * 原型那边是直接把它 `display: none` 的（`.rail-open .rail-edge`），关只能去头部找。
+         *
+         * 现在做成**对称**的：展开时在面板**左缘**挂一条竖排「收起」，
+         * 与收起态的把手同一套尺寸/样式/位置口径（竖直居中、贴面板那条边）——
+         * 面板在哪儿、多宽，它就贴在哪条边上，**跟着面板走**，不再是一颗飘在别处的小箭头。
+         */
+        <button
+          className="wb-summary-edge"
+          data-testid="wb-summary-edge"
+          aria-label="收起对话摘要"
+          title="收起对话摘要"
+          onClick={() => onCollapsedChange(true)}
+        >
+          <PanelRightClose size={14} />
+          <span>收起</span>
+        </button>
+      )}
 
       <header className="wb-summary-head">
         <span>对话摘要</span>

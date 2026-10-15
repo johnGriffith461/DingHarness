@@ -569,6 +569,12 @@
 .wb-summary {
   width: 225px;
   flex: 0 0 225px;
+  /*
+   * `position: relative` 是给左缘那条竖排「收起」用的（`.wb-summary-edge`，见
+   * `ding-harness-shell.css`）——它写的是 `position: absolute; left: 0`，没有定位上下文
+   * 就会挂到工作台根上去，位置**不跟着面板走**（那正是主人报的那一条）。
+   */
+  position: relative;
   /* 同 `.wb-nav`：边界交给 `--edge-shadow-left` 的发丝环，不再叠一根实线。 */
   display: flex;
   flex-direction: column;

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ENV_LABEL, ENV_VALUES, JOB_STATUSES, MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_LABEL, REPEAT_VALUES, afterRun, clampCustomMinutes, describeNextRun, dueJobs, makeJob, nextRunAt, normalizeJobs, type CronJob, validateJob } from "@shared/schedule";
+import { JOB_STATUSES, MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_LABEL, REPEAT_VALUES, afterRun, clampCustomMinutes, describeNextRun, dueJobs, makeJob, nextRunAt, normalizeJobs, type CronJob, validateJob } from "@shared/schedule";
 
 const NOW = new Date("2026-10-11T20:00:00").getTime();
-const job = (patch: Partial<CronJob> = {}): CronJob => ({ ...makeJob("j1", "每日新闻", "跑一下", "daily", "cloud", NOW), ...patch });
+const job = (patch: Partial<CronJob> = {}): CronJob => ({ ...makeJob("j1", "每日新闻", "跑一下", "daily", NOW), ...patch });
 
 describe("makeJob", () => {
   it("建出来就是 running，并算好了下次执行时间", () => {
-    const j = makeJob("j1", "每日新闻推送", "汇总行业动态", "daily", "cloud", NOW);
+    const j = makeJob("j1", "每日新闻推送", "汇总行业动态", "daily", NOW);
     expect(j.status).toBe("running");
     expect(j.nextRunAt).toBe(NOW + 24 * 60 * 60 * 1000);
     expect(j.lastRunAt).toBeNull();
@@ -14,22 +14,22 @@ describe("makeJob", () => {
   });
 
   it("标题与 prompt 去掉首尾空白", () => {
-    const j = makeJob("j1", "  日报  ", "  跑一下  ", "daily", "cloud", NOW);
+    const j = makeJob("j1", "  日报  ", "  跑一下  ", "daily", NOW);
     expect(j.title).toBe("日报");
     expect(j.prompt).toBe("跑一下");
   });
 
   it("custom 档把间隔夹进合法范围", () => {
-    expect(makeJob("j1", "t", "p", "custom", "cloud", NOW, 99999).customMinutes).toBe(MAX_CUSTOM_MINUTES);
-    expect(makeJob("j1", "t", "p", "custom", "cloud", NOW, 0).customMinutes).toBe(MIN_CUSTOM_MINUTES);
+    expect(makeJob("j1", "t", "p", "custom", NOW, 99999).customMinutes).toBe(MAX_CUSTOM_MINUTES);
+    expect(makeJob("j1", "t", "p", "custom", NOW, 0).customMinutes).toBe(MIN_CUSTOM_MINUTES);
   });
 
   it("非 custom 档不带 customMinutes", () => {
-    expect(makeJob("j1", "t", "p", "daily", "cloud", NOW, 30).customMinutes).toBeUndefined();
+    expect(makeJob("j1", "t", "p", "daily", NOW, 30).customMinutes).toBeUndefined();
   });
 
   it("不重复任务的下次执行时间就是当下（等第一次触发）", () => {
-    expect(makeJob("j1", "t", "p", "noRepeat", "cloud", NOW).nextRunAt).toBe(NOW);
+    expect(makeJob("j1", "t", "p", "noRepeat", NOW).nextRunAt).toBe(NOW);
   });
 });
 
@@ -184,10 +184,6 @@ describe("标签表", () => {
     }
   });
 
-  it("两个运行环境都有中文名", () => {
-    expect(ENV_LABEL.cloud).toBe("云电脑");
-    expect(ENV_LABEL.localDevice).toBe("本地电脑");
-  });
 });
 
 
@@ -197,7 +193,6 @@ describe("从磁盘恢复任务（§178）", () => {
     title: "每日新闻",
     prompt: "跑一下",
     repeat: "daily",
-    env: "cloud",
     status: "running",
     createdAt: NOW,
     lastRunAt: null,
@@ -243,10 +238,6 @@ describe("从磁盘恢复任务（§178）", () => {
     expect(normalizeJobs([{ ...good(), lastRunAt: "昨天" }])[0]?.lastRunAt ?? null).toBeNull();
   });
 
-  it("env 不认识 → 退回 cloud（不瞎猜一个环境）", () => {
-    expect(normalizeJobs([{ ...good(), env: "火星" }])[0]?.env).toBe("cloud");
-  });
-
   it("执行历史里坏的那几条丢掉（缺 at 的、非对象的）", () => {
     const got = normalizeJobs([
       { ...good(), runs: [{ at: NOW, ok: true }, { ok: true }, null, "字符串", { at: "不是数字" }] },
@@ -278,7 +269,6 @@ describe("从磁盘恢复任务（§178）", () => {
 
   it("⭐ 值表与联合类型必须一一对应（加了新档位忘了改这里，归一化会把新数据丢掉）", () => {
     expect(REPEAT_VALUES).toEqual(["noRepeat", "hourly", "daily", "weekly", "custom"]);
-    expect(ENV_VALUES).toEqual(["cloud", "localDevice"]);
     expect(JOB_STATUSES).toEqual(["running", "paused", "finished", "deleted"]);
   });
 });
@@ -331,7 +321,7 @@ describe("钟点（Phase 16：配得出「每晚 22:00」）", () => {
 
   it("磁盘上的坏钟点当没填（回落老行为，不夹到边界）", () => {
     const got = normalizeJobs([
-      { id: "a", title: "t", prompt: "p", repeat: "daily", env: "localDevice", status: "running", atHour: 99, createdAt: 0, lastRunAt: null, nextRunAt: null, runs: [] },
+      { id: "a", title: "t", prompt: "p", repeat: "daily", status: "running", atHour: 99, createdAt: 0, lastRunAt: null, nextRunAt: null, runs: [] },
     ]);
     expect(got[0]?.atHour).toBeUndefined();
   });

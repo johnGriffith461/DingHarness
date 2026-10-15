@@ -138,7 +138,7 @@ export type WorkbenchState = {
   openFloat: (seed?: string) => void;
   closeFloat: () => void;
   /** 新建一个任务并立刻开始跑（对应原版"发消息或创建任务"）。 */
-  createTask: (message: string, options?: { background?: boolean; material?: string }) => Promise<void>;
+  createTask: (message: string, options?: { background?: boolean; material?: string }) => Promise<string | undefined>;
   /** 在已有对话里继续说一句（§147）—— 与 `createTask` 的区别是带上历史。 */
   sendInTask: (taskId: string, message: string, options?: { material?: string }) => Promise<void>;
   /**
@@ -562,7 +562,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
   createTask: async (message, options) => {
     const text = String(message ?? "").trim();
-    if (!text) return;
+    if (!text) return undefined;
 
     const background = options?.background ?? false;
     const material = options?.material;
@@ -621,6 +621,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     );
 
     nextStep(port, task.id, reply.text, false, user, reply.tools, undefined, reply.usage);
+    return task.id;
   },
 
   answer: async (option, custom) => {

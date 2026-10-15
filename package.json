@@ -3,7 +3,7 @@
   "version": "0.5.0",
   "private": true,
   "description": "Ding Harness —— 本机优先的桌面 Agent 工作台（内核 + GUI/CLI 双宿主）",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist-electron/electron/main.cjs",
   "packageManager": "pnpm@10.34.1",

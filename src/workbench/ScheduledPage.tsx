@@ -4,12 +4,13 @@
  */
 
 import { useEffect, useState } from "react";
-import { Blocks, Check, ChevronDown, Cloud, FolderOpen, Plus, Sparkles } from "lucide-react";
+import { Check, Plus } from "lucide-react";
 import { NavCollapseButton } from "./NavCollapseButton";
-import { SCHEDULED_RECOMMEND, SCHEDULED_SERVED_IDS, SCHEDULE_COMPOSER_PLACEHOLDER } from "./copy";
+import { SCHEDULED_RECOMMEND, SCHEDULED_SERVED_IDS } from "./copy";
 import { useScheduleStore } from "./scheduleStore";
 import { useWorkbenchStore } from "./store";
-import { describeNextRun, ENV_LABEL, MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_LABEL, type RepeatType, type RunEnv } from "@shared/schedule";
+import { formatCount, sumUsage, usageTotal } from "@shared/cost";
+import { describeNextRun, MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_LABEL, type CronJob, type RepeatType } from "@shared/schedule";
 
 
 /**
@@ -40,7 +41,24 @@ export function ScheduledPage() {
   const runNow = useScheduleStore((s) => s.runNow);
   const update = useScheduleStore((s) => s.update);
   const takeScheduleDraft = useWorkbenchStore((s) => s.takeScheduleDraft);
+  /* 任务的各步用量挂在这里 —— 每个定时任务「累计用了多少」要顺着 run.taskId 找回来 */
+  const tasks = useWorkbenchStore((s) => s.tasks);
   const [now, setNow] = useState(() => Date.now());
+
+  /**
+   * 这个定时任务累计用了多少（各次执行关联到的任务的各步用量相加）。
+   *
+   * ⚠️ **拿不到就不显示**：老记录没有 `taskId`（那时还没记），
+   * 关联不到任务就给 `null` —— 不编一个数出来充数。
+   */
+  const jobTokens = (job: CronJob): number | null => {
+    const linked = job.runs.map((r) => r.taskId).filter((id): id is string => Boolean(id));
+    if (!linked.length) return null;
+    const total = usageTotal(
+      sumUsage(tasks.filter((t) => linked.includes(t.id)).flatMap((t) => t.steps.map((s) => s.usage))),
+    );
+    return total;
+  };
 
   // 每 30 秒刷新"下次执行"的倒计时文案
   useEffect(() => {
@@ -73,7 +91,6 @@ export function ScheduledPage() {
      */
     atHour: 22,
     atMinute: 0,
-    env: "cloud" as RunEnv,
     customMinutes: 60,
   });
   const [formError, setFormError] = useState("");
@@ -98,7 +115,6 @@ export function ScheduledPage() {
       title: job.title,
       prompt: job.prompt,
       repeat: job.repeat,
-      env: job.env,
       customMinutes: job.customMinutes ?? 60,
       /* 编辑已有任务时把它的钟点带进来（老任务没填 → 回落到 22:00 这个默认） */
       atHour: job.atHour ?? 22,
@@ -253,20 +269,6 @@ export function ScheduledPage() {
                 分
               </label>
             ) : null}
-            <label className="wb-sched-field">
-              运行在
-              <select
-                data-testid="wb-sched-env"
-                value={draft.env}
-                onChange={(e) => setDraft({ ...draft, env: e.target.value as RunEnv })}
-              >
-                {(Object.keys(ENV_LABEL) as RunEnv[]).map((key) => (
-                  <option key={key} value={key}>
-                    {ENV_LABEL[key]}
-                  </option>
-                ))}
-              </select>
-            </label>
             <span className="wb-spacer" />
             {editingId ? (
               <>
@@ -309,8 +311,6 @@ export function ScheduledPage() {
                     {REPEAT_LABEL[job.repeat]}
                     {job.repeat === "custom" ? ` ${job.customMinutes} 分钟` : ""}
                     <span className="wb-sched-dot">·</span>
-                    {ENV_LABEL[job.env]}
-                    <span className="wb-sched-dot">·</span>
                     <span data-testid={`wb-job-next-${job.id}`}>{describeNextRun(job.nextRunAt, now)}</span>
                     {job.runs.length > 0 ? (
                       <>
@@ -319,6 +319,16 @@ export function ScheduledPage() {
                         {job.runs[0].ok ? "" : `（上次失败：${job.runs[0].error ?? "未知"}）`}
                       </>
                     ) : null}
+                    {/*
+                      用量（2026-10-16）：从关联到的任务现算，口径与主页那颗「用量」同源
+                      （`sumUsage` + `formatCount`）—— 拿不到就整条不出现（见 `jobTokens`）。
+                    */}
+                    {jobTokens(job) === null ? null : (
+                      <>
+                        <span className="wb-sched-dot">·</span>
+                        <span data-testid={`wb-job-usage-${job.id}`}>累计 {formatCount(jobTokens(job)!)} token</span>
+                      </>
+                    )}
                   </span>
                 </div>
                 <div className="wb-sched-item-actions">
@@ -367,44 +377,6 @@ export function ScheduledPage() {
 
         <div className="wb-cloud-foot">
           定时任务存在本机，关掉窗口后不会执行；下次打开会顺延到下一个周期（不补跑错过的）
-        </div>
-      </div>
-
-      {/*
-        ⚠️ 这一条输入区是**照本体截图摆的样子**，但本机版没有"用一句话安排任务"的后端
-        （定时任务的创建在上面那个表单里）—— 所以它整条都是**装饰**。
-
-        ── 2026-10-15（M0 工单 3）：改成**非交互元素** ──
-
-        原来这里是六颗 `disabled` 按钮，每颗挂一句"本机版还没做"。工单的口径是
-        逐项三选一（实现 / 移除 / **降级为非交互元素**），**不允许留下"disabled + 借口"**。
-        这里按第三条降级：换成 `span` + 外层 `aria-hidden`，不再伪装成按钮 ——
-        那六句借口随之消失，其中两句还是**不实陈述**：
-        「技能（本机版还没做）」「插件（本机版还没做）」与事实不符 ——
-        技能面板与插件系统（Phase 8）都已落地，只是**定时任务还不能绑定它们**
-        （`ScheduleJob` 只有 title / prompt / repeat，见 `scheduleStore.ts`）。
-        这句话留在代码里，不再挂到界面上充数。
-      */}
-      <div className="wb-composer wb-composer-slim" aria-hidden="true">
-        <div className="wb-composer-input wb-composer-placeholder">{SCHEDULE_COMPOSER_PLACEHOLDER}</div>
-        <div className="wb-composer-bar">
-          <span className="wb-chip">
-            <Plus size={16} />
-          </span>
-          <span className="wb-chip">
-            <Cloud size={13} /> 云电脑 <ChevronDown size={12} />
-          </span>
-          <span className="wb-chip">
-            <FolderOpen size={13} /> 项目
-          </span>
-          <span className="wb-chip">
-            <Sparkles size={13} /> 技能
-          </span>
-          <span className="wb-chip">
-            <Blocks size={13} /> 插件
-          </span>
-          <span className="wb-spacer" />
-          <span className="wb-chip wb-chip-auto">AUTO · LOW</span>
         </div>
       </div>
     </section>
