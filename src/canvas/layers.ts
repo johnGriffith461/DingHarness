@@ -1,5 +1,4 @@
-import type { CanvasNode } from "./types";
-import { nodeLabel } from "./references";
+import { NODE_KIND_META, type NodeKind, type CanvasNode } from "./types";
 
 /**
  * 图层模型（阶段 8.1 / 8.2，对标原版 `data-canvas-order`、`data-canvas-slot`、
@@ -15,6 +14,22 @@ import { nodeLabel } from "./references";
  *   · 面板显示 = 从顶到底（用户习惯"最上面那层排第一"）
  *   · 所以面板是数组的**倒序**，两处不要各写一套
  */
+
+/**
+ * 节点在界面上的显示标题。
+ *
+ * 2026-10-16：原来住在 `canvas/references.ts`（画布聊天那条 `@` 引用链上）；聊天拆掉之后
+ * 只剩图层与别处要给节点起个人话名字，所以搬进这里 —— 它本来就不属于聊天。
+ */
+export function nodeLabel(node: Pick<CanvasNode, "id" | "type" | "data">): string {
+  const data = node.data as Record<string, unknown>;
+  const raw = data?.title ?? data?.alt;
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  // 没标题时用「类型 + id 里的数字」兜底：带数字才能区分同类节点（代码2 / 代码3）
+  const meta = NODE_KIND_META[node.type as NodeKind];
+  const suffix = /^[A-Za-z]*(d+)$/.exec(node.id)?.[1] ?? node.id;
+  return `${meta?.label ?? node.type}${suffix}`;
+}
 
 /** 图层调整顺序的动作（对标 `layerContext_*`）。 */
 export type LayerOrderOp = "front" | "forward" | "backward" | "back";

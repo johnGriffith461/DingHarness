@@ -16,7 +16,6 @@ import { PhonePage } from "./PhonePage";
 import { PluginsPage } from "./PluginsPage";
 import { ScheduledPage } from "./ScheduledPage";
 import CanvasRuntime from "@/canvas/CanvasRuntime";
-import ChatSidebar from "@/chat/ChatSidebar";
 import { startScheduler } from "./scheduleStore";
 import { useLibraryStore } from "./libraryStore";
 import { matchShortcut } from "./shortcuts";
@@ -50,8 +49,6 @@ export default function Workbench() {
   const floatOpen = useWorkbenchStore((s) => s.floatOpen);
   const floatSeed = useWorkbenchStore((s) => s.floatSeed);
   const closeFloat = useWorkbenchStore((s) => s.closeFloat);
-  /** 画布内的对话侧栏：默认收起（画布本身就够宽了）。 */
-  const [canvasChatOpen, setCanvasChatOpen] = useState(false);
   /*
    * 右侧「对话摘要」的收起态**提在这里**（2026-10-15，M0 工单 2）。
    *
@@ -136,15 +133,12 @@ export default function Workbench() {
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
-      if (canvasOpen && canvasChatOpen) {
-        setCanvasChatOpen(false);
-        return;
-      }
+      /* ⚠️ 2026-10-16：这里原来还有一条「画布对话优先收」，画布那个聊天侧栏拆了 —— 那条随之消失。 */
       if (!summaryCollapsed) setSummaryCollapsed(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canvasOpen, canvasChatOpen, summaryCollapsed]);
+  }, [summaryCollapsed]);
 
   /*
    * 任务历史 + 本机库的加载顺序**不能反**（阶段 11.9）：
@@ -232,20 +226,13 @@ export default function Workbench() {
         {canvasOpen ? (
           <div className="wb-canvas" data-testid="wb-canvas">
             {/*
-              画布与它的对话侧栏一起收在这里。
-              保留侧栏是有意的：画布的 AI 生成/改图那套功能挂在它上面（阶段 3/9 验证过），
-              拆掉就等于把已验证的功能丢了。默认收起，需要时展开。
+              ⚠️ 2026-10-16：画布自带的那条对话侧栏（连它那颗 `‹` 把手）**拆了** ——
+              主人的话：「应该用咱们主界面里边这个 Agent 的这个模型 去使用右边的这个画布啊
+              为什么你还有个聊天」。画布要 AI 干活走它自己的工具条（顶部「AI 生成」、
+              底部「图片 / 视频生成」）；而"让 agent 操作画布"是主界面那条路 ——
+              agent 手上就有 `canvas_add_node`（`canvasCommandHost.ts`）。
             */}
-            {canvasChatOpen ? <ChatSidebar onClose={() => setCanvasChatOpen(false)} /> : null}
             <div className="wb-canvas-stage">
-              <button
-                className="wb-canvas-chat-toggle"
-                data-testid="wb-canvas-chat-toggle"
-                title={canvasChatOpen ? "收起画布对话" : "展开画布对话"}
-                onClick={() => setCanvasChatOpen((v) => !v)}
-              >
-                {canvasChatOpen ? "‹" : "›"}
-              </button>
               <CanvasRuntime />
             </div>
           </div>

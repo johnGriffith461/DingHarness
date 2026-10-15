@@ -29,9 +29,8 @@ const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 describe("右侧面板守卫（M0 工单 2：只能开不能关 / Esc 可达）", () => {
   const wb = read("src/workbench/Workbench.tsx");
   const summary = read("src/workbench/SummaryPanel.tsx");
-  const chat = read("src/chat/ChatSidebar.tsx");
 
-  it("① Esc 只由一处处理，且三条边界都在", () => {
+  it("① Esc 只由一处处理，且（剩下的）两条边界都在", () => {
     expect(wb, "Workbench 里没有 Esc 处理").toMatch(/"Escape"/);
     /* 边界一：弹窗自己处理 Esc，两头一起关会让人莫名其妙 */
     expect(wb).toMatch(/wb-modal-mask/);
@@ -39,8 +38,11 @@ describe("右侧面板守卫（M0 工单 2：只能开不能关 / Esc 可达）"
     expect(wb).toMatch(/INPUT/);
     expect(wb).toMatch(/TEXTAREA/);
     expect(wb).toMatch(/isContentEditable/);
-    /* 边界三：一次只关一个 —— 画布对话优先 */
-    expect(wb).toMatch(/canvasChatOpen/);
+    /*
+     * 边界三「一次只关一个」原来是靠「画布对话优先」体现的；2026-10-16 那条侧栏拆了，
+     * 于是它退化成一次只关一个东西——现在只剩摘要面板，所以这条断言也随之删掉。
+     * ⚠️ 别把这条当成边界不需要了：**将来再加第二个可收面板时，它得回来**。
+     */
   });
 
   it("② 面板的开关态由工作台持有（两个面板各监听一次 Esc 会互相抢）", () => {
@@ -50,20 +52,9 @@ describe("右侧面板守卫（M0 工单 2：只能开不能关 / Esc 可达）"
     expect(wb, "Workbench 必须把收起态传下去").toMatch(/<SummaryPanel[\s\S]{0,120}collapsed=\{summaryCollapsed\}/);
   });
 
-  it("③ 画布对话侧栏的「收起」入口必须在头上、必须带字", () => {
-    expect(chat, "侧栏没有收起入口").toMatch(/data-testid="wb-chat-collapse"/);
-    expect(chat, "收起入口必须带字（图标 + 「收起」）").toMatch(/收起\s*<\/button>/);
-    /* 与摘要面板同一颗样式：两个右面板长一样，用户学一次就够 */
-    expect(chat).toMatch(/className="wb-summary-collapse"/);
-    /* 接收 onClose 并由工作台传进来（侧栏自己管不了画布的开关态） */
-    expect(chat).toMatch(/onClose\?\.\(\)/);
-    expect(wb).toMatch(/<ChatSidebar onClose=/);
-  });
-
-  it("④ 侧栏头上的「收起」排在新会话之前（关的入口不该比新建更靠里）", () => {
-    const collapseAt = chat.indexOf('data-testid="wb-chat-collapse"');
-    const newAt = chat.indexOf('title="新会话"');
-    expect(collapseAt).toBeGreaterThan(-1);
-    expect(newAt).toBeGreaterThan(collapseAt);
-  });
+  /*
+   * ⚠️ 2026-10-16：原来这里是两条「画布对话侧栏」的断言（收起入口在头上、带字、排在新会话之前）。
+   * 主人把那条侧栏整条拆了（「为什么你还有个聊天」）—— 没有侧栏就没有可关的入口，这两条随之删掉。
+   * 剩下的两条（Esc 的三条边界、摘要面板受控）仍然有效：它们盯的是**工作台**那层。
+   */;
 });
