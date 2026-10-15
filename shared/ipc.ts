@@ -549,8 +549,13 @@ export type ShellBridge = {
         toolCount: number;
       }[]
     >;
-    /** 选一个目录并安装（返回取消时 `canceled: true`）。 */
-    install: () => Promise<{ ok: boolean; canceled?: boolean; plugin?: string; errors?: string[]; list?: unknown }>;
+    /**
+     * 安装。
+     *
+     * - 不给参数：弹系统目录对话框装本地目录（**目录由对话框给**，不收渲染进程的路径）；
+     * - 给 `npm:<包名>`：从 npm 装（包名会被主进程**严格校验** —— 包名不是路径）。
+     */
+    install: (spec?: string) => Promise<{ ok: boolean; canceled?: boolean; plugin?: string; errors?: string[]; list?: unknown }>;
     /** 开/关（关 = 不装载它的工具与钩子，台账留着）。 */
     setEnabled: (name: string, enabled: boolean) => Promise<{ ok: boolean; errors?: string[]; list?: unknown }>;
     /** 卸载（台账与它拷贝进来的内容一起清；不碰用户给的源目录）。 */

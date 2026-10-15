@@ -167,7 +167,7 @@ export class McpClient {
         {
           protocolVersion: "2024-11-05",
           capabilities: {},
-          clientInfo: { name: "ding-harness", version: "0.2.0" },
+          clientInfo: { name: "ding-harness", version: "0.3.0" },
         },
         this.timeouts.handshakeMs,
       );

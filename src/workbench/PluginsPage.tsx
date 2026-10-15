@@ -127,6 +127,8 @@ export function PluginsPage() {
     | null
   >(null);
   const [pluginNote, setPluginNote] = useState("");
+  /** npm 包名输入（"发现"那一半：在 npm 上找到包名，粘进来装）。 */
+  const [npmSpec, setNpmSpec] = useState("");
 
   const pullPlugins = useCallback(() => {
     const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
@@ -341,12 +343,17 @@ export function PluginsPage() {
                 </div>
               ) : null}
             </div>
-          ) : manageTab === "插件" ? (
-            /*
-             * 「插件」页签：**外部插件在前、内置清单在后**。
-             * 顺序有理由：外部插件是用户自己装的东西，他进这一页多半是为了管它们；
-             * 而内置清单（本应用长出来的能力）更稳定、更少变。
-             */
+          ) : (
+            <>
+            {/*
+              「插件」页签**两段都要在**：外部插件段在前、原来的「已安装清单」在后。
+              ⚠️ 顺序有理由（外部插件是用户自己装的东西，他进这一页多半为了管它们；
+              内置清单更稳定），但**两段都必须在** —— 第一版把清单整段挤掉了，
+              而验收脚本当场就报"插件 tab 里没有刚装的那个"（`accept-context`）。
+              所以这里用 `manageTab === "插件" ? 段 : null` 叠在原有结构**之上**，
+              而不是替换掉它。
+            */}
+            {manageTab === "插件" ? (
             <div className="wb-plugin-ext" data-testid="wb-plugin-ext">
               <div className="wb-plugin-ext-head">
                 <b>外部插件</b>
@@ -354,6 +361,38 @@ export function PluginsPage() {
                   {plugins === null ? "读取中…" : plugins.length ? `${plugins.length} 个` : "还没有"}
                 </span>
                 <span className="wb-spacer" />
+                {/*
+                  两条件装路径（Phase 8.4 的"发现 + 安装"）：
+                  · 本地目录 —— 走系统对话框（目录由对话框给，渲染层不传路径）；
+                  · npm 包 —— 输入包名（主进程会**严格校验**：包名不是路径）。
+                  "发现"在 v1 就是**在 npm 上找包**（方案定的主渠道），所以这里给一个输入框，
+                  而不是假装有一个我们并不运营的市场后端。
+                */}
+                <input
+                  className="wb-setpage-input"
+                  data-testid="wb-plugin-npm"
+                  placeholder="npm 包名（可带 @版本）"
+                  value={npmSpec}
+                  onChange={(e) => setNpmSpec(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || !npmSpec.trim()) return;
+                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                    doPluginAction(() => shell!.plugins.install(npmSpec.trim()), "装好了");
+                    setNpmSpec("");
+                  }}
+                />
+                <button
+                  className="wb-page-btn"
+                  data-testid="wb-plugin-install-npm"
+                  disabled={!npmSpec.trim()}
+                  onClick={() => {
+                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                    doPluginAction(() => shell!.plugins.install(npmSpec.trim()), "装好了");
+                    setNpmSpec("");
+                  }}
+                >
+                  装 npm 包
+                </button>
                 <button
                   className="wb-page-btn"
                   data-testid="wb-plugin-install"
@@ -432,12 +471,14 @@ export function PluginsPage() {
                 </div>
               ) : null}
             </div>
-          ) : listed.length === 0 ? (
-            <div className="wb-manage-empty" data-testid="wb-manage-empty">
-              {`你还没有添加${manageTab}`}
-            </div>
-          ) : (
-            <div className="wb-sched-list">
+            ) : null}
+
+            {listed.length === 0 ? (
+              <div className="wb-manage-empty" data-testid="wb-manage-empty">
+                {`你还没有添加${manageTab}`}
+              </div>
+            ) : (
+              <div className="wb-sched-list">
               {listed.map((item) => (
                 <div className="wb-sched-item" key={item.id} data-testid={`wb-managed-${item.id}`}>
                   <div className="wb-sched-item-main">
@@ -452,8 +493,10 @@ export function PluginsPage() {
                     移除
                   </button>
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
+            </>
           )}
         </div>
       </section>

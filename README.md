@@ -9,7 +9,7 @@
 Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无限画布」放在同一个工作台里。
 它本机运行、本机存数据，模型走你自己配置的 OpenAI 兼容通道——不依赖任何后端服务。
 
-> 状态：**v0.2.0，早期版本**。目前仅提供 Windows 构建。
+> 状态：**v0.3.0，早期版本**。目前仅提供 Windows 构建。
 
 ---
 
@@ -50,7 +50,7 @@ pnpm electron:build && pnpm exec electron .
 打包（含 typecheck / lint / test 全门禁）：
 
 ```bash
-pnpm build   # → release/ding-harness-0.2.0-setup.exe
+pnpm build   # → release/ding-harness-0.3.0-setup.exe
 ```
 
 ### 配置模型
@@ -108,17 +108,31 @@ src/           渲染进程（React 19 + zustand + Vite）
 
 ## 命令行
 
+`ding` 是**正式的命令行宿主**，不是"桌面的附属开关"：它跟桌面跑同一个内核、同一套闸门。
+
 ```bash
-pnpm ding                          # 等同 tsx hosts/cli/ding.ts
+pnpm ding                                      # 不给参数 = 进交互模式（上下文接着上一句）
 pnpm ding run "把 demo 里的 md 整理成一份纪要" --dir ./demo
-pnpm ding sessions                 # 列会话（--json / --export <id>）
-pnpm ding sessions --cost          # 成本账本（--by session|day|model；数字只来自 provider 上报）
-pnpm ding record <会话 id>          # 录一份快照（fixture）
-pnpm ding replay <快照文件>         # 重放并与录下来的投影 diff —— 重构零漂移的验收器
-pnpm ding models
+pnpm ding sessions [--json|--export <id>]      # 列会话 / 导出 JSONL
+pnpm ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）
+pnpm ding models [--json]                      # provider 与模型（逐条标出数据来源与是否过期）
+pnpm ding agents                               # 内置专家（AgentSpec）
+pnpm ding plugins list|install|enable|disable|remove|doctor
+pnpm ding config [show|set <键> <值>|unset <键>] # 默认 provider / 模型 / 档位 / 目录
 ```
 
-数据目录默认 `~/.ding`，可用 `DH_DATA_DIR` 覆盖；`--dir` 可重复给（就是桌面的"工作区授权"）。
+交互模式里的斜杠命令：`/model` `/mode` `/provider` `/agents` `/sessions` `/help` `/exit`。
+
+**配置与优先级**（`~/.ding/config.json`，也读无扩展名的 `~/.ding/config`）：
+
+```
+命令行显式参数  >  环境变量（DH_PROVIDER / DH_MODEL / DH_MODE / DH_DIRS）  >  配置文件  >  内置默认
+```
+
+数据目录默认 `~/.ding`（`DH_DATA_DIR` 可覆盖）；`--dir` 可重复给（就是桌面的"工作区授权"）。
+`--json` 给脚本/CI 用；`--dev` 会多出两个**工程模式**命令（`record` / `replay`，验收驱动器）。
+
+装成全局命令：`node scripts/install-cli.mjs`（默认只构建并打印怎么装；加 `--link` 才真装）。
 
 ## 开发与验收
 
@@ -130,14 +144,20 @@ pnpm test        # vitest（内核测试在 engine/**/*.test.ts，与渲染层�
 
 `scripts/accept/` 下是浏览器端验收脚本，`scripts/verify-*.mjs` 是产物与打包校验。
 
-## 已知边界（v0.2.0）
+## 已知边界（v0.3.0）
 
 - 仅 Windows 构建；macOS / Linux 尚未验证。
 - `run_command` 与用户同权限运行，**没有沙箱**。
 - 只有 OpenAI 兼容一种 provider 通道（协议分层在 Phase 5/6 才做）。
 - 桌面与 CLI 都已跑在新内核上；两者的会话事件存在同一个 SQLite 库里（各自的数据目录）。
 - 旧 JSONL 数据会在启动时自动迁移；迁移**不删**旧文件。
-- 尚无插件机制：能力来自内置工具与 MCP。
+- **插件**（Phase 8）：npm 包或本地目录两种渠道，装之前要你确认权限清单。
+  ⚠️ 权限分两类，界面上分开说：`tools:register` / `hooks:register` **真的生效**（不批就不接那根线）；
+  `fs:read` / `fs:write` / `net` / `exec` 在 v1 **拦不住**（插件与宿主同进程同权限）——
+  它们是"知情"不是"限制"，真正的隔离（Worker / 容器）列 v2。
+- **多 agent 协作**（Phase 7）：coordinator 拆任务，几个专家（researcher / writer / runner）并行办。
+  每个专家的工具白名单与闸门档位在 `engine/runtime/agents.ts` 里声明；档位**只能更严，不能更松**。
+- 模型目录表目前只登记了少数几个模型；未登记模型走保守默认并在账本上标注"未登记模型"。
 
 ## 许可
 

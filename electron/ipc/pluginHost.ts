@@ -3,6 +3,7 @@ import { app, dialog, type BrowserWindow } from "electron";
 import {
   auditLedger,
   installFromDir,
+  installFromNpm,
   pluginPaths,
   readLedger,
   setEnabled,
@@ -27,6 +28,25 @@ import { ENFORCED_PERMISSIONS, type PluginPermission } from "../../engine/runtim
  * 与用户授权工作区那条理由一样：如果渲染层能指定任意路径，
  * "安装"就等于"让主进程去执行任意目录里的代码" —— 那是个不该开的口子。
  */
+
+/**
+ * 这个字符串能不能当 **npm 包名**用。
+ *
+ * ⚠️ 它是"发现 + 安装"那道口子的守卫：包名不是路径。
+ * 不校验的话 `../某处` / `C:\...` / `file:...` 都能被 `npm pack` 认下来，
+ * 于是"从 npm 装插件"变成"让主进程执行任意本地目录"。
+ *
+ * 规则（npm 自己的口径，收窄到常见的那些）：可选的 `@scope/`，名字用小写字母数字与 `-_.`，
+ * 可带 `@版本`；**不许**出现路径分隔符、`..`、协议前缀。
+ *
+ * @param spec 渲染进程给的包名
+ * @returns 能不能用
+ */
+export function isSafeNpmSpec(spec: string): boolean {
+  if (spec.length > 120) return false;
+  if (spec.includes("..") || spec.includes(":") || /[\/]/.test(spec.replace(/^@[^/]+\//, ""))) return false;
+  return /^(@[a-z0-9-_.]+\/)?[a-z0-9-_.]+(@[a-zA-Z0-9-.^~><= ]+)?$/.test(spec);
+}
 
 export const PLUGIN_CHANNEL = {
   list: "plugin:list",
@@ -117,16 +137,30 @@ export function registerPluginIpc(ipcMain: Electron.IpcMain, getWindow: () => Br
   ipcMain.handle(PLUGIN_CHANNEL.doctor, () => pluginDoctor());
 
   /*
-   * 从目录安装：**目录由系统对话框给**（不接受渲染进程传路径）。
-   * 装完立刻重新装载，这样"装好了马上能用"，而不是要重启。
+   * 安装（Phase 8.4 的"发现 + 安装"）：
+   * - **不给 `spec`** → 弹系统目录对话框装本地目录（目录由对话框给，不收渲染进程的路径）；
+   * - **给 `spec`** → 从 npm 装（`npm:包名`）。⚠️ 这个值是**渲染进程给的**，
+   *   所以只允许**严格的包名**（见 `isSafeNpmSpec`）：包名不是路径。
+   *   不校验的话 `npm pack ../某处` 就成了一条"让主进程去执行任意本地目录"的路 ——
+   *   那与"不收路径"的初衷直接矛盾。
    */
-  ipcMain.handle(PLUGIN_CHANNEL.install, async () => {
+  ipcMain.handle(PLUGIN_CHANNEL.install, async (_e, spec: unknown) => {
+    const paths = pluginPathsNow();
+    if (typeof spec === "string" && spec.trim()) {
+      if (!isSafeNpmSpec(spec.trim())) {
+        return { ok: false as const, errors: [`只允许 npm 包名（可带 @版本），不接受路径：${String(spec).slice(0, 60)}`] };
+      }
+      const got = installFromNpm({ paths, spec: spec.trim() });
+      if (!got.ok) return { ok: false as const, errors: got.errors };
+      await loadPluginsAtStartup();
+      return { ok: true as const, plugin: got.plugin.name, list: pluginViews() };
+    }
+
     const win = getWindow();
     const picked = win
       ? await dialog.showOpenDialog(win, { properties: ["openDirectory"], title: "选一个插件目录" })
       : await dialog.showOpenDialog({ properties: ["openDirectory"], title: "选一个插件目录" });
     if (picked.canceled || !picked.filePaths.length) return { ok: false as const, canceled: true as const };
-    const paths = pluginPathsNow();
     const got = installFromDir({ paths, from: picked.filePaths[0] });
     if (!got.ok) return { ok: false as const, errors: got.errors };
     await loadPluginsAtStartup();

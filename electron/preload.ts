@@ -142,7 +142,7 @@ const api = {
   },
   plugins: {
     list: () => ipcRenderer.invoke(PLUGIN_CHANNEL.list),
-    install: () => ipcRenderer.invoke(PLUGIN_CHANNEL.install),
+    install: (spec?: string) => ipcRenderer.invoke(PLUGIN_CHANNEL.install, spec),
     setEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke(PLUGIN_CHANNEL.setEnabled, name, enabled),
     uninstall: (name: string) => ipcRenderer.invoke(PLUGIN_CHANNEL.uninstall, name),
     doctor: () => ipcRenderer.invoke(PLUGIN_CHANNEL.doctor),

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, pickPort, shot } from "./harness.mjs";
 
 /**
  * 验收：**任务中心**（§154，对应 `chat/task-center`）。
@@ -63,7 +63,15 @@ fs.writeFileSync(
   "utf8",
 );
 
-const PORT = 9303;
+/*
+ * ⚠️ 端口**挑一个能用的**，不要写死（2026-10-15 实测）：
+ * 这条原来写死 9303，而这台机器上 9303 被别的进程占着（netstat 里
+ * `192.168.1.8:9303` 有活动连接）—— 应用确实起来了、调试端口也开了，
+ * 但 Playwright 连 127.0.0.1:9303 拿到 ECONNREFUSED，整条脚本红。
+ * 而它红出来的样子是"左栏没有任务中心入口"等 18 条产品断言，
+ * 看着像产品全塌了 —— 其实是端口撞车。用 harness 的 `pickPort`（会试几个候选）。
+ */
+const PORT = await pickPort([9303, 19303, 29303, 39303]);
 const out = {};
 let child = null;
 let ok = false;
