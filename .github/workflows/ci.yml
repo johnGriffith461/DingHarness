@@ -63,8 +63,13 @@ jobs:
         # **不是安装失败**。这里**不做掩盖**（不吞退出码）：如果 CI 上因此变红，
         # 先看它是不是同一现象，再决定要不要顶一层重试；不要把它当"CI 坏了"。
         #
-        # ⚠️ 只走这一步就够：electron 的 postinstall 会下 ~100MB 的二进制，
-        # 这是 CI 里唯一的"网络下载"，但它不是"调模型"——本 workflow 不配置任何模型 key。
+        # ⚠️⚠️ **2026-10-16 更正**：这里原来写着"electron 的 postinstall 会下二进制"——
+        # **那是错的**，冒烟 job 第一次真跑就红在这上面（spawn electron.exe → ENOENT）。
+        # electron@44 的包**没有 postinstall**（它的 package.json 里没有 `scripts` 字段，
+        # 注册表元数据也没有 hasInstallScript），下载改成了显式命令
+        # （bin 名 `install-electron` → `install.js`）。
+        # 所以 `pnpm install` 只装 JS —— **要 Electron 二进制的 job 自己下**（见 smoke job 那一步）。
+        # gates 这组不需要它（纯 node 的门），省下那 ~100MB。
         run: pnpm install --frozen-lockfile
 
       - name: 类型
@@ -132,6 +137,17 @@ jobs:
 
       - name: 装依赖（锁文件为准）
         run: pnpm install --frozen-lockfile
+
+      - name: 下 Electron 二进制（冒烟要真起应用）
+        # ⚠️ **这一步不能省**（2026-10-16 CI 第一次真跑冒烟时发现的）：
+        # electron@44 **没有 postinstall** —— 它的 package.json 里没有 `scripts` 字段
+        # （注册表元数据也没有 hasInstallScript），下载改成了显式命令
+        # （`install.js`，bin 名 `install-electron`）。
+        # 于是 `pnpm install` 只装 JS，`node_modules/electron/dist/electron.exe` 不存在，
+        # 冒烟脚本一 spawn 就是 ENOENT。本机之所以一直有 dist/，是当初手动跑过 install.js
+        # 留下的 —— 这正是"本机好好的、CI 一跑就红"的原因。
+        # 这 ~100MB 是 CI 里唯一的网络下载（不是"调模型"，本 workflow 不配任何模型 key）。
+        run: node node_modules/electron/install.js
 
       - name: 构建渲染产物与主进程
         # 冒烟跑的是**真应用**，所以先把 dist/ 与 dist-electron/ 建出来。

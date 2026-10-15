@@ -72,6 +72,20 @@ exceljs 只调 `v4()` 且不带参数 → 那条漏洞路径不可达；CI 的�
   修完当场验了三件事：全新构建过、幂等（第二遍 0 改动）、**守卫仍抓得住真问题**
   （塞一个解不开的 `require` 进去，它照样红 —— 不能修成一条空扫描）。
 
+#### 四、`electron@44` **没有 postinstall**（CI 注释里那句是错的）
+
+构建那步修好之后，冒烟终于跑到"真起一次应用"，红在 `spawn electron.exe ENOENT`。
+
+- **根因**：`electron@44` 的包**没有 postinstall** —— 它的 `package.json` 里
+  **没有 `scripts` 字段**（注册表元数据也没有 `hasInstallScript`），下载改成了
+  **显式命令**（`install.js`，bin 名 `install-electron`）。于是 `pnpm install`
+  只装 JS，`node_modules/electron/dist/electron.exe` 根本不存在。
+- **为什么本机没暴露**：本机那份 `dist/` 是当初手动跑过一次 `install.js` 留下的
+  （时间戳留着）——典型的"环境里正好有，所以没人问它从哪来"。
+- **修法**：冒烟 job 显式加一步 `node node_modules/electron/install.js`
+  （CI 里唯一的网络下载，也只在这一个 job 里做：gates 那组是纯 node，不需要 Electron）。
+  CI 里那句"postinstall 会下二进制"的注释也一并改成事实。
+
 ### Phase 12–18：日常可靠 · 说人话 · 沙箱 · 平台 · 功能补全 · 随处可用 · 生态
 
 **数据主权（12）**：14 个配置型 store 都走同一个 `createJsonStore`，所以在那一层搬进 SQLite ——
