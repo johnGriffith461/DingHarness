@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { pendingApprovalNotice, toolFailedNotice, unknownToolNotice } from "@engine/core/notices";
+import { pendingApprovalNotice, softLimitNotice, toolFailedNotice, unknownToolNotice } from "@engine/core/notices";
 
 /**
  * Factor 9 错误回注三件套（Phase 3.1）。
@@ -92,5 +92,43 @@ describe("错误回注三件套 · 单一来源", () => {
       expect(code, `${host} 没有从内核的 notices 取错误回注文案`).toContain('from "../../engine/core/notices"');
       expect(code).toContain("unknownToolNotice");
     }
+  });
+});
+
+describe("软限额提示（Phase 13.2：提示，不硬断）", () => {
+  it("说清花了多少、限额多少、还有百分比", () => {
+    const text = softLimitNotice(0.8, 1, 0.8);
+    expect(text).toContain("0.80");
+    expect(text).toContain("1.00");
+    expect(text).toContain("80%");
+  });
+
+  it("⭐ 说清「不会拦你」——否则用户以为下一轮跑不动了，反而不敢用", () => {
+    expect(softLimitNotice(0.5, 1, 0.5)).toContain("不会拦你");
+    expect(softLimitNotice(2, 1, 2)).toContain("不会拦你");
+  });
+
+  it("超了就说超了（措辞与「快到了」不一样）", () => {
+    const over = softLimitNotice(1.5, 1, 1.5);
+    expect(over).toContain("超过");
+    const near = softLimitNotice(0.9, 1, 0.9);
+    expect(near).toContain("快到");
+    expect(over).not.toBe(near);
+  });
+
+  it("小额不显示成 $0.00（那看着像坏了）", () => {
+    const tiny = softLimitNotice(0.0014, 0.01, 0.14);
+    expect(tiny).toContain("$0.0014");
+    /*
+     * ⚠️ 判据要精确到"那一整个数字"：`toContain("已用 $0.00")` 会被 $0.0014 **误命中**
+     * （它确实以 "$0.00" 开头）—— 第一版就是这么写的，红的是断言不是产品。
+     */
+    expect(tiny).not.toMatch(/$$0\.00[^0-9]/);
+  });
+
+  it("告诉用户怎么调、怎么关", () => {
+    const text = softLimitNotice(0.5, 1, 0.5);
+    expect(text).toContain("softLimitUsd");
+    expect(text).toContain("0");
   });
 });

@@ -49,8 +49,17 @@ export type TurnEvent =
   | { type: "text"; text: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
-  /** 一步结束（AI SDK 的 `finish`）—— 数步数用。**投影会忽略它**（它不改变内容）。 */
-  | { type: "step-finish" }
+  /**
+   * 一步结束 —— 数步数用，**投影会忽略它**（它不改变内容，所以不落盘）。
+   *
+   * ⚠️ 从 Phase 13.3 起它还带**这一步的用量与序号**：长回合要能说"现在第几步、已用多少 token"
+   * （方案 13.3："长回合进度叙述（当前步骤 / 已用 token / 预估剩余），CLI 与桌面一致"）。
+   *
+   * 为什么挂在它身上而不是新加一种事件：`step-finish` 本来就在**每一步**发一次，
+   * 而它不落盘（见 `engine/index.ts` 的说明）—— 加字段既不会污染日志，
+   * 也不会让读日志的人多一条要认识的类型。缺用量时**不编**（没有就是没有）。
+   */
+  | { type: "step-finish"; step?: number; usage?: TurnUsage }
   | { type: "done"; usage?: TurnUsage }
   | { type: "error"; message: string }
   /**
@@ -276,6 +285,8 @@ export async function runTurn(
         : {}),
     });
 
+    /** 到这一步为止发过几次"一步结束"（Phase 13.3：进度叙述要用步号）。 */
+    let steps = 0;
     /** 这一轮有没有见过"一步结束"（见下面 `finish-step` 那段）。 */
     let sawStepFinish = false;
 
@@ -320,7 +331,18 @@ export async function runTurn(
        */
       if (part.type === "finish-step") {
         sawStepFinish = true;
-        onEvent({ type: "step-finish" });
+        steps += 1;
+        /*
+         * 这一步的用量：AI SDK 的 `finish-step` 带 `usage`（与末尾 `finish` 同形）。
+         * 拿不到就不带（**不编**）—— 界面上宁可显示"已用 N token（还差这一步）"，
+         * 也不要显示一个编出来的数。
+         */
+        const su = (part as { usage?: StepUsage }).usage;
+        onEvent({
+          type: "step-finish",
+          step: steps,
+          ...(su ? { usage: su } : {}),
+        });
         continue;
       }
       /*

@@ -143,6 +143,14 @@ export type AiStreamEvent =
   | { requestId: string; type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { requestId: string; type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
   | { requestId: string; type: "done"; usage?: { inputTokens?: number; outputTokens?: number } }
+  /**
+   * 一步结束（Phase 13.3：长回合进度叙述）。
+   *
+   * ⚠️ 它**不落盘**（见 `engine/index.ts`：落进去会被读日志的人当成坏行），
+   * 但**要进 IPC** —— 界面靠它说"现在第几步、已用多少 token"。
+   * 这是"哪些事件给界面看"与"哪些事件要记住"第一次分开：以前两者是同一份清单。
+   */
+  | { requestId: string; type: "step-finish"; step?: number; usage?: { inputTokens?: number; outputTokens?: number } }
   | { requestId: string; type: "error"; message: string }
   /*
    * ── 一次委派的进度（Phase 7.3）───────────────────────────────

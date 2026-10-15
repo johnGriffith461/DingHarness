@@ -28,6 +28,7 @@ import { buildFollowUpPrompt, parseAskReply } from "./agent";
 import { artifactFileName, extractArtifacts, type Artifact } from "./artifact";
 import { enabledPromptBlock } from "@shared/library";
 import { fallbackNote } from "@shared/settings";
+import { formatCount } from "@shared/cost";
 import { toolLabel, type ToolTrace } from "@shared/agentTools";
 import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import { assembleSystem } from "@engine/core/assembly";
@@ -387,6 +388,10 @@ export async function runStream(
    */
   const project = () => finishTurn(turn, { expandBlocked: true });
 
+  /** 到目前第几步 / 累计 token（Phase 13.3 的进度叙述用；拿不到用量就不显示数字）。 */
+  let liveSteps = 0;
+  let liveTokens = 0;
+
   onPatch({ activity: "正在思考", stage: "running" });
 
   /** `catch` 里抛出来的错误。与投影里的 `error` 事件是两条路，按"后者发生者优先"合。 */
@@ -435,6 +440,26 @@ export async function runStream(
           /* 「等你确认」还是「正在回复」也取自投影（`pending` 只判一次） */
           const trace = project().traces.find((t) => t.toolCallId === event.toolCallId);
           onPatch({ activity: trace?.pending ? "等你确认" : "正在回复" });
+        }
+        if (event.type === "step-finish") {
+          /*
+           * ⭐ **长回合进度**（Phase 13.3）：每一步结束时把"到第几步、已用多少 token"
+           * 写进活动行。方案要求 CLI 与桌面**一致** —— 两边读的是同一个字段
+           * （`step-finish` 的 `usage`），不是各算一份。
+           *
+           * 为什么要有它：长回合里用户只看到"正在回复"，十几分钟不知道在干什么、
+           * 也不知道花了多少。有了步号与 token，他至少能判断"还要不要等"。
+           * 拿不到用量就不显示数字（**不编**）。
+           */
+          liveSteps = event.step ?? liveSteps + 1;
+          if (event.usage) {
+            liveTokens =
+              (event.usage.inputTokens ?? 0) +
+              (event.usage.outputTokens ?? 0);
+          }
+          const n = liveSteps;
+          const tk = liveTokens ? `，已用 ${formatCount(liveTokens)} token` : "";
+          onPatch({ activity: `第 ${n} 步${tk}` });
         }
         if (event.type === "delegation") {
           /*

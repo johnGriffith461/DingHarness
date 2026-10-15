@@ -797,7 +797,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           }));
           return;
         }
-        // error
+        /*
+         * ⚠️ 这里**必须显式判 error**（原来是把"剩下的都当 error"）：
+         * Phase 13.3 给流里加了 `step-finish`（进度叙述用），它落到这个兜底分支里
+         * 就成了一条类型错误 —— 而且语义上也错（它不是错误）。
+         * 聊天侧**不显示**进度叙述（那是任务视图那行活动提示的活），所以这里直接返回。
+         */
+        if (event.type !== "error") return;
         flush();
         set((prev) => ({
           streamingId: "",

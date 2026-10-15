@@ -38,6 +38,13 @@ export type CliConfig = {
   mode?: ConfirmMode;
   /** 默认工作目录（可多个）。 */
   dirs?: string[];
+  /**
+   * 软限额（美元，Phase 13.2）。**0 或没设 = 不提示**。
+   *
+   * 方案的口径是"**提示，不硬断**" —— 它只是一句话，不会拦住任何一轮。
+   * 默认不设是刻意的：替用户定一个他没同意的额度，比不提示更烦人。
+   */
+  softLimitUsd?: number;
 };
 
 /** 配置文件位置。 */
@@ -53,6 +60,9 @@ export function normalizeConfig(raw: unknown): CliConfig {
   if (typeof o.provider === "string" && o.provider.trim()) out.provider = o.provider.trim();
   if (typeof o.model === "string" && o.model.trim()) out.model = o.model.trim();
   if (o.mode !== undefined) out.mode = normalizeConfirmMode(o.mode);
+  if (typeof o.softLimitUsd === "number" && Number.isFinite(o.softLimitUsd) && o.softLimitUsd > 0) {
+    out.softLimitUsd = o.softLimitUsd;
+  }
   if (Array.isArray(o.dirs)) {
     const dirs = o.dirs.filter((d): d is string => typeof d === "string" && d.trim() !== "");
     if (dirs.length) out.dirs = dirs;

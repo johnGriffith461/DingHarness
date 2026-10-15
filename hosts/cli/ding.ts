@@ -13,6 +13,7 @@ import { allProviders, firstAvailableProvider, getProvider } from "../../engine/
 import { describeBudget } from "../../engine/runtime/budget";
 import { budgetOf } from "../../engine/runtime/budget";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
+import { formatCount } from "../../shared/cost";
 import { buildEngine as buildEngineIn } from "./assembly";
 import { cmdEval } from "./cmdEval";
 import { cmdInit, cmdDoctor } from "./cmdSetup";
@@ -198,7 +199,25 @@ async function cmdRun(p: Parsed): Promise<number> {
     maxSteps: Number(flag(p, "steps") ?? 8),
   };
 
-  const outcome = await engine.run(request);
+  /*
+   * ⭐ **长回合进度叙述**（Phase 13.3）：每一步结束打一行到 **stderr**。
+   *
+   * 打到 stderr 是刻意的：stdout 是"结果"（`render` 出来的正文），
+   * 而进度是"过程" —— 混在一起会让 `ding run ... > out.txt` 的产物里夹着进度行。
+   *
+   * 口径与桌面**同一个字段**（`step-finish` 的 `usage`），所以两边说的是同一件事。
+   * 拿不到用量就不显示数字（**不编**）。
+   */
+  const outcome = await engine.run({
+    ...request,
+    onEvent: (event) => {
+      if (event.type !== "step-finish") return;
+      const used = (event.usage?.inputTokens ?? 0) + (event.usage?.outputTokens ?? 0);
+      const head = event.step ? `第 ${event.step} 步` : "一步";
+      const tail = used ? `（已用 ${formatCount(used)} token）` : "";
+      process.stderr.write(`· ${head}${tail}\n`);
+    },
+  });
   if (p.flags.has("json")) {
     /*
      * JSON 输出给脚本用：**只把"发生过什么"结构化**，不夹一句人话。

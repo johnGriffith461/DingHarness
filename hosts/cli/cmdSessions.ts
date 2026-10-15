@@ -7,6 +7,8 @@ import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/co
 import { logLine } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { modelInfoOf } from "../../engine/runtime/models";
+import { softLimitNotice } from "../../engine/core/notices";
+import { readConfig } from "./config";
 import { flag, type Parsed } from "./args";
 export async function cmdCost(p: Parsed, dataDir: string): Promise<number> {
   const store = createSqliteSessionStore(dataDir);
@@ -36,6 +38,20 @@ export async function cmdCost(p: Parsed, dataDir: string): Promise<number> {
     }
     for (const row of rows) console.log(formatTotal(row));
     console.log("[2m口径：数字全部来自 provider 上报的 usage；`-` 表示 provider 没给（不是 0）。[0m");
+
+    /*
+     * 软限额（Phase 13.2）：**只在用户自己设过的时候**才算、才说。
+     * 没设就不提 —— 替用户定一个他没同意的额度比不提示更烦人。
+     */
+    const limit = readConfig(dataDir).config.softLimitUsd;
+    if (limit && limit > 0) {
+      const today = rows.find((r) => r.key === new Date().toISOString().slice(0, 10));
+      const spent = today?.estimatedCost ?? 0;
+      if (spent > 0) {
+        console.log("");
+        console.log(softLimitNotice(spent, limit, spent / limit));
+      }
+    }
     return 0;
   } finally {
     store.close();

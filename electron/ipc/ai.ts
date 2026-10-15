@@ -237,7 +237,15 @@ export function registerAiIpc(): void {
         }
         if (e.type === "done") return { requestId, type: "done", ...(e.usage ? { usage: e.usage } : {}) };
         if (e.type === "error") return { requestId, type: "error", message: e.message };
-        return null; // step-finish：只用来数步数，不进 IPC
+        /*
+         * ⭐ step-finish **要进 IPC**（Phase 13.3）：界面靠它显示"第几步 / 已用多少 token"。
+         * 它仍然**不落盘**（`engine/index.ts` 那边滤掉它，免得读日志的人把它当坏行）——
+         * "给界面看"与"要记住"从这一条起是两份清单。
+         */
+        if (e.type === "step-finish") {
+          return { requestId, type: "step-finish", ...(e.step ? { step: e.step } : {}), ...(e.usage ? { usage: e.usage } : {}) };
+        }
+        return null;
       };
 
       /*

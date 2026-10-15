@@ -44,8 +44,13 @@ export type StepUsage = {
 /** 界面上的一行用量。 */
 export type UsageRow = { key: string; label: string; value: string; note?: string };
 
-/** 四位数以上换成「万」，与实机那个「75.9万」的写法一致。 */
-function compact(n: number): string {
+/**
+ * 四位数以上换成「万」，与实机那个「75.9万」的写法一致。
+ *
+ * 导出（Phase 13.3）：长回合的进度叙述（`第 3 步，已用 1.2万 token`）要用**同一个口径** ——
+ * 各写一份格式化，界面上就会出现「75.9万」与「759412」两种写法。
+ */
+export function formatCount(n: number): string {
   return n >= 10000 ? `${(n / 10000).toFixed(1)}万` : String(n);
 }
 
@@ -73,13 +78,13 @@ export function usageRows(usage?: StepUsage): UsageRow[] {
   const isDerived = typeof usage.noCacheTokens !== "number" && typeof noCache === "number";
 
   if (typeof cacheReadTokens === "number") {
-    rows.push({ key: "cacheRead", label: "缓存读取", value: compact(cacheReadTokens) });
+    rows.push({ key: "cacheRead", label: "缓存读取", value: formatCount(cacheReadTokens) });
   }
   if (typeof noCache === "number") {
     rows.push({
       key: "noCache",
       label: "未缓存输入",
-      value: compact(noCache),
+      value: formatCount(noCache),
       ...(isDerived ? { note: "输入总数减缓存读取" } : {}),
     });
   }
@@ -91,10 +96,10 @@ export function usageRows(usage?: StepUsage): UsageRow[] {
     });
   }
   if (typeof cacheWriteTokens === "number") {
-    rows.push({ key: "cacheWrite", label: "缓存写入", value: compact(cacheWriteTokens) });
+    rows.push({ key: "cacheWrite", label: "缓存写入", value: formatCount(cacheWriteTokens) });
   }
   if (typeof outputTokens === "number") {
-    rows.push({ key: "output", label: "输出", value: compact(outputTokens) });
+    rows.push({ key: "output", label: "输出", value: formatCount(outputTokens) });
   }
   if (typeof outputTokens === "number" && typeof usage.elapsedMs === "number" && usage.elapsedMs > 0) {
     rows.push({

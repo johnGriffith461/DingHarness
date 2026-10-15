@@ -73,3 +73,32 @@ export function toolFailedNotice(name: string, reason?: string): string {
   const detail = (reason ?? "").trim();
   return detail || `「${name}」执行失败（没有给出原因）。`;
 }
+
+/**
+ * 软限额提示（Phase 13.2）。
+ *
+ * 方案原文：「超额前**软限额**提示（**提示，不硬断**）」——两个要点都在措辞里：
+ *   · 说清"已经花了多少、限额多少"（用户要的是数字，不是"注意用量"这种空话）；
+ *   · 说清"**不会拦你**"——否则用户会以为下一轮跑不动了，反而不敢用。
+ *
+ * @param spentUsd 到今天为止已花（美元）
+ * @param limitUsd 用户设的软限额
+ * @param fraction 已用比例（>=1 表示已超）
+ * @returns 给人看的一句话
+ */
+export function softLimitNotice(spentUsd: number, limitUsd: number, fraction: number): string {
+  /*
+   * ⚠️ 小额要**多给两位小数**：¥0.0014 用 toFixed(2) 会显示成 "$0.00"，
+   * 而那句话读起来就成了"已用 $0.00 / $0.01" —— 看着像坏了。
+   * 一元以下给四位，其余两位（用户看的是量级，不是账单）。
+   */
+  const money = (v: number) => (v < 1 ? v.toFixed(4) : v.toFixed(2));
+  const over = fraction >= 1;
+  const head = over
+    ? `今天的用量已经超过你设的软限额（已用 $${money(spentUsd)}，限额 $${money(limitUsd)}）`
+    : `今天的用量快到软限额了（已用 $${money(spentUsd)} / $${money(limitUsd)}，${Math.round(fraction * 100)}%）`;
+  return `${head}。**这只是提示，不会拦你** —— 想调就改 config.json 里的 softLimitUsd，想去掉就设成 0。`;
+}
+
+/** 软限额的默认阈值（方案没规定数，这里给 0 = 不提示 —— 不该替用户设一个他没同意的额度）。 */
+export const SOFT_LIMIT_DEFAULT_USD = 0;
