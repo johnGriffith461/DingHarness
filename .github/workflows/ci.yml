@@ -48,7 +48,7 @@ jobs:
           node-version: "24"
 
       - name: 装 pnpm（版本取自 package.json 的 packageManager）
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
@@ -131,7 +131,7 @@ jobs:
           node-version: "24"
 
       - name: 装 pnpm（版本取自 package.json 的 packageManager）
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
