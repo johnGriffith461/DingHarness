@@ -33,9 +33,18 @@ function walk(dir) {
 }
 
 let renamed = 0;
-/** 改写后**解不开**的相对路径（打包/启动时才会炸，所以在这里就报出来）。 */
-const brokenSpecs = [];
+/** 每个改写点（第二轮的检查要用；见下面自检的说明）。 */
+const rewrites = [];
 
+/*
+ * ⚠️ **两轮走**：第一轮只改名 + 改写路径，第二轮才检查。
+ *
+ * 一轮做完检查是错的（2026-10-16 CI 的冒烟 job 第一次真跑就红在这上面）：
+ * 检查问的是"目标 `.cjs` 此刻在不在"，而遍历到某个文件时，它的依赖**可能还没轮到改名** ——
+ * 顺序一变就误报（CI 上报了 95 条）。本机之所以一直"通过"，是因为 `dist-electron` 里
+ * 留着上一轮构建的 `.cjs`；**全新检出**（CI、干净 clone）必红。
+ * 判据本身没错（它当年真的逮到过目录导入那个坑），错的是"什么时候问"。
+ */
 for (const file of walk(outDir)) {
   let text = fs.readFileSync(file, "utf8");
   // require("./ipc/ai") → require("./ipc/ai.cjs")（只改相对路径，裸模块名不动）
@@ -54,9 +63,7 @@ for (const file of walk(outDir)) {
     } catch {
       /* 既不是文件也不是目录：交给下面的自检报出来 */
     }
-    if (!fs.existsSync(path.resolve(path.dirname(file), out))) {
-      brokenSpecs.push(`${path.relative(outDir, file)} → ${spec}`);
-    }
+    rewrites.push({ from: file, spec, target: path.resolve(path.dirname(file), out) });
     return `${a}${out}${c}`;
   });
   const target = file.replace(/\.js$/, ".cjs");
@@ -66,12 +73,17 @@ for (const file of walk(outDir)) {
 }
 
 /*
- * 自检：改写完的每个相对路径都必须真的存在。
+ * 自检（第二轮）：改名全部走完之后，每个改写目标都必须真的存在。
  *
- * 这一条是加出来的 —— 上面那个目录导入的坑就是**改写器自己埋的**，
+ * 这一条是加出来的 —— 那个目录导入的坑就是**改写器自己埋的**，
  * 而它的错误表现（启动时 Cannot find module）离原因很远。
  * 与其等下一个人去翻 boot.log，不如在这里当场红。
+ *
+ * ⚠️ 顺序很重要（见上面"两轮走"的说明）：这里问的是**终态**，所以与遍历顺序无关。
  */
+const brokenSpecs = rewrites
+  .filter((r) => !fs.existsSync(r.target))
+  .map((r) => `${path.relative(outDir, r.from)} → ${r.spec}`);
 if (brokenSpecs.length) {
   console.error(`[electron-cjs] ✗ 有 ${brokenSpecs.length} 个相对路径改写后解不开（启动时会 Cannot find module）：`);
   for (const x of brokenSpecs.slice(0, 10)) console.error(`    ${x}`);
