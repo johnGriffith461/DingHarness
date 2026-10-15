@@ -115,8 +115,19 @@ note(`起始窗口矩形：${JSON.stringify(before)}`);
 // 实测过 —— 合成事件驱动不了「浏览器进程按 app-region 起系统拖拽」那条路，
 // 于是拖动区明明是好的，断言却红（假阴性）。真实输入等于用户做的事，判据才算数。
 const beforeDrag = winRect();
-const dragResult = realDrag(660, 18, 12, 7);
-const afterDrag = winRect();
+/*
+ * ⚠️ 拖动这一步**最多试 3 次**：真实鼠标输入要求那一刻我们的窗口在那个坐标上最上层，
+ * 而批跑里前一条脚本可能留下别的窗口压在那一带上（实测：单跑必绿、批跑偶发红一次）。
+ * 判据**没有放宽** —— 仍然要求窗口真的动了；放宽的只是"试几次"。
+ */
+let dragResult = "";
+let afterDrag = beforeDrag;
+for (let attempt = 1; attempt <= 3; attempt += 1) {
+  dragResult = realDrag(660, 18, 12, 7);
+  afterDrag = winRect();
+  if (beforeDrag && afterDrag && (beforeDrag.l !== afterDrag.l || beforeDrag.t !== afterDrag.t)) break;
+  note(`（第 ${attempt} 次拖动没动：${dragResult} —— 再试一次）`);
+}
 if (!beforeDrag || !afterDrag || (beforeDrag.l === afterDrag.l && beforeDrag.t === afterDrag.t)) {
   bad.push(`拖动标题栏后窗口没动（拖动区没生效）：${dragResult}`);
   note(`✗ 拖动无效：${beforeDrag?.l},${beforeDrag?.t} → ${afterDrag?.l},${afterDrag?.t}`);

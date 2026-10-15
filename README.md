@@ -191,6 +191,12 @@ node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
 **改完东西请顺手跑一次 `pnpm eval`**：它是"行为有没有变"的最快信号，
 跌超 5 个百分点 `pnpm test` 会红（基线在 `engine/eval/baseline.json`）。
 
+## 写插件
+
+插件是一个目录（manifest + 入口），能力分两类：**`tools:register` / `hooks:register` 真的生效**，
+`fs:read` / `fs:write` / `net` / `exec` **只是声明**（v1 拦不住）。
+写之前先读 [`PLUGIN.md`](./PLUGIN.md)（含最小可用示例、四个钩子、装/试/卸与两条易忽略的规矩）。
+
 ## 平台覆盖（如实标注）
 
 | 平台 | 桌面 | CLI 单二进制 | 命令的资源上限 | 密钥加密存储 |
