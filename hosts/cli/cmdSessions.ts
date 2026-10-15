@@ -46,6 +46,36 @@ export async function cmdCost(p: Parsed, dataDir: string): Promise<number> {
 const titles = new Map<string, string>();
 
 export async function cmdSessions(p: Parsed, dataDir: string): Promise<number> {
+  /*
+   * `--search <词>`（Phase 12.4）：本地全文检索。
+   * 走 store 的 search 口子（FTS + LIKE 并集），所以桌面侧将来接同一个口子就行。
+   */
+  const query = flag(p, "search");
+  if (query) {
+    const store = createSqliteSessionStore(dataDir);
+    try {
+      const hits = await store.search(query, { limit: 30 });
+      if (p.flags.has("json")) {
+        process.stdout.write(JSON.stringify({ query, hits }, null, 2) + "\n");
+        return 0;
+      }
+      if (!hits.length) {
+        process.stdout.write(`没搜到「${query}」。换个词试试（检索的是会话正文，不是标题）。\n`);
+        return 0;
+      }
+      process.stdout.write(`搜到 ${hits.length} 段会话（按命中多少排序）：\n\n`);
+      for (const hit of hits) {
+        const when = new Date(hit.updatedAt).toLocaleString();
+        process.stdout.write(`  ${hit.sessionId}  ${when}  命中 ${hit.hits} 处\n`);
+        if (hit.title) process.stdout.write(`    ${hit.title}\n`);
+        process.stdout.write(`    ${hit.excerpt}\n\n`);
+      }
+      return 0;
+    } finally {
+      store.close();
+    }
+  }
+
   if (p.flags.has("cost")) return cmdCost(p, dataDir);
   const store = createSqliteSessionStore(dataDir);
   try {

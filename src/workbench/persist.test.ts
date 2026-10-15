@@ -160,6 +160,16 @@ const tmpFile = (): string => {
 };
 
 describe("createJsonStore", () => {
+  /*
+   * ⚠️ 这一组测的是**文件后端**的机制（磁盘上那个信封长什么样、不留 .tmp、
+   * 版本号取自 SCHEMA_VERSION）—— 所以固定走回退开关那条路。
+   * 从 Phase 12.1 起默认后端是 SQLite KV，那条路在 `src/kvStores.test.ts`。
+   */
+  process.env.DSH_STORE_BACKEND = "file";
+  afterAll(() => {
+    delete process.env.DSH_STORE_BACKEND;
+  });
+
   const migrations = { 0: (old: unknown) => ({ items: Array.isArray(old) ? old : [] }) };
   const makeStore = (file: string) =>
     createJsonStore<{ items: string[] }>({

@@ -54,6 +54,27 @@ export type SessionStore = {
   load(sessionId: string): Promise<{ records: LogRecord[]; skipped: number }>;
 
   /**
+   * 按内容检索（Phase 12.4 的本地检索）。
+   *
+   * ## 为什么它不是 `list` 的一个过滤参数
+   *
+   * `list` 走的是**会话**表（id / 标题 / 时间），而"三个月前聊过什么"要在**事件正文**里找 ——
+   * 两者命中不同的行、天然是两种查询。塞进 `list` 会让它一半走索引、一半走全文扫描。
+   *
+   * ## 实现之间语义不同（如实写在端口上，不让调用方猜）
+   *
+   * · SQLite 那版走 **FTS5 全文索引**（分词、按相关度排序之后仍按时间倒序给）；
+   * · JSONL 那版（历史遗留）没有索引，只能逐条 `includes` —— 慢，但结果一致。
+   *
+   * 所以调用方**不要**依赖排序细节，只依赖"命中的会话在这些结果里"。
+   *
+   * @param query 关键词（空串 = 空结果，不是全部）
+   * @param opts.limit 最多给多少条会话（默认 20）
+   * @returns 命中的会话摘要 + 每条命中的一小段上下文
+   */
+  search(query: string, opts?: { limit?: number }): Promise<SearchHit[]>;
+
+  /**
    * 列出会话，按最后写入时间**倒序**（最近的在前面）。
    *
    * @param opts 过滤（默认全部）
@@ -84,6 +105,14 @@ export type SessionStore = {
    * 是**运气**，不是契约 —— 换存储时正是这类假设会翻车。
    */
   close(): void;
+};
+
+/** 检索命中的一条：会话摘要 + 在哪一句命中的。 */
+export type SearchHit = SessionSummary & {
+  /** 命中的那一小段（截断后的），给用户看"为什么这条被搜出来"。 */
+  excerpt: string;
+  /** 这条会话里命中了几处。 */
+  hits: number;
 };
 
 /** 会话种类。前缀语义取自 `engine/core/events.ts` 的 `SESSION_PREFIX`。 */

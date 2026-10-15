@@ -587,3 +587,29 @@ export function current(tasks: WorkTask[], id: string): WorkTask {
 export function nextStepId(): string {
   return makeStepId(Date.now());
 }
+/**
+ * 被中断的回合，该"继续"什么（Phase 12.2 的桌面端）。
+ *
+ * @param task 任务
+ * @returns 上一次用户说的那句**原话**；没有可继续的 → `null`
+ *
+ * ## 判据为什么是这两条
+ *
+ * · **只对"被中断"的任务给按钮**：`activity` 里写着"被中断"才是崩溃恢复那种情形。
+ *   用户自己点了停止、或者模型报错 —— 那些已经被明确告知过了，再给一颗"继续"是多余的。
+ * · **必须能找到那句用户原话**：找不到就不给按钮（给一个按下去什么都不会发生的按钮，
+ *   比不给更糟）。历史里一定有 user 步骤，所以找不到基本意味着数据本身有问题。
+ */
+export function continueTargetOf(task: {
+  stage: string;
+  activity?: string;
+  steps: ReadonlyArray<{ role: string; text: string }>;
+}): string | null {
+  if (task.stage !== "failed") return null;
+  if (!(task.activity ?? "").includes("被中断")) return null;
+  for (let i = task.steps.length - 1; i >= 0; i -= 1) {
+    const step = task.steps[i];
+    if (step?.role === "user" && step.text.trim()) return step.text;
+  }
+  return null;
+}

@@ -17,6 +17,8 @@ import { buildEngine as buildEngineIn } from "./assembly";
 import { cmdEval } from "./cmdEval";
 import { cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
+import { cmdBackup, cmdRestore } from "./cmdBackup";
+import { cmdResume } from "./cmdResume";
 import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
@@ -581,6 +583,9 @@ function cmdHelp(devMode = false): number {
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
       "  ding doctor [--json]                           # 一键自检（每项失败都给下一步）",
+      "  ding resume [<会话 id>] [--continue]           # 崩溃恢复（列出被打断的回合；--continue 重跑那一轮）",
+      "  ding backup [--out <文件>]                     # 全量备份（会话 + 配置型 store + CLI 配置，单个 JSON）",
+      "  ding restore <文件> [--list]                   # 从备份恢复（--list 只看不恢复；只补不覆盖）",
       "  ding init                                      # 首次配置向导（配 key / 选模型 / 选目录）",
       "  ding eval [类别] [--json] [--update-baseline]  # 离线评测集（不烧 token，可进 CI）",
       "  ding models",
@@ -721,7 +726,13 @@ async function main(): Promise<void> {
               ? cmdModels(parsed)
               : parsed.command === "plugins"
                 ? await cmdPlugins(parsed)
-                : parsed.command === "doctor"
+                : parsed.command === "resume"
+                  ? await cmdResume(parsed, dataDir())
+                  : parsed.command === "backup"
+                  ? await cmdBackup(parsed, dataDir())
+                  : parsed.command === "restore"
+                    ? await cmdRestore(parsed, dataDir())
+                    : parsed.command === "doctor"
                   ? cmdDoctor(parsed, dataDir())
                   : parsed.command === "init"
                     ? await cmdInit(parsed, dataDir())

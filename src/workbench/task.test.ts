@@ -10,6 +10,7 @@ import {
   answerQuestion,
   autoTaskTitle,
   cleanTitle,
+  continueTargetOf,
   currentQuestion,
   formatDuration,
   MAX_QUESTIONS,
@@ -540,5 +541,49 @@ describe("流式草稿不落盘（2026-10-14）", () => {
     });
     expect(got).not.toBeNull();
     expect((got as Record<string, unknown>).material).toBeUndefined();
+  });
+});
+
+describe("被中断的回合该继续什么（Phase 12.2 的桌面端入口）", () => {
+  const task = (over: Partial<{ stage: string; activity: string; steps: Array<{ role: string; text: string }> }>) => ({
+    stage: "failed",
+    activity: "上次关闭时被中断",
+    steps: [
+      { role: "user", text: "把 demo 里的 md 整理成纪要" },
+      { role: "assistant", text: "我看到两个文件，其中" },
+    ],
+    ...over,
+  });
+
+  it("被中断 + 有用户原话 → 给得出要继续的那句", () => {
+    expect(continueTargetOf(task({}))).toBe("把 demo 里的 md 整理成纪要");
+  });
+
+  it("拿**最近**那句（多轮之后被打断时，继续的是最后那句）", () => {
+    const multi = task({
+      steps: [
+        { role: "user", text: "第一句" },
+        { role: "assistant", text: "回答一" },
+        { role: "user", text: "第二句（这句被打断）" },
+        { role: "assistant", text: "说到一半" },
+      ],
+    });
+    expect(continueTargetOf(multi)).toBe("第二句（这句被打断）");
+  });
+
+  it("不是「被中断」的那种 failed（用户自己停的 / 报错的）→ 不给按钮", () => {
+    expect(continueTargetOf(task({ activity: "已停止" }))).toBeNull();
+    expect(continueTargetOf(task({ activity: "连不上 provider" }))).toBeNull();
+    expect(continueTargetOf(task({ activity: "" }))).toBeNull();
+  });
+
+  it("跑得好好的任务不给按钮", () => {
+    expect(continueTargetOf(task({ stage: "running" }))).toBeNull();
+    expect(continueTargetOf(task({ stage: "done" }))).toBeNull();
+  });
+
+  it("找不到用户原话 → 不给按钮（按下去什么都不会发生的按钮比没有更糟）", () => {
+    expect(continueTargetOf(task({ steps: [{ role: "assistant", text: "只有回答" }] }))).toBeNull();
+    expect(continueTargetOf(task({ steps: [{ role: "user", text: "   " }] }))).toBeNull();
   });
 });

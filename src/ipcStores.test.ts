@@ -63,10 +63,21 @@ function tempLeftovers(): string[] {
 
 beforeEach(() => {
   env.userData = mkdtempSync(path.join(os.tmpdir(), "dh-ipcstore-"));
+  /*
+   * ⚠️ 这一套**固定走文件后端**（Phase 12.1 之后默认是 SQLite KV）。
+   *
+   * 理由：这些用例断言的是"磁盘上那个 JSON 文件长得对不对"（信封、版本、不留 .tmp、迁移）
+   * —— 那正是**文件后端**的规格，而它现在是**回退开关**那条路
+   * （`DSH_STORE_BACKEND=file`），依然要有人盯着。
+   *
+   * KV 那条路（含"老文件搬进 SQLite、原文件保留"与回退开关）在 `src/kvStores.test.ts`。
+   */
+  process.env.DSH_STORE_BACKEND = "file";
 });
 
 afterEach(() => {
   rmSync(env.userData, { recursive: true, force: true });
+  delete process.env.DSH_STORE_BACKEND;
 });
 
 describe("AI 文档（docs.json）", () => {

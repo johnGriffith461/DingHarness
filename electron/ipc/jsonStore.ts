@@ -1,6 +1,7 @@
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { SCHEMA_VERSION, retryAsync, unwrap, wrap, type Migration } from "../../shared/persist";
+import { backendKind, kvRead, kvWrite } from "../../engine/adapters/kvStore";
 
 /**
  * 主进程侧的 JSON 落盘（C1）。
@@ -88,32 +89,95 @@ function tempNameFor(file: string): string {
 export function createJsonStore<T>(opts: JsonStoreOptions<T>): JsonStore<T> {
   const version = opts.version ?? SCHEMA_VERSION;
 
-  async function read(): Promise<ReadResult<T>> {
-    let raw: unknown;
+  /** 数据目录（KV 库放这儿）：调用方给的是文件路径，取它的目录。 */
+  function dir(): string {
+    return path.dirname(path.resolve(opts.file()));
+  }
+
+  /** 从老的 JSON 文件里读一次（迁移用；`file` 后端也走它）。 */
+  async function readFileRaw(): Promise<{ raw: unknown; existed: boolean }> {
     try {
       const text = await fsp.readFile(opts.file(), "utf8");
-      raw = JSON.parse(text) as unknown;
+      return { raw: JSON.parse(text) as unknown, existed: true };
     } catch {
-      // 文件不存在 / 读不了 / JSON 坏了：都不算错误 —— 给兜底值，让应用能起来
-      return { data: opts.initial(), from: version, migrated: false, foreign: false };
+      return { raw: undefined, existed: false };
+    }
+  }
+
+  async function read(): Promise<ReadResult<T>> {
+    let raw: unknown;
+    let migratedFromFile = false;
+
+    if (backendKind() === "sqlite") {
+      const fromKv = kvRead(dir(), opts.file());
+      if (fromKv !== null && fromKv !== undefined) {
+        raw = fromKv;
+      } else {
+        /*
+         * KV 里还没有这条 → 去读老的 JSON 文件（**只读旧**）。
+         * 读到就地搬进 KV，**老文件原样留着** —— 用户排查时还找得到它。
+         */
+        const file = await readFileRaw();
+        if (!file.existed) {
+          // 全新的一份数据：给兜底值（此刻不写 KV —— 没有数据可写）
+          return { data: opts.initial(), from: version, migrated: false, foreign: false };
+        }
+        raw = file.raw;
+        migratedFromFile = true;
+      }
+    } else {
+      const file = await readFileRaw();
+      if (!file.existed) {
+        return { data: opts.initial(), from: version, migrated: false, foreign: false };
+      }
+      raw = file.raw;
     }
 
     const got = unwrap<unknown>(raw, { version, migrations: opts.migrations, initial: opts.initial });
     if (!got.ok) {
       return { data: opts.normalize(got.data), from: 0, migrated: false, foreign: true, note: got.reason };
     }
+    const data = opts.normalize(got.data);
+    if (migratedFromFile && backendKind() === "sqlite") {
+      // 搬迁：把**当前版**（可能刚从老版本升上来）写进 KV；老文件不动
+      try {
+        kvWrite(dir(), opts.file(), wrap(data, version));
+      } catch {
+        /* 写不进 KV 不影响这次读取 —— 下次再搬 */
+      }
+    }
     return {
-      data: opts.normalize(got.data),
+      data,
       from: got.from,
       migrated: got.migrated,
       foreign: false,
       ...(got.migrated ? { note: `已从第 ${got.from} 版数据升级到第 ${version} 版` } : {}),
+      ...(migratedFromFile ? { note: `${opts.file()} 的老数据已搬进 SQLite（原文件保留）` } : {}),
     };
   }
 
   async function write(value: T): Promise<WriteResult> {
+    const wrapped = wrap(opts.normalize(value), version);
+    if (backendKind() === "sqlite") {
+      try {
+        kvWrite(dir(), opts.file(), wrapped);
+        return { ok: true };
+      } catch (error) {
+        /*
+         * ⚠️ KV 写失败**回落到文件**，而不是直接报失败：
+         * 配置型数据（设置、记忆、任务）丢了，比"这份数据暂时不在 SQLite 里"严重得多。
+         * 回落的代价只是它这次落在文件里 —— 下次读会再搬一次进 KV。
+         */
+        return writeFile(wrapped, error instanceof Error ? error.message : String(error));
+      }
+    }
+    return writeFile(wrapped);
+  }
+
+  /** 文件后端：回退开关（`DSH_STORE_BACKEND=file`）走它，KV 写失败也走它。 */
+  async function writeFile(wrapped: unknown, kvError?: string): Promise<WriteResult> {
     const target = opts.file();
-    const body = `${JSON.stringify(wrap(opts.normalize(value), version), null, 2)}\n`;
+    const body = `${JSON.stringify(wrapped, null, 2)}\n`;
     try {
       await fsp.mkdir(path.dirname(target), { recursive: true });
       await retryAsync(
@@ -132,7 +196,8 @@ export function createJsonStore<T>(opts: JsonStoreOptions<T>): JsonStore<T> {
       );
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      const why = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: kvError ? `${why}（KV 也写过一次：${kvError}）` : why };
     }
   }
 

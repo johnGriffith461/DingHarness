@@ -10,7 +10,7 @@ import {
   type LogInput,
   type LogRecord,
 } from "../core/events";
-import type { SessionKind, SessionStore } from "../ports/store";
+import type { SearchHit, SessionKind, SessionStore } from "../ports/store";
 import type { SessionSummary } from "../../shared/ipc";
 
 /**
@@ -63,6 +63,38 @@ CREATE TABLE IF NOT EXISTS events (
   PRIMARY KEY (session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
+
+/*
+ * 全文索引（Phase 12.4）。
+ *
+ * ## 为什么用 FTS5 而不是 LIKE
+ *
+ * "三个月前的会话里提过什么"要在**事件正文**里找。「LIKE '%词%'」 会全表扫，
+ * 而且不认分词 —— 中文里 「LIKE」 更是几乎只能整串匹配。FTS5 有倒排索引与分词器，
+ * 这两个问题一次解决。
+ *
+ * ## 为什么是 external-content 表
+ *
+ * 正文**已经在 「events.payload」 里**了，再存一份副本既费空间又会出现"两处不一致"。
+ * external-content 表（「content='events'」）只存倒排索引，正文仍从 events 读 ——
+ * 代价是**必须自己用触发器把增删同步过去**（下面三条就是干这个的）。
+ *
+ * ⚠️ 中文分词：内置 unicode61 把它当一个长词处理，所以 MATCH 对中文不适合按词搜。
+ * 这里的做法是**查询侧兜底**（见 search()）：FTS 命中 + LIKE 兜底，
+ * 两者并集。宁可多一次扫描，也不要"搜不到"（那是用户最能感知的坏）。
+ */
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(payload, content='events', content_rowid='rowid');
+
+CREATE TRIGGER IF NOT EXISTS events_fts_ai AFTER INSERT ON events BEGIN
+  INSERT INTO events_fts(rowid, payload) VALUES (new.rowid, new.payload);
+END;
+CREATE TRIGGER IF NOT EXISTS events_fts_ad AFTER DELETE ON events BEGIN
+  INSERT INTO events_fts(events_fts, rowid, payload) VALUES ('delete', old.rowid, old.payload);
+END;
+CREATE TRIGGER IF NOT EXISTS events_fts_au AFTER UPDATE ON events BEGIN
+  INSERT INTO events_fts(events_fts, rowid, payload) VALUES ('delete', old.rowid, old.payload);
+  INSERT INTO events_fts(rowid, payload) VALUES (new.rowid, new.payload);
+END;
 `;
 
 /** 会话种类 → 前缀。写成表而不是 `if`：加第三种会话时只改这里。 */
@@ -144,6 +176,21 @@ export function createSqliteSessionStore(
   const selectEvents = db.prepare(
     "SELECT payload FROM events WHERE session_id = ? ORDER BY seq ASC",
   );
+  /*
+   * 检索的两条路（见 search() 的说明）：
+   *   · FTS：走倒排索引（英文/词形），`bm25` 让更相关的排前面；
+   *   · LIKE：中文与任意子串的兜底。
+   * 并集之后按"命中最多的会话"优先、同数量按时间倒序 —— 与 list 的口径一致（最近的在前面）。
+   */
+  const searchFts = db.prepare(
+    "SELECT e.session_id AS session_id, e.payload AS payload, bm25(events_fts) AS rank " +
+      "FROM events_fts JOIN events e ON e.rowid = events_fts.rowid " +
+      "WHERE events_fts MATCH ? LIMIT ?",
+  );
+  const searchLike = db.prepare(
+    "SELECT session_id, payload, 1 AS n FROM events WHERE payload LIKE ? ESCAPE '\\' ORDER BY at DESC LIMIT ?",
+  );
+  const sessionById = db.prepare("SELECT id, title, updated_at, bytes FROM sessions WHERE id = ?");
   const selectSessions = db.prepare(
     "SELECT id, title, updated_at, bytes FROM sessions ORDER BY updated_at DESC",
   );
@@ -266,6 +313,92 @@ export function createSqliteSessionStore(
 
     prune: async () => pruneStore(),
 
+    /**
+     * 按内容检索（Phase 12.4）。
+     *
+     * ## 为什么要 FTS + LIKE **两条路并集**
+     *
+     * FTS5 的内置分词器（`unicode61`）对中文**不分词** —— 它把一整串中文当成一个词，
+     * 于是 `MATCH '会议'` 在 `"明天十点开会"` 上**不命中**（那串是一个词）。
+     * 实测过这件事，所以这里把两条路并起来：
+     *
+     *   · FTS 那条负责"英文/词形/相关度"（它快、有索引）；
+     *   · `LIKE '%词%'` 那条负责中文与任何子串（它慢，但**搜得到**）。
+     *
+     * 宁可多扫一次也不要"搜不到"：对用户来说，"我以前明明聊过"是最能感知的坏。
+     *
+     * ## 摘要是**原文里的一小段**，不是生成的
+     *
+     * 用户点开检索结果前要能看到"为什么这条被搜出来"，所以摘一段命中的上下文
+     * （前后各留一点）。这里**不生成**任何文字 —— 生成的东西没法保证与原文一致。
+     */
+    async search(query: string, opts?: { limit?: number }): Promise<SearchHit[]> {
+      const q = query.trim();
+      if (!q) return []; // 空串 = 空结果（不是"全部" —— 那会让界面在回车时刷出一切）
+      const limit = Math.max(1, Math.min(opts?.limit ?? 20, 200));
+      /*
+       * `LIKE` 要转义（用户在搜索框里打 `%` 或 `_` 是很自然的，不该变成通配符）。
+       * FTS 的查询串要**引号包起来**：不然 `AND` / `OR` / `*` 这些会被当语法。
+       */
+      const like = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+      const ftsQuery = `"${q.replace(/"/g, '""')}"`;
+
+      /*
+       * 两条路并集（口径见上面那段说明）：
+       *   · FTS 那条：文本/词形，走倒排索引，快；
+       *   · LIKE 那条：中文与任意子串的兜底，慢但搜得到。
+       * 合并规则：同一个会话取两者里**命中最多的那个数**；排序按"命中多的优先、
+       * 同数量按时间倒序"（与 `list` 的口径一致：最近的在前面）。
+       */
+      const byId = new Map<string, { n: number; payload: string }>();
+
+      try {
+        const ftsRows = searchFts.all(ftsQuery, limit) as { session_id: string; payload: string }[];
+        for (const r of ftsRows) {
+          const prev = byId.get(r.session_id);
+          byId.set(r.session_id, { n: (prev?.n ?? 0) + 1, payload: prev?.payload ?? r.payload });
+        }
+      } catch {
+        /* FTS 查询串不合法（极端输入）→ 只靠 LIKE；不因为语法问题让整个检索失败 */
+      }
+
+      const likeRows = searchLike.all(like, limit) as { session_id: string; payload: string; n: number }[];
+      for (const r of likeRows) {
+        const prev = byId.get(r.session_id);
+        byId.set(r.session_id, { n: Math.max(prev?.n ?? 0, r.n), payload: prev?.payload ?? r.payload });
+      }
+
+      const rows = [...byId.entries()]
+        .map(([session_id, v]) => ({ session_id, ...v }))
+        .sort((a, b) => {
+          if (b.n !== a.n) return b.n - a.n;
+          const ta = (sessionById.get(a.session_id) as { updated_at?: number } | undefined)?.updated_at ?? 0;
+          const tb = (sessionById.get(b.session_id) as { updated_at?: number } | undefined)?.updated_at ?? 0;
+          return tb - ta;
+        })
+        .slice(0, limit);
+
+      const out: SearchHit[] = [];
+      for (const row of rows) {
+        const summary = sessionById.get(row.session_id) as
+          | { id: string; title: string; updated_at: number; bytes: number }
+          | undefined;
+        if (!summary) continue;
+        const kind = kindOf(row.session_id);
+        const prefix = KIND_PREFIX[kind];
+        out.push({
+          sessionId: row.session_id,
+          conversationId: kind === "chat" ? row.session_id.slice(prefix.length) : row.session_id,
+          title: summary.title,
+          updatedAt: summary.updated_at,
+          bytes: summary.bytes,
+          excerpt: excerptOf(row.payload, q),
+          hits: row.n,
+        });
+      }
+      return out;
+    },
+
     close(): void {
       db.close();
     },
@@ -334,4 +467,32 @@ export async function migrateJsonlSessions(
     records += ordered.length;
   }
   return { files, records, skipped };
+}
+
+/**
+ * 从一条记录里摘一小段命中上下文（前后各留一点）。
+ *
+ * ⚠️ 摘的是**原文**，不生成任何字 —— 生成的东西没法保证与原文一致，
+ * 而用户点开之前就是靠这一小段判断这条是不是我要找的。
+ */
+function excerptOf(payload: string, query: string): string {
+  /*
+   * 先剥掉记录的外壳，摘**正文**：日志行是 JSON，直接摘会带一堆
+   * requestId / type / text 这些字段噪声 —— 用户要看的是「那句话是什么」，
+   * 不是「它存在哪个字段里」。剥不出来（工具结果那种嵌套的）就退回整行，
+   * 那样照样能看出上下文。
+   */
+  let text = payload;
+  try {
+    const parsed = JSON.parse(payload) as { text?: unknown; message?: unknown; title?: unknown };
+    const cand = parsed.text ?? parsed.message ?? parsed.title;
+    if (typeof cand === "string" && cand.trim()) text = cand;
+  } catch {
+    /* 不是 JSON 就用原样 */
+  }
+  const at = text.toLowerCase().indexOf(query.toLowerCase());
+  if (at < 0) return text.slice(0, 120);
+  const from = Math.max(0, at - 40);
+  const to = Math.min(text.length, at + query.length + 60);
+  return (from > 0 ? "…" : "") + text.slice(from, to) + (to < text.length ? "…" : "");
 }

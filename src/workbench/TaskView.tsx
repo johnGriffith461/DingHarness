@@ -5,10 +5,10 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Clock, HelpCircle, Monitor, Phone } from "lucide-react";
+import { ChevronRight, Clock, HelpCircle, Monitor, Phone, RotateCcw } from "lucide-react";
 import { NavCollapseButton } from "./NavCollapseButton";
 import { useWorkbenchStore } from "./store";
-import { currentQuestion, progressLabel } from "./task";
+import { continueTargetOf, currentQuestion, progressLabel } from "./task";
 import { ToolTraceList } from "./ToolTraceList";
 import { ArtifactCard } from "./ArtifactCard";
 
@@ -29,6 +29,8 @@ export function TaskView() {
   const resolveTool = useWorkbenchStore((s) => s.resolveTool);
   /** 在这段对话里接着说一句（§147）。 */
   const sendInTask = useWorkbenchStore((s) => s.sendInTask);
+  /** 被中断的那一轮该继续什么（见 `task.ts` 的 `continueTargetOf`）。 */
+  const interruptedTarget = task ? continueTargetOf(task) : null;
   /** 标题改名：点标题进入，回车/失焦提交。 */
   const [renaming, setRenaming] = useState(false);
 
@@ -184,6 +186,27 @@ export function TaskView() {
         {task.activity && task.stage !== "done" ? (
           <div className="wb-activity">
             <HelpCircle size={13} /> {task.activity}
+            {/*
+              ⭐ **一键继续**（Phase 12.2 的桌面端入口）。
+              被中断的回合在库里是半截的（请求在、答案不在），原来这里只说一句
+              "上次关闭时被中断" 就没了 —— 用户得自己把上次那句话再打一遍。
+              现在给一颗按钮：把**上次那句原话**重发一轮（历史都在，所以新一轮看得到
+              "上次做到哪"）。
+
+              ⚠️ 如实说明：这是**重发**，不是"续写半句" —— 上游没有续写半轮这回事，
+              点它 = 这一轮重新计费。所以按钮的 title 里写清了。
+            */}
+            {interruptedTarget ? (
+              <button
+                className="wb-chip wb-continue"
+                data-testid="wb-task-continue"
+                title="重新跑一轮（不是续写半句：这一轮会重新计费）"
+                disabled={task.stage === "running" || Boolean(task.draft)}
+                onClick={() => void sendInTask(task.id, interruptedTarget)}
+              >
+                <RotateCcw size={12} /> 继续
+              </button>
+            ) : null}
           </div>
         ) : null}
         {/*

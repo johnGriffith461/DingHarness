@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createSqliteSessionStore, migrateJsonlSessions } from "./sqliteStore";
-import { chatSessionId, logLine, resumeSession, type LogInput } from "../core/events";
+import { chatSessionId, logLine, resumeSession, taskSessionId, type LogInput } from "../core/events";
 
 /**
  * SQLite 会话库（Phase 1 D1 的 PoC）。
@@ -232,3 +232,52 @@ describe("SQLite 会话库", () => {
   });
 });
 
+describe('本地检索（Phase 12.4：FTS + LIKE 并集）', () => {
+  it('中文按子串搜得到（FTS 的内置分词器对中文不分词 —— 靠 LIKE 那条兜底）', async () => {
+    const store = openStore();
+    await store.append(chatSessionId('cn'), [request('明天十点开会讨论预算')]);
+    const hits = await store.search('预算');
+    expect(hits.map((h) => h.sessionId)).toContain(chatSessionId('cn'));
+    // 摘要是**正文**那一句（不是整行 JSON）
+    expect(hits[0]?.excerpt).toContain('预算');
+    expect(hits[0]?.excerpt).not.toContain('requestId');
+  });
+
+  it('英文搜得到，且只命中说过它的那段会话', async () => {
+    const store = openStore();
+    await store.append(chatSessionId('en'), [request('review the budget tomorrow')]);
+    await store.append(taskSessionId('other'), [request('完全无关的一句话')]);
+    const hits = await store.search('budget');
+    expect(hits.map((h) => h.sessionId)).toEqual([chatSessionId('en')]);
+  });
+
+  it('搜不到的词给空数组（不是返回全部）', async () => {
+    const store = openStore();
+    await store.append(chatSessionId('x'), [request('一些内容')]);
+    expect(await store.search('不存在的词')).toEqual([]);
+  });
+
+  it('空串 = 空结果：回车不该刷出所有会话', async () => {
+    const store = openStore();
+    await store.append(chatSessionId('x'), [request('一些内容')]);
+    expect(await store.search('')).toEqual([]);
+    expect(await store.search('   ')).toEqual([]);
+  });
+
+  it('命中最多的会话排前面（多个会话都命中时）', async () => {
+    const store = openStore();
+    await store.append(chatSessionId('many'), [request('预算'), request('预算'), request('预算')]);
+    await store.append(chatSessionId('one'), [request('预算')]);
+    const hits = await store.search('预算');
+    expect(hits[0]?.sessionId).toBe(chatSessionId('many'));
+    expect(hits[0]?.hits).toBeGreaterThan(hits[1]?.hits ?? 0);
+  });
+
+  it('用户打的 % 与 _ 是普通字符，不是通配符', async () => {
+    const store = openStore();
+    await store.append(chatSessionId('pct'), [request('折扣 50% 起')]);
+    await store.append(chatSessionId('plain'), [request('折扣 500 起')]);
+    const hits = await store.search('%');
+    expect(hits.map((h) => h.sessionId)).toEqual([chatSessionId('pct')]);
+  });
+});

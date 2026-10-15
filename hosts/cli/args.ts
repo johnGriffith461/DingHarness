@@ -45,6 +45,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "kind",
   "export",
   "grant",
+  "search",
 ]);
 
 /**
