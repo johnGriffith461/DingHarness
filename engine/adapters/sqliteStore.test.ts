@@ -221,6 +221,40 @@ describe("SQLite 会话库", () => {
     aggressive.close();
   });
 
+  it("⭐ 保护线（protectBefore）：外部流量收口不得淘汰用户自有会话", async () => {
+    /*
+     * 审计 P173：服务态**每来一个请求就打开一次库**，而打开即收口。
+     * 不带保护线时，能连上服务的人只要不停换 sessionId，就能把用户历史
+     * 按"最旧的先删"整段挤掉 —— 不可逆的数据损失。
+     */
+    const seeded = createSqliteSessionStore(dir);
+    await seeded.append(chatSessionId("mine-1"), [request("我的老会话 A")]);
+    await new Promise((r) => setTimeout(r, 3));
+    await seeded.append(chatSessionId("mine-2"), [request("我的老会话 B")]);
+    seeded.close();
+
+    const protectBefore = Date.now() + 1; // 服务启动时刻：上面两个都在它之前（都是"用户自己的"）
+    await new Promise((r) => setTimeout(r, 3));
+
+    /* 服务期间又被造了 3 个（上限 4：受保护 2 + 未受保护配额 2）→ 只淘汰最旧的那个未受保护的 */
+    const serving = createSqliteSessionStore(dir, "sessions.db", { maxSessions: 4 }, { protectBefore });
+    for (const id of ["srv-1", "srv-2", "srv-3"]) {
+      await serving.append(chatSessionId(id), [request(`服务态建的 ${id}`)]);
+      await new Promise((r) => setTimeout(r, 3));
+    }
+    const got = await serving.prune();
+    expect(got.deleted, "淘汰的必须只是服务期间建的那个").toEqual([chatSessionId("srv-1")]);
+    expect((await serving.list()).map((x) => x.conversationId).sort()).toEqual(["mine-1", "mine-2", "srv-2", "srv-3"]);
+    serving.close();
+
+    /* 对照：**不带**保护线时同一份数据会被淘汰掉用户的两个 —— 说明拦住它的是保护线本身 */
+    const plain = createSqliteSessionStore(dir, "sessions.db", { maxSessions: 2 });
+    const left = (await plain.list()).map((x) => x.conversationId);
+    expect(left).not.toContain("mine-1");
+    expect(left).not.toContain("mine-2");
+    plain.close();
+  });
+
   it("迁移一个不存在的目录：当成'没有旧数据'，不是错误", async () => {
     const store = openStore();
     mkdirSync(dir, { recursive: true });

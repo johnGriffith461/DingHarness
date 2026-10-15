@@ -2,6 +2,9 @@ import type { Engine } from "../../engine/index";
 import type { TurnEvent } from "../../engine/runtime/loop";
 import type { ConfirmMode } from "../../shared/ipc";
 import { humanFailure } from "../../shared/errors";
+import { PRODUCT_NAME, PRODUCT_TITLE, PRODUCT_VERSION } from "../../shared/product";
+import { CwdNotAllowedError } from "../cwd";
+import type { CwdDecision } from "../cwd";
 
 /**
  * ACP 宿主（Phase 17）——让外部客户端（OpenHands 之类）能驱动我们。
@@ -19,11 +22,15 @@ import { humanFailure } from "../../shared/errors";
  * | agent → client | `session/update`（通知） | `sessionId` / `update.sessionUpdate` |
  * | client → agent | `session/cancel`（通知） | `sessionId` |
  *
- * ⚠️ **两处如实说明**（文档里没写死、我不编）：
+ * ⚠️ **三处如实说明**（文档里没写死、我不编）：
  *   1. `StopReason` 的**取值表**在那一页没有列全 —— 这里只发 `end_turn` / `cancelled`
  *      两个（社区实现里最常见的那两个），并靠调用方容错；
  *   2. `update.sessionUpdate` 的判别串同理，这里只发 `agent_message_chunk`（正文）
- *      与 `tool_call` 两种，其它类型不发（宁可不发，也不发一个形状可疑的）。
+ *      与 `tool_call` / `tool_call_update` 三种，其它类型不发
+ *      （宁可不发，也不发一个形状可疑的）；
+ *   3. **失败不走 `session/update`**：那个类型表里没有 "error"，所以一轮的失败
+ *      用 `session/prompt` 的 **JSON-RPC error 响应**报 —— 那是对端一定会看到的通道
+ *      （原来把错误只写 stderr，GUI 宿主看不见，等于把失败报成成功）。
  *
  * ## 与内核的关系：**一份引擎，两个宿主**
  *
@@ -61,6 +68,11 @@ type AcpSession = {
 export type AcpDeps = {
   /** 现建一个引擎（工作目录 → 引擎）。与 `hosts/cli` 的装配同一份。 */
   makeEngine: (cwd: string) => Promise<{ engine: Engine; close: () => void }>;
+  /**
+   * 工作目录授权（2026-10-16，审计 P181）：外部客户端给的 cwd 必须先过这一关。
+   * 不给 = 不校验（单测与嵌入式用法）；`ding acp` 一直给。
+   */
+  authorizeCwd?: (raw: string) => CwdDecision;
   /** 闸门档位（宿主决定；ACP 客户端目前不能改我们的档位）。 */
   mode: ConfirmMode;
   /** provider / model（宿主解析后的）。 */
@@ -71,6 +83,24 @@ export type AcpDeps = {
   /** 记一条日志（写 stderr；**不能写 stdout** —— 那是协议通道）。 */
   log?: (line: string) => void;
 };
+
+/**
+ * 一行输入的字节上限（审计 P185）。
+ *
+ * 原来没有上限：`JSON.parse` 对**整行**一次性解析，行有多长就吃多少内存 ——
+ * 而这一行的长度由对端决定。超限的判为解析错误（协议层面本来就解析不了），
+ * 但**不中止**这个进程：后面还有正常的行要处理。
+ */
+const MAX_LINE_CHARS = 1_000_000;
+
+/**
+ * 会话数上限（审计 P185）。
+ *
+ * `sessions` 原来只增不减 —— 对端只要一直 `session/new` 就能把内存吃光。
+ * 说清淘汰口径：**优先淘汰最旧的空闲会话**（正在跑一轮的一条都不动）；
+ * 全都在跑就明确拒绝新的 `session/new`（比悄悄挤掉一个正在跑的好）。
+ */
+const MAX_SESSIONS = 64;
 
 /**
  * 一个 ACP agent（协议层）。
@@ -87,6 +117,14 @@ export class AcpAgent {
   async handleLine(line: string): Promise<void> {
     const text = line.trim();
     if (!text) return;
+    if (text.length > MAX_LINE_CHARS) {
+      this.deps.send({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32700, message: `这一行太长（上限 ${MAX_LINE_CHARS} 字符）：拒绝解析` },
+      });
+      return;
+    }
     let message: RpcMessage;
     try {
       message = JSON.parse(text) as RpcMessage;
@@ -111,13 +149,20 @@ export class AcpAgent {
             loadSession: true,
             promptCapabilities: { image: false, audio: false, embeddedContext: false },
           },
-          agentInfo: { name: "ding-harness", title: "Ding Harness", version: "0.4.0" },
+          agentInfo: { name: PRODUCT_NAME, title: PRODUCT_TITLE, version: PRODUCT_VERSION },
         });
 
       case "session/new": {
         const cwd = String(params.cwd ?? "").trim();
         if (!cwd) return this.fail(id, -32602, "session/new 需要 cwd（绝对路径）");
-        return this.openSession(id, cwd);
+        /*
+         * ⚠️ 授权**在开门这一层**就判（审计 P181）：原来任意非法/未授权路径都照样
+         * `openSession` 回一个 sessionId，失败要等到 `session/prompt` 才暴露 ——
+         * 那时候客户端已经在按"会话建好了"往下走了。
+         */
+        const decision = this.deps.authorizeCwd?.(cwd) ?? { ok: true as const, cwd };
+        if (!decision.ok) return this.fail(id, -32602, decision.reason);
+        return this.openSession(id, decision.cwd);
       }
 
       case "session/prompt":
@@ -139,6 +184,16 @@ export class AcpAgent {
 
   /** 建一段会话（回 `sessionId`）。 */
   private async openSession(id: JsonRpcId | undefined, cwd: string): Promise<void> {
+    if (this.sessions.size >= MAX_SESSIONS) {
+      /*
+       * 满了：先淘汰**最旧的空闲会话**（没有在跑一轮的那些）。全都在跑就拒新的 ——
+       * 悄悄挤掉一个正在跑的会话，会让对端正跑着的那一轮凭空消失。
+       */
+      const idle = [...this.sessions.entries()].find(([, s]) => s.abort === null);
+      if (!idle) return this.fail(id, -32000, `会话数已达上限（${MAX_SESSIONS}），且都在跑：先 cancel 一些再建新的`);
+      this.sessions.delete(idle[0]);
+      this.deps.log?.(`会话数达上限：淘汰最旧的空闲会话 ${idle[0]}`);
+    }
     const sessionId = `acp-${Date.now().toString(36)}-${(this.seq += 1)}`;
     this.sessions.set(sessionId, { cwd, sessionId, abort: null });
     this.reply(id, { sessionId });
@@ -149,6 +204,12 @@ export class AcpAgent {
     const acpSessionId = String(params.sessionId ?? "");
     const session = this.sessions.get(acpSessionId);
     if (!session) return this.fail(id, -32602, `没有这段会话：${acpSessionId}`);
+
+    /*
+     * 同一段会话不许并发跑两轮：`session.abort` 非空就是"正跑着"。
+     * 拒绝比排队好 —— 排队会让对端以为第二句话已经在处理了。
+     */
+    if (session.abort) return this.fail(id, -32603, `这段会话正跑着一轮：先 session/cancel 再发`);
 
     const text = textOfPrompt(params.prompt);
     if (!text.trim()) return this.fail(id, -32602, "prompt 是空的（至少给一段文本）");
@@ -171,15 +232,24 @@ export class AcpAgent {
       });
       if (!outcome.ok && !outcome.aborted) {
         /*
-         * 失败也要**说人话**（Phase 13.1 的同一份话术）——
-         * 直接把上游原文丢给外部宿主，它那边界面同样会是一团看不懂的东西。
+         * ⚠️ 失败**如实报失败**（审计 P177）。ACP 的 `session/update` 里
+         * **没有** "error" 这个类型（见文件头第 2 条：形状不编），所以失败走
+         * JSON-RPC error 这条对端一定会看到的通道 —— 话术仍是 Phase 13.1 那份
+         * 人话，由 `humanFailure` 翻好再送。
          */
-        this.notifyUpdate(acpSessionId, { type: "error", message: humanFailure(outcome.error ?? "") } as TurnEvent);
+        this.fail(id, -32603, humanFailure(outcome.error ?? "这一轮没有跑成"));
+        return;
       }
       this.reply(id, { stopReason: outcome.aborted ? "cancelled" : "end_turn" });
     } catch (error) {
-      this.reply(id, { stopReason: "end_turn" });
-      this.deps.log?.(`ACP 这一轮出错：${String((error as Error)?.message ?? error).slice(0, 200)}`);
+      /*
+       * ⚠️ 内部异常必须**如实报失败**（审计 P177）：原来这里回一个与成功完全同形
+       * 的 `{stopReason:"end_turn"}`，错误只写 stderr —— 而 stderr 由客户端决定
+       * 看不看得见，多数 GUI 宿主不显示。于是"这一轮炸了"在对端等于"这一轮答完了"。
+       */
+      const reason = error instanceof CwdNotAllowedError ? error.message : humanFailure(String((error as Error)?.message ?? error));
+      this.fail(id, -32603, `这一轮出错：${reason}`);
+      this.deps.log?.(`ACP 这一轮出错：${reason.slice(0, 200)}`);
     } finally {
       session.abort = null;
       built?.close();
@@ -219,6 +289,14 @@ export class AcpAgent {
       return;
     }
     if (event.type === "tool-result") {
+      /*
+       * ⚠️ 被闸门拦下的工具**对外是失败**，不是"完成"（审计 P176）。
+       * 闸门拦下时工具返回的是 `{ pending: true, notice: "已把这次…交给用户确认……还没有执行" }`
+       * —— 它**没有 `error` 字段**，只按 `error` 判就会把"没执行"上报成 `completed`，
+       * 外部宿主界面上那条工具调用会显示成绿的。
+       */
+      const pending =
+        typeof event.output === "object" && event.output !== null && (event.output as { pending?: unknown }).pending === true;
       this.deps.send({
         jsonrpc: "2.0",
         method: "session/update",
@@ -227,7 +305,7 @@ export class AcpAgent {
           update: {
             sessionUpdate: "tool_call_update",
             toolCallId: event.toolCallId,
-            status: event.error ? "failed" : "completed",
+            status: event.error || pending ? "failed" : "completed",
           },
         },
       });

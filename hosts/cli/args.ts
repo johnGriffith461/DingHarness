@@ -47,6 +47,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "grant",
   "search",
   "hook",
+  "hook-secret",
   "token",
   "bind",
   "port",

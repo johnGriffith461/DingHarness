@@ -1,6 +1,9 @@
+import path from "node:path";
 import { createInterface } from "node:readline";
 
+import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { AcpAgent } from "../acp/agent";
+import { authorizeCwd, CwdNotAllowedError } from "../cwd";
 import { startAgentServer } from "../server/agentServer";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { flag, flagAll, type Parsed } from "./args";
@@ -12,40 +15,85 @@ import { effectiveConfig } from "./config";
  *
  * ## 两条口径都写在命令自己身上（而不是藏在文档里）
  *
- * · `serve`：**默认只绑回环**。要对外必须同时给 `--bind` 与 `--token` ——
- *   起服务之前会硬拒（见 `agentServer.ts` 的说明：agent 能读写文件、跑命令，
- *   一个没认证的公开服务等于把这些交给整个网络）。
+ * · `serve`：**默认只绑回环，且一律需要口令**。口令来源优先级：
+ *   `--token` > `DH_SERVE_TOKEN` > **现场随机生成**（启动时打印出来）。
+ *   要对外的绑定还要求**显式**给口令（`.env` 里那种不算）—— 起服务之前硬拒。
  * · `acp`：走标准输入输出，**agent 作为外部客户端的子进程**。
  *   于是**日志绝不能写 stdout** —— 那是协议通道（写进去会污染 JSON-RPC 流）。
+ *
+ * ## 2026-10-16（审计第 1 单）改了什么
+ *
+ * · 工作目录授权从"未规范化的字符串前缀"换成 `authorizeCwd`（`..` 逃不出去、
+ *   兄弟前缀目录不再被误认成已授权），**被拒绝的 cwd 明确报错**而不是静默落回默认目录；
+ * · `--mode` 原来因为传了个空 `Parsed` 被结构性忽略，现在真的生效；
+ * · `--port` 传坏值不再变成 `NaN` 喂给服务（NaN 会让 `listen` 抛一个看不懂的错）；
+ * · 会话库打开时带**保护线**（服务期间新建的会话之外，用户历史一条不动）；
+ * · 关闭路径：中止在跑回合、销毁在途连接，第二次 Ctrl+C 立即退出。
  */
 
+/** `--port` 的取值判定（审计 P111 的同形入口：坏值不许静默变 NaN）。 */
+export type PortDecision = { ok: true; port: number } | { ok: false; message: string };
+
+export function resolveServePort(raw: string | undefined): PortDecision {
+  if (raw === undefined) return { ok: true, port: 8787 };
+  const text = raw.trim();
+  if (!/^\d+$/.test(text)) return { ok: false, message: `--port 要 0–65535 的整数，给了「${raw}」` };
+  const port = Number(text);
+  if (port > 65535) return { ok: false, message: `--port 超出范围（0–65535）：${raw}` };
+  return { ok: true, port };
+}
+
 /** 这一段宿主侧共用的装配（两个命令一样）。 */
-function hostDeps(dataDir: string) {
+function hostDeps(dataDir: string, p: Parsed, protectBefore: number) {
   const { config } = effectiveConfig(dataDir);
-  const dirs = config.dirs ?? [process.cwd()];
+  const dirFlags = flagAll(p, "dir");
+  const dirs = (dirFlags.length ? dirFlags : (config.dirs ?? [process.cwd()])).map((d) => path.resolve(d));
   return {
     provider: config.provider ?? "",
     ...(config.model ? { model: config.model } : {}),
-    mode: normalizeConfirmMode(flag({ command: "", args: [], flags: new Map() }, "mode") ?? config.mode ?? "按需确认") as ConfirmMode,
+    /* ⚠️ `flag(p, …)`：这里原来传的是 `new Map()` 拼的空 Parsed → `--mode` 恒 undefined（审计 P209） */
+    mode: normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认") as ConfirmMode,
+    dirs,
     makeEngine: async (cwd: string) => {
       /*
-       * 工作目录用**客户端给的那个**（ACP/HTTP 都会带 cwd），但只在**已授权目录**里取 ——
+       * 工作目录用**客户端给的那个**，但它必须先过授权（`authorizeCwd`）——
        * 外部宿主不该因为能连上就获得新的可写范围。
+       * ⚠️ 不通过就**抛**（由服务层翻成 400 / ACP 翻成参数错）：
+       * 静默落回默认目录会让调用方以为自己指定的目录生效了（审计 P181）。
        */
-      const allowed = dirs.filter((d) => cwd.startsWith(d));
-      const use = allowed.length ? [cwd] : dirs;
-      return buildEngine(use, dataDir);
+      const decision = authorizeCwd(cwd, dirs);
+      if (!decision.ok) throw new CwdNotAllowedError(decision.reason);
+      return buildEngine([decision.cwd], dataDir, { protectBefore });
     },
-    dirs,
   };
 }
 
-/** `ding serve [--port 8787] [--bind 0.0.0.0 --token xxx] [--hook name=prompt]`。 */
+/** `ding serve [--port 8787] [--bind 0.0.0.0 --token xxx] [--hook name=prompt --hook-secret s]`。 */
 export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
-  const deps = hostDeps(dataDir);
-  const port = Number(flag(p, "port") ?? 8787);
+  /* 服务启动时刻：会话库的收口保护线（这一刻之前的会话都是"用户自己的"） */
+  const startedAt = Date.now();
+  const deps = hostDeps(dataDir, p, startedAt);
+
+  const portDecision = resolveServePort(flag(p, "port"));
+  if (!portDecision.ok) {
+    process.stderr.write(`${portDecision.message}\n`);
+    return 2;
+  }
   const bind = flag(p, "bind");
-  const token = flag(p, "token");
+  if (bind === "true") {
+    process.stderr.write("--bind 要一个地址（例如 127.0.0.1 / 0.0.0.0）\n");
+    return 2;
+  }
+  const token = flag(p, "token") ?? process.env.DH_SERVE_TOKEN?.trim();
+  if (token === "true") {
+    process.stderr.write("--token 要一个口令值（或改用环境变量 DH_SERVE_TOKEN）\n");
+    return 2;
+  }
+  const hookSecret = flag(p, "hook-secret") ?? process.env.DH_HOOK_SECRET?.trim();
+  if (hookSecret === "true") {
+    process.stderr.write("--hook-secret 要一个密钥值（或改用环境变量 DH_HOOK_SECRET）\n");
+    return 2;
+  }
   const hooks: Record<string, string> = {};
   for (const spec of flagAll(p, "hook")) {
     const at = spec.indexOf("=");
@@ -60,7 +108,7 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
   let started;
   try {
     started = await startAgentServer({
-      port,
+      port: portDecision.port,
       ...(bind ? { bind } : {}),
       ...(token ? { token } : {}),
       makeEngine: deps.makeEngine,
@@ -69,6 +117,16 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
       ...(deps.model ? { model: deps.model } : {}),
       cwd: deps.dirs[0] ?? process.cwd(),
       hooks,
+      ...(hookSecret ? { hooksSecret: hookSecret } : {}),
+      /* 会话列表：把真实会话库交给服务层（不给的话那个接口只能回 501） */
+      listSessions: async () => {
+        const store = createSqliteSessionStore(dataDir, "sessions.db", {}, { protectBefore: startedAt });
+        try {
+          return await store.list();
+        } finally {
+          store.close();
+        }
+      },
       log: (line) => process.stderr.write(`[serve] ${line}\n`),
     });
   } catch (error) {
@@ -77,22 +135,42 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
     return 2;
   }
 
+  const hookNames = Object.keys(hooks);
   process.stdout.write(
     [
       `Agent Server 已起：${started.url}`,
       `  档位：${deps.mode}　provider：${deps.provider}`,
-      `  接口：GET /healthz　GET /v1/info　POST /v1/run（SSE）${Object.keys(hooks).length ? `　POST /v1/hooks/<名字>（${Object.keys(hooks).join(" / ")}）` : ""}`,
-      `  ${bind && bind !== "127.0.0.1" ? "⚠️ 绑在非回环地址上：token 是唯一的一道门，别把它贴到聊天里" : "只绑回环（本机可用；对外请显式 --bind 并同时给 --token）"}`,
+      /*
+       * ⚠️ 口令**一定**会打印：回环且没显式给时它是现场生成的随机值 ——
+       * 不打印的话本机也没人知道它（fail-closed 的代价就是"必须把钥匙交到用户手上"）。
+       */
+      `  口令：${started.token}${token ? "" : "（本次随机生成；要固定就 --token 或 DH_SERVE_TOKEN）"}`,
+      `  用法：curl -H "Authorization: Bearer ${started.token}" ${started.url}/v1/info`,
+      `  接口：GET /healthz　GET /v1/info　GET /v1/sessions　POST /v1/run（SSE）${hookNames.length ? `　POST /v1/hooks/<名字>（${hookNames.join(" / ")}，要签名）` : ""}`,
+      ...(deps.mode === "按需确认"
+        ? ["  ⚠️ 档位是「按需确认」：服务态没有审批通道，需要确认的工具会被拦下（不会执行），对外如实报失败"]
+        : []),
+      ...(hookNames.length && !hookSecret
+        ? ["  ⚠️ 配了 hook 但没给 --hook-secret / DH_HOOK_SECRET：这些 webhook 一律 403（缺省 fail-closed）"]
+        : []),
+      `  ${bind && bind !== "127.0.0.1" ? "⚠️ 绑在非回环地址上：口令是唯一的一道门，别把它贴到聊天里" : "只绑回环（本机可用；对外请显式 --bind 并同时给 --token）"}`,
       "",
-      "Ctrl+C 退出。",
+      "Ctrl+C 退出（再按一次立即退出）。",
       "",
     ].join("\n"),
   );
 
   /* 等到被杀：这个进程的存在本身就是服务 */
   return await new Promise<number>((resolve) => {
+    let stopping = false;
     const stop = () => {
-      started.server.close(() => resolve(0));
+      if (stopping) {
+        /* 第二次 Ctrl+C：不再等（止损优先于优雅） */
+        process.exit(1);
+      }
+      stopping = true;
+      process.stderr.write("[serve] 正在关闭：中止在跑的回合、销毁在途连接……\n");
+      void started.stop().then(() => resolve(0));
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
@@ -101,7 +179,8 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
 
 /** `ding acp` —— 作为 ACP agent 跑在标准输入输出上。 */
 export async function cmdAcp(p: Parsed, dataDir: string): Promise<number> {
-  const deps = hostDeps(dataDir);
+  const startedAt = Date.now();
+  const deps = hostDeps(dataDir, p, startedAt);
   if (!deps.provider) {
     process.stderr.write("先配一个 provider：ding init（或 ding config set provider <id>）\n");
     return 3;
@@ -109,6 +188,7 @@ export async function cmdAcp(p: Parsed, dataDir: string): Promise<number> {
 
   const agent = new AcpAgent({
     makeEngine: deps.makeEngine,
+    authorizeCwd: (raw) => authorizeCwd(raw, deps.dirs),
     mode: deps.mode,
     provider: deps.provider,
     ...(deps.model ? { model: deps.model } : {}),
@@ -118,9 +198,16 @@ export async function cmdAcp(p: Parsed, dataDir: string): Promise<number> {
   });
 
   const rl = createInterface({ input: process.stdin, terminal: false });
+  /*
+   * ⚠️ **不能** `await agent.handleLine(line)`（审计 P175）：`session/prompt` 会一直
+   * 等到 `engine.run` 结束，串行 await 会让 `session/cancel` 在这一轮跑完之前
+   * **根本读不到** —— 中止在生产接线上必然失效。
+   * 现在逐行派发：cancel 这类通知立刻处理；同一会话的并发 prompt 由 agent 自己拒绝。
+   */
   for await (const line of rl) {
-    await agent.handleLine(line);
+    void agent.handleLine(line).catch((error: unknown) => {
+      process.stderr.write(`[acp] 处理一行失败：${String((error as Error)?.message ?? error)}\n`);
+    });
   }
-  void p;
   return 0;
 }

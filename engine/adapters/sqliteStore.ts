@@ -143,18 +143,43 @@ function lineBytes(payload: string): number {
   return Buffer.byteLength(payload, "utf8") + 1;
 }
 
+/** 打开时的额外选项。 */
+export type OpenOptions = {
+  /**
+   * **收口保护线**（2026-10-16，审计 P173）：`updated_at` 早于这一刻的会话
+   * **不参与任何一道收口**（年龄 / 条数 / 容量都不动它们）。
+   *
+   * ## 为什么要有它
+   *
+   * 服务态（`ding serve` / `ding acp`）**每来一个请求就打开一次库**，而打开即收口。
+   * 于是一个能连上服务的外部调用方只要不停换 `sessionId` 请求，就能造出几百个新会话，
+   * 把**用户自己的历史**按"最旧的先删"整段淘汰掉 —— 不可逆的数据损失，
+   * 而触发它只需要"能连上"。
+   *
+   * 给了这条保护线之后：收口只淘汰**保护线之后**（即这次服务期间）产生的会话，
+   * 用户原有的历史一条不动。保留策略的最终判断交还给**拥有数据的宿主**
+   * （桌面 / CLI 打开库时不带这条线，照旧收口）。
+   *
+   * ⚠️ 故意不做成"只保护非本次请求创建的"字面实现：那种粒度需要在每行上记来源，
+   * 而这里的威胁是"外部流量 vs 用户存量"，用服务启动时刻当分界线已经完整覆盖它。
+   */
+  protectBefore?: number;
+};
+
 /**
  * 打开（必要时建）一个 SQLite 会话库。
  *
  * @param dir 数据目录（不存在就建）
  * @param file 库文件名（默认 `sessions.db`；测试要并行时各给各的）
  * @param retention 保留策略（默认 `SQLITE_RETENTION`）；打开时就收口一次
+ * @param open 打开选项（`protectBefore` 见其说明）
  * @returns 满足 `SessionStore` 的实现
  */
 export function createSqliteSessionStore(
   dir: string,
   file = "sessions.db",
   retention: RetentionPolicy = {},
+  open: OpenOptions = {},
 ): SessionStore {
   mkdirSync(dir, { recursive: true });
   /*
@@ -200,6 +225,22 @@ export function createSqliteSessionStore(
   const deleteSessionRow = db.prepare("DELETE FROM sessions WHERE id = ?");
   const deleteSessionEvents = db.prepare("DELETE FROM events WHERE session_id = ?");
   const staleSessions = db.prepare("SELECT id FROM sessions WHERE updated_at < ? ORDER BY updated_at ASC");
+  /*
+   * 收口保护线那一侧的查询（见 `OpenOptions.protectBefore`）：
+   * "受保护" = `updated_at < protectBefore`，三道收口都只看**未受保护**的那批。
+   */
+  const countUnprotected = db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE updated_at >= ?");
+  const unprotectedBytes = db.prepare("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions WHERE updated_at >= ?");
+  const oldestUnprotected = db.prepare(
+    "SELECT id FROM sessions WHERE updated_at >= ? ORDER BY updated_at ASC LIMIT ?",
+  );
+  const oldestUnprotectedRow = db.prepare(
+    "SELECT id, bytes FROM sessions WHERE updated_at >= ? ORDER BY updated_at ASC LIMIT 1",
+  );
+  const oldestRow = db.prepare("SELECT id, bytes FROM sessions ORDER BY updated_at ASC LIMIT 1");
+  const staleUnprotected = db.prepare(
+    "SELECT id FROM sessions WHERE updated_at < ? AND updated_at >= ? ORDER BY updated_at ASC",
+  );
 
   /** 删掉一个会话（它的会话行与全部事件）。**整会话**，不截断。 */
   const dropSession = (id: string): void => {
@@ -214,36 +255,65 @@ export function createSqliteSessionStore(
    * 反过来的话，容量那道会把"很老但条数不多"的会话先淘汰掉，
    * 而它本来该由年龄那道更早、更便宜地处理掉。
    *
+   * ⚠️ 给了保护线时（`OpenOptions.protectBefore`）：三道都只在**未受保护**的会话里淘汰，
+   * 受保护的连年龄那道也不碰 —— 服务态不该替用户决定"你的旧历史该删了"。
+   *
    * @returns 删掉的会话 id 与剩下的条数
    */
   const pruneStore = (): { deleted: string[]; kept: number } => {
     const policy = { ...SQLITE_RETENTION, ...retention };
     const deleted: string[] = [];
+    const protectBefore = open.protectBefore;
+
+    /** 未受保护里最旧的 n 个 id（没给保护线时就是全局最旧）。 */
+    const victims = (limit: number): string[] =>
+      protectBefore === undefined
+        ? (oldestSessions.all(limit) as { id: string }[]).map((r) => r.id)
+        : (oldestUnprotected.all(protectBefore, limit) as { id: string }[]).map((r) => r.id);
 
     const cutoff = Date.now() - policy.maxAgeDays * 86_400_000;
-    for (const row of staleSessions.all(cutoff) as { id: string }[]) {
+    const stale = (
+      protectBefore === undefined ? staleSessions.all(cutoff) : staleUnprotected.all(cutoff, protectBefore)
+    ) as { id: string }[];
+    for (const row of stale) {
       dropSession(row.id);
       deleted.push(row.id);
     }
 
-    const count = Number((countSessions.get() as { n: number }).n);
-    if (count > policy.maxSessions) {
-      for (const row of oldestSessions.all(count - policy.maxSessions) as { id: string }[]) {
-        dropSession(row.id);
-        deleted.push(row.id);
+    const total = Number((countSessions.get() as { n: number }).n);
+    const freeCount =
+      protectBefore === undefined ? total : Number((countUnprotected.get(protectBefore) as { n: number }).n);
+    /*
+     * 受保护的那批**自己**就可能超过上限。那不是外部流量造成的，
+     * 不该由这里去删；配额只落在未受保护的那批头上（下限 0）。
+     */
+    const quota = Math.max(0, policy.maxSessions - (total - freeCount));
+    const overCount = freeCount - quota;
+    if (overCount > 0) {
+      for (const id of victims(overCount)) {
+        dropSession(id);
+        deleted.push(id);
       }
     }
 
-    let bytes = Number((totalBytes.get() as { n: number }).n);
-    while (bytes > policy.maxBytes) {
-      const row = (oldestSessions.all(1) as { id: string }[])[0];
+    let freeBytes = Number(
+      ((protectBefore === undefined ? totalBytes.get() : unprotectedBytes.get(protectBefore)) as { n: number }).n,
+    );
+    /*
+     * 容量的"受保护占用"要用**当前**的全库总字节减去未受保护的字节 ——
+     * 条数那道刚删过，两个数都得重新读一次，不能沿用上面的快照。
+     */
+    const totalNow = Number((totalBytes.get() as { n: number }).n);
+    const protectedNow = protectBefore === undefined ? 0 : totalNow - freeBytes;
+    const budget = Math.max(0, policy.maxBytes - protectedNow);
+    while (freeBytes > budget) {
+      const row = (
+        protectBefore === undefined ? oldestRow.get() : oldestUnprotectedRow.get(protectBefore)
+      ) as { id: string; bytes: number } | undefined;
       if (!row) break;
-      const rowBytes = Number(
-        (db.prepare("SELECT bytes FROM sessions WHERE id = ?").get(row.id) as { bytes: number } | undefined)?.bytes ?? 0,
-      );
       dropSession(row.id);
       deleted.push(row.id);
-      bytes -= rowBytes;
+      freeBytes -= Number(row.bytes ?? 0);
     }
 
     const kept = Number((countSessions.get() as { n: number }).n);

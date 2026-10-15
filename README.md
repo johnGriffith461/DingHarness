@@ -236,6 +236,19 @@ node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
 - **密钥**：桌面端写的走系统保护（DPAPI / Keychain / libsecret）；
   **CLI 侧没有钥匙串入口**，所以 CLI 不写加密存储（`ding doctor` 会这么说）。
   备份里**不含密钥**。
+## 连到远端的 agent（Phase 17 的另一半）
+
+`ding serve` 把 agent 挂到 HTTP 上；`ding connect` 是**客户端**：
+
+```bash
+ding connect 192.168.1.9:8787                                       # 看看那台机器上是谁、什么档位、工作目录
+ding connect 192.168.1.9:8787 "把 D:/报表 里那三个 csv 合成一张表"   # 跑一轮，正文边收边打（SSE）
+ding connect 192.168.1.9:8787 --sessions                            # 那边的会话列表
+ding connect 192.168.1.9:8787 "..." --token <口令>                    # 远端带 token 时（对外绑定必然要）
+```
+
+退出码跟着**远端那一轮**走（成功 0 / 失败 1），所以它能直接写进脚本。
+
 - **多平台**：见上面那张表 —— 桌面只有 Windows x64 验过；**CLI 单二进制**多了一个 Linux
   （WSL Ubuntu 24.04 上真跑过 `eval` 63/63）；macOS 仍然只有编得出来，**没在真机上跑过**。
 - **模型目录表**只登记了少数模型；未登记的走保守默认并在账本上标「未登记模型」。

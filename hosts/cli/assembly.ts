@@ -1,5 +1,5 @@
 import { createEngine, type Engine } from "../../engine/index";
-import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
+import { createSqliteSessionStore, type OpenOptions } from "../../engine/adapters/sqliteStore";
 import type { ToolExecutor } from "../../engine/ports/executor";
 import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } from "../../engine/runtime/registry";
 import { loadEnabledPlugins, pluginToolEntries } from "../../engine/runtime/pluginHost";
@@ -48,9 +48,15 @@ export type BuiltEngine = { engine: Engine; close: () => void; plugins: string[]
  *
  * @param dirs 授权目录（工具能碰的范围）
  * @param dataDir 会话数据目录（默认由调用方给 `dataDir()`；评测器会给一个临时目录）
+ * @param open 会话库的打开选项（目前只有 `protectBefore`：服务态拿它挡住
+ *   "外部流量挤掉用户历史"那条，见 `sqliteStore.ts` 的 `OpenOptions`）
  */
-export async function buildEngine(dirs: readonly string[], dataDir: string): Promise<BuiltEngine> {
-  const store = createSqliteSessionStore(dataDir);
+export async function buildEngine(
+  dirs: readonly string[],
+  dataDir: string,
+  open: OpenOptions = {},
+): Promise<BuiltEngine> {
+  const store = createSqliteSessionStore(dataDir, "sessions.db", {}, open);
 
   let makeTools:
     | ((mode: ConfirmMode, depth: number, provider: string, signal?: AbortSignal, only?: readonly string[]) => ReturnType<typeof buildToolSet>)

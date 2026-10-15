@@ -22,6 +22,7 @@ import { cmdBackup, cmdRestore } from "./cmdBackup";
 import { cmdResume } from "./cmdResume";
 import { cmdAcp, cmdServe } from "./cmdServe";
 import { cmdRecipe } from "./cmdRecipe";
+import { cmdConnect } from "./cmdConnect";
 import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
@@ -606,6 +607,7 @@ function cmdHelp(devMode = false): number {
       "  ding doctor [--json]                           # 一键自检（每项失败都给下一步）",
       "  ding recipe list|show|run|export|import            # 任务模板（可分享的「提示词 + 工具范围 + 档位」）",
       "  ding serve [--port 8787] [--bind <地址> --token <口令>]  # Agent Server（默认只绑回环）",
+      "  ding connect <url> [任务] [--token <口令>]           # 连到远端 agent 跑一轮（Phase 17 的另一半）",
       "  ding acp                                       # 作为 ACP agent 跑在标准输入输出上（被外部宿主驱动）",
       "  ding resume [<会话 id>] [--continue]           # 崩溃恢复（列出被打断的回合；--continue 重跑那一轮）",
       "  ding backup [--out <文件>]                     # 全量备份（会话 + 配置型 store + CLI 配置，单个 JSON）",
@@ -754,6 +756,8 @@ async function main(): Promise<void> {
                   ? await cmdRecipe(parsed, dataDir())
                   : parsed.command === "serve"
                   ? await cmdServe(parsed, dataDir())
+                  : parsed.command === "connect"
+                  ? await cmdConnect(parsed)
                   : parsed.command === "acp"
                     ? await cmdAcp(parsed, dataDir())
                     : parsed.command === "resume"
