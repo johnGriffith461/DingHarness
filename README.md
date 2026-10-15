@@ -203,7 +203,7 @@ node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
 |---|---|---|---|---|
 | **Windows x64** | ✅ 打包 + 启动验过（`pnpm package:win`） | ✅ 编出来且**跑过**（`pnpm cli:bin` + `node scripts/verify-cli-bin.mjs`） | ✅ 作业对象（内存 / 子进程数 / 不留孤儿） | ✅ 桌面走 DPAPI；CLI 无 |
 | macOS（x64 / arm64） | ⚠️ 目标配置就位，**没在真机上跑过** | ⚠️ 编得出来，**没跑过** | ❌ 未做（只有直通） | ⚠️ 桌面可走 Keychain；未验证 |
-| Linux x64 | ⚠️ 同上（AppImage / deb） | ⚠️ 同上 | ❌ 未做（没有 seccomp） | ⚠️ 桌面可走 libsecret；未验证 |
+| Linux x64 | ⚠️ 同上（AppImage / deb），**桌面版没在 Linux 上跑过** | ✅ **跑过**：WSL Ubuntu 24.04 里 `--help` / `doctor` / `eval` 63/63（2026-10-16） | ❌ 未做（没有 seccomp） | ⚠️ 桌面可走 libsecret；未验证 |
 
 **这张表就是"我们验过什么"的清单**：⚠️ 的那些是**能编出来但没在对应系统上执行过**，
 不是"已支持"。`ding doctor` 会把当前这台机器上缺的能力逐条列出来。
@@ -236,7 +236,9 @@ node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
 - **密钥**：桌面端写的走系统保护（DPAPI / Keychain / libsecret）；
   **CLI 侧没有钥匙串入口**，所以 CLI 不写加密存储（`ding doctor` 会这么说）。
   备份里**不含密钥**。
-- **多平台**：见上面那张表 —— 只有 Windows x64 是验过的。
+- **多平台**：见上面那张表 —— 桌面只有 Windows x64 验过；**CLI 单二进制**多了一个 Linux
+  （WSL Ubuntu 24.04 上真跑过 `eval` 63/63）；macOS 仍然只有编得出来，**没在真机上跑过**
+  （这台机器上装 macOS 虚拟机既不合法也不现实：Apple 的许可只允许 Apple 硬件）。
 - **模型目录表**只登记了少数模型；未登记的走保守默认并在账本上标「未登记模型」。
 - 旧 JSONL 数据在启动时自动迁移，**迁移不删**旧文件；
   配置型数据从 Phase 12.1 起默认存 SQLite（`DSH_STORE_BACKEND=file` 可退回文件）。
