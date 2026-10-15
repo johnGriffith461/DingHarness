@@ -2,16 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronRight,
-  CircleHelp,
   Folder,
-  Globe,
-  LogOut,
   Monitor,
   Moon,
-  RefreshCw,
   Settings as SettingsIcon,
   Sun,
-  UserPlus,
 } from "lucide-react";
 
 import { readTheme, saveTheme, THEME_OPTIONS, type Theme } from "./theme";
@@ -47,14 +42,21 @@ export type AccountMenuProps = {
 };
 
 /*
- * ⚠️ 下面五项（官网 / 检查更新 / 帮助与反馈 / 添加账号 / 退出登录）是 **disabled** 的 ——
- * 不是漏接线，是本机版**没有对应的后端**。
+ * ⚠️ 原来这里还有五项：官网 / 检查更新 / 帮助与反馈 / 添加账号 / 退出登录 ——
+ * 全是 `disabled` + 一句"本机版没有对应后端"。
  *
- * 判据来自本项目的标准"如实呈现，不装作能用"：
- * 一个点了什么都不发生的按钮，**必须在视觉上也表明不可用**，
- * 否则就是用户报的那种"点了没反应"。
+ * ── 2026-10-15（M0 工单 3）：**整组移除** ──
  *
- * 启动器的更新链路做完之后（PLAN 的 R3 档次二），「检查更新」才该变回可点。
+ * 工单的口径是逐项三选一（实现 / 移除 / 降级为非交互元素），
+ * **不允许留下"disabled + 借口"**。这五项按第二条办：
+ *
+ *   · 官网 / 帮助与反馈 / 添加账号 / 退出登录：本机版**没有任何目的地**
+ *     （无站点、无反馈通道、无账号服务端、无登录态）——
+ *     一个永远点不动的菜单项，用户看不见比看见了强；
+ *   · 检查更新：更新链路是《后续篇》Phase 15 的事，**现在做不出真的检查**。
+ *     它回来的时候该带着真更新器，而不是先占一个灰位。
+ *
+ * 「额度用量」那一行**保留**：它不是按钮，是把已用量如实显示出来的地方。
  */
 export default function AccountMenu({ onClose, onOpenSettings, onOpenStarred }: AccountMenuProps) {
   const [theme, setTheme] = useState<Theme>(() => readTheme());
@@ -137,41 +139,12 @@ export default function AccountMenu({ onClose, onOpenSettings, onOpenStarred }: 
 
       <div className="wb-acct-sep" />
 
-      <button className={item} disabled data-testid="wb-acct-site" title="本机版没有跳转目标">
-        <Globe size={15} />
-        <span>Ding Harness 官网</span>
-      </button>
-
-      <button className={item} disabled data-testid="wb-acct-update" title="本机版没有更新服务端">
-        <RefreshCw size={15} />
-        <span>检查更新</span>
-      </button>
-
-      <button className={item} disabled data-testid="wb-acct-help" title="本机版没有反馈通道">
-        <CircleHelp size={15} />
-        <span>帮助与反馈</span>
-      </button>
-
-      <div className="wb-acct-sep" />
-
       {/* 额度用量：本机版按已用量算不出"时段额度"，所以只显示用量本身 */}
       <div className="wb-acct-quota" data-testid="wb-acct-quota">
         <span className="wb-acct-radio" />
         <span>当前时段额度用量</span>
         <em>—</em>
       </div>
-
-      <button className={item} disabled data-testid="wb-acct-add" title="本机版没有账号服务端">
-        <UserPlus size={15} />
-        <span>添加账号</span>
-      </button>
-
-      <div className="wb-acct-sep" />
-
-      <button className={item} disabled data-testid="wb-acct-logout" title="本机版没有登录态">
-        <LogOut size={15} />
-        <span>退出登录</span>
-      </button>
     </div>
   );
 }

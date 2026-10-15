@@ -22,6 +22,7 @@ import { MCP_CHANNEL } from "./ipc/mcpStore";
 import { TASK_CHANNEL } from "./ipc/taskStore";
 import { VIDEO_CHANNEL } from "./ipc/videoGen";
 import { REMOTE_CHANNEL } from "./ipc/remote";
+import { WINDOW_CHANNEL } from "./ipc/windowControls";
 import { IMAGE_CHANNEL } from "./ipc/imageGen";
 
 /**
@@ -45,14 +46,35 @@ import { IMAGE_CHANNEL } from "./ipc/imageGen";
  */
 const api = {
   ping: () => ipcRenderer.invoke("app:ping"),
-  /**
-   * 让窗口标题栏覆盖层跟随主题。
-   *
-   * @param payload 覆盖层底色与符号色
-   */
-  setTitlebar: (payload: { color: string; symbolColor: string }): Promise<boolean> =>
-    ipcRenderer.invoke("app:titlebar", payload),
   userDataDir: (): Promise<string> => ipcRenderer.invoke("app:userDataDir"),
+
+  /*
+   * 窗口控制（自绘标题栏用）。
+   *
+   * ⚠️ 这里**没有** `setTitlebar` 了（2026-10-15 删，M0 工单 1）—— 它原来是给
+   * `titleBarOverlay` 那条原生覆盖层改配色的。覆盖层已删（它压住了云盘/插件页
+   * 自己的右上角按钮），配色改由 CSS 负责，这条路整条撤掉。
+   * 见 `electron/ipc/windowControls.ts` 里的根因与证据。
+   */
+  win: {
+    minimize: (): Promise<void> => ipcRenderer.invoke(WINDOW_CHANNEL.minimize),
+    /** 最大化 ⇄ 还原；返回操作后的真实状态。 */
+    toggleMaximize: (): Promise<boolean> => ipcRenderer.invoke(WINDOW_CHANNEL.toggleMaximize),
+    close: (): Promise<void> => ipcRenderer.invoke(WINDOW_CHANNEL.close),
+    isMaximized: (): Promise<boolean> => ipcRenderer.invoke(WINDOW_CHANNEL.isMaximized),
+    /**
+     * 订阅最大化状态变化。
+     * @param listener 状态变时调用
+     * @returns 取消订阅函数
+     */
+    onMaximizedChange: (listener: (maximized: boolean) => void): (() => void) => {
+      const wrapped = (_e: unknown, maximized: unknown) => listener(Boolean(maximized));
+      ipcRenderer.on(WINDOW_CHANNEL.maximizedChanged, wrapped);
+      return () => {
+        ipcRenderer.removeListener(WINDOW_CHANNEL.maximizedChanged, wrapped);
+      };
+    },
+  },
 
   ai: {
     /** 列出可用 provider（脱敏，只含 id/名称/模型/是否可用）。 */

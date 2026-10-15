@@ -22,6 +22,7 @@ import { registerTaskIpc } from "./ipc/taskStore";
 import { registerMemoryIpc } from "./ipc/memoryStore";
 import { registerVideoIpc } from "./ipc/videoGen";
 import { registerRemoteIpc } from "./ipc/remote";
+import { attachWindowEvents, registerWindowIpc } from "./ipc/windowControls";
 import { registerClipboardIpc } from "./ipc/clipboard";
 import { registerCodingIpc } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL, loadAppSettings, saveAppSettings } from "./ipc/appSettings";
@@ -218,9 +219,26 @@ async function createWindow(): Promise<void> {
       }
       return undefined;
     })(),
-    // 无边框 + 自绘标题栏（对标原版的沉浸式外壳）
+    /*
+     * 无边框 + 自绘标题栏（对标原版的沉浸式外壳）。
+     *
+     * ⚠️ **不要加回 `titleBarOverlay`**（2026-10-15 删，M0 工单 1）：
+     * 它让 Windows 在窗体顶部覆盖层里再画一套**原生** caption 按钮，位置固定在
+     * 右上角约 138×36 —— 而本应用的「云盘 / 插件·技能·伙伴 / 定时任务」三个视图
+     * 自己的操作按钮（`wb-cloud-new` 等）就在 x=1359..1426（视口 1440），
+     * 正好被那套原生按钮压住。OS 层实拍证据：`.verify/m0/repro-cloud-topright.png`。
+     * 用户报的「右上角按钮重复显示」就是这个 —— 同一个角挤了两簇。
+     *
+     * 现在窗口按钮由应用自己画（`src/workbench/TitleBar.tsx` → `electron/ipc/windowControls.ts`），
+     * 拖动区也在那里（全仓唯一一处 `-webkit-app-region: drag`）。
+     * 回归守卫：`src/windowChrome.test.ts`，别绕过它。
+     */
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#0f1115", symbolColor: "#c9d1d9", height: 36 },
+    /*
+     * 菜单栏：Windows 上不设的话按一次 Alt 就会闪出系统菜单栏，而本应用的命令都在界面里。
+     * 不设它时默认是 `true`（长期显示），比"闪现"更糟。
+     */
+    autoHideMenuBar: true,
     webPreferences: {
       // preload 编译为 CJS，扩展名是 .cjs（见 scripts/mark-electron-cjs.mjs），必须给绝对路径
       preload: path.join(__dirname, "preload.cjs"),
@@ -234,6 +252,8 @@ async function createWindow(): Promise<void> {
   win.on("closed", () => {
     win = null;
   });
+  // 最大化状态变了要推给自绘标题栏（双击 / Win+↑ / Snap 都要跟上）
+  attachWindowEvents(win);
 
   // 外部链接交给系统浏览器，不在应用内打开
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -250,20 +270,6 @@ async function createWindow(): Promise<void> {
 }
 
 /* ---------- IPC ---------- */
-
-/*
- * 标题栏覆盖层跟随主题。
- *
- * `titleBarOverlay` 是**创建窗口时**的选项，之后要改只能调 `setTitleBarOverlay`。
- * 不接这条通路的话，覆盖层会一直停在创建时那个颜色，
- * 于是浅色主题下窗口按钮仍是一块深色 —— 与整体不一致。
- */
-ipcMain.handle("app:titlebar", (event, payload: { color: string; symbolColor: string }) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  // height 沿用创建时的值，这里只改颜色
-  win?.setTitleBarOverlay({ color: payload.color, symbolColor: payload.symbolColor, height: 36 });
-  return true;
-});
 
 ipcMain.handle("app:ping", () => ({
   ok: true,
@@ -315,6 +321,8 @@ try {
   registerRemoteIpc(ipcMain);
 registerClipboardIpc(ipcMain);
 registerCodingIpc(ipcMain);
+/* 窗口控制（自绘标题栏的按钮：最小化 / 最大化·还原 / 关闭） */
+registerWindowIpc(ipcMain, () => win);
 /* 本机版设置（§183）：新对话默认模型 */
 ipcMain.handle(APP_SETTINGS_CHANNEL.read, () => loadAppSettings());
 ipcMain.handle(APP_SETTINGS_CHANNEL.write, (_e, next: unknown) => saveAppSettings(next));

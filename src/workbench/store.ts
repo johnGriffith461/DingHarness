@@ -69,6 +69,20 @@ export type WorkbenchState = {
    */
   canvasOpen: boolean;
   /**
+   * 左侧导航栏是否收起（2026-10-15，M0 工单 3）。
+   *
+   * 这条**兑现的是工单里"能快的就实现"那一类**：五个页面（云盘 / 插件·技能·伙伴 /
+   * 定时任务 / 手机遥控电脑 / 任务视图）外加任务中心的头部，各自都摆着同一颗
+   * 「打开/收起左侧栏」，而它一直是 `disabled` —— `grep` 出来是同一颗按钮在六处各写一遍。
+   *
+   * ⚠️ **收起后怎么再打开**：那颗按钮在**页面头部**（主区里），不在左栏里 ——
+   * 所以左栏收成 0 宽之后它照样看得见、点得到（不需要再挂一颗浮标）。
+   * 这与右栏摘要面板不同：那个的展开入口是右缘浮标，因为它连头部一起收掉了。
+   */
+  navCollapsed: boolean;
+  /** 收起 / 展开左栏。 */
+  toggleNav: () => void;
+  /**
    * 悬浮助手窗是否打开。
    *
    * 挂在应用级而不是任务视图里：云盘的文件行右键也有「问问豆包」，
@@ -205,6 +219,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   canvasOpen: false,
   toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
   setCanvasOpen: (open) => set((s) => (s.canvasOpen === open ? s : { canvasOpen: open })),
+
+  navCollapsed: false,
+  toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
 
   floatOpen: false,
   floatSeed: "",

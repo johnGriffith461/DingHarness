@@ -5,7 +5,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Clock, HelpCircle, Monitor, Phone, PanelLeft } from "lucide-react";
+import { ChevronRight, Clock, HelpCircle, Monitor, Phone } from "lucide-react";
+import { NavCollapseButton } from "./NavCollapseButton";
 import { useWorkbenchStore } from "./store";
 import { currentQuestion, progressLabel } from "./task";
 import { ToolTraceList } from "./ToolTraceList";
@@ -43,21 +44,12 @@ export function TaskView() {
     <section className="wb-task" data-testid="wb-task">
       <header className="wb-task-head">
         {/*
-          ⚠️ 这个按钮**标了 disabled**（§124 的死按钮审计报出来的）。
-
-          它原本是个没有 onClick 的死按钮，而且**图标也不太对**
-          （在"打开/收起左侧栏"的位置放了个 MoreHorizontal）。
-
-          查过了：**项目里没有侧栏折叠机制**（store 与 Workbench 里都搜不到
-          navCollapsed / navOpen 之类）。所以它不是"漏接线"，是**参考里有、
-          我还没做**的功能。
-
-          按本项目标准"如实呈现，不装作能用"，没实现的就不该可点 ——
-          所以标 disabled，并把它记进待做（R5 视觉/体验收口）。
+          收起左栏（2026-10-15，M0 工单 3）。原来这里是一颗 `disabled` 的死按钮，
+          注释里写着"项目里没有侧栏折叠机制" —— 那是当时的实情，
+          但它是工单点名的 26 处死控件里出现次数最多的那一颗（六个页面各写一遍）。
+          现在六个页面共用 `NavCollapseButton`：一处实现，六处受益，文案只写一份。
         */}
-        <button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
-          <PanelLeft size={15} />
-        </button>
+        <NavCollapseButton />
         {/*
           重命名：原来是个**没有 onClick 的死按钮**（§124 审计报出）——
           而它要唤起的能力**早就做好了**：`renaming` state 与下面的

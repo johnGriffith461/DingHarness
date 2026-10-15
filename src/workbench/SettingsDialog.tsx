@@ -132,7 +132,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           本机用户 <ChevronRight size={13} />
         </div>
         <div className="wb-modal-id">本机模式 · 未登录</div>
-        <button className="wb-modal-primary" disabled title="本机版没有账号服务端">账号管理</button>
+        {/*
+          ⚠️ 这里原来是「账号管理」的死按钮（`disabled` + "本机版没有账号服务端"）。
+          2026-10-15（M0 工单 3）按工单口径**移除**：本机版就是"本机用户 · 未登录"
+          （上一行如实写着），没有账号可管 —— 摆一颗点不动的按钮只会让人以为登录坏了。
+        */}
 
         {subPage ? (
           <SettingsPages

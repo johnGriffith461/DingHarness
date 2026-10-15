@@ -16,6 +16,7 @@ import { useUploadStore } from "./uploadStore";
 import { useSearchHistoryStore } from "./searchHistoryStore";
 import { deleteConfirmTitle, DRIVE_LABELS, DRIVE_SORTS, DRIVE_SORT_LABEL, DRIVE_TABS, DRIVE_TAB_LABEL, emptyTextFor, filterByKind, filterByQuery, kindOptions, sortEntries, storageLine, untitledName, validateDriveName, type DriveSort } from "@shared/driveOps";
 import { FileText, FolderOpen, Grid3x3, List, Plus, Search, Upload, X } from "lucide-react";
+import { NavCollapseButton } from "./NavCollapseButton";
 import { useLibraryStore } from "./libraryStore";
 import { useReaderStore } from "./readerStore";
 import { useWorkbenchStore } from "./store";
@@ -143,10 +144,7 @@ export function CloudPage() {
   return (
     <section className="wb-page" data-testid="wb-page-cloud">
       <header className="wb-page-head">
-        {/* 侧栏折叠：本机版还没做（参考实现里有）—— 标 disabled，不装作能用（§125/§126） */}
-<button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
-          <List size={15} />
-        </button>
+<NavCollapseButton />
         <div className="wb-tabs">
           {(
             // 证据里的四个 + 本机版的「收藏」（只增不减，§157）

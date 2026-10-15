@@ -37,6 +37,7 @@ import { useDocStore } from "./docStore";
 import { startCanvasCommandHost } from "./canvasCommandHost";
 import ThreadListPage from "./ThreadListPage";
 import FloatingAssistant from "./FloatingAssistant";
+import TitleBar from "./TitleBar";
 
 import { NavSidebar } from "./NavSidebar";
 import { TaskView } from "./TaskView";
@@ -52,6 +53,15 @@ export default function Workbench() {
   const closeFloat = useWorkbenchStore((s) => s.closeFloat);
   /** 画布内的对话侧栏：默认收起（画布本身就够宽了）。 */
   const [canvasChatOpen, setCanvasChatOpen] = useState(false);
+  /*
+   * 右侧「对话摘要」的收起态**提在这里**（2026-10-15，M0 工单 2）。
+   *
+   * 原来它是 `SummaryPanel` 内部的 `useState`。提上来是为了让 **Esc 只由一处处理**：
+   * 两个右侧面板各自的开关都在这里，Esc 的语义才说得清（不然两个监听器同时响应，
+   * 一次 Esc 会把两个面板一起关掉，或者按注册顺序决定关哪个 —— 都不是用户能预期的）。
+   * 仓库里同样的取舍见 `theme.ts`（"改主题的唯一收口"）。
+   */
+  const [summaryCollapsed, setSummaryCollapsed] = useState(true);
 
   // 定时任务的调度器（阶段 11.6）：整个应用生命周期只启动一次
   useEffect(() => startScheduler(), []);
@@ -108,6 +118,34 @@ export default function Workbench() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setView]);
+
+  /*
+   * Esc 收起右侧面板（2026-10-15，M0 工单 2）。
+   *
+   * 两个面板**都要键盘可达** —— 用户报过"打开了然后怎么关呢"，而关的入口本来只有一颗
+   * 贴在边缘的小把手。Esc 是泛用约定，但有三条边界必须让开，否则修 bug 会修出新 bug：
+   *
+   *   ① 弹窗开着时不动面板：设置那类对话框自己处理 Esc，两头一起关会让人莫名其妙；
+   *   ② 焦点在输入框里时不动面板：画布对话侧栏一关就**卸载**，正在写的草稿会直接没了；
+   *   ③ 一次只关一个（画布对话优先，它是"更近"的那一层）—— 所以状态都提在上面，
+   *      这里只有一处判定，不会两个监听器抢同一次按键。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (document.querySelector(".wb-modal-mask")) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      if (canvasOpen && canvasChatOpen) {
+        setCanvasChatOpen(false);
+        return;
+      }
+      if (!summaryCollapsed) setSummaryCollapsed(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canvasOpen, canvasChatOpen, summaryCollapsed]);
 
   /*
    * 任务历史 + 本机库的加载顺序**不能反**（阶段 11.9）：
@@ -185,6 +223,8 @@ export default function Workbench() {
 
   return (
     <div className="wb" data-testid="wb">
+      {/* 标题栏（窗口按钮 + 拖动区）—— 必须是 `.wb` 的第一个孩子且独占一行，理由见 TitleBar.tsx */}
+      <TitleBar />
       <NavSidebar />
       <main className="wb-main">
         {body}
@@ -199,7 +239,7 @@ export default function Workbench() {
               保留侧栏是有意的：画布的 AI 生成/改图那套功能挂在它上面（阶段 3/9 验证过），
               拆掉就等于把已验证的功能丢了。默认收起，需要时展开。
             */}
-            {canvasChatOpen ? <ChatSidebar /> : null}
+            {canvasChatOpen ? <ChatSidebar onClose={() => setCanvasChatOpen(false)} /> : null}
             <div className="wb-canvas-stage">
               <button
                 className="wb-canvas-chat-toggle"
@@ -214,7 +254,8 @@ export default function Workbench() {
           </div>
         ) : null}
       </main>
-      <SummaryPanel />
+      {/* 收起态由工作台持有（Esc 只在这一处判定，见上面的 Esc 处理） */}
+      <SummaryPanel collapsed={summaryCollapsed} onCollapsedChange={setSummaryCollapsed} />
       {/* 悬浮助手窗挂应用级：云盘文件行的「问问豆包」也要能调起它 */}
       {floatOpen ? <FloatingAssistant onClose={closeFloat} seed={floatSeed} /> : null}
       {/*

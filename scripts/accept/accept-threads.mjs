@@ -129,8 +129,12 @@ try {
    * 见 HANDOFF §208 的零覆盖清单）—— 行内那枚置顶小旗正属于"没人点过"的那一类。
    *
    * 断**后果**：点了「置顶」之后**那一行上真出现置顶标记**（不是"点了没报错"）。
-   * 顺带把顶部两颗按钮的性质也钉住：`wb-threads-new` 可点、`wb-threads-more` 如实禁用且说明原因
-   * （手册那条"杜绝假按钮"的可检查形式 —— 与 `accept-accountmenu` 对账号菜单用的同一口径）。
+   * 顺带把顶部那颗「新工作任务」钉住（必须可点）。
+   *
+   * ⚠️ `wb-threads-more`（批量操作）**2026-10-15 已被移除**（M0 工单 3）：
+   * 原来是"如实禁用 + 说明原因"，工单把口径改成"实现 / 移除 / 降级"三选一、
+   * 不许留"disabled + 借口" —— 本机版没做批量操作，所以移除。
+   * 于是这里改成断言"它不该再出现"（见下面的判定）。
    */
   out.headNew = await page.evaluate(() => {
     const e = document.querySelector('[data-testid="wb-threads-new"]');
@@ -199,11 +203,12 @@ try {
   /* 补的那组（零覆盖清单里的置顶标记与顶部两颗按钮，§208） */
   if (!out.headNew) bad.push("页面顶部没有「新工作任务」按钮");
   else if (out.headNew.disabled) bad.push("⭐「新工作任务」被禁用了（点了没反应的假按钮）");
-  if (!out.headMore) bad.push("页面顶部没有那颗「更多」按钮");
-  else {
-    if (!out.headMore.disabled) bad.push("⭐ 本机版没做批量操作，那颗「更多」应当是 disabled 的");
-    if (!out.headMore.title) bad.push("那颗 disabled 的「更多」没说为什么（title 为空）");
-  }
+  /*
+   * ⚠️ 2026-10-15（M0 工单 3）口径反转：原来钉的是"本机版没做批量操作 → 那颗「更多」
+   * 必须 disabled 且有说明"，现在**那颗按钮已被移除**（工单口径：实现 / 移除 / 降级，
+   * 不留"disabled + 借口"）。所以这条改成"它不该再出现"。
+   */
+  if (out.headMore) bad.push("⭐ 页面顶部那颗「批量操作（更多）」本该移除却还在（点了没反应 = 假按钮）");
   if (out.pinnedFlag !== 1) bad.push("点了「置顶」那一行上没有出现置顶标记");
   if (out.unpinCtrl !== 1) bad.push("左栏置顶行上没有「取消置顶」（wb-unpin-*）");
   if (out.pinnedFlagAfterUnpin !== 0) bad.push("点了「取消置顶」标记还在");

@@ -15,8 +15,6 @@ import {
   Link2,
   MessageCircle,
   Pencil,
-  Share2,
-  SquarePlus,
   Star,
   StarOff,
   Trash2,
@@ -76,7 +74,12 @@ export function DriveRowMenu({
       icon: <Pencil size={13} />,
       run: () => onRename(entry),
     },
-    { label: "分享", icon: <Share2 size={13} />, disabled: "分享需要服务端支持，本机版没有" },
+    /*
+     * ⚠️ 这里原来还有两项：「分享」「添加快捷方式到」—— 都是 `disabled` + 一句
+     * "本机版没有"。2026-10-15（M0 工单 3）按工单口径**移除**：
+     * 一个点不动的菜单项对用户来说和坏掉没区别，而这两项本机版**没有任何目的地**
+     * （无服务端可分享、无系统级快捷方式支持）。做出来的时候它们会带着真能力回来。
+     */
     {
       label: "复制链接",
       icon: <Link2 size={13} />,
@@ -94,7 +97,6 @@ export function DriveRowMenu({
           .then((name) => onChanged(name ? `已创建副本：${name}` : "创建副本失败"));
       },
     },
-    { label: "添加快捷方式到", icon: <SquarePlus size={13} />, disabled: "需要系统级快捷方式支持，本机版没有" },
     {
       label: starred ? "取消收藏" : "收藏",
       icon: starred ? <Star size={13} /> : <StarOff size={13} />,

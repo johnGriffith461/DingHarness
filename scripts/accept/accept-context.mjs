@@ -182,16 +182,22 @@ report.installedAfterRemove = lib.installed;
   const bad = [];
   const menu = report.menuItems ?? [];
 
-  /* ① 菜单本身：七项、且"分享"这类做不了的要说清为什么 */
+  /* ① 菜单本身：内容齐、且**一项都不许置灰** */
   if (!report.menuOpened) bad.push("⭐ 云盘行右键没有菜单");
   /*
-   * 项数**不写死**：本体实机看到的七项之后又补了「下载」（§169）与「AI 阅读」（§158），
-   * 写死 7 会让这条断言比产品更旧（红的是断言不是功能）。改成"至少七项 + 该有的都在"，
-   * 下面逐个点名。
+   * ⚠️ 2026-10-15（M0 工单 3）口径变了，这条断言跟着变：
+   *
+   * 原来这里数的是"至少七项"，其中两项（分享 / 添加快捷方式到）是**置灰的壳**，
+   * 判据是"置灰就必须写清为什么"。工单把这条口径改成：
+   * 逐项三选一（实现 / 移除 / 降级为非交互元素），**不允许留"disabled + 借口"** ——
+   * 所以那两项已移除，这个菜单现在**五项全部可点**，断言也随之改成"一项都不许置灰"。
+   *
+   * 数**不写死**（这条经验是有代价的：写死 7 的那版在补了「下载」「AI 阅读」之后
+   * 比产品还旧，红的是断言不是功能）—— 只点名"该有的必须在"。
    */
-  if (menu.length < 7) bad.push(`右键菜单只有 ${menu.length} 项（本体至少 7 项）`);
-  for (const item of menu) {
-    if (item.disabled && !item.reason) bad.push(`菜单项「${item.label}」置灰但没写原因`);
+  const disabledItems = menu.filter((m) => m.disabled).map((m) => m.label);
+  if (disabledItems.length) {
+    bad.push(`⭐ 右键菜单里还有置灰项（工单 3 口径：实现 / 移除 / 降级）：${disabledItems.join(" / ")}`);
   }
   for (const need of ["复制链接", "创建副本", "删除", "问问助手", "AI 阅读", "下载"]) {
     /* 用原始文字比：`label` 把英文滤掉了，「AI 阅读」在那里会变成「 阅读」。 */
@@ -243,7 +249,7 @@ report.installedAfterRemove = lib.installed;
     bad.push(`移除之后 library.json 里还有 ${keptInstalled.length} 项：${JSON.stringify(keptInstalled)}`);
   }
 
-  verdict(bad, "云盘右键七项 + 插件管理子页成立：复制链接真进剪贴板 / 副本真落盘 / 删除有确认且取消不删 / 管理页三 tab 计数对得上 / 移除真写库");
+  verdict(bad, "云盘右键（内容齐、一项都不置灰）+ 插件管理子页成立：复制链接真进剪贴板 / 副本真落盘 / 删除有确认且取消不删 / 管理页三 tab 计数对得上 / 移除真写库");
 
   await browser.close().catch(() => undefined);
   child.kill();

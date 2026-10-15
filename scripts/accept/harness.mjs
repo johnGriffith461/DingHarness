@@ -193,7 +193,7 @@ export const NO_PAGE_HINT =
  * 而不是"端口开着"或"用 Node 服务器探一下这个端口" ——
  * 后者会误判（Node 服务器在 9579 上通，Electron 的调试服务器在那里却不答）。
  *
- * @param options 同 `bootOnce`；`port` 是首选，不通会就近换（最多 3 个）
+ * @param options 同 `bootOnce`（含 `extraArgs`）；`port` 是首选，不通会就近换（最多 3 个）
  * @returns `bootOnce` 的返回值（`port` 是**实际**用的那个）
  */
 export async function bootApp(options) {
@@ -219,12 +219,17 @@ export async function bootApp(options) {
   return { child: null, port: candidate, ok: false, getLog: () => `试过的端口都不通：${tried.join(" / ")}` };
 }
 
-async function bootOnce({ port, dataDir, extraEnv = {}, cwd = ".", timeoutMs = 30000 }) {
+async function bootOnce({ port, dataDir, extraEnv = {}, cwd = ".", timeoutMs = 30000, extraArgs = [] }) {
   const env = { ...process.env, ...extraEnv };
   delete env.ELECTRON_RUN_AS_NODE;
   env.DSH_DEBUG_PORT = String(port);
   if (dataDir) env.DSH_CANVAS_DATA_DIR = dataDir;
-  const child = spawn("node_modules/electron/dist/electron.exe", [".", `--remote-debugging-port=${port}`], {
+  /*
+   * `extraArgs`：给"要按不同启动参数跑一遍"的验收用（目前只有 DPI 矩阵：
+   * `--force-device-scale-factor=1.25` 这类）。放参数而不是另写一份 spawn ——
+   * 起应用这一整套（端口探测、CDP 握手、stderr 读掉防阻塞）就是这个文件存在的理由。
+   */
+  const child = spawn("node_modules/electron/dist/electron.exe", [".", `--remote-debugging-port=${port}`, ...extraArgs], {
     cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -414,7 +419,7 @@ export async function connectWithRetry(browserType, url, attempts = 8) {
  * 连不上就杀掉、换一个底座端口重来（最多 3 个端口）。
  *
  * @param chromium Playwright 的 `chromium`
- * @param options 同 `bootApp`（`port` 是首选，连不上会换）
+ * @param options 同 `bootApp`（含 `extraArgs`：给按不同启动参数各跑一遍的验收，如 DPI 矩阵；`port` 是首选，连不上会换）
  * @returns `{ browser, page, child, port, getLog }`
  */
 export async function openApp(chromium, options) {

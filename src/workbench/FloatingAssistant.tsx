@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Minus, MoreHorizontal, Phone, Plus, Sparkles, Volume2 } from "lucide-react";
+import { Minus, Phone, Sparkles, Volume2 } from "lucide-react";
 import { abortStream, streamChat } from "@/ai/aiClient";
 import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import type { ShellBridge } from "@shared/ipc";
@@ -23,10 +23,27 @@ import type { PathRead } from "./fileContextTypes";
  * 那正是悬浮窗想避免的。所以这里直接调 `streamChat`、自己存消息。
  */
 
+/*
+ * ⚠️ 三颗死按钮已移除（2026-10-15，M0 工单 3）：头部那颗「更多」（无更多菜单）、
+ * 底栏的「添加附件」（没接原生文件对话框）与底栏又一颗「更多」。
+ * 原来它们都是 `disabled` + 一句"本机版没有/还没做" —— 工单口径不允许留这种形态：
+ * 要么实现、要么移除、要么降级成非交互元素。这三颗本机版都没有对应能力，所以移除。
+ * 真做出来的时候它们会带着真能力回来（附件要走已经存在的那套导入通道）。
+ */
+
 type Bubble = { id: string; role: "user" | "assistant"; text: string };
 
-/** 面板默认位置与尺寸（照实机量出来的比例）。 */
-const DEFAULT_POS = { x: 610, y: 30 };
+/**
+ * 浮窗上边不能越过的线 = 自绘标题栏的高度（`shell.css` 的 `--win-titlebar-h`）。
+ *
+ * 为什么要有这条下界（2026-10-15）：标题栏是窗口的拖动区，而且它压在最上面
+ * （z-index 90）—— 浮窗钻进那一条就会**被它盖住**，连浮窗自己的标题栏
+ * （拖动手柄 + 最小化/关闭）都一起没了。默认位置原来就是 `y: 30`，正好落在里面。
+ */
+const FLOAT_MIN_Y = 36;
+
+/** 面板默认位置与尺寸（照实机量出来的比例）。`y` 落在标题栏之下，见 `FLOAT_MIN_Y`。 */
+const DEFAULT_POS = { x: 610, y: FLOAT_MIN_Y + 12 };
 const SIZE = { width: 400, height: 600 };
 
 export default function FloatingAssistant({ onClose, seed }: { onClose: () => void; seed?: string }) {
@@ -69,12 +86,13 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
     /*
      * 夹在窗口内：不夹的话面板能被拖到屏幕外，用户再也找不回来 ——
      * 一个拖不回来的浮窗比不能拖更糟。至少留 80px 在窗口里。
+     * 上边另有一条下界（见 `FLOAT_MIN_Y`）：不许钻进标题栏那一条。
      */
     const maxX = window.innerWidth - 80;
-    const maxY = Math.max(0, window.innerHeight - 40);
+    const maxY = Math.max(FLOAT_MIN_Y, window.innerHeight - 40);
     setPos({
       x: Math.min(Math.max(0, event.clientX - drag.dx), maxX),
-      y: Math.min(Math.max(0, event.clientY - drag.dy), maxY),
+      y: Math.min(Math.max(FLOAT_MIN_Y, event.clientY - drag.dy), maxY),
     });
   }, []);
 
@@ -211,9 +229,6 @@ ${block}` : value;
         >
           <Volume2 size={14} />
         </button>
-        <button className="wb-icon" aria-label="更多" title="更多（本机版没有更多菜单）" disabled>
-          <MoreHorizontal size={14} />
-        </button>
         <button className="wb-icon" title="关闭" data-testid="wb-float-close" onClick={onClose}>
           ✕
         </button>
@@ -258,14 +273,8 @@ ${block}` : value;
               }}
             />
             <div className="wb-float-bar">
-              <button className="wb-icon" aria-label="添加附件" title="添加附件（本机版还没接原生文件对话框）" disabled>
-                <Plus size={15} />
-              </button>
               <button className="wb-chip">
                 <Sparkles size={12} /> 本地电脑
-              </button>
-              <button className="wb-icon" aria-label="更多" title="更多（本机版没有更多菜单）" disabled>
-                <MoreHorizontal size={15} />
               </button>
               <span className="wb-spacer" />
               <span className="wb-float-level">低</span>

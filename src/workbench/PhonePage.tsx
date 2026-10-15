@@ -5,7 +5,8 @@
 
 import { useEffect, useState } from "react";
 import type { ShellBridge } from "@shared/ipc";
-import { Check, Clock, List, Monitor, Smartphone } from "lucide-react";
+import { Check, Clock, Monitor, Smartphone } from "lucide-react";
+import { NavCollapseButton } from "./NavCollapseButton";
 
 export function PhonePage() {
   const bridge = (window as unknown as { shell?: ShellBridge }).shell;
@@ -47,10 +48,7 @@ export function PhonePage() {
   return (
     <section className="wb-page" data-testid="wb-page-phone">
       <header className="wb-page-head">
-        {/* 侧栏折叠：本机版还没做（参考实现里有）—— 标 disabled，不装作能用（§125/§126） */}
-<button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
-          <List size={15} />
-        </button>
+<NavCollapseButton />
         <span className="wb-spacer" />
         {!loaded ? <em className="wb-phone-loading">读取本机状态…</em> : null}
       </header>

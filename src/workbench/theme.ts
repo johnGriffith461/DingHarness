@@ -71,17 +71,6 @@ export function resolvesToDark(theme: Theme, prefersDark: boolean): boolean {
  * @param dark 是否渲染成深色
  */
 /**
- * 标题栏覆盖层（窗口右上角三个按钮所在的条）的两套配色。
- *
- * 这两组值必须与 `.wb` / `.wb.is-dark` 的底色对上 —— 对不上的表现就是
- * "窗口按钮那一块和整体颜色不一致"。
- */
-const TITLEBAR = {
-  light: { color: "#ffffff", symbolColor: "#1b1d21" },
-  dark: { color: "#11141a", symbolColor: "#c9d1d9" },
-} as const;
-
-/**
  * Ding Harness 提案 §05「主题切换：为什么不是渐变过去」（motion.css THREE-A）。
  *
  * 翻转主题会同时改掉几乎每个元素的 color / background / border / shadow ——
@@ -133,12 +122,11 @@ export function applyDark(dark: boolean): void {
   });
 
   /*
-   * 标题栏覆盖层是**主进程**的窗口选项，改不了 CSS —— 得走 IPC。
-   * 不通知的话它会一直停在创建时那个颜色（深色），
-   * 于是浅色主题下窗口按钮仍是一块深色。
+   * ⚠️ 这里**曾经**还要走一条 IPC 去改标题栏覆盖层的配色（`shell.setTitlebar`）——
+   * 因为那套原生按钮是**主进程**画的窗口选项，CSS 够不着。
+   * 2026-10-15 覆盖层删掉、窗口按钮改由应用自绘之后（M0 工单 1），
+   * 配色归 CSS 令牌管，这条路整条不需要了。
    */
-  const shell = (globalThis as { shell?: { setTitlebar?: (p: unknown) => void } }).shell;
-  shell?.setTitlebar?.(dark ? TITLEBAR.dark : TITLEBAR.light);
 }
 
 /**

@@ -17,6 +17,17 @@
   display: flex;
   background: var(--bg);
   color: var(--fg);
+  /*
+   * 顶部让出标题栏那一条（自绘窗口按钮，见 `shell.css` 的 `.wb-titlebar`）。
+   *
+   * ⚠️ 这一条**不是装饰**：`.wb-titlebar` 同时是窗口的拖动区
+   * （`titleBarStyle: "hidden"` 之后没有系统标题栏，全靠 `-webkit-app-region: drag`），
+   * 而拖动区会吃掉落在它底下的点击。让出这一条，它就永远压在空处 ——
+   * 否则「云盘 / 插件 / 定时任务」那些顶部按钮又会变成点不动
+   * （`FloatingAssistant.tsx:52` 记过同一类故障）。
+   * 窗体拖动、四操作与"底下不得有可点元素"的断言见 `src/windowChrome.test.ts`。
+   */
+  padding-top: var(--win-titlebar-h);
   /* ⚠️ 工作台字体的**实际生效点**：这一行覆盖 body 的继承（提案 §08 冲突点 1）。
      只改 body 不改这里 = 工作台里所有文字都不跟着变。 */
   font: 13px/1.6 var(--dh-font-text);
@@ -37,6 +48,25 @@
    * "高度只声明一次，描边或阴影"。两套一起上只会显得脏。
    */
   min-height: 0;
+}
+
+/*
+ * 左栏收起（2026-10-15，M0 工单 3）。
+ *
+ * 塌成 0 宽、不占列 —— 与右栏「对话摘要」收起时同一套几何（那边见
+ * `ding-harness-shell.css` 的 `.wb-summary.is-collapsed`）。
+ *
+ * ⚠️ 为什么这里**不需要**浮标：右栏收起时把它自己的头部一起收掉了，所以要在右缘挂一颗
+ * 浮标当展开入口；而左栏这颗开关按钮在**页面头部**（主区里），左栏收成 0 宽之后
+ * 它照样在。多挂一颗浮标反而会多一个"两个入口"的歧义。
+ */
+.wb-nav.is-collapsed {
+  width: 0;
+  flex: 0 0 0;
+  overflow: hidden;
+}
+.wb-nav.is-collapsed > * {
+  display: none;
 }
 
 .wb-nav-head {

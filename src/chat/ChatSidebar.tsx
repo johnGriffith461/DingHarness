@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, AtSign, MessageSquarePlus, RotateCcw, Send, Square } from "lucide-react";
+import { AlertTriangle, AtSign, MessageSquarePlus, PanelLeftClose, RotateCcw, Send, Square } from "lucide-react";
 import { useChatStore } from "@/ai/chatStore";
 import { hasShellBridge } from "@/ai/aiClient";
 import { useRuntimeStore } from "@/canvas/runtimeStore";
@@ -19,7 +19,7 @@ import {
  * 流式内容直接来自 store，本组件不做缓冲 —— 缓冲统一放在 store 里做，
  * 避免"组件里也节流一份"导致两处行为不一致。
  */
-export default function ChatSidebar() {
+export default function ChatSidebar({ onClose }: { onClose?: () => void } = {}) {
   const {
     conversations,
     activeId,
@@ -130,6 +130,22 @@ export default function ChatSidebar() {
     <aside className="side left">
       <div className="side-head">
         <span>对话</span>
+        {/*
+          收起的入口。原来**只有**那颗贴在侧栏右缘的 16px 小把手（`.wb-canvas-chat-toggle`，
+          画着 `‹`）—— 既容易看漏，又像"往左导航"而不是"收起"。
+          与右栏「对话摘要」用**同一颗带字的「收起」**（`SummaryPanel` 那边也是这么改的，
+          主人 2026-10-14 的原话：「点一下面板按钮就打开了，然后怎么关呢？」）——
+          两个右侧面板长一样，用户学一次就够。
+        */}
+        <button
+          className="wb-summary-collapse"
+          data-testid="wb-chat-collapse"
+          aria-label="收起画布对话"
+          title="收起画布对话"
+          onClick={() => onClose?.()}
+        >
+          <PanelLeftClose size={13} /> 收起
+        </button>
         <button className="side-icon" onClick={() => newConversation()} title="新会话">
           <MessageSquarePlus size={14} />
         </button>

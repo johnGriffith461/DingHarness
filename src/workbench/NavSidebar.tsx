@@ -78,6 +78,8 @@ export function NavSidebar() {
   const setView = useWorkbenchStore((s) => s.setView);
   const openTask = useWorkbenchStore((s) => s.openTask);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 左栏收起（工单 3）：状态在 store 里，六个页面的那颗按钮共用一个开关。 */
+  const navCollapsed = useWorkbenchStore((s) => s.navCollapsed);
   /*
    * 账号头像点开的是**下拉菜单**（不是直接开设置弹窗）——
    * 本体就是这样：菜单里有 设置 / 外观设置 / 收藏夹 / 官网 / 检查更新 /
@@ -119,7 +121,7 @@ export function NavSidebar() {
   const looseTasks = tasks.filter((t) => !lib.projects.some((p) => p.memberIds.includes(t.id)));
 
   return (
-    <aside className="wb-nav" data-testid="wb-nav">
+    <aside className={`wb-nav${navCollapsed ? " is-collapsed" : ""}`} data-testid="wb-nav">
       <div className="wb-nav-head">
         <BrandMark />
         <button className="wb-icon" aria-label="后退" title="后退" disabled>

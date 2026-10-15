@@ -1,6 +1,6 @@
 {
   "name": "ding-harness",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Ding Harness —— 本机优先的桌面 Agent 工作台（内核 + GUI/CLI 双宿主）",
   "license": "MIT",
@@ -23,7 +23,9 @@
     "vendor:models": "node scripts/vendor-models.mjs",
     "verify:accept": "node scripts/verify-acceptances.mjs",
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
-    "verify:packaged": "node scripts/verify-packaged.mjs"
+    "verify:packaged": "node scripts/verify-packaged.mjs",
+    "perf:budget": "tsx scripts/perf-budget.ts",
+    "eval": "tsx hosts/cli/ding.ts eval"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

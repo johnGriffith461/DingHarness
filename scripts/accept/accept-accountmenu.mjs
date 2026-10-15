@@ -89,34 +89,26 @@ try {
     return rows;
   });
   out.rowIds = (out.rowKinds ?? []).map((r) => r.id);
-  /** 应当存在的九项（本体口径，见 §107 / R1）。 */
-  out.expectIds = [
-    "wb-acct-settings",
-    "wb-acct-appearance",
-    "wb-acct-starred",
-    "wb-acct-site",
-    "wb-acct-update",
-    "wb-acct-help",
-    "wb-acct-quota",
-    "wb-acct-add",
-    "wb-acct-logout",
-  ];
+  /** 应当存在的项（2026-10-15 收窄，见下面 `removedRows`）。 */
+  out.expectIds = ["wb-acct-settings", "wb-acct-appearance", "wb-acct-starred", "wb-acct-quota"];
   out.missingRows = out.expectIds.filter((id) => !out.rowIds.includes(id));
   /*
-   * "假按钮"的可验证口径（第一版写成"没 title 就算假"，**是错的**：真按钮不需要 title）：
-   *   · **壳**（本机版没有那个能力）必须是 `disabled` **且带 title 说明为什么** ——
-   *     这正是手册那条"杜绝假按钮：界面保持 disabled 且有说明"；
-   *   · **真入口**（设置 / 外观设置 / 收藏夹）不许被禁掉。
+   * ⚠️ 口径在 2026-10-15 变了（M0 工单 3）——**这条判据反了过来**。
+   *
+   * 原来这里钉的是"五个壳必须 `disabled` **且**带 title 说明为什么"，
+   * 依据是手册那条"界面保持 disabled 且有说明"。
+   * 工单把这条口径改成：逐项三选一（实现 / 移除 / 降级为非交互元素），
+   * **不允许留下"disabled + 借口"** —— 因为对用户来说，一颗**看得见、点不动、
+   * 悬停才说一句为什么**的菜单项，和坏掉没有区别。
+   *
+   * 这五项（官网 / 检查更新 / 帮助与反馈 / 添加账号 / 退出登录）本机版都没有目的地，
+   * 所以按"移除"办：**它们不该再出现在菜单里**。
    */
-  out.shellRows = ["wb-acct-site", "wb-acct-update", "wb-acct-help", "wb-acct-add", "wb-acct-logout"];
+  out.removedRows = ["wb-acct-site", "wb-acct-update", "wb-acct-help", "wb-acct-add", "wb-acct-logout"];
+  out.stillPresent = (out.rowKinds ?? []).filter((r) => out.removedRows.includes(r.id)).map((r) => r.id);
   out.realRows = ["wb-acct-settings", "wb-acct-appearance", "wb-acct-starred"];
-  out.shellNotDisabled = (out.rowKinds ?? [])
-    .filter((r) => out.shellRows.includes(r.id) && !r.disabled)
-    .map((r) => r.id);
-  out.shellNoReason = (out.rowKinds ?? [])
-    .filter((r) => out.shellRows.includes(r.id) && r.disabled && !r.title)
-    .map((r) => r.id);
   out.realDisabled = (out.rowKinds ?? []).filter((r) => out.realRows.includes(r.id) && r.disabled).map((r) => r.id);
+  /** 菜单里**一个禁用项都不该有**（额度用量那一行不是 button，不在这个查询里）。 */
   out.disabledRows = (out.rowKinds ?? []).filter((r) => r.disabled).map((r) => r.id);
 
   // 3) 外观设置 → 子菜单三选一
@@ -175,16 +167,16 @@ try {
   child.kill();
 
   /*
-   * 判定（2026-10-13 补：这九项的 testid 原来一个都没被脚本引用过 —— 见上面说明）。
-   * 两条都是**可证伪**的：少一项就红；"壳"没 disabled、或 disabled 却不说为什么也红。
+   * 判定（2026-10-13 立，2026-10-15 按 M0 工单 3 的口径改了方向）。
+   * 两条都是**可证伪**的：该有的少一项就红；该移除的还在、或菜单里出现任何禁用项，也红。
    */
   const bad = [];
   if ((out.missingRows ?? []).length) bad.push(`账号菜单少了这些项：${out.missingRows.join(" / ")}`);
-  if ((out.shellNotDisabled ?? []).length) {
-    bad.push(`⭐ 这些"壳"没被 disabled（点下去没反应 = 假按钮）：${out.shellNotDisabled.join(" / ")}`);
+  if ((out.stillPresent ?? []).length) {
+    bad.push(`⭐ 这些"壳"本该移除却还在（看得见、点不动 = 用户眼里的坏按钮）：${out.stillPresent.join(" / ")}`);
   }
-  if ((out.shellNoReason ?? []).length) {
-    bad.push(`⭐ 这些"壳"disabled 了却没说为什么（title 为空）：${out.shellNoReason.join(" / ")}`);
+  if ((out.disabledRows ?? []).length) {
+    bad.push(`⭐ 账号菜单里还有禁用项（工单 3 口径：实现 / 移除 / 降级，不留"disabled + 借口"）：${out.disabledRows.join(" / ")}`);
   }
   if ((out.realDisabled ?? []).length) bad.push(`⭐ 这些是真入口却被禁掉了：${out.realDisabled.join(" / ")}`);
   if (!out.reloadKeptLight) {
@@ -195,6 +187,6 @@ try {
     console.error("✗ " + bad.join("；"));
     process.exitCode = 1;
   } else {
-    console.log("✓ 账号菜单九项齐全 / 五个壳都 disabled 且有说明 / 三个真入口可用 / 外观三选一 + 刷新后保持");
+    console.log("✓ 账号菜单：真入口都在（设置/外观/收藏夹/额度用量）/ 五个没目的的壳已移除 / 菜单里无禁用项 / 外观三选一 + 刷新后保持");
   }
 }

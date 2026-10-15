@@ -9,7 +9,8 @@ import { SEARCH_LABELS, hitLabel, placeholderFor, searchItems } from "@shared/se
 import { MCP_LABELS } from "@shared/mcp";
 import { SearchHistoryStrip } from "./SearchHistoryStrip";
 import { useSearchHistoryStore } from "./searchHistoryStore";
-import { Check, ChevronDown, List, Plus, Search, Settings2, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Search, Settings2, X } from "lucide-react";
+import { NavCollapseButton } from "./NavCollapseButton";
 import { ADMIN_TABS } from "./copy";
 import { FEATURED_ITEMS, RECOMMENDED_PLUGINS, SKILL_GROUPS, type CatalogItem } from "./catalog";
 import { catalogIcon } from "./catalogIcon";
@@ -506,10 +507,7 @@ export function PluginsPage() {
   return (
     <section className="wb-page" data-testid="wb-page-plugins">
       <header className="wb-page-head">
-        {/* 侧栏折叠：本机版还没做（参考实现里有）—— 标 disabled，不装作能用（§125/§126） */}
-<button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
-          <List size={15} />
-        </button>
+<NavCollapseButton />
         <div className="wb-tabs" data-testid="wb-plugin-tabs">
           {ADMIN_TABS.map((t) => (
             <button

@@ -91,3 +91,59 @@ jobs:
       # · `electron-builder` 打包：CI 不出安装包（出包在 `pnpm build` 里做）。
       # · 任何真调模型的脚本（`.verify/ai-smoke.mjs`、`accept-chatartifact.mjs` 等）：
       #   **一条都不跑**。真调模型的能力单独手动跑，见 `.verify/ATTACH-ONLY.md` 的三问。
+
+  # ── 开箱冒烟（M0 工单 4 机制 2：install → launch → 主路径点击）──
+  #
+  # 为什么**单独一个 job**，而不是并进上面那组纯 node 的门：
+  # 它要**真起一次 Electron**（仓库里其余 Playwright 验收都刻意不进 CI，理由见上面那一段：
+  # 耗时、历史上偏 flaky）。分开跑有两个好处：主门仍然秒级、且"哪一层红了"一眼看得出来。
+  #
+  # 它**一条模型都不调**（全走本地 UI 与空态），`DSH_NO_REAL_MODEL` 再兜一层。
+  # 依赖主门通过才跑 —— 单测都红的时候没必要再起应用。
+  #
+  # ⚠️ 如实记下边界：这个 job 是 2026-10-15 新加的，**第一次跑的结果要以 CI 为准**。
+  # 若它在 CI 上偶发红（起不来 / CDP 连不上），先看 `.verify/accept-smoke-data/` 与应用日志，
+  # 判断是环境还是产品 —— 这台机器上"某段回环端口对 Electron 不通"的坑，
+  # `harness.mjs` 的 `pickPort` / `bootApp` 已经换端口重试兜过一层，但 CI 的网络栈与这里不同。
+  smoke:
+    needs: gates
+    runs-on: windows-latest
+    env:
+      CI: "true"
+      DSH_NO_REAL_MODEL: "1"
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 装 Node（跟本机一致：24.x LTS）
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: 装 pnpm（版本取自 package.json 的 packageManager）
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: 装依赖（锁文件为准）
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建渲染产物与主进程
+        # 冒烟跑的是**真应用**，所以先把 dist/ 与 dist-electron/ 建出来。
+        # 不打包（不出安装包）—— 这一步只为了让应用起得来。
+        run: |
+          pnpm build:web
+          pnpm electron:build
+
+      - name: 开箱冒烟
+        # 一次启动走完：启动 → 窗口（自绘标题栏 + 三个按钮）→ 左栏 → 右栏 → 画布 → 设置 → 主路径
+        run: node scripts/accept/accept-smoke.mjs
+
+      - name: 失败时把应用日志带上来
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            .verify/accept-smoke-data/
+          if-no-files-found: ignore

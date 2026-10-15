@@ -1,0 +1,31 @@
+{
+  "rate": 100,
+  "total": 28,
+  "byCategory": {
+    "纯对话": {
+      "total": 5,
+      "passed": 5
+    },
+    "工具调用": {
+      "total": 6,
+      "passed": 6
+    },
+    "闸门审批": {
+      "total": 5,
+      "passed": 5
+    },
+    "子智能体": {
+      "total": 4,
+      "passed": 4
+    },
+    "多 agent 协作": {
+      "total": 4,
+      "passed": 4
+    },
+    "上下文压缩": {
+      "total": 4,
+      "passed": 4
+    }
+  },
+  "generatedAt": "2026-10-15T04:51:07.864Z"
+}

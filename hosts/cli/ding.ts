@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,14 +10,15 @@ import { cliSessionId, logLine, splitTurns, type LogRecord } from "../../engine/
 import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
-import type { ToolExecutor } from "../../engine/ports/executor";
-import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } from "../../engine/runtime/registry";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
 import { describeBudget } from "../../engine/runtime/budget";
 import { modelInfoOf } from "../../engine/runtime/models";
 import { budgetOf } from "../../engine/runtime/budget";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
-import { createCliExecutor } from "./tools";
+import { buildEngine as buildEngineIn } from "./assembly";
+import { EVAL_CASES } from "../../engine/eval/cases";
+import { runSuite } from "../../engine/eval/run";
+import { EVAL_CATEGORIES } from "../../engine/eval/types";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
 import { flag, flagAll, parseArgv, type Parsed } from "./args";
@@ -33,7 +35,7 @@ import {
   setEnabled,
   uninstall,
 } from "../../engine/adapters/pluginStore";
-import { loadEnabledPlugins, loadedPlugins, pluginToolEntries, withheldCapabilities } from "../../engine/runtime/pluginHost";
+import { loadEnabledPlugins, loadedPlugins, withheldCapabilities } from "../../engine/runtime/pluginHost";
 import { ENFORCED_PERMISSIONS, PLUGIN_PERMISSIONS, checkManifest, type PluginPermission } from "../../engine/runtime/plugins";
 import { AGENT_SPECS } from "../../engine/runtime/agents";
 
@@ -78,24 +80,6 @@ function workspaceDirs(extra: readonly string[]): string[] {
   return (extra.length ? extra : [process.cwd()]).map((d) => path.resolve(d));
 }
 
-/**
- * CLI 登记哪些内置工具。
- *
- * ⚠️ 挑的是"这个宿主**真能执行**的"：记忆 / 定时任务 / 画布落到**桌面界面的 store** 上，
- * CLI 登记它们等于登记三个必然失败的按钮。
- */
-const CLI_TOOLS = [
-  "list_files",
-  "read_file",
-  "write_file",
-  "list_dir",
-  "search_files",
-  "edit_file",
-  "run_command",
-  "spawn_agent",
-  "spawn_agents",
-] as const;
-
 /* ────────────────────── 终端输出（走投影） ────────────────────── */
 
 /** 工具留痕缩进（比正文退一格：读起来是"这句话底下发生的事"）。 */
@@ -138,10 +122,7 @@ function budgetInfo(modelId: string): Record<string, unknown> {
   };
 }
 
-/** 内置（限本宿主能跑的那批）+ 插件，进同一张注册表。 */
-function createRegistryWithPlugins(pluginEntries: readonly ToolEntry[]): ToolRegistry {
-  return createToolRegistry({ include: CLI_TOOLS, extra: pluginEntries });
-}
+/* 装配（CLI_TOOLS / buildEngine / 注册表来源）已搬到 ./assembly.ts —— 见那里的说明。 */
 
 /**
  * 建一个供本次运行使用的引擎。
@@ -154,44 +135,11 @@ function createRegistryWithPlugins(pluginEntries: readonly ToolEntry[]): ToolReg
  * 运行期没有 null 检查。
  */
 async function buildEngine(dirs: readonly string[]): Promise<{ engine: Engine; close: () => void; plugins: string[] }> {
-  const store = createSqliteSessionStore(dataDir());
-
-  let makeTools: ((mode: ConfirmMode, depth: number, provider: string, signal?: AbortSignal, only?: readonly string[]) => ReturnType<typeof buildToolSet>) | null = null;
-  const executor: ToolExecutor = createCliExecutor({
-    dirs,
-    makeTools: (mode, depth, provider, signal, only) => {
-      if (!makeTools) throw new Error("工具集还没装配好（不应该发生）");
-      return makeTools(mode, depth, provider, signal, only);
-    },
-  });
-
   /*
-   * 插件（Phase 8.3）：把台账里**开着**的装载起来，它们的工具与内置工具进**同一个注册表**。
-   *
-   * ⚠️ 装载失败**不拦着跑**：一个坏插件不该让 CLI 起不来（`problems` 打出来给用户看）。
+   * 装配在 `./assembly.ts`（Phase 10 拆出来的）—— 评测器要**用同一份装配**跑，
+   * 自己拼一套端口就等于绕开产品那条路。这里只负责把本宿主的数据目录传进去。
    */
-  const paths = pluginPaths(dataDir());
-  const loaded = await loadEnabledPlugins(readLedger(paths).ledger.installed);
-  const plugins = loaded.flatMap((p) => (p.problems.length ? p.problems.map((x) => `${p.name}：${x}`) : []));
-  const pluginEntries = pluginToolEntries();
-
-  /*
-   * 注册表带**两个来源**：内置（`include` 限定的那批）+ 插件。
-   * ⚠️ 插件走 `include` 会被滤掉（它只筛内置），所以必须显式并进来 ——
-   * 这正是"三个来源统一注册"的落点（builtin / mcp / plugin 都在这张表里）。
-   */
-  const registry = createRegistryWithPlugins(pluginEntries);
-  makeTools = (mode, depth, provider, signal, only) =>
-    buildToolSet({
-      registry,
-      mode,
-      executor,
-      ctx: { mode, provider, depth, ...(signal ? { signal } : {}) },
-      ...(only ? { only } : {}),
-    });
-
-  const engine = createEngine({ store, executor, include: CLI_TOOLS, tools: pluginEntries });
-  return { engine, close: () => store.close(), plugins };
+  return buildEngineIn(dirs, dataDir());
 }
 
 /* ────────────────────── 命令 ────────────────────── */
@@ -700,6 +648,127 @@ function cmdAgents(p: Parsed = { command: "", args: [], flags: new Map() }): num
   return 0;
 }
 
+/* ────────────────────── eval（Phase 10） ────────────────────── */
+
+/**
+ * 仓根。
+ *
+ * ⚠️ 两条路都要留：**打包后的 CLI 是 CJS**（有 `__dirname`），
+ * 而 `pnpm ding` 走 tsx（ESM，没有 `__dirname` —— 用它会 ReferenceError）。
+ * `typeof __dirname` 在 ESM 下不会抛（对未声明标识符取 typeof 是安全的）。
+ */
+function repoRoot(): string {
+  /*
+   * 往上找 `engine/eval/cases.ts` —— 而不是"从 cwd 上两级"或"从 __dirname 上两级"：
+   * 那两条各只对一种跑法（tsx 从仓根跑 / 打包后的 dist-cli/hosts/cli），换一种就指错地方
+   * （实测撞过：写基线写到了 `C:\engine\evalaseline.json`）。
+   * 找标记文件对两种跑法都对。
+   */
+  const starts = [process.cwd(), ...(typeof __dirname === "string" ? [__dirname] : [])];
+  for (const start of starts) {
+    let dir = path.resolve(start);
+    for (let i = 0; i < 6; i += 1) {
+      if (fsSync.existsSync(path.join(dir, "engine", "eval", "cases.ts"))) return dir;
+      dir = path.dirname(dir);
+    }
+  }
+  return process.cwd();
+}
+
+/**
+ * 基线落哪（**进版本库**）。
+ *
+ * ⚠️ 不放 `docs/`：那个目录被 `.gitignore` 排除了（内部施工笔记不入公开仓，2026-10-15 的决定）。
+ * 基线必须跟着版本走 —— 它是"通过率不许往下掉"的那个参照。
+ */
+function evalBaselinePath(): string {
+  return path.join(repoRoot(), "engine", "eval", "baseline.json");
+}
+
+/**
+ * `ding eval [suite] [--json] [--update-baseline]`（Phase 10.2）。
+ *
+ * ## 它为什么必须离线
+ *
+ * 评测要**能进 CI、能天天跑**，所以一条真 provider 都不调：用例自带脚本化的模型回复
+ * （`engine/eval/fakeProvider.ts` 起一个本地的 OpenAI 兼容 SSE 服务），
+ * 于是被测的是**真代码路径**（真 SDK、真流解析、真工具往返、真闸门），
+ * 只是"模型"那一段是确定性的。
+ *
+ * ## 它与 `engine/eval/eval.test.ts` 的关系
+ *
+ * **同一个 `runSuite`**：那条在 CI 里当门（通过率跌超 5% 即红），这条给人看报告。
+ * 一个跑、一个看 —— 不会出现"CI 判的与命令行看到的不一样"。
+ *
+ * @param p 解析后的参数
+ * @returns 退出码（有失败 = 1）
+ */
+async function cmdEval(p: Parsed): Promise<number> {
+  const only = p.args[0];
+  if (only && !EVAL_CATEGORIES.includes(only as (typeof EVAL_CATEGORIES)[number])) {
+    process.stderr.write(`没有这一类评测集：${only}\n可选：${EVAL_CATEGORIES.join(" / ")}\n`);
+    return 2;
+  }
+  const cases = only ? EVAL_CASES.filter((c) => c.category === only) : EVAL_CASES;
+  if (!cases.length) {
+    process.stderr.write("这一类还没有用例。\n");
+    return 2;
+  }
+
+  const report = await runSuite(
+    cases,
+    {
+      /*
+       * ⚠️ 每个用例一个临时工作目录 + 一个临时数据目录：**绝不碰真实 userData**。
+       * CLI 的 `ding run` 用的是真实数据目录，而评测是"可重复的检查"，
+       * 写进真实目录会让下一轮的先决条件变掉（前几条用例跑的产物变成后几条的既有状态）。
+       */
+      makeEngine: async (workDir) => {
+        const storeDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "dh-eval-store-"));
+        const built = await buildEngineIn([workDir], storeDir);
+        return {
+          engine: built.engine,
+          close: () => {
+            built.close();
+            fsSync.rmSync(storeDir, { recursive: true, force: true });
+          },
+        };
+      },
+      sessionPrefix: "eval",
+    },
+    (r, i, total) => {
+      if (p.flags.has("json")) return;
+      process.stdout.write(`${r.ok ? "✓" : "✗"} [${i}/${total}] ${r.id}  ${r.title}\n`);
+      for (const f of r.failures) process.stdout.write(`     ${f.what}：${f.detail}\n`);
+    },
+  );
+
+  if (p.flags.has("json")) {
+    process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+  } else {
+    process.stdout.write(`\n共 ${report.total} 条，通过 ${report.passed}，失败 ${report.failed}，通过率 ${report.rate}%\n`);
+    for (const [category, slot] of Object.entries(report.byCategory)) {
+      process.stdout.write(`  ${category}：${slot.passed}/${slot.total}\n`);
+    }
+  }
+
+  /* 基线：`--update-baseline` 落盘；否则只比对并提示（判定在单测里，这里给人看） */
+  const baselineFile = evalBaselinePath();
+  if (p.flags.has("update-baseline")) {
+    const payload = { rate: report.rate, total: report.total, byCategory: report.byCategory, generatedAt: new Date().toISOString() };
+    fsSync.writeFileSync(baselineFile, JSON.stringify(payload, null, 2) + "\n", "utf8");
+    process.stdout.write(`基线已更新：${baselineFile}\n`);
+  } else if (fsSync.existsSync(baselineFile)) {
+    const baseline = JSON.parse(fsSync.readFileSync(baselineFile, "utf8")) as { rate: number };
+    const drop = baseline.rate - report.rate;
+    if (drop > 5) process.stderr.write(`⚠️ 通过率比基线跌了 ${drop.toFixed(1)} 个百分点（${baseline.rate}% → ${report.rate}%）\n`);
+  } else {
+    process.stdout.write(`（还没有基线：跑 \`ding eval --update-baseline\` 落一份）\n`);
+  }
+
+  return report.failed ? 1 : 0;
+}
+
 function cmdHelp(devMode = false): number {
   process.stdout.write(
     [
@@ -708,6 +777,7 @@ function cmdHelp(devMode = false): number {
       '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
+      "  ding eval [类别] [--json] [--update-baseline]  # 离线评测集（不烧 token，可进 CI）",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|install <目录|npm:包名> --yes|enable|disable|remove|doctor]",
@@ -811,7 +881,9 @@ async function main(): Promise<void> {
               ? cmdModels(parsed)
               : parsed.command === "plugins"
                 ? await cmdPlugins(parsed)
-                : parsed.command === "config"
+                : parsed.command === "eval"
+                  ? await cmdEval(parsed)
+                  : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"
                     ? cmdAgents(parsed)

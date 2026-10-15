@@ -243,17 +243,26 @@ export type ShellBridge = {
     clear: () => Promise<unknown>;
   };
   /**
-   * 让窗口标题栏覆盖层跟随主题（Windows 上的标题栏是自绘的）。
+   * 窗口控制（自绘标题栏的三个按钮）。
    *
-   * ⚠️ 它原来**只存在于 preload**（`electron/preload.ts`），契约里没有 ——
-   * 正是手册点名的两处漂移之一（另一处是 `memory`，已补）。漂移不会有任何报错，
-   * 只会表现为"类型说有、实际没有"或反过来。C4 给 preload 加上
-   * `satisfies ShellBridge` 之后，这条立刻被 `tsc` 顶了出来。
+   * ⚠️ 这里**没有** `setTitlebar` 了（2026-10-15 删，M0 工单 1）：它服务的是
+   * `titleBarOverlay` —— Windows 在窗体顶部覆盖层里画的那套**原生** caption 按钮。
+   * 那套按钮固定在右上角约 138×36，而「云盘 / 插件·技能·伙伴 / 定时任务」三个视图
+   * 自己的操作按钮就在同一处（`wb-cloud-new` 等，x=1359..1426），被压住半个字 ——
+   * 用户报的「右上角按钮重复显示」。覆盖层已删，按钮改由应用自绘、配色归 CSS，
+   * 这条改配色的通路整条撤掉（删不干净就会留下一条"调了没反应"的死通路）。
    *
-   * @param payload 覆盖层底色与符号色
-   * @returns 主进程是否设置成功
+   * 契约里**必须**留着这一组：删掉覆盖层之后，右上角就只剩这几个按钮了。
    */
-  setTitlebar: (payload: { color: string; symbolColor: string }) => Promise<boolean>;
+  win: {
+    minimize: () => Promise<void>;
+    /** 最大化 ⇄ 还原；返回**操作后**的真实状态（不要回意图，图标会撒谎）。 */
+    toggleMaximize: () => Promise<boolean>;
+    close: () => Promise<void>;
+    isMaximized: () => Promise<boolean>;
+    /** 订阅最大化状态变化（双击标题栏 / Win+↑ / Snap 都会触发）。 */
+    onMaximizedChange: (listener: (maximized: boolean) => void) => () => void;
+  };
   ai: {
     listProviders: () => Promise<ProviderInfo[]>;
     /** 主动探测真实连通性（较慢，只在用户触发时跑）。 */

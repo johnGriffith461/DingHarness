@@ -4,7 +4,8 @@
  */
 
 import { useEffect, useState } from "react";
-import { Blocks, Check, ChevronDown, Cloud, FolderOpen, List, Plus, Sparkles } from "lucide-react";
+import { Blocks, Check, ChevronDown, Cloud, FolderOpen, Plus, Sparkles } from "lucide-react";
+import { NavCollapseButton } from "./NavCollapseButton";
 import { SCHEDULED_RECOMMEND, SCHEDULED_SERVED_IDS, SCHEDULE_COMPOSER_PLACEHOLDER } from "./copy";
 import { useScheduleStore } from "./scheduleStore";
 import { useWorkbenchStore } from "./store";
@@ -117,10 +118,7 @@ export function ScheduledPage() {
   return (
     <section className="wb-page" data-testid="wb-page-scheduled">
       <header className="wb-page-head">
-        {/* 侧栏折叠：本机版还没做（参考实现里有）—— 标 disabled，不装作能用（§125/§126） */}
-<button className="wb-icon" aria-label="打开/收起左侧栏" title="打开/收起左侧栏（本机版还没做折叠）" disabled>
-          <List size={15} />
-        </button>
+<NavCollapseButton />
         <span className="wb-page-title" />
         {note ? (
           <span className="wb-sched-note" data-testid="wb-sched-note">
@@ -335,33 +333,39 @@ export function ScheduledPage() {
 
       {/*
         ⚠️ 这一条输入区是**照本体截图摆的样子**，但本机版没有"用一句话安排任务"的后端
-        （定时任务的创建在上面那个表单里）——
-        所以里面这几颗按钮**没有一个是能点的**。原来它们既不 disabled、也没有 title：
-        点了毫无反应，用户只会以为坏了（§124 "死按钮"审计报的就是这类）。
-        现在如实标注：整条标 `aria-disabled` + 逐颗给可访问名与说明，鼠标悬停能读到原因。
+        （定时任务的创建在上面那个表单里）—— 所以它整条都是**装饰**。
+
+        ── 2026-10-15（M0 工单 3）：改成**非交互元素** ──
+
+        原来这里是六颗 `disabled` 按钮，每颗挂一句"本机版还没做"。工单的口径是
+        逐项三选一（实现 / 移除 / **降级为非交互元素**），**不允许留下"disabled + 借口"**。
+        这里按第三条降级：换成 `span` + 外层 `aria-hidden`，不再伪装成按钮 ——
+        那六句借口随之消失，其中两句还是**不实陈述**：
+        「技能（本机版还没做）」「插件（本机版还没做）」与事实不符 ——
+        技能面板与插件系统（Phase 8）都已落地，只是**定时任务还不能绑定它们**
+        （`ScheduleJob` 只有 title / prompt / repeat，见 `scheduleStore.ts`）。
+        这句话留在代码里，不再挂到界面上充数。
       */}
-      <div className="wb-composer wb-composer-slim" aria-disabled="true">
+      <div className="wb-composer wb-composer-slim" aria-hidden="true">
         <div className="wb-composer-input wb-composer-placeholder">{SCHEDULE_COMPOSER_PLACEHOLDER}</div>
         <div className="wb-composer-bar">
-          <button className="wb-chip" disabled aria-label="添加附件（本机版还没做）" title="添加附件（本机版还没做）">
+          <span className="wb-chip">
             <Plus size={16} />
-          </button>
-          <button className="wb-chip" disabled aria-label="云电脑（本机版没有）" title="云电脑（本机版没有）">
+          </span>
+          <span className="wb-chip">
             <Cloud size={13} /> 云电脑 <ChevronDown size={12} />
-          </button>
-          <button className="wb-chip" disabled aria-label="项目（本机版还没做）" title="项目（本机版还没做）">
+          </span>
+          <span className="wb-chip">
             <FolderOpen size={13} /> 项目
-          </button>
-          <button className="wb-chip" disabled aria-label="技能（本机版还没做）" title="技能（本机版还没做）">
+          </span>
+          <span className="wb-chip">
             <Sparkles size={13} /> 技能
-          </button>
-          <button className="wb-chip" disabled aria-label="插件（本机版还没做）" title="插件（本机版还没做）">
+          </span>
+          <span className="wb-chip">
             <Blocks size={13} /> 插件
-          </button>
+          </span>
           <span className="wb-spacer" />
-          <button className="wb-chip" disabled aria-label="执行档位（本机版还没做）" title="执行档位（本机版还没做）">
-            自动 <ChevronDown size={12} /> 低
-          </button>
+          <span className="wb-chip wb-chip-auto">AUTO · LOW</span>
         </div>
       </div>
     </section>

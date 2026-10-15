@@ -5,7 +5,7 @@
  */
 
 import { useState } from "react";
-import { FolderOpen, PanelRight, PanelRightClose, Plus, Settings } from "lucide-react";
+import { FolderOpen, PanelRight, PanelRightClose, Plus } from "lucide-react";
 import { useWorkbenchStore, openArtifact, revealArtifact } from "./store";
 import { ARTIFACT_TITLE_GENERATING, SUMMARY_RECENT_FILES, SUMMARY_RECENT_LIMIT_NOTE, SUMMARY_SESSION_FILES, SUMMARY_TABS, type SummaryTabId } from "./copy";
 import { resourceTypeOf } from "@shared/artifactProto";
@@ -14,22 +14,35 @@ import { ARTIFACT_FORMATS } from "./artifact";
 import { formatBytes } from "./uiUtil";
 import { MediaTab } from "./MediaTab";
 
-export function SummaryPanel() {
+export function SummaryPanel({
+  collapsed,
+  onCollapsedChange,
+}: {
+  /**
+   * 是否收起。
+   *
+   * ⚠️ 它**由工作台持有**（2026-10-15，M0 工单 2）：Esc 要能收起这个面板，
+   * 而 Esc 的判定必须在**一处**做 —— 两个右侧面板各自监听同一个按键，
+   * 就会出现"一次 Esc 关掉两个"或"关哪个看注册顺序"（见 `Workbench.tsx` 的 Esc 处理）。
+   */
+  collapsed: boolean;
+  /** 收起态变化（展开浮标 / 头上的「收起」都会调它）。 */
+  onCollapsedChange: (collapsed: boolean) => void;
+}) {
   const task = useWorkbenchStore((s) => s.tasks.find((t) => t.id === s.activeTaskId) ?? null);
   const [tab, setTab] = useState<SummaryTabId>("artifacts");
   const [opening, setOpening] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
   /*
-   * 面板收起（2026-10-14）。这一颗按钮原来写着 `disabled` + "本机版还没做面板折叠" ——
-   * Ding Harness 原型里右栏是**默认收起**的（塌成右缘一条竖直把手，点开才展开），
-   * 主人 2026-10-14 点名要这个口径，所以默认值取 `true`。
+   * 面板**默认收起**（2026-10-14）。这一颗按钮原来写着 `disabled` + "本机版还没做面板折叠" ——
+   * Ding Harness 原型里右栏是默认收起的（塌成右缘一条竖直把手，点开才展开），
+   * 主人 2026-10-14 点名要这个口径。
    *
    * ⚠️ 代价是**4 条验收脚本原来直接点 `wb-summary-tab-*`**（artifacts / emptystates /
    * media / workbench），默认收起会让它们一起红 —— 已在 `harness.mjs` 里加了
    * `openSummary(page)`（与 `openCanvas` 同一个理由：别让 4 处各写一遍"先展开再点"），
-   * 那 4 条各调一次。
+   * 那 4 条各调一次。默认值现在由 `Workbench` 那边给。
    */
-  const [collapsed, setCollapsed] = useState(true);
 
   const artifacts = task?.artifacts ?? [];
 
@@ -41,7 +54,7 @@ export function SummaryPanel() {
           data-testid="wb-summary-expand"
           aria-label="展开对话摘要"
           title="展开对话摘要"
-          onClick={() => setCollapsed(false)}
+          onClick={() => onCollapsedChange(false)}
         >
           {/* 图标正立、文字竖排 —— 原型就是分两段做的（`.re-ic` / `.re-tx`）；
               图标走 lucide（`uiCraft.test.ts ⑦` 明令不许用 Unicode 字形顶图标） */}
@@ -52,15 +65,17 @@ export function SummaryPanel() {
 
       <header className="wb-summary-head">
         <span>对话摘要</span>
-        <button className="wb-icon" aria-label="摘要设置" title="摘要设置（本机版没有后端）" disabled>
-          <Settings size={14} />
-        </button>
+        {/*
+          ⚠️ 这里原来是「摘要设置」的死按钮（`disabled` + "本机版没有后端"）。
+          2026-10-15（M0 工单 3）按工单口径**移除** —— 摘要没有可设的项，
+          摆一颗点不动的齿轮只会让人以为摘要功能坏了。
+        */}
         <button
           className="wb-summary-collapse"
           data-testid="wb-summary-collapse"
           aria-label="收起对话摘要"
           title="收起对话摘要"
-          onClick={() => setCollapsed(true)}
+          onClick={() => onCollapsedChange(true)}
         >
           {/* ⚠️ 2026-10-14 主人报的原话：「点一下面板按钮就打开了，然后怎么关呢？」
               —— 第一版这里只有一枚**没字的右向箭头**（`.wb-icon` + ChevronRight），

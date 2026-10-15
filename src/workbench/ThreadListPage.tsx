@@ -1,4 +1,5 @@
-import { MoreHorizontal, Pin, Plus, PanelLeft } from "lucide-react";
+import { MoreHorizontal, Pin, Plus } from "lucide-react";
+import { NavCollapseButton } from "./NavCollapseButton";
 import { useState } from "react";
 import type { WorkTask } from "./task";
 import { groupThreads, summaryOf } from "./threadGroups";
@@ -50,16 +51,16 @@ export default function ThreadListPage() {
   return (
     <div className="wb-threads" data-testid="wb-threads">
       <div className="wb-threads-head">
-        <button className="wb-icon" aria-label="收起侧栏" title="收起侧栏（本机版还没做折叠）" disabled>
-          <PanelLeft size={15} />
-        </button>
+        <NavCollapseButton />
         <button className="wb-icon" aria-label="新工作任务" title="新工作任务" data-testid="wb-threads-new" onClick={() => setView("home")}>
           <Plus size={15} />
         </button>
         <span className="wb-threads-title">管理历史对话</span>
-        <button className="wb-icon" aria-label="本机版还没做批量操作" title="本机版还没做批量操作" data-testid="wb-threads-more" disabled>
-          <MoreHorizontal size={15} />
-        </button>
+        {/*
+          ⚠️ 这里原来是「批量操作（更多）」的死按钮（`disabled` + "本机版还没做批量操作"）。
+          2026-10-15（M0 工单 3）按工单口径**移除** —— 本机版没做批量操作，
+          与其摆一颗点不动的 ⋯，不如不摆（`accept-threads` 现在断言它不该再出现）。
+        */}
       </div>
 
       {groups.length === 0 ? (

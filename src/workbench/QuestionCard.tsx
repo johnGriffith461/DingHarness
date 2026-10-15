@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clipboard, Plus, Volume2, X } from "lucide-react";
+import { Clipboard, Plus, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { currentQuestion, questionProgress, type WorkTask } from "./task";
 
@@ -70,9 +70,11 @@ export function QuestionCard({ task }: { task: WorkTask }) {
         >
           <Plus size={15} />
         </button>
-        <button className="wb-icon" aria-label="语音输入" title="语音输入（本机版还没做）" disabled>
-          <Volume2 size={15} />
-        </button>
+        {/*
+          ⚠️ 这里原来是「语音输入」的死按钮（`disabled` + "本机版还没做"）。
+          2026-10-15（M0 工单 3）按工单口径**移除**：本机版没有语音后端，
+          与其摆一颗点不动的麦克风，不如不摆 —— 想用的人会去找，而不是先点坏一次。
+        */}
       </div>
     </div>
   );
