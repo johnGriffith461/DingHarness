@@ -30,7 +30,9 @@
     "eval:matrix": "tsx scripts/eval-matrix.ts",
     "cli:bin": "node scripts/build-cli-bin.mjs",
     "sandbox:build": "cargo build --release --manifest-path sandbox/Cargo.toml",
-    "sandbox:probe": "cargo run --release --manifest-path sandbox/Cargo.toml -- --probe"
+    "sandbox:probe": "cargo run --release --manifest-path sandbox/Cargo.toml -- --probe",
+    "package:mac": "node scripts/stage-app.mjs && electron-builder --mac dmg",
+    "package:linux": "node scripts/stage-app.mjs && electron-builder --linux AppImage deb"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -112,6 +114,20 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "ding-harness-${version}-setup.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
     }
   },
   "bin": {

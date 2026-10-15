@@ -29,6 +29,31 @@ Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无
 
 Electron 44 · React 19 · zustand · Vite 7 · React Flow v12 · Vercel AI SDK v7 · zod · TypeScript 5.9 · pnpm
 
+## 五分钟上手
+
+```bash
+# ① 装（两条渠道，选一条）
+#    a. 不想装 Node：用单文件可执行（目标机器什么都不用装）
+pnpm cli:bin && node scripts/install-cli.mjs --bin
+#    b. 已经有 Node：装成全局命令
+node scripts/install-cli.mjs --link
+
+# ② 配（交互式向导：配 key → 选模型 → 选工作目录，全程四问）
+ding init
+
+# ③ 自检（它会告诉你这台机器上缺什么、下一步做什么）
+ding doctor
+
+# ④ 跑一句
+ding run "把这个目录里的文件列一遍，说清哪个最可能是配置"
+```
+
+装完不放心就先看看它到底会动什么：`ding recipe list`（内置几个常用模板，
+`ding recipe show <id>` 看它要发什么提示词、用哪些工具）。
+
+**桌面端**：`pnpm dev:web` + `pnpm electron:dev`（见下），或者直接跑安装包。
+第一次打开会带你走同样的向导。
+
 ## 快速开始
 
 环境要求：Node ≥ 20（实测 v24）、pnpm ≥ 10、Windows。
@@ -119,6 +144,15 @@ pnpm ding models [--json]                      # provider 与模型（逐条标�
 pnpm ding agents                               # 内置专家（AgentSpec）
 pnpm ding eval [类别] [--json]                 # 离线评测集（不烧 token，可进 CI）
 pnpm ding eval --update-baseline               # 落一份通过率基线（进版本库）
+pnpm ding doctor [--json]                      # 一键自检（每项失败都给下一步）
+pnpm ding init                                 # 首次配置向导（配 key / 选模型 / 选目录）
+pnpm ding resume [<会话 id>] [--continue]      # 崩溃恢复（看被打断的回合 / 接着跑完）
+pnpm ding sessions --search <词>               # 本地全文检索（FTS + 子串）
+pnpm ding backup [--out <文件>]                # 全量备份（会话 + 配置，单个 JSON，不含密钥）
+pnpm ding restore <文件> [--list]              # 从备份恢复（只补不覆盖）
+pnpm ding recipe list|show|run|export|import   # 任务模板（可分享）
+pnpm ding serve [--port 8787]                  # Agent Server（REST + SSE；默认只绑回环）
+pnpm ding acp                                  # 作为 ACP agent 跑在 stdio 上（被外部宿主驱动）
 pnpm ding plugins list|install|enable|disable|remove|doctor
 pnpm ding config [show|set <键> <值>|unset <键>] # 默认 provider / 模型 / 档位 / 目录
 ```
@@ -146,20 +180,60 @@ pnpm test        # vitest（内核测试在 engine/**/*.test.ts，与渲染层�
 
 `scripts/accept/` 下是浏览器端验收脚本，`scripts/verify-*.mjs` 是产物与打包校验。
 
-## 已知边界（v0.3.0）
+```bash
+pnpm eval            # 离线评测集（63 条，六类；不烧 token）
+pnpm perf:budget     # perf-budget 实测（数字落 engine/eval/perf-baseline.md）
+pnpm cli:bin         # 编单文件可执行（四个平台；Windows 那个可验）
+pnpm sandbox:build   # 编命令沙箱（Rust；零外部依赖）
+node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
+```
 
-- 仅 Windows 构建；macOS / Linux 尚未验证。
-- `run_command` 与用户同权限运行，**没有沙箱**。
-- 只有 OpenAI 兼容一种 provider 通道（协议分层在 Phase 5/6 才做）。
-- 桌面与 CLI 都已跑在新内核上；两者的会话事件存在同一个 SQLite 库里（各自的数据目录）。
-- 旧 JSONL 数据会在启动时自动迁移；迁移**不删**旧文件。
-- **插件**（Phase 8）：npm 包或本地目录两种渠道，装之前要你确认权限清单。
-  ⚠️ 权限分两类，界面上分开说：`tools:register` / `hooks:register` **真的生效**（不批就不接那根线）；
-  `fs:read` / `fs:write` / `net` / `exec` 在 v1 **拦不住**（插件与宿主同进程同权限）——
-  它们是"知情"不是"限制"，真正的隔离（Worker / 容器）列 v2。
-- **多 agent 协作**（Phase 7）：coordinator 拆任务，几个专家（researcher / writer / runner）并行办。
-  每个专家的工具白名单与闸门档位在 `engine/runtime/agents.ts` 里声明；档位**只能更严，不能更松**。
-- 模型目录表目前只登记了少数几个模型；未登记模型走保守默认并在账本上标注"未登记模型"。
+**改完东西请顺手跑一次 `pnpm eval`**：它是"行为有没有变"的最快信号，
+跌超 5 个百分点 `pnpm test` 会红（基线在 `engine/eval/baseline.json`）。
+
+## 平台覆盖（如实标注）
+
+| 平台 | 桌面 | CLI 单二进制 | 命令的资源上限 | 密钥加密存储 |
+|---|---|---|---|---|
+| **Windows x64** | ✅ 打包 + 启动验过（`pnpm package:win`） | ✅ 编出来且**跑过**（`pnpm cli:bin` + `node scripts/verify-cli-bin.mjs`） | ✅ 作业对象（内存 / 子进程数 / 不留孤儿） | ✅ 桌面走 DPAPI；CLI 无 |
+| macOS（x64 / arm64） | ⚠️ 目标配置就位，**没在真机上跑过** | ⚠️ 编得出来，**没跑过** | ❌ 未做（只有直通） | ⚠️ 桌面可走 Keychain；未验证 |
+| Linux x64 | ⚠️ 同上（AppImage / deb） | ⚠️ 同上 | ❌ 未做（没有 seccomp） | ⚠️ 桌面可走 libsecret；未验证 |
+
+**这张表就是"我们验过什么"的清单**：⚠️ 的那些是**能编出来但没在对应系统上执行过**，
+不是"已支持"。`ding doctor` 会把当前这台机器上缺的能力逐条列出来。
+
+自动更新**未做**：它需要代码签名证书与一个更新 feed（见 `SAFETY.md` 第五节）。
+现在装新版本是手动下载安装包。
+
+## 排错（先跑 `ding doctor`）
+
+| 现象 | 多半是什么 | 怎么弄 |
+|---|---|---|
+| `没有可用的模型凭据` | 还没配 key | `ding init`，或设环境变量（`DEEPSEEK_API_KEY` 等） |
+| `连不上 provider` | 网络 / 本地服务没起 | 本地 provider 要先起服务；远程看代理设置 |
+| `密钥无效或已过期` | key 过期 / 抄漏了 | 重新写一次；`ding doctor` 的「模型凭据」会告诉你读到几条 |
+| 工具一律报「不在可写范围内」 | 工作目录没配 / 配的目录不存在 | `ding config set dirs <目录>`；`ding doctor` 的「工作目录」那一格会红 |
+| 界面上按钮点不动 | 旧构建 | 重新 `pnpm build:web && pnpm electron:build`（验收脚本也会报同一个原因） |
+| 上次关窗口时它还在跑，现在那个任务躺着 | 回合被打断（正常现象） | `ding resume` 看有哪些，`ding resume <id> --continue` 接着跑；桌面上那颗「继续」按钮同理 |
+| 想找三个月前聊过的内容 | —— | `ding sessions --search <词>`（检索会话正文，不只是标题） |
+| 沙箱报「不受限地跑」 | 没编 `ding-sandbox` | `pnpm sandbox:build`（需要 Rust）；不编也能用，只是命令没有资源上限 |
+
+## 已知边界
+
+**安全边界逐条写在 [`SAFETY.md`](./SAFETY.md)**（包括"没做的"那一节）—— 这里只列最要紧的：
+
+- **`run_command` 不是安全边界**：Windows 上它有内存与子进程数上限（作业对象），
+  但命令仍以**你的身份**运行，能读能写能联网。唯一拦着 `rm -rf` 的是**闸门**（你点的那一下）。
+- **插件 v1 的权限只是声明**：`fs:read` / `fs:write` / `net` / `exec` **拦不住**
+  （插件与宿主同进程）。`tools:register` / `hooks:register` 是真的（不批就不接那根线）。
+  隔离版（wasmtime + 签名）**未做**。
+- **密钥**：桌面端写的走系统保护（DPAPI / Keychain / libsecret）；
+  **CLI 侧没有钥匙串入口**，所以 CLI 不写加密存储（`ding doctor` 会这么说）。
+  备份里**不含密钥**。
+- **多平台**：见上面那张表 —— 只有 Windows x64 是验过的。
+- **模型目录表**只登记了少数模型；未登记的走保守默认并在账本上标「未登记模型」。
+- 旧 JSONL 数据在启动时自动迁移，**迁移不删**旧文件；
+  配置型数据从 Phase 12.1 起默认存 SQLite（`DSH_STORE_BACKEND=file` 可退回文件）。
 
 ## 许可
 

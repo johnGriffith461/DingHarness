@@ -7,7 +7,7 @@ import { MODEL_CATALOG, STALE_DAYS, UNKNOWN_MODEL_BUDGET, isStale } from "../../
 import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
 import { sqliteRuntimeName } from "../../engine/adapters/sqliteDriver";
 import { probeSandbox } from "../../engine/adapters/sandbox";
-import { credentialProtection } from "../../engine/adapters/secretStore";
+import { credentialProtection, secretsEncrypted } from "../../engine/adapters/secretStore";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { normalizeConfig } from "./config";
 
@@ -73,13 +73,23 @@ export type DoctorInput = {
 export function runDoctor(input: DoctorInput): Check[] {
   const out: Check[] = [];
 
-  /* ① 运行时：够不够新 */
-  out.push({
-    name: "运行时",
-    ok: true,
-    detail: `${input.runtime}，SQLite 驱动走 \`${sqliteRuntimeName()}:sqlite\``,
-    next: "无需处理（这一格只在你看到 migrate/upgrade 提示时才需要动）",
-  });
+  /* ① 运行时：够不够新 + **这个平台有哪些能力不可用**（如实标注，不装全能） */
+  {
+    const box = probeSandbox();
+    const gaps: string[] = [];
+    if (!box.bounded) gaps.push("命令的资源上限（Windows 才有作业对象实现）");
+    if (!secretsEncrypted()) gaps.push("密钥的加密存储（CLI 侧没有系统钥匙串入口）");
+    out.push({
+      name: "运行时",
+      ok: true,
+      detail:
+        `${input.runtime}，SQLite 驱动走 \`${sqliteRuntimeName()}:sqlite\`` +
+        (gaps.length ? `；本平台**没有**：${gaps.join("、")}` : ""),
+      next: gaps.length
+        ? "这些是已知的平台差异（README 的「平台覆盖」一节列了全表）—— 别把它们当成已具备的保护"
+        : "无需处理（这一格只在你看到 migrate/upgrade 提示时才需要动）",
+    });
+  }
 
   /* ② 数据目录可写 */
   {
