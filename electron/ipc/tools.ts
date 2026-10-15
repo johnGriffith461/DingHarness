@@ -116,11 +116,14 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
    * 写完要**广播变更**：渲染侧的调度器用内存里那份列表，不通知就跑到旧列表上（§145）。
    */
   [SCHEDULE_CREATE_TOOL]: async (input) => {
-    const { title, prompt, repeat, customMinutes } = input as {
+    const { title, prompt, repeat, customMinutes, atHour, atMinute } = input as {
       title: string;
       prompt: string;
       repeat: RepeatType;
       customMinutes?: number;
+      /** 钟点（Phase 16）：模型说"每天早上 8 点"时填这两个。 */
+      atHour?: number;
+      atMinute?: number;
     };
     const now = Date.now();
     const job = makeJob(
@@ -132,6 +135,8 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       "localDevice",
       now,
       customMinutes,
+      atHour,
+      atMinute,
     );
     const bad = validateJob(job);
     if (bad) return { ok: false, error: bad };

@@ -99,6 +99,12 @@ export const SCHEDULE_CREATE_INPUT = z.object({
     .max(60 * 24 * 30)
     .optional()
     .describe("repeat=custom 时的间隔分钟数（5 ~ 43200）"),
+  /*
+   * 钟点（Phase 16）。用户说「每天早上 8 点汇总」时，模型该填这两个 ——
+   * 在这之前 `repeat=daily` 只能表达"从现在起每 24 小时"，配不出"每晚几点"。
+   */
+  atHour: z.number().int().min(0).max(23).optional().describe("repeat=daily/weekly 时的钟点（0-23）；不填＝从现在起每 24 小时"),
+  atMinute: z.number().int().min(0).max(59).optional().describe("配合 atHour 的分钟（0-59，默认 0）"),
 });
 
 export const SCHEDULE_LIST_DESC = "列出已有的定时任务（标题、重复方式、下次运行时间）。";

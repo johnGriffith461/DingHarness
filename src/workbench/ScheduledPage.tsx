@@ -67,6 +67,12 @@ export function ScheduledPage() {
     title: "",
     prompt: "",
     repeat: "daily" as RepeatType,
+    /*
+     * 钟点（Phase 16）：默认填 22:00 —— "每晚汇总"是定时任务最常见的用法，
+     * 而这个字段在这之前**根本配不出来**（daily 是"从创建时刻起算的 24 小时"）。
+     */
+    atHour: 22,
+    atMinute: 0,
     env: "cloud" as RunEnv,
     customMinutes: 60,
   });
@@ -94,6 +100,9 @@ export function ScheduledPage() {
       repeat: job.repeat,
       env: job.env,
       customMinutes: job.customMinutes ?? 60,
+      /* 编辑已有任务时把它的钟点带进来（老任务没填 → 回落到 22:00 这个默认） */
+      atHour: job.atHour ?? 22,
+      atMinute: job.atMinute ?? 0,
     });
   };
 
@@ -212,6 +221,36 @@ export function ScheduledPage() {
                   onChange={(e) => setDraft({ ...draft, customMinutes: Number(e.target.value) })}
                 />
                 分钟
+              </label>
+            ) : null}
+            {/*
+              ⭐ 钟点（Phase 16）：daily / weekly 才出现。
+              在这之前这两个档位是"从创建时刻起算的固定间隔"——用户 11:37 建的任务
+              永远 11:37 跑，"每天早上 8 点汇总"配不出来。
+            */}
+            {draft.repeat === "daily" || draft.repeat === "weekly" ? (
+              <label className="wb-sched-field">
+                在
+                <input
+                  className="wb-sched-num"
+                  type="number"
+                  min={0}
+                  max={23}
+                  data-testid="wb-sched-hour"
+                  value={draft.atHour}
+                  onChange={(e) => setDraft({ ...draft, atHour: Number(e.target.value) })}
+                />
+                点
+                <input
+                  className="wb-sched-num"
+                  type="number"
+                  min={0}
+                  max={59}
+                  data-testid="wb-sched-minute"
+                  value={draft.atMinute}
+                  onChange={(e) => setDraft({ ...draft, atMinute: Number(e.target.value) })}
+                />
+                分
               </label>
             ) : null}
             <label className="wb-sched-field">

@@ -45,6 +45,18 @@ export type CronJob = {
   repeat: RepeatType;
   /** `custom` 档用的间隔分钟数（其它档忽略）。 */
   customMinutes?: number;
+  /**
+   * `daily` / `weekly` 的**钟点**（0–23 时，Phase 16 的 P0 缺口）。
+   *
+   * 为什么要它：在这之前 daily 是"从创建时刻起算的 24 小时" ——
+   * 于是"每天早上 8 点汇总"配不出来（你 11:37 创建，它就永远在 11:37 跑）。
+   * 而"每晚汇总"正是这个功能最常见的用法。
+   *
+   * 不填 = 保持原行为（从创建/上次执行起算的固定间隔）—— **不改老任务的时间**。
+   */
+  atHour?: number;
+  /** 配合 `atHour` 的分（默认 0）。 */
+  atMinute?: number;
   env: RunEnv;
   status: JobStatus;
   createdAt: number;
@@ -110,6 +122,29 @@ export function nextRunAt(job: CronJob, from: number): number | null {
     return from + minutes * 60 * 1000;
   }
 
+  /*
+   * ⭐ **有钟点就按钟点算**（Phase 16）：daily/weekly 填了 `atHour` 时，
+   * 下一次是"往后数到那个钟点"，而不是"从这一刻起加 24 小时"。
+   *
+   * 两条要注意的：
+   *   · **当天那个钟点已经过了** → 落到第二天（否则一创建就会立刻跑一次）；
+   *   · **weekly 还要看星期**：老行为是"每 7 天"，没有"星期几"的概念 ——
+   *     所以这里保持"每 7 天的那个钟点"（不假装有星期几），这是**如实**的简化。
+   */
+  const clock = job.atHour;
+  if ((job.repeat === "daily" || job.repeat === "weekly") && typeof clock === "number") {
+    const period = FIXED_INTERVAL[job.repeat];
+    if (!period) return null;
+    const hour = Math.min(Math.max(Math.trunc(clock), 0), 23);
+    const minute = Math.min(Math.max(Math.trunc(job.atMinute ?? 0), 0), 59);
+    const base = new Date(from);
+    const candidate = new Date(base);
+    candidate.setHours(hour, minute, 0, 0);
+    /* 当天那个钟点已经过了（或就是此刻）→ 往后推一个周期 */
+    if (candidate.getTime() <= from) candidate.setTime(candidate.getTime() + period);
+    return candidate.getTime();
+  }
+
   const interval = FIXED_INTERVAL[job.repeat];
   return interval ? from + interval : null;
 }
@@ -135,7 +170,9 @@ export function clampCustomMinutes(minutes: number | undefined): number {
  * @param job 草稿
  * @returns 错误说明；能建则返回 null
  */
-export function validateJob(job: Pick<CronJob, "title" | "prompt" | "repeat" | "customMinutes">): string | null {
+export function validateJob(
+  job: Pick<CronJob, "title" | "prompt" | "repeat" | "customMinutes"> & { atHour?: number; atMinute?: number },
+): string | null {
   if (!String(job.title ?? "").trim()) return "给这个定时任务起个名字";
   if (!String(job.prompt ?? "").trim()) return "写清到点要做什么";
   if (job.repeat === "custom") {
@@ -143,6 +180,19 @@ export function validateJob(job: Pick<CronJob, "title" | "prompt" | "repeat" | "
     if (!Number.isFinite(n)) return "自定义间隔要填分钟数";
     if (n < MIN_CUSTOM_MINUTES) return `间隔不能小于 ${MIN_CUSTOM_MINUTES} 分钟`;
     if (n > MAX_CUSTOM_MINUTES) return `间隔不能大于 ${MAX_CUSTOM_MINUTES} 分钟`;
+  }
+  /*
+   * 钟点（Phase 16）：填了就要在 0–23 / 0–59 之内 ——
+   * 不合法时报错而不是悄悄夹住：用户填了 25 点，他不会希望它变成 1 点。
+   */
+  for (const [value, max, what] of [
+    [job.atHour, 23, "小时"],
+    [job.atMinute, 59, "分钟"],
+  ] as const) {
+    if (value === undefined) continue;
+    if (!Number.isFinite(value) || value < 0 || value > max || Math.trunc(value) !== value) {
+      return `${what}要是 0–${max} 的整数`;
+    }
   }
   return null;
 }
@@ -219,6 +269,8 @@ export function makeJob(
   env: RunEnv,
   now: number,
   customMinutes?: number,
+  atHour?: number,
+  atMinute?: number,
 ): CronJob {
   const base: CronJob = {
     id,
@@ -226,6 +278,8 @@ export function makeJob(
     prompt: prompt.trim(),
     repeat,
     ...(repeat === "custom" ? { customMinutes: clampCustomMinutes(customMinutes) } : {}),
+    ...(atHour !== undefined && (repeat === "daily" || repeat === "weekly") ? { atHour: Math.trunc(atHour) } : {}),
+    ...(atMinute !== undefined && (repeat === "daily" || repeat === "weekly") ? { atMinute: Math.trunc(atMinute) } : {}),
     env,
     status: "running",
     createdAt: now,
@@ -293,6 +347,19 @@ export function normalizeJobs(raw: unknown): CronJob[] {
       if (customMinutes < MIN_CUSTOM_MINUTES || customMinutes > MAX_CUSTOM_MINUTES) continue;
     }
 
+    /*
+     * 钟点（Phase 16）：磁盘上的值不可信 —— 不在范围内就当没填（回落老行为），
+     * **不是**夹到边界：夹出来的"每天 23 点"是用户从没要求过的时间。
+     */
+    const atHour =
+      typeof j.atHour === "number" && Number.isFinite(j.atHour) && j.atHour >= 0 && j.atHour <= 23
+        ? Math.trunc(j.atHour)
+        : undefined;
+    const atMinute =
+      typeof j.atMinute === "number" && Number.isFinite(j.atMinute) && j.atMinute >= 0 && j.atMinute <= 59
+        ? Math.trunc(j.atMinute)
+        : undefined;
+
     seen.add(id);
     const status = j.status as JobStatus;
     out.push({
@@ -301,6 +368,8 @@ export function normalizeJobs(raw: unknown): CronJob[] {
       prompt: typeof j.prompt === "string" ? j.prompt : "",
       repeat,
       ...(repeat === "custom" && customMinutes !== undefined ? { customMinutes } : {}),
+      ...(atHour !== undefined && (repeat === "daily" || repeat === "weekly") ? { atHour } : {}),
+      ...(atMinute !== undefined && (repeat === "daily" || repeat === "weekly") ? { atMinute } : {}),
       env: (ENV_VALUES as readonly string[]).includes(j.env as string) ? (j.env as RunEnv) : "cloud",
       /*
        * ⚠️ 不认识的 status 一律当 `paused`。

@@ -1,22 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  ENV_VALUES,
-  JOB_STATUSES,
-  REPEAT_VALUES,
-  normalizeJobs,
-  afterRun,
-  clampCustomMinutes,
-  describeNextRun,
-  dueJobs,
-  ENV_LABEL,
-  MAX_CUSTOM_MINUTES,
-  MIN_CUSTOM_MINUTES,
-  makeJob,
-  nextRunAt,
-  REPEAT_LABEL,
-  validateJob,
-  type CronJob,
-} from "@shared/schedule";
+import { ENV_LABEL, ENV_VALUES, JOB_STATUSES, MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_LABEL, REPEAT_VALUES, afterRun, clampCustomMinutes, describeNextRun, dueJobs, makeJob, nextRunAt, normalizeJobs, type CronJob, validateJob } from "@shared/schedule";
 
 const NOW = new Date("2026-10-11T20:00:00").getTime();
 const job = (patch: Partial<CronJob> = {}): CronJob => ({ ...makeJob("j1", "每日新闻", "跑一下", "daily", "cloud", NOW), ...patch });
@@ -297,5 +280,59 @@ describe("从磁盘恢复任务（§178）", () => {
     expect(REPEAT_VALUES).toEqual(["noRepeat", "hourly", "daily", "weekly", "custom"]);
     expect(ENV_VALUES).toEqual(["cloud", "localDevice"]);
     expect(JOB_STATUSES).toEqual(["running", "paused", "finished", "deleted"]);
+  });
+});
+
+describe("钟点（Phase 16：配得出「每晚 22:00」）", () => {
+  it("⭐ 每天 22:00：从上午 11 点算，下一次是**当天** 22:00（不是 24 小时之后）", () => {
+    const from = new Date(2026, 9, 15, 11, 37, 0).getTime();
+    const next = nextRunAt(job({ atHour: 22 }), from);
+    const d = new Date(next!);
+    expect(d.getHours()).toBe(22);
+    expect(d.getMinutes()).toBe(0);
+    // 同一天（这才是"每晚 22 点"的意思）
+    expect(d.getDate()).toBe(15);
+  });
+
+  it("当天那个钟点已经过了 → 落到第二天（否则一创建就立刻跑一次）", () => {
+    const from = new Date(2026, 9, 15, 23, 30, 0).getTime();
+    const next = nextRunAt(job({ atHour: 22 }), from);
+    const d = new Date(next!);
+    expect(d.getDate()).toBe(16);
+    expect(d.getHours()).toBe(22);
+  });
+
+  it("带分钟：22:30 也配得出来", () => {
+    const from = new Date(2026, 9, 15, 8, 0, 0).getTime();
+    const d = new Date(nextRunAt(job({ atHour: 22, atMinute: 30 }), from)!);
+    expect(d.getHours()).toBe(22);
+    expect(d.getMinutes()).toBe(30);
+  });
+
+  it("weekly + 钟点：间隔仍是 7 天（**不假装有「星期几」**）", () => {
+    const from = new Date(2026, 9, 15, 8, 0, 0).getTime();
+    const d = new Date(nextRunAt(job({ repeat: "weekly", atHour: 9 }), from)!);
+    expect(d.getHours()).toBe(9);
+    expect(d.getMinutes()).toBe(0);
+    // 当天 9 点还没到 → 就是当天 9 点；这说明 weekly 的钟点语义与 daily 一致（都是"最近的那个钟点"）
+    expect(d.getDate()).toBe(15);
+  });
+
+  it("**没填钟点 = 老行为**（固定间隔）—— 不改老任务的时间", () => {
+    const from = new Date(2026, 9, 15, 11, 37, 0).getTime();
+    const next = nextRunAt(job({}), from);
+    expect(next! - from).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it("钟点写坏了（25 点）报错，而不是悄悄夹成 1 点", () => {
+    expect(validateJob({ title: "x", prompt: "y", repeat: "daily", atHour: 25 })).toContain("0–23");
+    expect(validateJob({ title: "x", prompt: "y", repeat: "daily", atHour: 22 })).toBeNull();
+  });
+
+  it("磁盘上的坏钟点当没填（回落老行为，不夹到边界）", () => {
+    const got = normalizeJobs([
+      { id: "a", title: "t", prompt: "p", repeat: "daily", env: "localDevice", status: "running", atHour: 99, createdAt: 0, lastRunAt: null, nextRunAt: null, runs: [] },
+    ]);
+    expect(got[0]?.atHour).toBeUndefined();
   });
 });

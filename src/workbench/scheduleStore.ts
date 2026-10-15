@@ -45,6 +45,9 @@ type ScheduleState = {
     repeat: RepeatType;
     env: RunEnv;
     customMinutes?: number;
+    /** `daily` / `weekly` 的钟点（Phase 16）。不填 = 老行为（固定间隔）。 */
+    atHour?: number;
+    atMinute?: number;
   }) => string | null;
   /**
    * 改一个已有任务（阶段 11.27）。
@@ -57,7 +60,7 @@ type ScheduleState = {
    */
   update: (
     id: string,
-    draft: { title: string; prompt: string; repeat: RepeatType; env: RunEnv; customMinutes?: number },
+    draft: { title: string; prompt: string; repeat: RepeatType; env: RunEnv; customMinutes?: number; atHour?: number; atMinute?: number },
   ) => string | null;
   /** 暂停 / 继续。 */
   toggle: (id: string) => void;
@@ -121,6 +124,8 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
       draft.env,
       Date.now(),
       draft.customMinutes,
+      draft.atHour,
+      draft.atMinute,
     );
     const jobs = [job, ...get().jobs];
     set({ jobs, note: "" });
@@ -142,6 +147,9 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
         env: draft.env,
         // 换回非自定义档时把分钟数清掉，免得下次切回来还留着旧值
         customMinutes: draft.repeat === "custom" ? draft.customMinutes : undefined,
+        // 钟点同理：只有 daily / weekly 才有意义
+        atHour: draft.repeat === "daily" || draft.repeat === "weekly" ? draft.atHour : undefined,
+        atMinute: draft.repeat === "daily" || draft.repeat === "weekly" ? draft.atMinute : undefined,
       };
       /*
        * 改了时间就得**重算下次执行**，否则界面会显示一个按旧设置算出来的时间。
