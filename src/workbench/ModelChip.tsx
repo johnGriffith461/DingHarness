@@ -5,7 +5,7 @@ import { EFFORT_LABEL, REASONING_EFFORTS, type ReasoningEffort } from "@engine/r
 import { listProviders } from "@/ai/aiClient";
 import { readSavedRoute } from "@/ai/route";
 
-import { readReasoningEffort, saveReasoningEffort } from "./reasoningEffort";
+import { useEffortStore } from "./effortStore";
 
 /**
  * 输入区的「模型 · 思考」chip（2026-10-16）。
@@ -34,7 +34,9 @@ export function ModelChip({
   onClose: () => void;
 }) {
   const [route, setRoute] = useState(() => readSavedRoute());
-  const [effort, setEffort] = useState<ReasoningEffort | undefined>(() => readReasoningEffort());
+  /* ⚠️ 与画布对话侧栏**同一份状态**（见 effortStore 的说明）：两处永远不会显示成两个值 */
+  const effort = useEffortStore((s) => s.effort);
+  const setEffort = useEffortStore((s) => s.setEffort);
   /** 可选的 provider/模型。**菜单打开时才拉**（它是主进程的状态，没必要一直挂着）。 */
   const [providers, setProviders] = useState<
     Array<{ id: string; label: string; models: string[]; available: boolean; note?: string }>
@@ -78,7 +80,6 @@ export function ModelChip({
 
   /** 选思考强度（`undefined` = 默认 = 一个字段都不发）。 */
   const pickEffort = (next: ReasoningEffort | undefined): void => {
-    saveReasoningEffort(next);
     setEffort(next);
     onClose();
   };

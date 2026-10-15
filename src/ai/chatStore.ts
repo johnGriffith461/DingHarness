@@ -17,6 +17,7 @@ import { keepTokensFor } from "@engine/runtime/budget";
 import type { SessionSummary, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "./aiClient";
 import { readConfirmMode } from "@/workbench/confirmMode";
+import { readReasoningEffort } from "@/workbench/effortStore";
 import { abortStream, listProviders, probeProviders, streamChat } from "./aiClient";
 import { planRetry } from "./chatRetry";
 import { attachArtifactPaths, messagesFromRecords } from "./chatRestore";
@@ -630,6 +631,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         useTools: true,
         // 审批档位随请求过界（§143）：模式选择在这边，工具执行在那边
         toolPolicy: readConfirmMode(),
+        /* 思考强度（2026-10-16）：与工作台那条路同一个键、同一个默认（没选过就一个字段都不发） */
+        ...(readReasoningEffort() === undefined ? {} : { reasoningEffort: readReasoningEffort() }),
         /*
          * 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）。
          *

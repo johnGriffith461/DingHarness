@@ -50,7 +50,7 @@ import {
   withSummary,
 } from "./compaction";
 import { readConfirmMode } from "./confirmMode";
-import { readReasoningEffort } from "./reasoningEffort";
+import { readReasoningEffort } from "./effortStore";
 import {
   acceptQuestions,
   cleanTitle,

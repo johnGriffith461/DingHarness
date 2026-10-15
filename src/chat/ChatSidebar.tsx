@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, AtSign, MessageSquarePlus, PanelLeftClose, RotateCcw, Send, Square } from "lucide-react";
 import { useChatStore } from "@/ai/chatStore";
+import { EFFORT_LABEL, REASONING_EFFORTS, type ReasoningEffort } from "@engine/runtime/protocols/reasoning";
+import { useEffortStore } from "@/workbench/effortStore";
 import { hasShellBridge } from "@/ai/aiClient";
 import { useRuntimeStore } from "@/canvas/runtimeStore";
 import { ToolTraceList } from "@/workbench/ToolTraceList";
@@ -41,6 +43,16 @@ export default function ChatSidebar({ onClose }: { onClose?: () => void } = {}) 
   } = useChatStore();
 
   const [draft, setDraft] = useState("");
+  /*
+   * 思考强度（2026-10-16，主人的话：「你只做了一个吧」）。
+   *
+   * 这一栏原来只有提供方与模型 —— **没有思考强度**，所以画布里的对话与主页那颗 chip
+   * 的能力不一致。与主页读**同一个键**（dsh-canvas.reasoning-effort）、同一个默认
+   * （没选过 = 一个字段都不发），请求那一侧也走同一条（chatStore）。
+   */
+  /* ⚠️ 与主页那颗 chip **同一份状态**（见 effortStore 的说明） */
+  const effort = useEffortStore((s) => s.effort);
+  const setEffort = useEffortStore((s) => s.setEffort);
   /** 输入框里 "…@" 之后的部分（用于候选列表）；null 表示当前不在引用输入状态。 */
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -206,6 +218,27 @@ export default function ChatSidebar({ onClose }: { onClose?: () => void } = {}) 
               {(currentProvider?.models ?? []).map((m) => (
                 <option key={m} value={m}>
                   {m}
+                </option>
+              ))}
+            </select>
+            {/*
+              思考强度（2026-10-16）。主人的话：「你只做了一个吧」—— 对：这一栏原来只有
+              提供方与模型，**没有思考强度**，于是画布里的对话与主页那颗 chip 的能力不一致。
+              与主页同一个键（`dsh-canvas.reasoning-effort`）、同一个默认（没选过就一个字段都不发）。
+            */}
+            <select
+              value={effort ?? ""}
+              onChange={(e) => {
+                const next = e.target.value === "" ? undefined : (e.target.value as ReasoningEffort);
+                setEffort(next);
+              }}
+              title="思考强度"
+              data-testid="chat-effort"
+            >
+              <option value="">思考默认</option>
+              {REASONING_EFFORTS.map((e) => (
+                <option key={e} value={e}>
+                  思考{EFFORT_LABEL[e]}
                 </option>
               ))}
             </select>
