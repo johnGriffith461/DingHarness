@@ -107,9 +107,14 @@ export type SandboxPlan = {
   /** 有没有隔离（`false` = 直通；调用方应当如实转述）。 */
   bounded: boolean;
   /**
+   * `args` **原样**拼成命令行（`windowsVerbatimArguments`），一个字符都不让 Node 转义。
+   * 直通路要它（理由见 `planFor`），沙箱路不要（那边的参数由 CRT 规则解析）。
+   */
+  verbatimArgv: boolean;
+  /**
    * 额外要设的环境变量。
    *
-   * ⚠️ 命令本身**走这里**而不是 argv（见下面 `planSandboxed` 的说明）——
+   * ⚠️ 走沙箱时命令本身**走这里**而不是 argv（见下面 `planFor` 的说明）——
    * Windows 上 `cmd.exe` 要的是一整条原始命令行，argv 传过去会被引号转义规则弄坏。
    */
   env: Record<string, string>;
@@ -122,22 +127,27 @@ export const SANDBOX_MEMORY_MB = 2048;
 export const SANDBOX_PROCESSES = 32;
 
 /**
- * 给一条命令编排"怎么跑它"。
+ * 给一条命令编排"怎么跑它"。**纯函数**：能力由调用方传进来（`planSandboxed` 负责去问）。
+ *
+ * 拆开是为了让两条路**都能被测到**：本机编过 `pnpm sandbox:build` 时走沙箱那条，
+ * 没编过时走直通那条 —— 只看 `probeSandbox()` 的话，测到的永远只是本机这一条，
+ * 另一条要等 CI 或用户机器上才第一次执行（那正是直通路的引号缺陷躲过整轮开发的原因）。
  *
  * @param command 用户/模型给的那条命令行
- * @param opts.comSpec 平台 shell（Windows 用 ComSpec，POSIX 用 /bin/sh）
+ * @param info 沙箱能力（`probeSandbox()` 的结果）
  * @param opts.memoryMb / processes 上限（省略用默认；测试要压小才快）
  * @returns 计划（`file` + `args`），调用方直接 spawn 它
  */
-export function planSandboxed(
+export function planFor(
   command: string,
+  info: SandboxInfo,
   opts: {
     memoryMb?: number;
     processes?: number;
   } = {},
 ): SandboxPlan {
-  const info = probeSandbox();
-  const comSpec = process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh";
+  const isWin = process.platform === "win32";
+  const comSpec = isWin ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh";
   /*
    * ⚠️ 两条路的 shell 参数**不一样**，别图省事用同一份：
    *   · 直通那条：命令就在 argv 里（`cmd /d /s /c <命令>`）；
@@ -145,12 +155,26 @@ export function planSandboxed(
    *     把命令也留在 argv 里会让 cmd 收到两遍（第一版就是这么写的，
    *     报错长成 `Cannot find module 'C:\…\work\"…" node …'` 那种四不像）。
    */
-  const shellFlags = process.platform === "win32" ? ["/d", "/s", "/c"] : ["-c"];
+  const shellFlags = isWin ? ["/d", "/s", "/c"] : ["-c"];
 
   if (!info.found) {
+    /*
+     * ⚠️ 直通路的引号：命令要**原样**落到 cmd 手里，Node 的转义一个都不许加。
+     *
+     * Node 在 Windows 上按 **CRT** 规则给每个 argv 元素加引号（`"` → `\"`），
+     * 而 `cmd.exe` 不按 CRT 解析命令行 —— 于是 `node -e "…"`、带引号的路径
+     * 这类**含引号的命令**到它手里会变形：实测**退出码 0、没有输出、什么都没跑**
+     * （静默失效，界面上只看到"（没有输出）"）。2026-10-16 CI 第一次真跑单测时逮到，
+     * 此前一直没露头，是因为开发机上编过沙箱、命令全走沙箱那条路。
+     *
+     * 所以这里做两件事：① 命令外面再套一层引号 —— cmd 的 `/s` 会剥掉它，
+     * 里层的引号原样留下（命令自己以引号开头也不会被 `cmd` 剥错）；
+     * ② `verbatimArgv: true`，让调用方关掉 Node 的转义。
+     */
     return {
       file: comSpec,
-      args: [...shellFlags, command],
+      args: [...shellFlags, isWin ? `"${command}"` : command],
+      verbatimArgv: isWin,
       env: {},
       bounded: false,
       note: "没有沙箱（命令不受限）——编它：pnpm sandbox:build",
@@ -179,8 +203,27 @@ export function planSandboxed(
       comSpec,
       ...shellFlags,
     ],
+    /* 这条路的参数是给 CRT/sandbox 自己解析的（不是给 cmd 解析的），照常让 Node 转义 */
+    verbatimArgv: false,
     env: { DING_SANDBOX_COMMAND: command },
     bounded: info.bounded,
     note: info.note,
   };
+}
+
+/**
+ * 编排一条命令（先去问沙箱能力，再拼计划）。
+ *
+ * @param command 用户/模型给的那条命令行
+ * @param opts 上限（省略用默认）
+ * @returns 计划（`file` + `args`），调用方直接 spawn 它
+ */
+export function planSandboxed(
+  command: string,
+  opts: {
+    memoryMb?: number;
+    processes?: number;
+  } = {},
+): SandboxPlan {
+  return planFor(command, probeSandbox(), opts);
 }

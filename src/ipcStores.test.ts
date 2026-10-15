@@ -316,18 +316,40 @@ describe("记忆库（memory.json）", () => {
 });
 
 describe("provider 探测记录（provider-probe.json）· C1 收编后", () => {
+  /** 读一次探测文件；还没建出来（写还在队列里）时返回 null。 */
+  const readProbe = (): { __schema?: number; data: Record<string, { ok: boolean; note?: string }> } | null => {
+    try {
+      return JSON.parse(readFileSync(fileOf("provider-probe.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * 等落盘 —— **轮询**，不固定睡。
+   *
+   * ⚠️ 原来这里写的是 `await sleep(60)`，平时够、机器一有负载就不够：
+   * 2026-10-16 CI 第一次真跑单测时红在这条上（Windows runner 上 128 个 worker 挤在一起，
+   * 60ms 内那个文件还没落下来）。判据没变，变的是**别把"多久算够"写死**。
+   */
+  const waitForProbe = async (atLeast: number) => {
+    const deadline = Date.now() + 4000;
+    let got = readProbe();
+    while (Date.now() < deadline && Object.keys(got?.data ?? {}).length < atLeast) {
+      await new Promise((r) => setTimeout(r, 25));
+      got = readProbe();
+    }
+    return got;
+  };
+
   it("往返 + 落盘带信封；坏条目在读回时被丢掉（原来是一句裸 as ProbeRecord）", async () => {
     const { markProviderOk, listProvidersWithProbe } = await import("../electron/ipc/aiProbe");
     markProviderOk("deepseek");
-    // 队列是异步的：等它落盘（下面的并发用例也是靠这条路径）
-    await new Promise((r) => setTimeout(r, 60));
 
-    const raw = JSON.parse(readFileSync(fileOf("provider-probe.json"), "utf8")) as {
-      __schema: number;
-      data: Record<string, unknown>;
-    };
-    expect(raw.__schema).toBe(SCHEMA_VERSION);
-    expect(raw.data.deepseek).toMatchObject({ ok: true });
+    const raw = (await waitForProbe(1)) as { __schema: number; data: Record<string, unknown> } | null;
+    expect(raw, "等 4 秒也没等到 provider-probe.json").not.toBeNull();
+    expect(raw!.__schema).toBe(SCHEMA_VERSION);
+    expect(raw!.data.deepseek).toMatchObject({ ok: true });
 
     // 手写一个坏条目进去：读回时应当被丢掉，而不是让整个列表拉不出来
     writeFileSync(
@@ -346,24 +368,10 @@ describe("provider 探测记录（provider-probe.json）· C1 收编后", () => 
     markProviderFailed("p2", "连不上");
     markProviderOk("p3");
     /*
-     * ⚠️ **轮询等落盘，不固定睡 120ms**（2026-10-14 改）。
-     * 原来是 `await sleep(120)` 然后断言 —— 平时够，但机器一有负载（比如批跑正在
-     * 一条条起应用）就不够：那条"并发三条不丢"会偶发只看到两条（假红）。
-     * 判据本身没变（还是要三条都在），变的是**别把"多久算够"写死**。
+     * ⚠️ **轮询等落盘，不固定睡**（2026-10-14 起；理由见 `waitForProbe`）。
+     * 判据本身没变（还是要三条都在），变的是"多久算够"不写死。
      */
-    /* ⚠️ 第一次读时文件**可能还没建出来**（三条写还在队列里）→ 容忍 ENOENT，继续等。 */
-    const readData = (): { data: Record<string, { ok: boolean; note?: string }> } | null => {
-      try {
-        return JSON.parse(readFileSync(fileOf("provider-probe.json"), "utf8"));
-      } catch {
-        return null;
-      }
-    };
-    const deadline = Date.now() + 4000;
-    while (Date.now() < deadline && Object.keys(readData()?.data ?? {}).length < 3) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    const got = readData();
+    const got = await waitForProbe(3);
     expect(got, "等 4 秒也没等到 provider-probe.json").not.toBeNull();
     expect(Object.keys(got!.data).sort()).toEqual(["p1", "p2", "p3"]);
     expect(got!.data.p2).toMatchObject({ ok: false, note: "连不上" });

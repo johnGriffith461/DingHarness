@@ -136,6 +136,11 @@ export async function runCommandForModel(
         cwd,
         shell: false,
         windowsHide: true,
+        /*
+         * ⚠️ 直通路要**原样**把命令行交给 cmd：Node 的 CRT 转义会把命令里的引号弄坏，
+         * 实测表现是"退出码 0、没有输出、什么都没跑"（见 `planFor` 的说明）。
+         */
+        windowsVerbatimArguments: plan.verbatimArgv,
         env: { ...process.env, ...plan.env },
       });
     } catch (e) {

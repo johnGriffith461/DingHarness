@@ -2,7 +2,15 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-import { SANDBOX_MEMORY_MB, SANDBOX_PROCESSES, findSandboxBinary, planSandboxed, probeSandbox } from "./sandbox";
+import {
+  SANDBOX_MEMORY_MB,
+  SANDBOX_PROCESSES,
+  findSandboxBinary,
+  planFor,
+  planSandboxed,
+  probeSandbox,
+  type SandboxInfo,
+} from "./sandbox";
 
 /**
  * 沙箱的**宿主侧**（Phase 14.1）。
@@ -16,10 +24,32 @@ import { SANDBOX_MEMORY_MB, SANDBOX_PROCESSES, findSandboxBinary, planSandboxed,
  *
  * ⚠️ 二进制不在时（没跑过 `pnpm sandbox:build`）那几条**跳过并说清**，
  * 而不是假装通过 —— 不然"验过"就成了空话。
+ *
+ * ⚠️⚠️ **接线那几条用 `planFor` 把能力直接喂进去，不走 `probeSandbox()`**：
+ * 只看真探测的话，本机（编过沙箱）永远只测到沙箱那条，**直通那条要等 CI
+ * 或用户机器上才第一次执行** —— 2026-10-16 CI 第一次真跑单测，直通路的引号缺陷
+ * 就是这么露头的（含引号的命令静默变成空操作）。两条路都要有常驻断言。
  */
 
 const binary = findSandboxBinary();
 const hasBinary = binary !== "" && existsSync(binary);
+
+/** 「找到了沙箱」的能力（假的：这几条只问计划怎么拼，不 spawn）。 */
+const foundInfo: SandboxInfo = {
+  found: true,
+  bounded: true,
+  binary: "ding-sandbox",
+  platform: process.platform,
+  note: "命令在作业对象里跑：有内存与子进程数上限，且随沙箱一起结束（不留孤儿）",
+};
+/** 「没找到沙箱」的能力 —— 没编过 `pnpm sandbox:build` 的机器、CI、装出来的版本都是它。 */
+const missingInfo: SandboxInfo = {
+  found: false,
+  bounded: false,
+  binary: "",
+  platform: process.platform,
+  note: "没有 ding-sandbox（编它：pnpm sandbox:build）；命令将不受限地跑",
+};
 
 describe("沙箱接线（Phase 14.1）", () => {
   it("① 找不到二进制时：直通 + **明说没有隔离**（不静默降级）", () => {
@@ -35,33 +65,61 @@ describe("沙箱接线（Phase 14.1）", () => {
     expect(info.note).toContain("不受限");
   });
 
-  it("② 计划里带上了上限参数，且命令**不在 argv 里**（走环境变量）", () => {
-    const plan = planSandboxed("echo 你好");
+  it("② 走沙箱那条：上限参数在，命令**不在 argv 里**（走环境变量）", () => {
+    const plan = planFor("echo 你好", foundInfo);
     const joined = plan.args.join(" ");
     /*
      * ⚠️ 这条是踩出来的：命令同时出现在 argv 与环境变量里时，cmd 会收到两遍
      * （报错长成 `Cannot find module 'C:\…\work\"…" node …'`）。
      */
     expect(joined, "命令不该出现在 argv 里（它走 DING_SANDBOX_COMMAND）").not.toContain("echo 你好");
-    if (plan.bounded) {
-      expect(plan.args).toContain("--memory-mb");
-      expect(plan.args).toContain(String(SANDBOX_MEMORY_MB));
-      expect(plan.args).toContain("--processes");
-      expect(plan.args).toContain(String(SANDBOX_PROCESSES));
-      expect(plan.args).toContain("--from-env");
-      expect(plan.env.DING_SANDBOX_COMMAND).toBe("echo 你好");
+    expect(plan.args).toContain("--memory-mb");
+    expect(plan.args).toContain(String(SANDBOX_MEMORY_MB));
+    expect(plan.args).toContain("--processes");
+    expect(plan.args).toContain(String(SANDBOX_PROCESSES));
+    expect(plan.args).toContain("--from-env");
+    expect(plan.env.DING_SANDBOX_COMMAND).toBe("echo 你好");
+    /* 这条路的参数是给沙箱自己解析的，照常让 Node 转义 */
+    expect(plan.verbatimArgv).toBe(false);
+  });
+
+  it("②b 直通那条：命令在 argv 里，且**原样**交给 cmd（关掉 Node 的 CRT 转义）", () => {
+    const plan = planFor("echo 你好", missingInfo);
+    expect(plan.bounded).toBe(false);
+    expect(plan.env.DING_SANDBOX_COMMAND).toBeUndefined();
+    const last = plan.args[plan.args.length - 1];
+    if (process.platform === "win32") {
+      /* 外面套的那层引号由 cmd 的 `/s` 剥掉，里层引号原样留下 */
+      expect(last).toBe('"echo 你好"');
+      expect(plan.verbatimArgv).toBe(true);
     } else {
-      // 直通那条：命令必须在 argv 里（否则没人跑它）
-      expect(joined).toContain("echo 你好");
+      expect(last).toBe("echo 你好");
+      expect(plan.verbatimArgv).toBe(false);
     }
   });
 
+  it("②c 直通那条**真的能跑含引号的命令**（2026-10-16 CI 逮到的静默失效）", () => {
+    /*
+     * 判据就是当年的故障现象：含引号的命令**退出码 0 但没有输出**。
+     * 这里真跑一次 —— 拼对了才拿得到那句 marker。
+     * ⚠️ 别把这条改成"断言 args 长什么样"：这正是它当年躲过所有断言的原因。
+     */
+    const plan = planFor(`node -e "console.error('straight-through-marker')"`, missingInfo);
+    const got = spawnSync(plan.file, plan.args, {
+      encoding: "utf8",
+      shell: false,
+      windowsHide: true,
+      windowsVerbatimArguments: plan.verbatimArgv,
+      timeout: 60_000,
+    });
+    expect(got.status).toBe(0);
+    expect(`${got.stdout ?? ""}${got.stderr ?? ""}`).toContain("straight-through-marker");
+  });
+
   it("③ 上限可以压小（验收要它快，不该非等 2GB / 32 个进程）", () => {
-    const plan = planSandboxed("echo x", { memoryMb: 64, processes: 2 });
-    if (plan.bounded) {
-      expect(plan.args).toContain("64");
-      expect(plan.args).toContain("2");
-    }
+    const plan = planFor("echo x", foundInfo, { memoryMb: 64, processes: 2 });
+    expect(plan.args).toContain("64");
+    expect(plan.args).toContain("2");
   });
 
   it.runIf(hasBinary)("④ 真的能跑：命令经沙箱执行，输出一字不差", () => {
