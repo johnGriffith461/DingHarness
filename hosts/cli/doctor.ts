@@ -6,6 +6,8 @@ import { allProviders, firstAvailableProvider, getProvider } from "../../engine/
 import { MODEL_CATALOG, STALE_DAYS, UNKNOWN_MODEL_BUDGET, isStale } from "../../engine/runtime/models";
 import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
 import { sqliteRuntimeName } from "../../engine/adapters/sqliteDriver";
+import { probeSandbox } from "../../engine/adapters/sandbox";
+import { credentialProtection } from "../../engine/adapters/secretStore";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { normalizeConfig } from "./config";
 
@@ -246,14 +248,36 @@ export function runDoctor(input: DoctorInput): Check[] {
     });
   }
 
-  /* ⑨ 沙箱：**如实说没有**（Phase 14 之前就是这样，不装） */
-  out.push({
-    name: "命令隔离",
-    ok: true,
-    detail:
-      "run_command **没有沙箱**：它和 ding 同权限跑（闸门会先问，但问过之后就是全权限）",
-    next: `知道边界就好：别让 agent 在不可信目录里跑命令；要真隔离见 README 的「已知边界」`,
-  });
+  /* ⑨ 命令隔离（Phase 14.1）：**如实说清有哪一层、没有哪一层** */
+  {
+    const box = probeSandbox();
+    out.push({
+      name: "命令隔离",
+      ok: true, // 不是"必须过"的检查项 —— 没有沙箱也能用，只是要知道边界
+      /*
+       * ⚠️ "**不是安全边界**"这句**两种情况都要说**：作业对象挡的是失控，不是恶意 ——
+       * 有沙箱时不说这句，用户会以为"有沙箱 = 安全"，而那正是最危险的误解
+       * （SAFETY.md 里那句"挡的是失控，不是恶意"就是同一件事的另一种写法）。
+       */
+      detail: box.found
+        ? `${box.note}（**不是安全边界**：命令仍以你的身份跑，能读能写能联网）`
+        : "run_command **没有沙箱**：它和 ding 同权限跑（闸门会先问，但问过之后就是全权限）",
+      next: box.found
+        ? "知道边界就好：它挡的是失控（吃光内存 / 起无数子进程 / 留孤儿），不是恶意"
+        : "想有资源上限：pnpm sandbox:build（需要 Rust）。它挡的是失控，不是恶意",
+    });
+  }
+
+  /* ⑩ 凭据保护（Phase 14.2）：说清我们的密钥是不是加密存的 */
+  {
+    const protection = credentialProtection(input.dataDir);
+    out.push({
+      name: "凭据保护",
+      ok: true,
+      detail: protection.detail,
+      next: protection.next,
+    });
+  }
 
   return out;
 }

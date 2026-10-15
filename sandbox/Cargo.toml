@@ -1,0 +1,14 @@
+[package]
+name = "ding-sandbox"
+version = "0.1.0"
+edition = "2021"
+
+# ⚠️ **零外部依赖**是刻意的：沙箱这一层要能在没有网络、没有 crates.io 的机器上编出来
+# （它是"命令执行"的边界设施，不该因为拉不到包而装不上）。
+# Windows 那套（Job Object）直接用 FFI 声明，见 src/win.rs。
+[dependencies]
+
+[profile.release]
+opt-level = "s"
+strip = true
+panic = "abort"

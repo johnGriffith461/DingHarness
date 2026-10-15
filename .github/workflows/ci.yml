@@ -73,6 +73,11 @@ jobs:
       - name: lint
         run: pnpm lint
 
+      - name: 依赖审计（Phase 14.3）
+        # 供应链门：只在高危及以上红。**允许失败不掩盖** —— 真红了就得看一眼。
+        # `--prod` 只看运行时依赖（开发依赖的漏洞不发给用户）。
+        run: pnpm audit --audit-level=high --prod
+
       - name: 单测
         # 纯 node 环境：`vitest.config.ts` 的 include 只有 `src/` 下的测试，
         # 不启 Electron、不连网、不调模型 —— 这是"不烧钱"的结构性保证，不是承诺。

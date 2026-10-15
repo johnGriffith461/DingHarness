@@ -28,7 +28,9 @@
     "eval": "tsx hosts/cli/ding.ts eval",
     "eval:samples": "tsx scripts/eval-samples.ts",
     "eval:matrix": "tsx scripts/eval-matrix.ts",
-    "cli:bin": "node scripts/build-cli-bin.mjs"
+    "cli:bin": "node scripts/build-cli-bin.mjs",
+    "sandbox:build": "cargo build --release --manifest-path sandbox/Cargo.toml",
+    "sandbox:probe": "cargo run --release --manifest-path sandbox/Cargo.toml -- --probe"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -142,7 +142,7 @@ describe("拒绝的每一条都要有理由", () => {
 describe("describeRunResult", () => {
   it("成功说清跑了什么、退出码是多少", () => {
     const line = describeRunResult(
-      { ok: true, command: "npm test", cwd: "D:/x", exitCode: 1, output: "", truncated: false, timedOut: false },
+      { ok: true, command: "npm test", cwd: "D:/x", exitCode: 1, output: "", truncated: false, timedOut: false, sandboxed: false },
       "npm test",
     );
     expect(line).toContain("npm test");
@@ -151,7 +151,7 @@ describe("describeRunResult", () => {
 
   it("超时那句话与「跑完了」分开（看的人要能一眼分辨）", () => {
     const line = describeRunResult(
-      { ok: true, command: "npm test", cwd: "D:/x", exitCode: null, output: "", truncated: false, timedOut: true },
+      { ok: true, command: "npm test", cwd: "D:/x", exitCode: null, output: "", truncated: false, timedOut: true, sandboxed: false },
       "npm test",
     );
     expect(line).toContain("超时");

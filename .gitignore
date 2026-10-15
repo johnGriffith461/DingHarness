@@ -20,3 +20,4 @@ design-backup/
 # 内部施工笔记（HANDOFF / PLAN / REFERENCE / evidence 等，开发过程用，不公开）
 # 文件本地保留，只是不入库；历史里也已连同这条一起清掉
 docs/
+sandbox/target/

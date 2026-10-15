@@ -106,11 +106,21 @@ describe("ding doctor（Phase 11.4）", () => {
     expect(/删掉|改对|unset/.test(dirs!.next)).toBe(true);
   });
 
-  it("⑤ 沙箱那一格**如实说没有**（不装）", () => {
+  it("⑤ 命令隔离那一格：有沙箱说清楚、没沙箱也**如实说没有**（不装）", () => {
     const checks = doctorWith(freshDir());
     const box = checks.find((c) => c.name === "命令隔离");
     expect(box, "没有「命令隔离」这一格").toBeTruthy();
-    expect(box!.detail).toMatch(/没有沙箱|同权限/);
+    /*
+     * 判据是"**说的是实话**"，不是"一定没有沙箱"：
+     * Phase 14.1 之后本机（Windows）**可能真的编了沙箱**，那时它该报"有上限、不留孤儿"，
+     * 而**同时**必须说清"不是安全边界"。两种情况都要能过 —— 这一格不是"有没有"，是"实不实"。
+     */
+    expect(box!.detail.length).toBeGreaterThan(10);
+    if (/作业对象|上限/.test(box!.detail)) {
+      expect(box!.detail, "有沙箱时必须说清它不是安全边界").toMatch(/不是安全边界|仍以你的身份/);
+    } else {
+      expect(box!.detail).toMatch(/没有沙箱|同权限/);
+    }
   });
 
   it("⑥ 只报告、不动机器：探针文件写完就删", () => {

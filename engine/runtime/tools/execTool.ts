@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 
 import { insideDirs } from "./drivePaths";
+import { planSandboxed } from "../../adapters/sandbox";
 
 /**
  * 「跑命令」工具的执行体（2026-10-14）。
@@ -57,6 +58,13 @@ export type RunCommandResult =
       output: string;
       truncated: boolean;
       timedOut: boolean;
+      /**
+       * 这一条命令有没有真的在沙箱里跑（Phase 14.1）。
+       *
+       * ⚠️ **必须如实带出来**：没有隔离时用户/模型要能看见 ——
+       * "以为有隔离"比"知道没有"更危险（后者至少会让人谨慎）。
+       */
+      sandboxed: boolean;
     }
   | { ok: false; error: string };
 
@@ -111,13 +119,24 @@ export async function runCommandForModel(
 
   return await new Promise<RunCommandResult>((resolve) => {
     let child;
+    /** 这一条命令有没有真的在沙箱里跑（如实报给模型与用户）。 */
+    let sandboxed = false;
     try {
-      child = spawnImpl(command, {
+      /*
+       * ⭐ **经沙箱执行**（Phase 14.1）：命令放进一个有内存/子进程上限的作业对象里跑，
+       * 并且随沙箱一起结束（不留孤儿）。找不到沙箱就直通 —— 但那时 `sandboxed` 会是 false，
+       * 由调用方如实转述（**静默降级比报错更坏**：用户会以为有隔离）。
+       *
+       * ⚠️ 走沙箱时 **`shell` 不用 Node 的**：那层壳会落在作业对象外面，
+       * 于是上限约束的是壳、真正的命令在壳外跑（见 `sandbox.ts` 的说明）。
+       */
+      const plan = planSandboxed(command);
+      sandboxed = plan.bounded;
+      child = spawnImpl(plan.file, plan.args, {
         cwd,
-        // Windows 走 ComSpec(cmd.exe)，POSIX 走 /bin/sh —— 与用户开一个终端同一口径
-        shell: true,
+        shell: false,
         windowsHide: true,
-        env: process.env,
+        env: { ...process.env, ...plan.env },
       });
     } catch (e) {
       resolve({ ok: false, error: `起不来：${e instanceof Error ? e.message : String(e)}` });
@@ -162,6 +181,7 @@ export async function runCommandForModel(
         output: [output.trimEnd(), ...notes].filter(Boolean).join("\n"),
         truncated,
         timedOut,
+        sandboxed,
       });
     };
 

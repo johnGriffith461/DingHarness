@@ -23,6 +23,7 @@ import { registerMemoryIpc } from "./ipc/memoryStore";
 import { registerVideoIpc } from "./ipc/videoGen";
 import { registerRemoteIpc } from "./ipc/remote";
 import { attachWindowEvents, registerWindowIpc } from "./ipc/windowControls";
+import { registerDesktopSecretCipher } from "./ipc/secretStore";
 import { registerClipboardIpc } from "./ipc/clipboard";
 import { registerCodingIpc } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL, loadAppSettings, saveAppSettings } from "./ipc/appSettings";
@@ -331,6 +332,11 @@ ipcMain.handle(APP_SETTINGS_CHANNEL.write, (_e, next: unknown) => saveAppSetting
 }
 
 app.whenReady().then(() => {
+  /*
+   * 注册系统密钥保护（Phase 14.2）——safeStorage 要 app ready 之后才可用。
+   * 注册之后 `engine/adapters/secretStore` 才知道"这台机器上能不能加密地存 key"。
+   */
+  registerDesktopSecretCipher();
   // 资源协议要在 ready 之后接上处理器
   try {
     serveAssets();

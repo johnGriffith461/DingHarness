@@ -1,0 +1,23 @@
+# 依赖更新提醒（Phase 14.3 的供应链那一半）。
+#
+# 口径：**每周一次**（不是每天）—— 这个项目的依赖不多，每天提醒只会训练出"忽略它"。
+# 分组：把同一生态的补丁/小版本合成一个 PR，避免十几条 PR 淹掉真正要紧的那条。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-patch-minor:
+        applies-to: version-updates
+        update-types: ["patch", "minor"]
+  - package-ecosystem: cargo
+    directory: "/sandbox"
+    schedule:
+      interval: monthly
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
