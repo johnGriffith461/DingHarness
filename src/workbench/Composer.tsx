@@ -24,6 +24,7 @@ import SkillPanel from "./SkillPanel";
 
 import { CONFIRM_MODES } from "./uiUtil";
 import { UsagePopover } from "./UsagePopover";
+import { ModelChip } from "./ModelChip";
 import { sumUsage } from "@shared/cost";
 
 /**
@@ -129,7 +130,7 @@ export function Composer({
    * 换成单值之后，"最多只有一个开着"是**结构上保证的**，不靠每处记得去关别人。
    * 以后再加 chip 也不会重犯这个问题。
    */
-  const [openPop, setOpenPop] = useState<null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage">(null);
+  const [openPop, setOpenPop] = useState<null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model">(null);
   /*
    * 工作区（2026-10-14）：用户授权给 agent 干活的目录。
    * 列表在**菜单打开时**才拉（它是主进程的磁盘状态，没必要一直挂着）。
@@ -156,12 +157,15 @@ export function Composer({
     setConfirmModeState(mode);
   };
 
+  /* ⚠️ 2026-10-16：「模型 · 思考」那颗 chip 搬进 `ModelChip.tsx` 了 —— 它自己带着下拉与落盘，
+     这里只剩一个挂载点（结构守卫也不允许这个文件再长，拆是对的）。 */
+
   /**
    * 切换某个下拉的开合：开的若是它自己就关掉，否则换成它。
    *
    * @param which 要切换的下拉
    */
-  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage"): void =>
+  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model"): void =>
     setOpenPop((cur) => (cur === which ? null : which));
 
   const installed = useLibraryStore((s) => s.lib.installed);
@@ -728,6 +732,8 @@ export function Composer({
         </div>
 
         <span className="wb-spacer" />
+        {/* 模型 · 思考：真选择器（组件在 ModelChip.tsx） */}
+        <ModelChip open={openPop === "model"} onToggle={() => togglePop("model")} onClose={() => setOpenPop(null)} />
 
         {/*
           ⚠️ 这里原来有一颗 `disabled` 的「模型档位」chip，写死显示 `AUTO · LOW`。
@@ -800,3 +806,5 @@ export function Composer({
  * 首页（blob + 今天有什么工作要处理? + 为你推荐）
  * ============================================================ */
 
+  /* ⚠️ 2026-10-16：「模型 · 思考」那颗 chip 搬进  了 —— 它自己带着下拉与落盘，
+     这里只剩一个挂载点（结构守卫也不允许这个文件再长，拆是对的）。 */

@@ -237,8 +237,7 @@ node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
   **CLI 侧没有钥匙串入口**，所以 CLI 不写加密存储（`ding doctor` 会这么说）。
   备份里**不含密钥**。
 - **多平台**：见上面那张表 —— 桌面只有 Windows x64 验过；**CLI 单二进制**多了一个 Linux
-  （WSL Ubuntu 24.04 上真跑过 `eval` 63/63）；macOS 仍然只有编得出来，**没在真机上跑过**
-  （这台机器上装 macOS 虚拟机既不合法也不现实：Apple 的许可只允许 Apple 硬件）。
+  （WSL Ubuntu 24.04 上真跑过 `eval` 63/63）；macOS 仍然只有编得出来，**没在真机上跑过**。
 - **模型目录表**只登记了少数模型；未登记的走保守默认并在账本上标「未登记模型」。
 - 旧 JSONL 数据在启动时自动迁移，**迁移不删**旧文件；
   配置型数据从 Phase 12.1 起默认存 SQLite（`DSH_STORE_BACKEND=file` 可退回文件）。

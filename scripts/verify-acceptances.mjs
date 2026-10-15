@@ -85,7 +85,7 @@ const RECORDS_DIR = ".verify";
  *   ✅ `accept-context`（菜单 testid 从 `wb-ctx-*` 改成 `wb-drive-menu-*`；
  *      删除改成走确认框；顺带逮到**真缺陷**：`refresh()` 把「已复制链接」回执吃掉）
  *   ✅ `accept-export`（"没有画框"的提示是常驻浮层且盖在导出菜单上，不点掉后面全被挡）
- *   ✅ `accept-voice`（账号按钮现在弹的是菜单，设置在其中一项；三段导航都改对了）
+ *   🗑️ `accept-voice`：**2026-10-16 删了**（主人把设置里的「声音选择」拆了 —— 没有可挑的音色，就没有可验的入口）
  *   ✅ `accept-p5-prompt` **退役**：它读的 `window.__lastAiPrompt` 是 DEV-only 探针，
  *      打包产物里根本没有 → 这条脚本**永远跑不了**。它要守的东西已搬进单测
  *      （`src/canvas/markers.test.ts` 里 `instructionFromMarkers` 那 5 条）。
@@ -143,6 +143,7 @@ const CASES = [
    */
   ["accept-brand.mjs", "视觉系统（三族字体 / 纸白·暖墨 / 无冷色 / 区块标题衬线）"],
   ["accept-chips.mjs", "输入区 chip（项目 / 按需确认点了要有反应）"],
+  ["accept-modelchip.mjs", "输入区的「模型 · 思考」chip（真列模型 / 真落盘 / 默认不发字段）"],
   /*
    * ⚠️ `accept-theme.mjs` **2026-10-14 退役**（从这份清单摘掉，脚本本体留在原地并加了墓碑说明）：
    * 它点的是设置弹窗里的「外观」行，而**外观早就挪到账号菜单的子菜单**（`wb-acct-appearance`）——
@@ -227,7 +228,6 @@ const CASES = [
   ["accept-schedule.mjs", "定时任务：落盘 / 立刻执行真开任务 / 暂停态跨重启"],
   ["accept-edit.mjs", "定时任务编辑：重算下次时间 / 历史不动 / 非法值不放行"],
   ["accept-export.mjs", "画布导出（视图 / 画框各一张真 PNG，画框更小）"],
-  ["accept-voice.mjs", "设置·声音选择（真音色列表 / 选了就生效并记住）"],
   /*
    * 2026-10-14 新写/重写的三条（都**不连模型、不看 DEV 探针**）：
    *   · `accept-p5-ref` 重写：原来断的是 `window.__lastChatPayload`（DEV 才有），

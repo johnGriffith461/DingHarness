@@ -12,7 +12,6 @@ import { type TaskStep } from "./task";
 import { REWIND_HINT } from "./checkpoint";
 import { useDocStore } from "./docStore";
 import { costNote } from "@shared/cost";
-import { findVoice, readVoiceName } from "./tts";
 
 export function MessageActions({ taskId, step, cost, at }: { taskId: string; step: TaskStep; cost?: number; at: number }) {
   const regenerate = useWorkbenchStore((s) => s.regenerate);
@@ -62,13 +61,7 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
       setSpeaking(false);
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(text);
-    /*
-     * 用设置里选的音色。**找不到就退回系统默认** ——
-     * 换了机器/浏览器之后原来选的音色可能不在了，那时候不能什么都不念。
-     */
-    const chosen = findVoice(window.speechSynthesis.getVoices(), readVoiceName());
-    if (chosen) utterance.voice = chosen;
+    const utterance = new SpeechSynthesisUtterance(text);    /* 2026-10-16：不再挑音色（主人把设置里的「声音选择」拆了）—— 用系统默认那一把嗓子。 */
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => {
       setSpeaking(false);

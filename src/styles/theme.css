@@ -511,32 +511,14 @@
 .wb-modal-row.is-todo { color: var(--fg-disabled); cursor: default; }
 .wb-modal-row.is-todo:hover { background: transparent; }
 
-.wb-voice-list {
-  max-height: 210px;
-  overflow-y: auto;
-  padding: 4px 0 6px 12px;
-}
 
-.wb-voice-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 9px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  font-size: 12.5px;
-  color: var(--fg-3);
-  cursor: pointer;
-  text-align: left;
-}
 
-.wb-voice-item:hover { background: var(--bg-2); }
-.wb-voice-item.is-on { background: var(--tint-blue); color: var(--accent-strong); font-weight: 600; }
-.wb-voice-item em { font-style: normal; font-size: 10.5px; color: var(--fg-dim); }
-.wb-voice-empty { padding: 8px 10px; font-size: 12px; color: var(--fg-dim); }
+
+
+
+
+
+
 
 /* ---------- 添加自定义能力（阶段 11.34） ---------- */
 
@@ -756,6 +738,14 @@
   background: var(--surface);
   box-shadow: var(--shadow-popover);
 }
+/* 模型 · 思考那颗的下拉：provider 一多就长，给它一个滚动上限（别顶到窗口外） */
+.wb-model-pop {
+  max-height: 54vh;
+  overflow-y: auto;
+  min-width: 232px;
+}
+.wb-model-pop .wb-chip-title { margin-top: 6px; }
+
 .wb-chip-option {
   display: flex;
   align-items: center;

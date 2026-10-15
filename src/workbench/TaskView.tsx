@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Clock, HelpCircle, Monitor, Phone, RotateCcw } from "lucide-react";
+import { ChevronRight, Clock, HelpCircle, Monitor, RotateCcw } from "lucide-react";
 import { NavCollapseButton } from "./NavCollapseButton";
 import { useWorkbenchStore } from "./store";
 import { continueTargetOf, currentQuestion, progressLabel } from "./task";
@@ -104,9 +104,6 @@ export function TaskView() {
           顶栏右侧那一排图标。实机第 3 个是**弹出悬浮助手窗**（独立可拖拽的快速问答面板）。
           其余几个（电话/定时/设备）是远端能力，这里只做图标占位，不做假功能。
         */}
-        <button className="wb-icon" aria-label="语音通话" title="语音通话（未接入）" disabled>
-          <Phone size={15} />
-        </button>
         {/*
           ⏰ 用它把当前任务变成定时任务：跳到定时任务页并把标题与要做的事填好。
           **不直接建**：点一下凭空多出一个每天跑的任务会让人意外，

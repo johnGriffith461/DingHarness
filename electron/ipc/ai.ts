@@ -274,6 +274,7 @@ export function registerAiIpc(): void {
           ...(request.system ? { system: request.system } : {}),
           messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+          ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           mode: request.toolPolicy ?? "按需确认",
           ...(request.useTools ? { useTools: true } : {}),
           abortSignal: controller.signal,

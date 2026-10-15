@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Minus, Phone, Sparkles, Volume2 } from "lucide-react";
+import { Minus, Sparkles, Volume2 } from "lucide-react";
 import { abortStream, streamChat } from "@/ai/aiClient";
 import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import type { ShellBridge } from "@shared/ipc";
@@ -216,9 +216,6 @@ ${block}` : value;
         <span className="wb-float-user" data-testid="wb-float-user">
           本机用户 ›
         </span>
-        <button className="wb-icon" aria-label="语音通话" title="语音通话（按用户口径不做）" disabled>
-          <Phone size={14} />
-        </button>
         <button
           className="wb-icon"
           title={streaming ? "停止" : "朗读"}

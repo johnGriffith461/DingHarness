@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, Volume2, X } from "lucide-react";
+import { Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -13,7 +13,6 @@ import { listProviders } from "@/ai/aiClient";
 import { useMemoryStore } from "./memoryStore";
 import MemoryPanel from "./MemoryPanel";
 import SettingsPages, { type SettingsSubPage } from "./SettingsPages";
-import { listVoices, readVoiceName, saveVoiceName } from "./tts";
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   /*
@@ -52,12 +51,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void loadMemory();
   }, [loadMemory]);
-  const [voiceOpen, setVoiceOpen] = useState(false);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [voiceName, setVoiceName] = useState(() => readVoiceName());
-
-  // getVoices() 第一次常是空的，要听 voiceschanged（见 tts.ts 里的说明）
-  useEffect(() => listVoices(setVoices), []);
 
   /*
    * 「套餐」在本机版的真实对应物就是**当前在用的模型通道** —— 写死一个「已开通」
@@ -113,7 +106,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     },
     /* 关于（§182）：只说本机这一份的事实 */    { group: 1, icon: <Info size={13} />, label: "关于", value: "" },
     { group: 0, icon: <CircleDollarSign size={13} />, label: "订阅与额度管理", todo: "需要账号服务端，本机版没有" },
-    { group: 1, icon: <Volume2 size={13} />, label: "声音选择" },
     /*
       记忆：原来写着「本机版没有」+ 写死的"已启用" —— 那是**错的**。
       本体路由里有 `chat/memory/list|clear|delete`，它就是个真实功能，
@@ -176,10 +168,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                         setMemoryOpen((v) => !v);
                         return;
                       }
-                      if (r.label === "声音选择") {
-                        setVoiceOpen((v) => !v);
-                        return;
-                      }
                       /*
                         标准套餐 / 账号：本体里是**独立路由**
                         （`chat/settings/profile` / `chat/settings/account`），
@@ -206,12 +194,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <span className="wb-modal-row-icon">{r.icon}</span>
                     <span className="wb-modal-row-label">{r.label}</span>
                     {/*
-                      声音选择这一行现在显示**实际选中的音色**，不是写死的「温柔桃子」——
-                      写死的值会让人以为设置生效了，其实朗读用的是系统默认。
+                      ⚠️ 2026-10-16：这里原来还有一行「声音选择」的值（显示实际选中的音色）——
+                      主人说那一行没用（「声音选择，有必要吗，没用啊，不要了」），
+                      整行连它的音色列表一起拆了。朗读还在（用系统默认音色），
+                      只是不再让你挑音色。
                     */}
-                    {r.label === "声音选择" ? (
-                      <em data-testid="wb-set-voice-value">{voiceName || "系统默认"}</em>
-                    ) : r.value && r.label === "外观" ? (
+                    {r.value && r.label === "外观" ? (
                       <em data-testid="wb-set-theme-value">{r.value}</em>
                     ) : r.value ? (
                       <em>{r.value}</em>
@@ -219,40 +207,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <ChevronRight size={13} />
                   </button>
                   {r.label === "记忆" && memoryOpen ? <MemoryPanel /> : null}
-                  {r.label === "声音选择" && voiceOpen ? (
-                    <div className="wb-voice-list" data-testid="wb-voice-list">
-                      {voices.length === 0 ? (
-                        <div className="wb-voice-empty">这台机器上没有可选的朗读音色</div>
-                      ) : (
-                        <>
-                          <button
-                            className={`wb-voice-item${voiceName ? "" : " is-on"}`}
-                            data-testid="wb-voice-default"
-                            onClick={() => {
-                              saveVoiceName("");
-                              setVoiceName("");
-                            }}
-                          >
-                            系统默认
-                          </button>
-                          {voices.map((v) => (
-                            <button
-                              className={`wb-voice-item${voiceName === v.name ? " is-on" : ""}`}
-                              key={v.name}
-                              data-testid={`wb-voice-${v.name}`}
-                              onClick={() => {
-                                saveVoiceName(v.name);
-                                setVoiceName(v.name);
-                              }}
-                            >
-                              {v.name}
-                              <em>{v.lang}</em>
-                            </button>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  ) : null}
                 </div>
               ))}
           </div>

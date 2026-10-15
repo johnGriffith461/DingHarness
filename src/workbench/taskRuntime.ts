@@ -50,6 +50,7 @@ import {
   withSummary,
 } from "./compaction";
 import { readConfirmMode } from "./confirmMode";
+import { readReasoningEffort } from "./reasoningEffort";
 import {
   acceptQuestions,
   cleanTitle,
@@ -406,6 +407,9 @@ export async function runStream(
         system: fullSystem,
         // 审批档位随请求过界（§143）：模式选择在这侧，工具执行在那侧
         toolPolicy: readConfirmMode(),
+        // 思考强度（2026-10-16）：没选过就是 undefined，一个字段都不多发
+        ...(readReasoningEffort() === undefined ? {} : { reasoningEffort: readReasoningEffort() }),
+
         // 只有"回答用户"这条路径才带工具；起标题等附带请求不带（§143）
         useTools: true,
         // 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）

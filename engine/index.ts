@@ -19,6 +19,7 @@ import {
 } from "./runtime/registry";
 import { runTurn, type TurnEvent } from "./runtime/loop";
 import { runHooks } from "./runtime/pluginHost";
+import type { ReasoningEffort } from "./runtime/protocols/reasoning";
 
 /**
  * 内核的公开 API（Phase 1 D1 冻结）。
@@ -75,6 +76,8 @@ export type EngineRunRequest = {
   system?: string;
   messages: { role: "system" | "user" | "assistant"; content: string }[];
   temperature?: number;
+  /** 思考强度（见 ）：不给 = 不发，与以前完全一致。 */
+  reasoningEffort?: ReasoningEffort;
   /** 闸门档位。 */
   mode: ConfirmMode;
   /** 给不给工具（起标题、翻译这类附带请求不给 —— 它们拿到工具会真的动手）。 */
@@ -200,6 +203,7 @@ export function createEngine(ports: EnginePorts): Engine {
           ...(request.system ? { system: request.system } : {}),
           messages: request.messages,
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+          ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
           ...(request.useTools
             ? {

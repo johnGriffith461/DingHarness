@@ -46,6 +46,11 @@ export type ChatRequest = {
   system?: string;
   temperature?: number;
   /**
+   * 思考强度（2026-10-16）：用户在输入区明确选的 低 / 中 / 高。
+   * 不给就不发这个参数（各家走自己的默认）—— 见 。
+   */
+  reasoningEffort?: "low" | "medium" | "high";
+  /**
    * 审批档位（§143）。
    *
    * 为什么**必须随请求传**：模式选择在渲染进程（那个 chip），而工具执行在主进程 ——

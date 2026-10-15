@@ -1,5 +1,7 @@
 import { stepCountIs, streamText, type ToolSet } from "ai";
 
+import { reasoningProviderOptions, type ReasoningEffort } from "./protocols/reasoning";
+
 import type { StepUsage } from "../../shared/cost";
 import type { HealthStore } from "../ports/health";
 import { noopHealth } from "../ports/health";
@@ -99,6 +101,13 @@ export type TurnRequestInput = {
   tools?: ToolSet;
   /** 步数上限（父 4 / 子 6 都是这个参数）。 */
   maxSteps?: number;
+  /**
+   * 思考强度（2026-10-16）：用户明确选的低 / 中 / 高。
+   *
+   * ⚠️ **不给就是不给**：这一轮不发任何思考相关参数，走各家默认（与以前完全一致）。
+   * 给的方式由  按协议翻（三家写法不一样，映射只有那一处）。
+   */
+  reasoningEffort?: ReasoningEffort;
   /**
    * 中止信号。
    *
@@ -279,6 +288,10 @@ export async function runTurn(
       messages: input.messages,
       ...(input.system ? { system: input.system } : {}),
       ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+      /* 思考强度：没选就是 undefined，一个字段都不多发（见 reasoning.ts 的口径） */
+      ...(reasoningProviderOptions(protocolOf(provider.id), input.reasoningEffort) === undefined
+        ? {}
+        : { providerOptions: reasoningProviderOptions(protocolOf(provider.id), input.reasoningEffort) }),
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       ...(input.tools
         ? { tools: input.tools, stopWhen: stepCountIs(input.maxSteps ?? 6) }
