@@ -92,6 +92,17 @@ const PROVIDER_TABLE: ProviderDef[] = [
     note: "中转，便宜",
   },
   {
+    id: "apikeyfan",
+    label: "apiKeyFan 中转",
+    protocol: "openai-compatible",
+    baseURL: "https://api.apikey.fan/v1",
+    baseURLEnv: "APIKEYFAN_BASE_URL",
+    keyRef: "APIKEYFAN_API_KEY",
+    models: ["deepseek-flash", "deepseek-chat"],
+    modelsEnv: "APIKEYFAN_MODELS",
+    note: "多模型中转（baseURL 可用 APIKEYFAN_BASE_URL 覆盖）",
+  },
+  {
     id: "apihub",
     label: "API_HUB 中转",
     protocol: "openai-compatible",

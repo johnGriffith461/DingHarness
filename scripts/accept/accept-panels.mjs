@@ -115,73 +115,17 @@ await sleep(350);
 if (!(await summaryState()).collapsed) bad.push("摘要面板按 Esc 没有收起");
 note(`摘要面板 Esc：${(await summaryState()).collapsed ? "✓ 收起了" : "✗ 没反应"}`);
 
-/* ---------- 面板 B：画布对话侧栏 ---------- */
+/* ---------- 面板 B：画布对话侧栏 —— 已拆（2026-10-16） ----------
+ *
+ * 主人把画布那条聊天侧栏整条拆了。画布要 AI 干活走它自己的工具条（顶部「AI 生成」、
+ * 底部「图片 / 视频生成」），而让 agent 操作画布走主界面那条路（agent 手上就有 canvas_add_node）。
+ * 所以这一格的断言（把手热区 / 开合 10 次 / Esc / 头上收起）连同那两个 testid 一起删 ——
+ * 没有侧栏就没有可关的入口。
+ *
+ * ⚠️ 留一条：画布本身仍然要打得开。
+ */
+if (!(await openCanvas(page))) bad.push("画布打不开");
 
-if (!(await openCanvas(page))) bad.push("画布打不开 —— 下面的侧栏断言无从谈起");
-await sleep(1200);
-
-const sideState = () =>
-  page.evaluate(() => {
-    const toggle = document.querySelector('[data-testid="wb-canvas-chat-toggle"]');
-    const side = document.querySelector(".wb-canvas .side.left");
-    const head = document.querySelector('[data-testid="wb-chat-collapse"]');
-    if (!toggle) return { toggle: false };
-    const r = toggle.getBoundingClientRect();
-    const at = document.elementFromPoint(Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2));
-    return {
-      toggle: true,
-      open: Boolean(side),
-      hitIsToggle: at === toggle || Boolean(at?.closest?.('[data-testid="wb-canvas-chat-toggle"]')),
-      headCollapse: Boolean(head),
-      headText: (head?.textContent ?? "").trim(),
-    };
-  });
-
-const b0 = await sideState();
-if (!b0.toggle) bad.push("找不到画布对话侧栏的开关把手");
-if (b0.open) bad.push("画布对话侧栏默认应当收起");
-if (!b0.hitIsToggle) bad.push("把手中心被别的东西挡住了（热区被吞）—— 点了会没反应");
-
-await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
-await sleep(800);
-const b1 = await sideState();
-if (!b1.open) bad.push("点把手后画布对话侧栏没有展开");
-if (!b1.headCollapse) bad.push("画布对话侧栏展开后，头上没有「收起」入口（关的入口只剩一颗 17px 的把手）");
-if (!/收起/.test(b1.headText)) bad.push(`画布对话侧栏的收起入口不带字（实测=「${b1.headText}」）`);
-note(`画布侧栏：把手热区${b0.hitIsToggle ? "未被吞 ✓" : "被吞 ✗"} / 头上收起入口「${b1.headText}」`);
-
-// 用头上那颗「收起」关一次（这才是工单要的入口）
-if (b1.headCollapse) {
-  await page.locator('[data-testid="wb-chat-collapse"]').click();
-  await sleep(600);
-  if ((await sideState()).open) bad.push("点头上的「收起」没有关掉画布对话侧栏");
-  note(`用头上「收起」关闭：${(await sideState()).open ? "✗ 没关掉" : "✓ 关掉了"}`);
-}
-
-// 往返 10 次（用把手，它是唯一的开入口）
-let bRound = 0;
-for (let i = 0; i < 10; i += 1) {
-  const t = page.locator('[data-testid="wb-canvas-chat-toggle"]');
-  await t.click();
-  await sleep(320);
-  const opened = (await sideState()).open;
-  await t.click();
-  await sleep(320);
-  const closed = (await sideState()).open;
-  if (!opened || closed) break;
-  bRound += 1;
-}
-if (bRound !== 10) bad.push(`画布对话侧栏反复开合只有 ${bRound}/10 次一致`);
-note(`画布侧栏往返：${bRound}/10`);
-
-// Esc 关闭
-await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
-await sleep(600);
-await page.keyboard.press("Escape");
-await sleep(400);
-const bEsc = await sideState();
-if (bEsc.open) bad.push("画布对话侧栏按 Esc 没有收起");
-note(`画布侧栏 Esc：${bEsc.open ? "✗ 没反应" : "✓ 收起了"}`);
 
 /* ---------- Esc 的边界：在输入框里打字时不许收面板 ---------- */
 
@@ -208,7 +152,7 @@ if (bad.length) {
   console.error("✗ " + bad.join("；"));
   process.exitCode = 1;
 } else {
-  console.log("✓ 右侧面板：两个都能开能关、收起入口都带字、Esc 可关、往返各 10 次一致、把手热区未被吞");
+  console.log("✓ 右侧面板（摘要）：能开能关、收起入口带字、Esc 可关、往返 10 次一致 —— 画布那条侧栏已拆，见上面的说明");
 }
 
 await browser.close();
