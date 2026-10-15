@@ -131,7 +131,7 @@ export function describeConfig(config: CliConfig): string {
   const lines = [
     `provider：${config.provider ?? "（没设，挑第一个有密钥的）"}`,
     `model：${config.model ?? "（没设，用该 provider 的第一个）"}`,
-    `档位：${config.mode ?? "（没设，默认「全部允许」）"}（可选：${CONFIRM_MODES.join(" / ")}）`,
+    `档位：${config.mode ?? "（没设，默认「按需确认」）"}（可选：${CONFIRM_MODES.join(" / ")}）`,
     `工作目录：${config.dirs?.length ? config.dirs.join(" / ") : "（没设，用当前目录）"}`,
   ];
   return lines.join("\n");

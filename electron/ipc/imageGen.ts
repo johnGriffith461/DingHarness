@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app, ipcMain, nativeImage, net, protocol } from "electron";
 import { normalize } from "../../shared/imageSize";
+import { humanFailure } from "../../shared/errors";
 
 /**
  * 图像生成（对标原版画布的核心用途：`aiCreation_canvas_toolbar_imageGenerator`）。
@@ -309,8 +310,13 @@ export function registerImageIpc(): void {
 
         const text = await res.text();
         if (!res.ok) {
-          // 把上游的原文带出来：欠费、额度不足、内容审核这些原因只有它说得清
-          return { ok: false, error: `上游 ${res.status}：${text.slice(0, 300)}` } satisfies GenerateImageResult;
+          /*
+           * ⚠️ 先**说人话**再附原文（Phase 13.1）：原来是 `上游 429：{...}` ——
+           * 裸状态码对用户没有信息量。现在统一走 `humanFailure`：
+           * 它把原因翻成"限流/欠费/审核没过…"，并把上游原文附在后面（查账要用）。
+           * 判定要看**状态码 + 原文**一起：单看原文会漏掉那些只回码不回话的上游。
+           */
+          return { ok: false, error: humanFailure(`上游 ${res.status} ${text.slice(0, 300)}`, { keepDetail: true }) } satisfies GenerateImageResult;
         }
 
       let json: { data?: Array<{ b64_json?: string; url?: string }> } = {};
@@ -402,9 +408,10 @@ export function registerImageIpc(): void {
 
       const text = await res.text();
       if (!res.ok) {
+        // 同上面那张：先说人话，再附原文（口径见 Phase 13.1 的 shared/errors.ts）
         return {
           ok: false,
-          error: `上游 ${res.status}：${text.slice(0, 300)}`,
+          error: humanFailure(`上游 ${res.status} ${text.slice(0, 300)}`, { keepDetail: true }),
         } satisfies EditImageResult;
       }
 

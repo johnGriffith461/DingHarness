@@ -90,7 +90,18 @@ export type ConfirmMode = (typeof CONFIRM_MODES)[number];
 
 /** 档位是否合法（从磁盘/本地存储读回来的东西一律不可信）。 */
 export function normalizeConfirmMode(raw: unknown): ConfirmMode {
-  return CONFIRM_MODES.includes(raw as ConfirmMode) ? (raw as ConfirmMode) : "全部允许";
+  /*
+   * ⚠️ 默认档在 Phase 11.5 改成「按需确认」了（原来是「全部允许」）。
+   *
+   * 方案 11.5 的验收是"**默认档让陌生人敢用**" —— 而"什么都不配 = 写文件与跑命令
+   * 都不问"对一个刚装好的人是不合适的：他不知道这东西会动他的文件。
+   * 现在默认"读操作直接放行 / 写与执行需确认"，与他第一次上手时的心理预期一致；
+   * 想全放开的人随时可以 `ding config set mode 全部允许`。
+   *
+   * ⚠️ 这一条**也影响老用户**（没显式设过档位的人）。这是有意的：`config.json` 里
+   * 显式写过档位的人不受影响，没写过的按"没表达过偏好"处理 —— 而安全的那一侧是默认。
+   */
+  return CONFIRM_MODES.includes(raw as ConfirmMode) ? (raw as ConfirmMode) : "按需确认";
 }
 
 /**

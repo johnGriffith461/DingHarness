@@ -2,6 +2,7 @@ import { omittedNote, shouldCompact } from "../core/context";
 import { KEEP_RECENT_TOKENS_MIN, MAX_KEEP_TOKENS, keepTokensFor } from "../runtime/budget";
 import { MODEL_CATALOG } from "../runtime/models";
 import type { EvalCase } from "./types";
+import { compaction2, conversation2, gates2, subagents2, teams2, tools2 } from "./cases2";
 
 /** 目录表里登记过的模型 id（"上限"那条要拿上下文最大的那个来试）。 */
 const MODEL_IDS = MODEL_CATALOG.map((m) => m.id);
@@ -499,7 +500,7 @@ const compaction: EvalCase[] = [
   },
 ];
 
-/** 全量评测集（turn 型）。 */
+/** 全量评测集（第一批 + 第二批）。 */
 export const EVAL_CASES: EvalCase[] = [
   ...conversation,
   ...tools,
@@ -507,4 +508,10 @@ export const EVAL_CASES: EvalCase[] = [
   ...subagents,
   ...teams,
   ...compaction,
+  ...conversation2,
+  ...tools2,
+  ...gates2,
+  ...subagents2,
+  ...teams2,
+  ...compaction2,
 ];

@@ -1,24 +1,23 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { existsSync } from "node:fs";
-import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { createEngine, type Engine, type EngineRunRequest } from "../../engine/index";
-import { cliSessionId, logLine, splitTurns, type LogRecord } from "../../engine/core/events";
-import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
+import { cliSessionId, splitTurns, type LogRecord } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
 import { describeBudget } from "../../engine/runtime/budget";
-import { modelInfoOf } from "../../engine/runtime/models";
 import { budgetOf } from "../../engine/runtime/budget";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { buildEngine as buildEngineIn } from "./assembly";
-import { EVAL_CASES } from "../../engine/eval/cases";
-import { runSuite } from "../../engine/eval/run";
-import { EVAL_CATEGORIES } from "../../engine/eval/types";
+import { cmdEval } from "./cmdEval";
+import { cmdInit, cmdDoctor } from "./cmdSetup";
+import { cmdSessions } from "./cmdSessions";
+import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
 import { flag, flagAll, parseArgv, type Parsed } from "./args";
@@ -177,7 +176,7 @@ async function cmdRun(p: Parsed): Promise<number> {
     return 3;
   }
 
-  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "全部允许");
+  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认");
   const sessionId = cliSessionId(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
   const { engine, close, plugins } = await buildEngine(dirs);
   for (const problem of plugins) process.stderr.write(`[plugin] ${problem}\n`);
@@ -242,81 +241,6 @@ async function cmdRun(p: Parsed): Promise<number> {
  * 另存一份统计迟早会与日志漂移（那是本项目的老毛病）。所以这里的数与
  * `--export` 出来的记录**必然一致**。
  */
-async function cmdCost(p: Parsed): Promise<number> {
-  const store = createSqliteSessionStore(dataDir());
-  try {
-    const kind = flag(p, "kind");
-    const sessions = await store.list(kind === "chat" || kind === "task" || kind === "cli" ? { kind } : undefined);
-    const entries: LedgerEntry[] = [];
-    for (const summary of sessions) {
-      const { records } = await store.load(summary.sessionId);
-      // 只给会话维度留标题（其它维度用的是日期/模型名，不需要）
-      const book = ledgerOf(records, summary.sessionId);
-      for (const e of book) entries.push({ ...e });
-      titles.set(summary.sessionId, summary.title || summary.sessionId);
-    }
-
-    const by = flag(p, "by");
-    const dim = by === "day" || by === "model" ? by : "session";
-    // 目录表从 runtime 递进来（core 的账本自己不去查表 —— 分层方向）
-    const rows = rollup(entries, dim, (key) => titles.get(key) || key, modelInfoOf);
-    if (p.flags.has("json")) {
-      console.log(JSON.stringify(rows, null, 2));
-      return 0;
-    }
-    if (!rows.length) {
-      console.log("账本还是空的（没有任何一轮带 provider 上报的用量）。");
-      return 0;
-    }
-    for (const row of rows) console.log(formatTotal(row));
-    console.log("[2m口径：数字全部来自 provider 上报的 usage；`-` 表示 provider 没给（不是 0）。[0m");
-    return 0;
-  } finally {
-    store.close();
-  }
-}
-
-/** 会话 id → 标题（成本账本按会话汇总时给人看的那一列）。 */
-const titles = new Map<string, string>();
-
-async function cmdSessions(p: Parsed): Promise<number> {
-  if (p.flags.has("cost")) return cmdCost(p);
-  const store = createSqliteSessionStore(dataDir());
-  try {
-    const kind = flag(p, "kind");
-    const list = await store.list(kind === "chat" || kind === "task" || kind === "cli" ? { kind } : undefined);
-
-    const exportId = flag(p, "export");
-    if (exportId) {
-      const { records, skipped } = await store.load(exportId);
-      /*
-       * 用 `logLine` 而不是自己 `JSON.stringify(record)`：那一行是 `.jsonl` 的**格式定义**
-       * （`parseLog` 是它的读侧），自己拼一遍就等于把这个格式写了两份 ——
-       * 而迁移路径吃的正是这个格式，两份一旦不一致，"导出的文件导不回去"。
-       */
-      for (const record of records) process.stdout.write(logLine(record, record.seq, record.at));
-      process.stderr.write(`\x1b[2m导出了 ${records.length} 条${skipped ? `（跳过 ${skipped} 条坏行）` : ""}\x1b[0m\n`);
-      return 0;
-    }
-    if (p.flags.has("json")) {
-      process.stdout.write(`${JSON.stringify(list, null, 2)}\n`);
-      return 0;
-    }
-    if (!list.length) {
-      process.stdout.write("还没有任何会话。\n");
-      return 0;
-    }
-    for (const s of list) {
-      const when = new Date(s.updatedAt).toLocaleString("zh-CN");
-      const kb = `${Math.round(s.bytes / 1024)}KB`;
-      process.stdout.write(`${s.sessionId.padEnd(28)} ${when.padEnd(22)} ${kb.padStart(6)}  ${s.title || "（没有标题）"}\n`);
-    }
-    return 0;
-  } finally {
-    store.close();
-  }
-}
-
 async function cmdRecord(p: Parsed): Promise<number> {
   const sessionId = p.args[0];
   if (!sessionId) {
@@ -648,127 +572,6 @@ function cmdAgents(p: Parsed = { command: "", args: [], flags: new Map() }): num
   return 0;
 }
 
-/* ────────────────────── eval（Phase 10） ────────────────────── */
-
-/**
- * 仓根。
- *
- * ⚠️ 两条路都要留：**打包后的 CLI 是 CJS**（有 `__dirname`），
- * 而 `pnpm ding` 走 tsx（ESM，没有 `__dirname` —— 用它会 ReferenceError）。
- * `typeof __dirname` 在 ESM 下不会抛（对未声明标识符取 typeof 是安全的）。
- */
-function repoRoot(): string {
-  /*
-   * 往上找 `engine/eval/cases.ts` —— 而不是"从 cwd 上两级"或"从 __dirname 上两级"：
-   * 那两条各只对一种跑法（tsx 从仓根跑 / 打包后的 dist-cli/hosts/cli），换一种就指错地方
-   * （实测撞过：写基线写到了 `C:\engine\evalaseline.json`）。
-   * 找标记文件对两种跑法都对。
-   */
-  const starts = [process.cwd(), ...(typeof __dirname === "string" ? [__dirname] : [])];
-  for (const start of starts) {
-    let dir = path.resolve(start);
-    for (let i = 0; i < 6; i += 1) {
-      if (fsSync.existsSync(path.join(dir, "engine", "eval", "cases.ts"))) return dir;
-      dir = path.dirname(dir);
-    }
-  }
-  return process.cwd();
-}
-
-/**
- * 基线落哪（**进版本库**）。
- *
- * ⚠️ 不放 `docs/`：那个目录被 `.gitignore` 排除了（内部施工笔记不入公开仓，2026-10-15 的决定）。
- * 基线必须跟着版本走 —— 它是"通过率不许往下掉"的那个参照。
- */
-function evalBaselinePath(): string {
-  return path.join(repoRoot(), "engine", "eval", "baseline.json");
-}
-
-/**
- * `ding eval [suite] [--json] [--update-baseline]`（Phase 10.2）。
- *
- * ## 它为什么必须离线
- *
- * 评测要**能进 CI、能天天跑**，所以一条真 provider 都不调：用例自带脚本化的模型回复
- * （`engine/eval/fakeProvider.ts` 起一个本地的 OpenAI 兼容 SSE 服务），
- * 于是被测的是**真代码路径**（真 SDK、真流解析、真工具往返、真闸门），
- * 只是"模型"那一段是确定性的。
- *
- * ## 它与 `engine/eval/eval.test.ts` 的关系
- *
- * **同一个 `runSuite`**：那条在 CI 里当门（通过率跌超 5% 即红），这条给人看报告。
- * 一个跑、一个看 —— 不会出现"CI 判的与命令行看到的不一样"。
- *
- * @param p 解析后的参数
- * @returns 退出码（有失败 = 1）
- */
-async function cmdEval(p: Parsed): Promise<number> {
-  const only = p.args[0];
-  if (only && !EVAL_CATEGORIES.includes(only as (typeof EVAL_CATEGORIES)[number])) {
-    process.stderr.write(`没有这一类评测集：${only}\n可选：${EVAL_CATEGORIES.join(" / ")}\n`);
-    return 2;
-  }
-  const cases = only ? EVAL_CASES.filter((c) => c.category === only) : EVAL_CASES;
-  if (!cases.length) {
-    process.stderr.write("这一类还没有用例。\n");
-    return 2;
-  }
-
-  const report = await runSuite(
-    cases,
-    {
-      /*
-       * ⚠️ 每个用例一个临时工作目录 + 一个临时数据目录：**绝不碰真实 userData**。
-       * CLI 的 `ding run` 用的是真实数据目录，而评测是"可重复的检查"，
-       * 写进真实目录会让下一轮的先决条件变掉（前几条用例跑的产物变成后几条的既有状态）。
-       */
-      makeEngine: async (workDir) => {
-        const storeDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "dh-eval-store-"));
-        const built = await buildEngineIn([workDir], storeDir);
-        return {
-          engine: built.engine,
-          close: () => {
-            built.close();
-            fsSync.rmSync(storeDir, { recursive: true, force: true });
-          },
-        };
-      },
-      sessionPrefix: "eval",
-    },
-    (r, i, total) => {
-      if (p.flags.has("json")) return;
-      process.stdout.write(`${r.ok ? "✓" : "✗"} [${i}/${total}] ${r.id}  ${r.title}\n`);
-      for (const f of r.failures) process.stdout.write(`     ${f.what}：${f.detail}\n`);
-    },
-  );
-
-  if (p.flags.has("json")) {
-    process.stdout.write(JSON.stringify(report, null, 2) + "\n");
-  } else {
-    process.stdout.write(`\n共 ${report.total} 条，通过 ${report.passed}，失败 ${report.failed}，通过率 ${report.rate}%\n`);
-    for (const [category, slot] of Object.entries(report.byCategory)) {
-      process.stdout.write(`  ${category}：${slot.passed}/${slot.total}\n`);
-    }
-  }
-
-  /* 基线：`--update-baseline` 落盘；否则只比对并提示（判定在单测里，这里给人看） */
-  const baselineFile = evalBaselinePath();
-  if (p.flags.has("update-baseline")) {
-    const payload = { rate: report.rate, total: report.total, byCategory: report.byCategory, generatedAt: new Date().toISOString() };
-    fsSync.writeFileSync(baselineFile, JSON.stringify(payload, null, 2) + "\n", "utf8");
-    process.stdout.write(`基线已更新：${baselineFile}\n`);
-  } else if (fsSync.existsSync(baselineFile)) {
-    const baseline = JSON.parse(fsSync.readFileSync(baselineFile, "utf8")) as { rate: number };
-    const drop = baseline.rate - report.rate;
-    if (drop > 5) process.stderr.write(`⚠️ 通过率比基线跌了 ${drop.toFixed(1)} 个百分点（${baseline.rate}% → ${report.rate}%）\n`);
-  } else {
-    process.stdout.write(`（还没有基线：跑 \`ding eval --update-baseline\` 落一份）\n`);
-  }
-
-  return report.failed ? 1 : 0;
-}
-
 function cmdHelp(devMode = false): number {
   process.stdout.write(
     [
@@ -777,6 +580,8 @@ function cmdHelp(devMode = false): number {
       '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
+      "  ding doctor [--json]                           # 一键自检（每项失败都给下一步）",
+      "  ding init                                      # 首次配置向导（配 key / 选模型 / 选目录）",
       "  ding eval [类别] [--json] [--update-baseline]  # 离线评测集（不烧 token，可进 CI）",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
@@ -810,7 +615,42 @@ function cmdHelp(devMode = false): number {
  */
 async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
   // `help` / `--help` / `-h` 在任何时候都是帮助，不进交互
+
+  /*
+   * 向导要临时借 stdin 问几句话；REPL 起来之后由它自己接管。
+   * 所以这个 `rl` 在进 REPL 之前关掉（两个 readline 抢同一路输入会丢行）。
+   */
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
   if (p.command === "help" || p.flags.has("help") || p.flags.has("h")) return cmdHelp(devMode);
+
+  /*
+   * ⚠️ 先过**首次配置**这道门（Phase 11.3）。
+   *
+   * 原来是直接 `replPrecondition()` 报错退出 —— 一个刚装好的人看到的是
+   * 「没有可用的 provider」然后进程结束（方案 U1 要的是「五分钟上手」）。
+   * 现在没配就走向导：配 key → 选模型 → 选目录，两分钟。
+   *
+   * 非交互环境（管道 / CI）里向导**不提问**：`ensureConfigured(null, …)` 只给一句
+   * 能照做的说明 —— 在 CI 里等输入的向导会把流水线卡死。
+   */
+  const configured = await ensureConfigured(
+    process.stdin.isTTY
+      ? {
+          ask: (q, opts) =>
+            new Promise((resolve) => {
+              const suffix = opts?.default ? ` [${opts.default}]` : "";
+              rl.question(`${q}${suffix} `, (answer) => resolve(answer.trim() || opts?.default || ""));
+            }),
+          say: (line) => process.stdout.write(line + "\n"),
+        }
+      : null,
+    { dataDir: dataDir() },
+  );
+  if (!configured.ok) {
+    process.stderr.write(`${configured.reason ?? "还没配好"}\n`);
+    return 3;
+  }
+  rl.close();
 
   const ready = replPrecondition();
   if (!ready.ok) {
@@ -826,7 +666,7 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
   for (const problem of built.plugins) process.stderr.write(`[plugin] ${problem}\n`);
 
   const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider()!.id;
-  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "全部允许");
+  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认");
   const sessionId = cliSessionId(`repl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
 
   try {
@@ -872,7 +712,7 @@ async function main(): Promise<void> {
     parsed.command === "run"
       ? await cmdRun(parsed)
       : parsed.command === "sessions"
-        ? await cmdSessions(parsed)
+        ? await cmdSessions(parsed, dataDir())
         : parsed.command === "record"
           ? await cmdRecord(parsed)
           : parsed.command === "replay"
@@ -881,7 +721,11 @@ async function main(): Promise<void> {
               ? cmdModels(parsed)
               : parsed.command === "plugins"
                 ? await cmdPlugins(parsed)
-                : parsed.command === "eval"
+                : parsed.command === "doctor"
+                  ? cmdDoctor(parsed, dataDir())
+                  : parsed.command === "init"
+                    ? await cmdInit(parsed, dataDir())
+                    : parsed.command === "eval"
                   ? await cmdEval(parsed)
                   : parsed.command === "config"
                   ? cmdConfig(parsed)

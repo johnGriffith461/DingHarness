@@ -42,10 +42,21 @@ import type { AddressInfo } from "node:net";
 
 /** 用例脚本里的一次"模型回复"。 */
 export type EvalReply =
-  /** 只说一句话（收尾 = `stop`）。 */
-  | { say: string }
-  /** 调一个或多个工具（收尾 = `tool_calls`）。`say` 可选：先吐一句再调。 */
-  | { say?: string; call: { name: string; args: Record<string, unknown> }[] };
+  /**
+   * 只说一句话（收尾 = `stop`）。
+   *
+   * `chunks` 给"分多帧吐"的用例：真实模型是一个词一个词流出来的，
+   * 而**一帧吐完**与**分十帧吐完**在客户端是两条不同的路径
+   * （前者测不到增量归并）。不传 `chunks` 就是一帧。
+   */
+  | { say: string; chunks?: string[] }
+  /** 调一个或多个工具（收尾 = `tool_calls`）。`say` 可选：先吐一句再调（也可分帧）。 */
+  | { say?: string; chunks?: string[]; call: { name: string; args: Record<string, unknown> }[] }
+  /**
+   * **中途断开**（崩溃注入，Phase 10.6）：不回任何帧，直接把连接掐掉。
+   * 用它验的是"上游半路没了"时这一轮**怎么收场** —— 该报错收尾，不该挂在那里等。
+   */
+  | { crash: true };
 
 /** 一帧 chunk 的公共字段（与真 provider 同形）。 */
 const CHUNK = { id: "eval-1", object: "chat.completion.chunk", created: 0, model: "eval-model" };
@@ -72,7 +83,12 @@ const toolFrame = (id: string | null, name: string | null, args: string) => ({
 /** 把一次语义回复翻成一串帧。 */
 function framesOf(reply: EvalReply, index: number): object[] {
   const out: object[] = [];
-  if ("say" in reply && reply.say) out.push(textFrame(reply.say));
+  if ("crash" in reply) return out;
+  if ("say" in reply && reply.say) {
+    // `chunks` 给了就按它分帧（否则整段一帧）—— 分帧要拼起来仍等于 `say`
+    const pieces = reply.chunks?.length ? reply.chunks : [reply.say];
+    for (const piece of pieces) out.push(textFrame(piece));
+  }
   if ("call" in reply && reply.call?.length) {
     reply.call.forEach((c, i) => {
       const id = `call_${index}_${i}`;
@@ -135,6 +151,13 @@ export async function startFakeProvider(replies: readonly EvalReply[], parentTur
       const parentSoFar = bodies.filter((b) => parentTurns.some((t) => JSON.stringify(b ?? "").includes(t))).length;
       const index = Math.max(0, Math.min(parentSoFar - 1, replies.length - 1));
       const reply = isParent ? (replies[index] ?? { say: "" }) : { say: "（子智能体收尾）" };
+
+      if ("crash" in reply && reply.crash) {
+        // 崩溃注入（Phase 10.6）：连响应头都不回，直接把连接掐掉
+        // —— 模拟上游进程被杀 / 网络断在半路。验的是"这一轮怎么收场"，不是"会不会崩"。
+        req.socket.destroy();
+        return;
+      }
 
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       for (const frame of framesOf(reply, index)) res.write(`data: ${JSON.stringify(frame)}\n\n`);

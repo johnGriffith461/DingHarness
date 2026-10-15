@@ -43,6 +43,8 @@ export type EvalCaseResult = {
   eventTypes: string[];
   steps: number;
   ms: number;
+  /** 这一条的用量（把各步 `done` 事件的 usage 加起来）。矩阵拿它算花费。 */
+  usage: { input: number; output: number };
 };
 
 /** 宿主提供给评测器的东西（装配方式由宿主决定：CLI 给真装配，测试给同一份）。 */
@@ -57,6 +59,18 @@ export type EvalDeps = {
   makeEngine: (workDir: string) => Promise<{ engine: Engine; close: () => void }>;
   /** 会话 id 前缀（方便在临时目录里认出来）。 */
   sessionPrefix?: string;
+  /**
+   * 用哪个 provider。默认 `strata`（那个本来指本机服务的），也就是**假 provider 那条路**。
+   *
+   * ⚠️ 跨 provider 质量-成本矩阵（10.7）会把它换成真 provider ——
+   * 那时 `fakeProvider: false`，用例脚本里的"模型回复"就没人读了，
+   * 评测变成"拿真模型跑同一批题、看通过率与花费"。**那会花钱**，所以默认不开。
+   */
+  provider?: string;
+  /** 用哪个模型（默认 `deepseek-flash`）。矩阵那条按 provider 换。 */
+  model?: string;
+  /** 要不要起假 provider（默认要）。`false` = 打真端点。 */
+  fakeProvider?: boolean;
 };
 
 /** 起一个一次性的临时工作目录。 */
@@ -109,7 +123,17 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
-    return { id: c.id, category: c.category, title: c.title, ok: failures.length === 0, failures, eventTypes: [], steps: 0, ms: Date.now() - started };
+    return {
+      id: c.id,
+      category: c.category,
+      title: c.title,
+      ok: failures.length === 0,
+      failures,
+      eventTypes: [],
+      steps: 0,
+      ms: Date.now() - started,
+      usage: { input: 0, output: 0 },
+    };
   }
 
   /*
@@ -130,11 +154,14 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
     }),
   );
 
-  const provider = await startFakeProvider(substituted.flat(), c.turns ?? []);
+  const useFake = deps.fakeProvider !== false;
+  const provider = useFake ? await startFakeProvider(substituted.flat(), c.turns ?? []) : null;
   const prevBase = process.env.STRATA_BASE_URL;
   const prevKey = process.env.STRATA_API_KEY;
-  process.env.STRATA_BASE_URL = provider.url;
-  process.env.STRATA_API_KEY = "eval-key";
+  if (provider) {
+    process.env.STRATA_BASE_URL = provider.url;
+    process.env.STRATA_API_KEY = "eval-key";
+  }
 
   let close: (() => void) | null = null;
   try {
@@ -148,8 +175,8 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
       const turn = turns[i] ?? "";
       await built.engine.run({
         sessionId,
-        provider: "strata",
-        model: "deepseek-flash",
+        provider: deps.provider ?? "strata",
+        model: deps.model ?? "deepseek-flash",
         messages: [{ role: "user", content: turn }],
         mode: c.mode ?? "按需确认",
         ...(c.useTools === false ? { useTools: false } : { useTools: true }),
@@ -237,7 +264,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
     } catch {
       /* 收尾失败不影响判定 */
     }
-    await provider.close();
+    if (provider) await provider.close();
     if (prevBase === undefined) delete process.env.STRATA_BASE_URL;
     else process.env.STRATA_BASE_URL = prevBase;
     if (prevKey === undefined) delete process.env.STRATA_API_KEY;
@@ -246,6 +273,15 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
   }
 
   const eventTypes = events.map((e) => e.type);
+  const usage = events.reduce(
+    (acc, e) => {
+      if (e.type !== "done" || !e.usage) return acc;
+      acc.input += e.usage.inputTokens ?? 0;
+      acc.output += e.usage.outputTokens ?? 0;
+      return acc;
+    },
+    { input: 0, output: 0 },
+  );
   return {
     id: c.id,
     category: c.category,
@@ -255,6 +291,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
     eventTypes,
     steps: eventTypes.filter((t) => t === "step-finish").length,
     ms: Date.now() - started,
+    usage,
   };
 }
 

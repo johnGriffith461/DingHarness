@@ -1,0 +1,10 @@
+{"seq":1,"at":1792042543861,"requestId":"turn-1792042543861-ccv4qz","type":"request","provider":"strata","model":"deepseek-flash","messages":[{"role":"user","content":"上游会断"}],"toolPolicy":"按需确认","useTools":true,"tools":["spawn_agents","spawn_agent","list_files","list_dir","search_files","read_file","write_file","edit_file","run_command"]}
+
+{"seq":2,"at":1792042543870,"requestId":"turn-1792042543861-ccv4qz","type":"tool-call","toolCallId":"call_0_0","toolName":"list_dir","input":{"path":"{{work}}","depth":1}}
+
+{"seq":3,"at":1792042543872,"requestId":"turn-1792042543861-ccv4qz","type":"tool-result","toolCallId":"call_0_0","toolName":"list_dir","error":"这个目录不在授权范围内"}
+
+{"seq":4,"at":1792042549942,"requestId":"turn-1792042543861-ccv4qz","type":"error","message":"Failed after 3 attempts. Last error: AI_APICallError: Cannot connect to API: other side closed"}
+
+{"type":"tool-result","requestId":"cut-off",
+

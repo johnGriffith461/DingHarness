@@ -17,8 +17,13 @@ describe("审批档位的持久化", () => {
     localStorage.clear();
   });
 
-  it("没存过时回落到「全部允许」（= 改造前的行为，不能突然全都要确认）", () => {
-    expect(readConfirmMode()).toBe("全部允许");
+  /*
+     * ⚠️ 默认档在 Phase 11.5 改了：**不再**回落到「全部允许」，而是「按需确认」。
+     * 方案的验收是"默认档让陌生人敢用" —— 一个刚装好的人不知道这东西会动他的文件，
+     * 所以默认"读放行、写与执行先问"。显式选过档位的人不受影响。
+     */
+  it("没存过时回落到「按需确认」（Phase 11.5 的安全默认档）", () => {
+    expect(readConfirmMode()).toBe("按需确认");
   });
 
   it("存了就记住（往返）", () => {
@@ -28,11 +33,11 @@ describe("审批档位的持久化", () => {
     }
   });
 
-  it("存的是乱值也不崩，回落「全部允许」", () => {
+  it("存的是乱值也不崩，回落「按需确认」", () => {
     localStorage.setItem("dsh-canvas.confirm-mode", "EveryStepPlease");
-    expect(readConfirmMode()).toBe("全部允许");
+    expect(readConfirmMode()).toBe("按需确认");
     localStorage.setItem("dsh-canvas.confirm-mode", "");
-    expect(readConfirmMode()).toBe("全部允许");
+    expect(readConfirmMode()).toBe("按需确认");
   });
 
   it("存的位置是既有的那套键名（与 chat-settings 同期，别另起一套）", () => {

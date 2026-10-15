@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "./sqliteDriver";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -125,7 +125,11 @@ export function createSqliteSessionStore(
   retention: RetentionPolicy = {},
 ): SessionStore {
   mkdirSync(dir, { recursive: true });
-  const db = new DatabaseSync(path.join(dir, file));
+  /*
+   * ⚠️ 驱动是**运行时选的**（Phase 11.1）：Node/Electron 用 `node:sqlite`，
+   * Bun（单二进制那条路）用 `bun:sqlite` —— 见 `./sqliteDriver.ts` 的说明与实测证据。
+   */
+  const db = openSqlite(path.join(dir, file));
   db.exec(SCHEMA);
 
   const insertEvent = db.prepare(

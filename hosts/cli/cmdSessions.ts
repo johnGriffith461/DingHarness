@@ -1,0 +1,85 @@
+/**
+ * `ding sessions` / `ding sessions --cost` —— 会话列表、导出与成本账本。
+ *
+ * 从 `ding.ts` 拆出来的（结构守卫 C6-5）。
+ */
+import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
+import { logLine } from "../../engine/core/events";
+import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
+import { modelInfoOf } from "../../engine/runtime/models";
+import { flag, type Parsed } from "./args";
+export async function cmdCost(p: Parsed, dataDir: string): Promise<number> {
+  const store = createSqliteSessionStore(dataDir);
+  try {
+    const kind = flag(p, "kind");
+    const sessions = await store.list(kind === "chat" || kind === "task" || kind === "cli" ? { kind } : undefined);
+    const entries: LedgerEntry[] = [];
+    for (const summary of sessions) {
+      const { records } = await store.load(summary.sessionId);
+      // 只给会话维度留标题（其它维度用的是日期/模型名，不需要）
+      const book = ledgerOf(records, summary.sessionId);
+      for (const e of book) entries.push({ ...e });
+      titles.set(summary.sessionId, summary.title || summary.sessionId);
+    }
+
+    const by = flag(p, "by");
+    const dim = by === "day" || by === "model" ? by : "session";
+    // 目录表从 runtime 递进来（core 的账本自己不去查表 —— 分层方向）
+    const rows = rollup(entries, dim, (key) => titles.get(key) || key, modelInfoOf);
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify(rows, null, 2));
+      return 0;
+    }
+    if (!rows.length) {
+      console.log("账本还是空的（没有任何一轮带 provider 上报的用量）。");
+      return 0;
+    }
+    for (const row of rows) console.log(formatTotal(row));
+    console.log("[2m口径：数字全部来自 provider 上报的 usage；`-` 表示 provider 没给（不是 0）。[0m");
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
+/** 会话 id → 标题（成本账本按会话汇总时给人看的那一列）。 */
+const titles = new Map<string, string>();
+
+export async function cmdSessions(p: Parsed, dataDir: string): Promise<number> {
+  if (p.flags.has("cost")) return cmdCost(p, dataDir);
+  const store = createSqliteSessionStore(dataDir);
+  try {
+    const kind = flag(p, "kind");
+    const list = await store.list(kind === "chat" || kind === "task" || kind === "cli" ? { kind } : undefined);
+
+    const exportId = flag(p, "export");
+    if (exportId) {
+      const { records, skipped } = await store.load(exportId);
+      /*
+       * 用 `logLine` 而不是自己 `JSON.stringify(record)`：那一行是 `.jsonl` 的**格式定义**
+       * （`parseLog` 是它的读侧），自己拼一遍就等于把这个格式写了两份 ——
+       * 而迁移路径吃的正是这个格式，两份一旦不一致，"导出的文件导不回去"。
+       */
+      for (const record of records) process.stdout.write(logLine(record, record.seq, record.at));
+      process.stderr.write(`\x1b[2m导出了 ${records.length} 条${skipped ? `（跳过 ${skipped} 条坏行）` : ""}\x1b[0m\n`);
+      return 0;
+    }
+    if (p.flags.has("json")) {
+      process.stdout.write(`${JSON.stringify(list, null, 2)}\n`);
+      return 0;
+    }
+    if (!list.length) {
+      process.stdout.write("还没有任何会话。\n");
+      return 0;
+    }
+    for (const s of list) {
+      const when = new Date(s.updatedAt).toLocaleString("zh-CN");
+      const kb = `${Math.round(s.bytes / 1024)}KB`;
+      process.stdout.write(`${s.sessionId.padEnd(28)} ${when.padEnd(22)} ${kb.padStart(6)}  ${s.title || "（没有标题）"}\n`);
+    }
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+

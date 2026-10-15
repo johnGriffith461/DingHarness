@@ -6,6 +6,7 @@ import { noopHealth } from "../ports/health";
 import { getProvider, protocolOf } from "./providers";
 import { adapterFor } from "./protocols";
 import { resolveSecret } from "./credentials";
+import { humanFailure } from "../../shared/errors";
 
 /**
  * **一份主循环**（C2-3）。
@@ -121,14 +122,12 @@ export type TurnOutcome = {
 export function humanError(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") return "已中止";
   const raw = error instanceof Error ? error.message : String(error);
-  if (/401|unauthorized|invalid api key/i.test(raw)) return "密钥无效或已过期";
-  if (/404|model.*not.*found/i.test(raw)) return "模型不存在（检查模型名与 provider）";
-  if (/429|rate limit/i.test(raw)) return "触发限流，稍后重试";
-  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(raw)) {
-    return "连不上 provider（网络问题，或本地服务未启动）";
-  }
-  if (/insufficient|balance|quota/i.test(raw)) return "余额不足";
-  return raw.slice(0, 200);
+  /*
+   * ⚠️ 话术**不再长在这里**（Phase 13.1）：统一到 `shared/errors.ts`。
+   * 之前文本侧与图像侧各写一份，同一个 429 在两边显示不同的话
+   * （"触发限流，稍后重试" vs "被限流或额度用完了"）—— 用户看到的是两个产品。
+   */
+  return humanFailure(raw, { fallbackLimit: 200 });
 }
 
 /**

@@ -112,9 +112,15 @@ describe("normalizeConfirmMode：磁盘上的东西不可信", () => {
     for (const m of CONFIRM_MODES) expect(normalizeConfirmMode(m)).toBe(m);
   });
 
-  it("乱七八糟的值一律回落到「全部允许」（与今天的行为一致，不会突然全都要确认）", () => {
+  it("乱七八糟的值一律回落到**安全默认**「按需确认」（Phase 11.5）", () => {
+    /*
+     * ⚠️ 回落目标在 Phase 11.5 改了：原来回「全部允许」（= 改造前的行为，向后兼容），
+     * 现在回「按需确认」。理由写在 `shared/ipc.ts` 那段注释里：
+     * 磁盘上的值是**不可信**的，而"不可信时选哪一侧"就是安全默认的定义 ——
+     * 选放开那一侧等于"配置坏掉 = 悄悄全放开"，那是反的。
+     */
     for (const bad of [undefined, null, "", "EveryStep", 3, {}, []]) {
-      expect(normalizeConfirmMode(bad)).toBe("全部允许");
+      expect(normalizeConfirmMode(bad)).toBe("按需确认");
     }
   });
 });

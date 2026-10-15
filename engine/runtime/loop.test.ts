@@ -428,12 +428,22 @@ describe("主循环 · 前置校验与错误翻译", () => {
     }
   });
 
-  it("错误翻译：密钥 / 限流 / 网络 / 余额分别给人话", () => {
-    expect(humanError(new Error("401 Unauthorized"))).toBe("密钥无效或已过期");
-    expect(humanError(new Error("429 rate limit exceeded"))).toBe("触发限流，稍后重试");
-    expect(humanError(new Error("fetch failed"))).toBe("连不上 provider（网络问题，或本地服务未启动）");
-    expect(humanError(new Error("Insufficient Balance"))).toBe("余额不足");
+  it("错误翻译：密钥 / 限流 / 网络 / 余额分别给人话，且每条都给出下一步", () => {
+    /*
+     * ⚠️ 文案在 Phase 13.1 改过：原来只说"发生了什么"（"密钥无效或已过期"），
+     * 现在**每条都带下一步**（方案 10.4 的"人话清单"要求）—— 只说"出错了"
+     * 等于把问题丢回给用户。措辞的单一来源在 `shared/errors.ts`，
+     * 逐条清单由 `shared/errors.test.ts` 验；这里断的是**这条路真的走通了**。
+     */
+    expect(humanError(new Error("401 Unauthorized"))).toContain("密钥无效或已过期");
+    expect(humanError(new Error("401 Unauthorized"))).toContain("检查");
+    expect(humanError(new Error("429 rate limit exceeded"))).toContain("限流");
+    expect(humanError(new Error("429 rate limit exceeded"))).toContain("稍后重试");
+    expect(humanError(new Error("fetch failed"))).toContain("连不上");
+    expect(humanError(new Error("Insufficient Balance"))).toContain("余额不足");
     expect(humanError(Object.assign(new Error("x"), { name: "AbortError" }))).toBe("已中止");
+    // 认不出来时不编话：截断原文（用户至少能看到上游说了什么）
+    expect(humanError(new Error("x".repeat(500)))).toHaveLength(200);
   });
 });
 

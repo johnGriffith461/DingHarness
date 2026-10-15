@@ -34,7 +34,8 @@ describe("收窄（磁盘不可信）", () => {
   });
 
   it("⭐ 认不出的档位**不写进去**（回落默认，而不是留一个假档位）", () => {
-    expect(normalizeConfig({ mode: "随便" })).toEqual({ mode: "全部允许" });
+    // Phase 11.5：认不出的档位回落到**安全默认**（按需确认），不是"全放开"
+    expect(normalizeConfig({ mode: "随便" })).toEqual({ mode: "按需确认" });
     expect(normalizeConfig({ mode: "每步确认" })).toEqual({ mode: "每步确认" });
   });
 

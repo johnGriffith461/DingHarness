@@ -144,7 +144,7 @@ export function registerAiIpc(): void {
      */
     const first = (await listProvidersWithProbe())?.[0];
     const env: ToolEnv = {
-      mode: request.toolPolicy ?? "全部允许",
+      mode: request.toolPolicy ?? "按需确认",
       provider: first?.id ?? "",
       ...(first?.models?.[0] ? { model: first.models[0] } : {}),
       depth: 0,
@@ -266,7 +266,7 @@ export function registerAiIpc(): void {
           ...(request.system ? { system: request.system } : {}),
           messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-          mode: request.toolPolicy ?? "全部允许",
+          mode: request.toolPolicy ?? "按需确认",
           ...(request.useTools ? { useTools: true } : {}),
           abortSignal: controller.signal,
           /*

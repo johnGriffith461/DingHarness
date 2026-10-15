@@ -25,7 +25,10 @@
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
     "verify:packaged": "node scripts/verify-packaged.mjs",
     "perf:budget": "tsx scripts/perf-budget.ts",
-    "eval": "tsx hosts/cli/ding.ts eval"
+    "eval": "tsx hosts/cli/ding.ts eval",
+    "eval:samples": "tsx scripts/eval-samples.ts",
+    "eval:matrix": "tsx scripts/eval-matrix.ts",
+    "cli:bin": "node scripts/build-cli-bin.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

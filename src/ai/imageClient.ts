@@ -1,4 +1,5 @@
 import type { ShellBridge } from "@shared/ipc";
+import { humanFailure } from "@shared/errors";
 
 /**
  * 图像生成客户端（对标原版 `aiCreation_canvas_toolbar_imageGenerator`）。
@@ -60,21 +61,18 @@ export async function generateImage(
   }
 }
 
-/** 把上游错误说成人话（界面直接显示这一段）。 */
+/**
+ * 把上游错误说成人话（界面直接显示这一段）。
+ *
+ * ⚠️ 措辞**不再长在这里**（Phase 13.1）：统一到 `shared/errors.ts` ——
+ * 与文本对话那条共用同一份"原因 → 一句话"。
+ *
+ * 这里只保留图像通道**自己的**一点差别：`keepDetail`。
+ * 出图的错误要带上上游原文（用户要拿它去查账/投诉），而文本对话那条不带
+ * （协议细节糊在界面上对用户没有信息量）。
+ */
 export function humanImageError(raw: string): string {
-  if (/欠费|Arrearage|overdue|good standing/i.test(raw)) return `账号欠费，出不了图：${raw}`;
-  if (/429|rate|quota|额度/i.test(raw)) return `被限流或额度用完了：${raw}`;
-  if (/content|policy|safety|审核/i.test(raw)) return `内容审核没通过：${raw}`;
-  if (/timeout|abort/i.test(raw)) return `超时了（生成可能还在排队，稍后重试）：${raw}`;
-  /**
-   * 这一条是实测踩出来的：输入图尺寸不合规时，上游不报"输入不合规"，
-   * 而是回一个**毫无指向性**的 `502 Upstream service temporarily unavailable`。
-   * 照原文显示会让人一直以为是上游挂了，所以这里点明最可能的原因。
-   */
-  if (/502|503|unavailable/i.test(raw)) {
-    return `上游暂时不可用：${raw}（若反复出现，多半是输入图尺寸不合规 —— 应用会自动规整后再发，可稍后重试）`;
-  }
-  return raw;
+  return humanFailure(raw, { keepDetail: true });
 }
 
 /** 图生图：以一张已有图为输入做编辑。 */

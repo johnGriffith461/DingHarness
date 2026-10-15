@@ -47,6 +47,10 @@ export default defineConfig({
      * `hosts/**` 也在里面（Phase 9）：CLI 宿主的纯逻辑（参数解析、配置、REPL 的行解析）
      * 同样该被单测钉住 —— 而它们跑起来不需要 Electron，与另外两层同一个环境。
      */
-    include: ["src/**/*.test.ts", "engine/**/*.test.ts", "hosts/**/*.test.ts"],
+    /*
+     * `shared/**` 也进来了（Phase 13.1）：那里开始有**纯逻辑**要单测
+     * （`errors.ts` 的"原因 → 一句话"映射与它的顺序敏感性）。
+     */
+    include: ["src/**/*.test.ts", "engine/**/*.test.ts", "hosts/**/*.test.ts", "shared/**/*.test.ts"],
   },
 });

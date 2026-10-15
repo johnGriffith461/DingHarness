@@ -14,13 +14,13 @@ import { normalizeConfirmMode, type ConfirmMode } from "@shared/ipc";
 
 const KEY = "dsh-canvas.confirm-mode";
 
-/** 读出当前档位；没存过或存坏了都回落到「全部允许」（= 改造前的行为）。 */
+/** 读出当前档位；没存过或存坏了都回落到「按需确认」（Phase 11.5 的安全默认档）。 */
 export function readConfirmMode(): ConfirmMode {
   try {
     return normalizeConfirmMode(localStorage.getItem(KEY));
   } catch {
     // 隐私模式 / 存储被禁用：回落即可，不该因此让输入区报错
-    return "全部允许";
+    return "按需确认";
   }
 }
 

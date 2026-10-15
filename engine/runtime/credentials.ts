@@ -55,16 +55,39 @@ function parseRefs(text: string): Record<string, string> {
   return out;
 }
 
-let cache: { at: number; refs: Record<string, string> } | null = null;
+/**
+ * 缓存。
+ *
+ * ⚠️ **必须按文件路径分开**（2026-10-15 修）：原来只记时间戳，于是换了凭据文件
+ * （`DSH_CREDENTIALS_FILE` 变过、或者用户在向导里刚写完一份新的）之后，
+ * 30 秒内读到的还是**上一个文件**的内容 —— 表现是"刚配好，doctor 却说没配"。
+ * 这条是 `hosts/cli/wizard.test.ts` 逮到的：它每个用例换一个凭据文件。
+ */
+let cache: { at: number; file: string; refs: Record<string, string> } | null = null;
 
-/** 读 refs 段（带 30s 缓存，避免每次发请求都读盘）。 */
+/**
+ * 让凭据缓存失效。
+ *
+ * ⚠️ **写完凭据必须调它**（向导那条路）：否则"刚写完、紧接着读"会在 30 秒内
+ * 拿到写之前的快照 —— 表现是"向导说配好了，自检却说没有 key"。
+ * 缓存是给"每次发请求读一次盘"省开销的，不是给"写完还读旧的"用的。
+ */
+export function invalidateCredentialCache(): void {
+  cache = null;
+}
+
+/**
+ * 读 refs 段（带 30s 缓存，避免每次发请求都读盘）。
+ *
+ * 缓存键是**文件路径 + 时间**：换了文件立刻失效（不清缓存就读到别人的 key 才是更坏的）。
+ */
 export function readCredentialRefs(): Record<string, string> {
   const now = Date.now();
-  if (cache && now - cache.at < 30_000) return cache.refs;
+  const file = credentialsPath();
+  if (cache && cache.file === file && now - cache.at < 30_000) return cache.refs;
 
   let refs: Record<string, string> = {};
   try {
-    const file = credentialsPath();
     if (fs.existsSync(file)) {
       // 先按 UTF-8 解，失败再退到 latin1（BOM/编码异常时至少不崩）
       const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
@@ -74,7 +97,7 @@ export function readCredentialRefs(): Record<string, string> {
     refs = {};
   }
 
-  cache = { at: now, refs };
+  cache = { at: now, file, refs };
   return refs;
 }
 
