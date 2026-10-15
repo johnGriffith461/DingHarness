@@ -37,7 +37,6 @@ export const NAV_SHORTCUTS: readonly NavShortcut[] = [
   { keys: "Ctrl N", view: "home" },
   { keys: "Ctrl Shift T", view: "scheduled" },
   { keys: "Ctrl Shift S", view: "plugins" },
-  { keys: "Ctrl Shift D", view: "cloud" },
 ];
 
 /** 某视图的快捷键提示；没有就返回空串（左栏据此决定渲不渲染那枚 `wb-kbd`）。 */
@@ -58,6 +57,5 @@ export function matchShortcut(e: ShortcutEvent): WorkbenchView | null {
   if (!e.shiftKey) return key === "n" ? "home" : null;
   if (key === "t") return "scheduled";
   if (key === "s") return "plugins";
-  if (key === "d") return "cloud";
   return null;
 }

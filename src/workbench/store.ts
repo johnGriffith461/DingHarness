@@ -48,7 +48,7 @@ import {
  */
 
 /** 工作台里的一个"页面"。 */
-export type WorkbenchView = "home" | "task" | "scheduled" | "plugins" | "cloud" | "phone" | "threads" | "doc" | "center" | "reader" | "agent" | "coding" | "image" | "video";
+export type WorkbenchView = "home" | "task" | "scheduled" | "plugins" | "phone" | "threads" | "doc" | "center" | "reader" | "agent" | "coding" | "image" | "video";
 
 export type WorkbenchState = {
   view: WorkbenchView;

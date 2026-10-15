@@ -99,13 +99,12 @@ try {
     );
   }
 
-  /* ── 云盘里能看到两张 ── */
-  await page.locator('[data-testid="wb-nav-cloud"]').click();
-  await page.waitForTimeout(2500);
-  out.driveRows = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-testid^="wb-file-"]')).map((e) =>
-      (e.getAttribute("data-testid") ?? "").replace("wb-file-", ""),
-    ),
+  /* ── 两张图都留下了：看**生成图片页**的最近生成（2026-10-16：原来去云盘看，
+        云盘整页拆了 —— 改看留下的那个入口，判据不变：还是"两张都在"） ── */
+  await page.locator('[data-testid="wb-nav-image"]').click().catch(() => undefined);
+  await page.waitForTimeout(2000);
+  out.imagePageRecent = await page.evaluate(
+    () => Array.from(document.querySelectorAll('[data-testid^="wb-imagegen-recent-"]')).map((e) => e.getAttribute("data-testid")),
   );
   out.shot = await shot(page, "imageedit.png");
 

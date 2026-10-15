@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**搜索历史**（§162，对应 `search_history` / `清空全部搜索记录`）。
@@ -127,26 +127,11 @@ try {
   await page.locator('[data-testid="wb-plugins-search"]').fill("");
   await page.waitForTimeout(400);
 
-  /* ── ⑥ 云盘历史不串 ── */
-  await page.locator('[data-testid="wb-nav-cloud"]').click();
-  await page.waitForTimeout(1500);
-  out.cloudStripBefore = (await page.locator('[data-testid="wb-history-files"]').count()) > 0;
-  await page.locator('[data-testid="wb-cloud-search"]').fill("看板");
-  await page.locator('[data-testid="wb-cloud-search"]').press("Enter");
-  await page.waitForTimeout(600);
-  await page.locator('[data-testid="wb-cloud-search"]').fill("");
-  await page.waitForTimeout(600);
-  out.wordsFiles = await historyWords(page, "files");
-  /*
-   * ⭐「不串」的正确判据：**云盘页上根本不存在技能那条历史**。
-   * （第一版我写成"技能历史应该还是那两条" —— 可它压根不在这个页面的 DOM 里，
-   *  读到空数组就被我判成了错。断言要盯着"该不在的不在"。）
-   */
-  out.skillsStripOnCloudPage = await page.locator('[data-testid="wb-history-skills"]').count();
-
+  /* ⚠️ 2026-10-16：云盘整页拆了 —— 「云盘历史不串」这一截随之删掉（只剩技能这一处）。
+     当年它挡的是真事：两个搜索框共用一份历史、互相串。现在只有一个搜索框，串不起来。
+     ⚠️ 不过**重启前读一次磁盘快照**得留着（下面的 `diskBeforeRestart` 断言靠它）——
+     那一截当时顺手兼职了这个，剪的时候容易一起剪掉。 */
   out.diskBeforeRestart = readFile();
-  out.shot = await shot(page, "searchhistory.png");
-  await b.close();
 
   /* ── ⑦a 重开：历史还在 ── */
   await killTree(child);
@@ -227,11 +212,8 @@ try {
   if (out.pickedQuery !== "估值") bad.push(`点历史没填回输入框：${out.pickedQuery}`);
   if (!(out.cardsAfterPick < 9)) bad.push(`点历史之后没有真的筛（卡片数 ${out.cardsAfterPick}）`);
 
-  if (out.cloudStripBefore) bad.push("云盘一开始就有历史（两处串了？）");
-  if (JSON.stringify(out.wordsFiles) !== JSON.stringify(["看板"])) {
-    bad.push(`云盘历史不对：${JSON.stringify(out.wordsFiles)}`);
-  }
-  if (out.skillsStripOnCloudPage !== 0) bad.push("云盘页上出现了技能的历史条（两处串了）");
+  /* ⚠️ 2026-10-16：云盘整页拆了 —— 「两处历史不串」这三条随之删掉（只剩技能这一处）。
+     当年它挡的是真事：两个搜索框共用一份历史、互相串。现在只有一个搜索框，串不起来。 */
   if (!out.diskBeforeRestart?.skills?.includes("个股")) bad.push("历史没落到磁盘");
 
   if (JSON.stringify(out.wordsAfterRestart) !== JSON.stringify(["个股", "估值"])) {
@@ -259,6 +241,6 @@ try {
     console.error("✗ " + bad.join("；"));
     process.exitCode = 1;
   } else {
-    console.log("✓ 搜索历史成立：记一次 / 新的在前 / 去重 / 太短不记 / 点回填并筛 / 两处不串 / 落盘且清空也落盘");
+    console.log("✓ 搜索历史成立：记一次 / 新的在前 / 去重 / 太短不记 / 点回填并筛 / 单条删除 / 落盘且清空也落盘");
   }
 }

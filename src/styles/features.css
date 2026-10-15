@@ -118,83 +118,16 @@
 /* ============================================================
  * 云盘的证据层（§157）：筛选 / 排序 / 新建菜单 / 到底了 / 存储
  * ============================================================ */
-.wb-cloud-filter select {
-  padding: 3px 6px;
-  border: 1px solid var(--line-soft);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 12px;
-  outline: none;
-}
 
-.wb-cloud-newbox { position: relative; display: inline-flex; }
-.wb-cloud-newmenu {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 30;
-  min-width: 140px;
-  margin-top: 4px;
-  padding: 4px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: var(--shadow-popover);
-}
-.wb-cloud-newmenu-item {
-  display: block;
-  width: 100%;
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg);
-  font-size: 12.5px;
-  text-align: left;
-  cursor: pointer;
-}
-.wb-cloud-newmenu-item:hover { background: var(--bg-2); }
 
-.wb-cloud-end {
-  padding: 14px 0 6px;
-  color: var(--fg-3);
-  font-size: 12px;
-  text-align: center;
-}
+
+
+
+
 
 .wb-cloud-foot { display: flex; align-items: center; gap: 10px; }
 
-/* ============================================================
- * 云盘的删除确认与重命名（§158）
- * ============================================================ */
-.wb-cloud-dialog {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 50;
-  min-width: 320px;
-  padding: 16px 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
-  background: var(--bg);
-  box-shadow: var(--shadow-modal);
-}
-.wb-cloud-dialog p { margin: 0 0 8px; color: var(--fg); font-size: 13px; }
-.wb-cloud-dialog-sub { color: var(--fg-3) !important; font-size: 12px !important; word-break: break-all; }
-.wb-cloud-dialog-input {
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: 7px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 13px;
-  outline: none;
-}
-.wb-cloud-dialog-err { margin: 6px 0 0 !important; color: var(--accent) !important; font-size: 12px !important; }
-.wb-cloud-dialog-bar { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+/* ⚠️ 2026-10-16：这一节（云盘的删除确认与重命名）随云盘整页一起删了。 */
 
 /* ============================================================
  * 创作广场（§159）—— 文案照本体 `coding_launch_page_*` 那一组
@@ -507,54 +440,19 @@
 /* ============================================================
  * 上传任务面板（§170）
  * ============================================================ */
-.wb-upload {
-  margin-bottom: 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: 9px;
-  background: var(--bg);
-}
-.wb-upload-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
-.wb-upload-sum { color: var(--fg); font-size: 12.5px; }
-.wb-upload-list { margin: 0; padding: 0 10px 8px; list-style: none; max-height: 160px; overflow-y: auto; }
-.wb-upload-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 12.5px; }
-.wb-upload-name {
-  flex: 1;
-  min-width: 0;
-  color: var(--fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wb-upload-ok { color: var(--fg-3); }
-.wb-upload-bad { color: var(--accent); }
+
+
+
+
+
+
+
+
 
 /* ============================================================
  * 拖拽上传（§171）
  * ============================================================ */
-.wb-cloud-drop { position: relative; }
-.wb-cloud-drop.is-over {
-  /*
-   * 拖拽落点：原来是一圈 **2px 蓝色虚线** —— 横跨整个云盘区，又粗又蓝。
-   * 现在改成"整块轻轻亮一下"（柔和底色）+ 一条 1px 中性虚线边界：
-   * 落点是**大面积**元素，信号应该来自面，不是来自一圈粗线。
-   */
-  border-radius: 10px;
-  background: var(--surface-hover);
-  outline: 1px dashed var(--line-strong);
-  outline-offset: -4px;
-}
-.wb-cloud-drop-hint {
-  position: absolute;
-  right: 10px;
-  top: 8px;
-  z-index: 5;
-  padding: 3px 9px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 11.5px;
-  pointer-events: none;
-}
+
 
 .wb-doc-pop-empty { display: block; padding: 5px 9px; color: var(--fg-3); font-size: 11.5px; }
 

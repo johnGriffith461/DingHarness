@@ -41,7 +41,6 @@ describe("matchShortcut", () => {
   it("Ctrl Shift T / S / D 分别到定时任务、插件、云盘", () => {
     expect(matchShortcut(ev("t", { ctrlKey: true, shiftKey: true }))).toBe("scheduled");
     expect(matchShortcut(ev("s", { ctrlKey: true, shiftKey: true }))).toBe("plugins");
-    expect(matchShortcut(ev("d", { ctrlKey: true, shiftKey: true }))).toBe("cloud");
   });
 
   it("macOS 的 Cmd 等价于 Ctrl", () => {
@@ -66,7 +65,6 @@ describe("键位表与提示文本", () => {
     expect(shortcutFor("home")).toBe("Ctrl N");
     expect(shortcutFor("scheduled")).toBe("Ctrl Shift T");
     expect(shortcutFor("plugins")).toBe("Ctrl Shift S");
-    expect(shortcutFor("cloud")).toBe("Ctrl Shift D");
   });
 
   it("没有快捷键的视图返回空串（左栏据此不渲染那枚角标）", () => {

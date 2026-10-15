@@ -1,10 +1,10 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, waitForPage } from "./harness.mjs";
 
 /**
- * 验收：**两处搜索**（§160）—— 技能搜索 + 云盘搜索。
+ * 验收：**技能搜索**（§160 里剩下的那一处；云盘搜索随云盘页 2026-10-16 拆掉）。
  *
  * ## 这条**不调模型**（进批跑）
  *
@@ -54,7 +54,7 @@ const boot = async () => {
 };
 
 const cards = (page) => page.locator(".wb-plugin-grid > *").count();
-const rows = (page) => page.locator(".wb-tr:not(.wb-th)").count();
+/* ⚠️ 原来这里还有个 rows(page)（数云盘表格行）—— 2026-10-16 云盘页拆了，它跟着走。 */
 
 try {
   if (!(await boot())) {
@@ -138,65 +138,8 @@ try {
     Array.from(document.querySelectorAll(".wb-history-word")).map((e) => (e.textContent ?? "").trim()),
   );
 
-  /* ── ④ 云盘搜索 ── */
-  await page.locator('[data-testid="wb-nav-cloud"]').click();
-  await page.waitForTimeout(1800);
-  out.filePlaceholder = await page.evaluate(
-    () => document.querySelector('[data-testid="wb-cloud-search"]')?.getAttribute("placeholder") ?? "",
-  );
-  out.rowsBefore = await rows(page);
-  await page.locator('[data-testid="wb-cloud-search"]').fill("看板");
-  await page.waitForTimeout(800);
-  out.rowsAfter = await rows(page);
-  out.hitNames = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-testid^="wb-file-"]')).map((e) =>
-      (e.getAttribute("data-testid") ?? "").replace("wb-file-", ""),
-    ),
-  );
-
-  /* ── ④a 命中数（⑧） ── */
-  out.cloudHits = await page.evaluate(
-    () => document.querySelector('[data-testid="wb-cloud-hits"]')?.textContent?.trim() ?? "(没有命中数)",
-  );
-  out.cloudHitsMatch = out.cloudHits === `命中 ${out.rowsAfter} 条`;
-
-  /* ── ④b 清除 ×（⑦） ── */
-  await page.locator('[data-testid="wb-cloud-search-clear"]').click();
-  await page.waitForTimeout(800);
-  out.rowsAfterClear = await rows(page);
-  out.fileQueryAfterClear = await page.evaluate(
-    () => document.querySelector('[data-testid="wb-cloud-search"]')?.value ?? "(没找到输入框)",
-  );
-
-  /* ── ④c 多命中（⑧ 的真考验）：两行都要算进去 ── */
-  await page.locator('[data-testid="wb-cloud-search"]').fill("销售");
-  await page.waitForTimeout(800);
-  out.cloudMultiRows = await rows(page);
-  out.cloudMultiHits = await page.evaluate(
-    () => document.querySelector('[data-testid="wb-cloud-hits"]')?.textContent?.trim() ?? "(没有命中数)",
-  );
-  out.cloudMultiMatch = out.cloudMultiHits === `命中 ${out.cloudMultiRows} 条`;
-
-  /* ── ⑤ 搜不到 ── */
-  await page.locator('[data-testid="wb-cloud-search"]').fill("zzz不存在");
-  await page.waitForTimeout(800);
-  /* 同上：云盘空态也有「清除筛选」了，只读那句话 */
-  out.fileEmpty = await page.evaluate(
-    () => document.querySelector('[data-testid="wb-cloud-empty"] p')?.textContent?.trim() ?? "",
-  );
-
-  /* ── ⑤b 空态给出路（⑨） ── */
-  out.cloudEmptyAction = await page.locator('[data-testid="wb-cloud-empty-clear"]').count();
-
-  /* ── ⑥ 清空回到原样：走那颗按钮 ── */
-  await page.locator('[data-testid="wb-cloud-empty-clear"]').click();
-  await page.waitForTimeout(800);
-  out.rowsRestored = await rows(page);
-  out.fileQueryAfterEmptyClear = await page.evaluate(
-    () => document.querySelector('[data-testid="wb-cloud-search"]')?.value ?? "(没找到输入框)",
-  );
-  out.shot = await shot(page, "search.png");
-
+  /* ⚠️ 2026-10-16：云盘整页拆了，所以这一半（云盘搜索）连同它的断言一起删掉 —— */
+  /*    留下来的是技能搜索那一半；两处搜索现在只有一处，这不是降期望，是那处没了。 */
   await b.close();
 } catch (e) {
   out.error = String(e).slice(0, 300);
@@ -208,7 +151,6 @@ try {
   if (out.error) bad.push("异常: " + out.error);
 
   if (out.skillPlaceholder !== "搜索技能") bad.push(`技能搜索占位与证据不符：${out.skillPlaceholder}`);
-  if (out.filePlaceholder !== "搜索文件") bad.push(`云盘搜索占位与证据不符：${out.filePlaceholder}`);
 
   if (!(out.skillCardsBefore > 0)) bad.push("技能页一开始就没有卡片");
   if (!(out.skillCardsAfter < out.skillCardsBefore)) {
@@ -251,38 +193,15 @@ try {
     bad.push(`搜索历史里出现了空词条：${JSON.stringify(out.skillHistoryWords)}`);
   }
 
-  if (!(out.rowsBefore > 0)) bad.push("云盘一开始就没有文件");
-  if (out.rowsAfter !== 1) bad.push(`云盘搜「看板」应只剩 1 行，实际 ${out.rowsAfter}`);
-  if (JSON.stringify(out.hitNames) !== JSON.stringify(["销售看板.md"])) {
-    bad.push(`云盘搜索命中不对：${JSON.stringify(out.hitNames)}`);
-  }
-  if (out.fileEmpty !== "未搜索到匹配的文件") bad.push(`云盘搜不到时的提示不对：${out.fileEmpty}`);
-  if (!out.cloudHitsMatch) bad.push(`云盘命中数与行数不符：${out.cloudHits} vs ${out.rowsAfter} 行`);
-  if (out.rowsAfterClear !== out.rowsBefore) {
-    bad.push(`点云盘 × 之后没回到原样：${out.rowsAfterClear} vs ${out.rowsBefore}`);
-  }
-  if (out.fileQueryAfterClear !== "") bad.push(`点云盘 × 之后搜索框没清空：「${out.fileQueryAfterClear}」`);
-  if (!(out.cloudMultiRows >= 2)) {
-    bad.push(`云盘多命中用例只剩 ${out.cloudMultiRows} 行 —— 少于 2 行验不出命中数`);
-  }
-  if (!out.cloudMultiMatch) {
-    bad.push(`云盘多命中时命中数不对：${out.cloudMultiHits} vs ${out.cloudMultiRows} 行`);
-  }
-
-  if (out.cloudEmptyAction !== 1) bad.push(`云盘搜不到时没给「清除筛选」的出路（${out.cloudEmptyAction} 个）`);
-  if (out.fileQueryAfterEmptyClear !== "") {
-    bad.push(`点了云盘「清除筛选」搜索框还是：「${out.fileQueryAfterEmptyClear}」`);
-  }
-  if (out.rowsRestored !== out.rowsBefore) {
-    bad.push(`清空云盘搜索后没回到原样：${out.rowsRestored} vs ${out.rowsBefore}`);
-  }
+  /* ⚠️ 2026-10-16：云盘整页拆了，所以这一半（云盘搜索）连同它的断言一起删掉 —— */
+  /*    留下来的是技能搜索那一半；两处搜索现在只有一处，这不是降期望，是那处没了。 */
 
   if (bad.length) {
     console.error("✗ " + bad.join("；"));
     process.exitCode = 1;
   } else {
     console.log(
-      "✓ 两处搜索成立：占位逐字 / 筛得对 / 命中数与渲染一致 / 清除 × 与空态出路都真管用 / 清空能回到原样",
+      "✓ 技能搜索成立：占位逐字 / 筛得对 / 命中数与渲染一致 / 清除 × 与空态出路都真管用 / 清空能回到原样",
     );
   }
 }

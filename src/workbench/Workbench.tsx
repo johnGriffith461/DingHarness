@@ -9,10 +9,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useWorkbenchStore, restoreTasks, startTaskPersistence } from "./store";
 /*
- * ⚠️ C6-2：`pages.tsx` 已按组件拆成 `ScheduledPage.tsx` / `PluginsPage.tsx` / `CloudPage.tsx` / `PhonePage.tsx`
+ * ⚠️ C6-2：`pages.tsx` 已按组件拆成 `ScheduledPage.tsx` / `PluginsPage.tsx` / `PhonePage.tsx`
  * （原来那个 1669 行的文件不再存在，避免留一个只是转发的"桶文件"）。
  */
-import { CloudPage } from "./CloudPage";
 import { PhonePage } from "./PhonePage";
 import { PluginsPage } from "./PluginsPage";
 import { ScheduledPage } from "./ScheduledPage";
@@ -177,8 +176,6 @@ export default function Workbench() {
         return <ScheduledPage />;
       case "plugins":
         return <PluginsPage />;
-      case "cloud":
-        return <CloudPage />;
       case "phone":
         return <PhonePage />;
       /*

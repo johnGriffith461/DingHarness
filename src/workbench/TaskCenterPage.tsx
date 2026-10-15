@@ -56,7 +56,6 @@ export function TaskCenterPage() {
   };
 
   const services: Array<{ view: WorkbenchView; label: string }> = [
-    { view: "cloud", label: "云盘" },
     { view: "phone", label: "手机遥控电脑" },
     { view: "plugins", label: "插件 · 技能 · 伙伴" },
     { view: "scheduled", label: "定时任务" },

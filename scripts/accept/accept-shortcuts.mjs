@@ -67,10 +67,6 @@ await waitForPort(__port, 40000);
   await page.waitForTimeout(700);
   out.ctrlShiftS = { nav: await activeNav(page), page: await has('[data-testid="wb-plugin-tabs"]') };
 
-  await page.keyboard.press("Control+Shift+D");
-  await page.waitForTimeout(700);
-  out.ctrlShiftD = { nav: await activeNav(page), page: await has('[data-testid="wb-cloud-count"]') };
-
   await page.keyboard.press("Control+n");
   await page.waitForTimeout(700);
   out.ctrlN = { nav: await activeNav(page) };
@@ -98,8 +94,8 @@ await waitForPort(__port, 40000);
   if (!out.ctrlShiftT?.page) bad.push("Ctrl Shift T 后没看到定时任务页的内容");
   if (out.ctrlShiftS?.nav !== "插件·技能·伙伴") bad.push("Ctrl Shift S 没切到插件页");
   if (!out.ctrlShiftS?.page) bad.push("Ctrl Shift S 后没看到插件页的内容");
-  if (out.ctrlShiftD?.nav !== "云盘") bad.push("Ctrl Shift D 没切到云盘");
-  if (!out.ctrlShiftD?.page) bad.push("Ctrl Shift D 后没看到云盘页的内容");
+  /* ⚠️ 2026-10-16：Ctrl Shift D（云盘）随云盘整页一起拆了 —— 那条映射与它的断言都删掉，
+     不是改个期望值：快捷键没了就是没了。 */
   if (out.ctrlN?.nav !== "新工作任务") bad.push("Ctrl N 没回到新工作任务");
   if (out.plainT !== "新工作任务") bad.push("按了个光杆 t 就把界面切走了（会导致打字误触）");
   if (out.ctrlShiftN !== "新工作任务") bad.push("没定义的 Ctrl Shift N 也把界面切走了");

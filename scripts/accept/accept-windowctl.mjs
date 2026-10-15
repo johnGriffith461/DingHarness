@@ -82,12 +82,14 @@ if (under.length) {
   note("✓ 标题栏底下没有可点元素（不会吞点击）");
 }
 
-/* ---------- 3. 云盘页：右上按钮不再被压住 ---------- */
+/* ---------- 3. 插件页：右上按钮不再被压住 ---------- */
+/* ⚠️ 2026-10-16：原来这里点的是云盘页（`wb-cloud-new` 等三颗按钮）—— 云盘整页拆了，
+   改用**插件页**的右上按钮（`wb-plugin-add` 在同一角上，判据一字未改）。 */
 
-await page.locator('[data-testid="wb-nav-cloud"]').click();
+await page.locator('[data-testid="wb-nav-plugins"]').click();
 await sleep(1200);
 const cloud = await page.evaluate(() => {
-  const ids = ["wb-cloud-new", "wb-cloud-upload", "wb-cloud-refresh"];
+  const ids = ["wb-plugin-add"];
   const r = {};
   for (const id of ids) {
     const el = document.querySelector(`[data-testid="${id}"]`);
@@ -99,10 +101,10 @@ const cloud = await page.evaluate(() => {
 }, chrome.barBottom);
 
 for (const [id, v] of Object.entries(cloud)) {
-  if (!v.visible) { bad.push(`云盘页 ${id} 不见了`); continue; }
-  if (v.top < chrome.barBottom) bad.push(`云盘页 ${id} 仍在标题栏下方被压住（top=${v.top} < ${chrome.barBottom}）`);
+  if (!v.visible) { bad.push(`插件页 ${id} 不见了`); continue; }
+  if (v.top < chrome.barBottom) bad.push(`插件页 ${id} 仍在标题栏下方被压住（top=${v.top} < ${chrome.barBottom}）`);
 }
-note(`云盘页右上按钮：${Object.entries(cloud).map(([k, v]) => `${k}@top${v.top}`).join("  ")}`);
+note(`插件页右上按钮：${Object.entries(cloud).map(([k, v]) => `${k}@top${v.top}`).join("  ")}`);
 
 /* ---------- 4. 窗口四操作 ---------- */
 

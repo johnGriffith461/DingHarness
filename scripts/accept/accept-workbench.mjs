@@ -91,13 +91,7 @@ await page.waitForTimeout(500);
 report.skillsTab = await page.$$eval(".wb-group-title", (els) => els.map((e) => e.textContent.trim()));
 await shot(page, path.join(shots, "wb-04-skills-tab.png"));
 
-await visit("cloud", "wb-05-cloud.png");
-report.cloud = {
-  tabs: await page.$$eval(".wb-tab", (els) => els.map((e) => e.textContent.trim())),
-  headers: await page.$$eval(".wb-th span", (els) => els.map((e) => e.textContent.trim())),
-  rows: await page.locator(".wb-tr").count(),
-  foot: await page.locator(".wb-cloud-foot").textContent(),
-};
+/* ⚠️ 2026-10-16：云盘整页拆了，这一格（访问 cloud 视图）删掉。 */
 
 await visit("phone", "wb-06-phone.png");
 report.phone = {

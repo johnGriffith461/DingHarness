@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { kindOf, type DriveEntry, type DriveKind } from "../../shared/drive";
 import { isUnsupported, type ImportItem } from "../../shared/upload";
-import { READ_MAX_BYTES } from "../../shared/driveFiles";
+import { READ_MAX_BYTES } from "../../shared/drive";
 // 生成图落的目录（与 imageGen 同一处，不另写一份路径）
 import { assetsDir } from "./imageGen";
 import { insideDirs } from "../../engine/runtime/tools/drivePaths";

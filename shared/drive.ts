@@ -195,3 +195,12 @@ export function countByKind(entries: DriveEntry[]): Record<string, number> {
   for (const entry of entries) out[entry.kind] = (out[entry.kind] ?? 0) + 1;
   return out;
 }
+
+/**
+ * 一份文件的文本上限（超过就不往阅读器 / 工具里塞 —— 界面会卡住）。
+ *
+ * 2026-10-16：原来住在 `shared/driveFiles.ts`（云盘的改名 + 读取那支）。
+ * 云盘页拆掉之后，只剩这一个常量还有人用（`electron/ipc/driveStore.ts` 与读文件工具），
+ * 所以并进这里 —— 一个常量不值得单独一支文件。
+ */
+export const READ_MAX_BYTES = 200 * 1024;
