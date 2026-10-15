@@ -39,7 +39,10 @@
       "electron",
       "esbuild",
       "electron-winstaller"
-    ]
+    ],
+    "overrides": {
+      "pptxgenjs>image-size": "-"
+    }
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.79",

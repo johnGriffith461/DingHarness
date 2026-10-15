@@ -8,6 +8,25 @@
 > 这一版把《V4 后续篇》的主线（10 → 11 → 12 → 13 → 14 → 15 → 16 → 17 → 18）走完。
 > **两节都读一下「没做的」** —— 那是这一版真实的边界。
 
+### CI 第一次真跑逮到的（供应链 · 14.3 的回报）
+
+`pnpm audit --audit-level=high --prod` 是 14.3 加进 CI 的，但**加的时候没跑过** ——
+推上去才第一次真跑，当场逮到一条：**pptxgenjs 声明的 `image-size@1.2.1`**
+（两条 high：JXL / HEIF / ICNS 解析器死循环 DoS，修在 ≥2.0.3）。
+
+**先查证，再动手 —— 结论是它是死依赖**：pptxgenjs 4.0.1 的产物（cjs / es / bundle 三份）
+里**没有任何一处 `require('image-size')`**；唯一沾边的 `sizeOf` 那段整段躺在注释里
+（原样标着 "currently unused"）；而我们自己的 pptx 用法（`electron/ipc/officeWrite.ts`）
+**只写文字、不加图**。也就是说：被计进审计的这条依赖，运行时根本不会加载。
+
+**处置**：`pnpm.overrides` 里写 `"pptxgenjs>image-size": "-"` 把这条边**摘掉** ——
+pnpm 文档里 `-` 就是"删掉用不上的依赖"；用**限定边**写法而不是全局删，
+是为了将来真要用 image-size 时不被这条规则误伤。锁文件里不再有 image-size，high 档干净。
+
+**余下 1 条 moderate 如实留着**：`exceljs > uuid@8.3.2`（v3/v5/v6 传 `buf` 时的越界检查）。
+exceljs 只调 `v4()` 且不带参数 → 那条漏洞路径不可达；CI 的门是 high，不拦 moderate。
+要收紧时单独处置，不在这笔里顺手升大版本（uuid 8 → 11 是跨大版本，风险与收益不成比例）。
+
 ### Phase 12–18：日常可靠 · 说人话 · 沙箱 · 平台 · 功能补全 · 随处可用 · 生态
 
 **数据主权（12）**：14 个配置型 store 都走同一个 `createJsonStore`，所以在那一层搬进 SQLite ——
