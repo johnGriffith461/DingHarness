@@ -20,6 +20,7 @@ import { cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore } from "./cmdBackup";
 import { cmdResume } from "./cmdResume";
+import { cmdAcp, cmdServe } from "./cmdServe";
 import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
@@ -602,6 +603,8 @@ function cmdHelp(devMode = false): number {
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
       "  ding doctor [--json]                           # 一键自检（每项失败都给下一步）",
+      "  ding serve [--port 8787] [--bind <地址> --token <口令>]  # Agent Server（默认只绑回环）",
+      "  ding acp                                       # 作为 ACP agent 跑在标准输入输出上（被外部宿主驱动）",
       "  ding resume [<会话 id>] [--continue]           # 崩溃恢复（列出被打断的回合；--continue 重跑那一轮）",
       "  ding backup [--out <文件>]                     # 全量备份（会话 + 配置型 store + CLI 配置，单个 JSON）",
       "  ding restore <文件> [--list]                   # 从备份恢复（--list 只看不恢复；只补不覆盖）",
@@ -745,7 +748,11 @@ async function main(): Promise<void> {
               ? cmdModels(parsed)
               : parsed.command === "plugins"
                 ? await cmdPlugins(parsed)
-                : parsed.command === "resume"
+                : parsed.command === "serve"
+                  ? await cmdServe(parsed, dataDir())
+                  : parsed.command === "acp"
+                    ? await cmdAcp(parsed, dataDir())
+                    : parsed.command === "resume"
                   ? await cmdResume(parsed, dataDir())
                   : parsed.command === "backup"
                   ? await cmdBackup(parsed, dataDir())
