@@ -4,6 +4,7 @@ import {
   AGENT_TOOLS,
   MAX_SUBAGENT_DEPTH,
   SPAWN_AGENT_TOOL,
+  SPAWN_AGENTS_TOOL,
   toolSpec,
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
@@ -133,12 +134,33 @@ export function buildToolSet(input: {
   mode: ConfirmMode;
   executor: ToolExecutor;
   ctx: ExecutorContext;
+  /**
+   * 只要这些工具（agent 的**白名单**，Phase 7.1）。
+   *
+   * ⚠️ 它与 `hide` 是**两层**，别混：
+   * - `hide` 挡的是"用户这一档不让用"（策略）；
+   * - `only` 挡的是"这个角色本来就不该碰"（职责）。
+   * 研究员的 `only` 里没有 `write_file` —— 于是它**根本拿不到**写工具，
+   * 而不是"拿到了但会被拦"。模型看不到就不会试，也就不会浪费时间。
+   *
+   * 省略 = 不限制（主对话那个 agent 就是这样）。
+   */
+  only?: readonly string[];
+  /** 当前深度（给 `only` 之外的第二道限制用）。 */
 }): ToolSet {
   const { registry, mode, executor, ctx } = input;
   const depth = ctx.depth ?? 0;
 
   const kept = new Set(injectableTools(mode, registry.list().map((e) => e.name)));
-  if (depth >= MAX_SUBAGENT_DEPTH) kept.delete(SPAWN_AGENT_TOOL);
+  if (input.only) {
+    const allow = new Set(input.only);
+    for (const name of [...kept]) if (!allow.has(name)) kept.delete(name);
+  }
+  if (depth >= MAX_SUBAGENT_DEPTH) {
+    kept.delete(SPAWN_AGENT_TOOL);
+    // 一支小队同理：到顶就不给（模型看不到，就不会试）
+    kept.delete(SPAWN_AGENTS_TOOL);
+  }
 
   const out: ToolSet = {};
   for (const entry of registry.list()) {
@@ -188,7 +210,9 @@ export function buildToolSet(input: {
  */
 export function offeredToolNames(registry: ToolRegistry, mode: ConfirmMode, depth = 0): string[] {
   const names = injectableTools(mode, registry.list().map((e) => e.name));
-  if (depth >= MAX_SUBAGENT_DEPTH) return names.filter((n) => n !== SPAWN_AGENT_TOOL);
+  if (depth >= MAX_SUBAGENT_DEPTH) {
+    return names.filter((n) => n !== SPAWN_AGENT_TOOL && n !== SPAWN_AGENTS_TOOL);
+  }
   return names;
 }
 

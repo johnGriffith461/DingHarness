@@ -45,6 +45,22 @@ export type ExecutorContext = {
   signal?: AbortSignal;
   /** 嵌套深度（防止子智能体再派子智能体）。 */
   depth?: number;
+  /**
+   * 上报**委派进度**（Phase 7.3）。
+   *
+   * 派活的执行体在"某个专家开始/结束"时调它一次；内核负责把它记成 `delegation` 事件
+   * 并转给宿主上屏。执行体自己**不碰**日志与 IPC —— 它只报告"发生了什么"。
+   */
+  onDelegation?: (event: {
+    delegationId: string;
+    agent: string;
+    task: string;
+    status: "started" | "finished";
+    ok?: boolean;
+    summary?: string;
+    steps?: number;
+    error?: string;
+  }) => void;
 };
 
 /**

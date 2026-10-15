@@ -533,7 +533,7 @@ describe("resume · 从日志还原会话", () => {
   });
 
   it("空日志还原成空会话（不是报错）", () => {
-    expect(resumeSession([])).toEqual({ turns: [], pending: [] });
+    expect(resumeSession([])).toEqual({ turns: [], pending: [], runningDelegations: [] });
   });
 });
 
@@ -568,3 +568,64 @@ describe("快照 · 重放 diff（重构零漂移的验收器）", () => {
     expect(diff.differences.some((d) => d.includes("轮数"))).toBe(true);
   });
 });
+
+/**
+ * Phase 7.3：**委派进度**（团队进展要能从日志还原）。
+ *
+ * 这几条的判据都是"可证伪的行为"：started/finished 是不是**一件事的两端**、
+ * 被打断的会话能不能看出"谁当时在跑"。
+ */
+describe("delegation · 委派进度", () => {
+  const at = (n: number, e: Record<string, unknown>) => ({ seq: n, at: T(n), type: "delegation", requestId: "r1", ...e }) as unknown as LogRecord;
+
+  it("⭐ started 与 finished 是**一件事的两端**（就地更新，不是追加两条）", () => {
+    const records = [
+      { seq: 1, at: T(1), type: "request", requestId: "r1", provider: "p", model: "m", messages: [] },
+      at(2, { delegationId: "d1", agent: "researcher", task: "查一下", status: "started" }),
+      at(3, { delegationId: "d1", agent: "researcher", task: "查一下", status: "finished", ok: true, summary: "查到了", steps: 3 }),
+    ] as unknown as LogRecord[];
+    const view = projectTurn(records);
+    expect(view.delegations).toHaveLength(1);
+    expect(view.delegations?.[0]).toMatchObject({ agent: "researcher", status: "finished", ok: true, summary: "查到了" });
+  });
+
+  it("⭐ 被打断的会话里，那个还在跑的委派看得出来（不能只体现在最终报告里）", () => {
+    // 两个专家：一个跑完了，一个还在跑就被停掉了
+    const records = [
+      { seq: 1, at: T(1), type: "request", requestId: "r1", provider: "p", model: "m", messages: [] },
+      at(2, { delegationId: "d1", agent: "researcher", task: "甲", status: "started" }),
+      at(3, { delegationId: "d2", agent: "writer", task: "乙", status: "started" }),
+      at(4, { delegationId: "d1", agent: "researcher", task: "甲", status: "finished", ok: true, summary: "好了" }),
+      { seq: 5, at: T(5), requestId: "r1", type: "error", message: "已中止" },
+    ] as unknown as LogRecord[];
+
+    const resumed = resumeSession(records);
+    expect(resumed.runningDelegations).toHaveLength(1);
+    expect(resumed.runningDelegations[0]).toMatchObject({ agent: "writer", task: "乙" });
+  });
+
+  it("多个专家的进度都留着（并行时不会互相覆盖）", () => {
+    const records = [
+      { seq: 1, at: T(1), type: "request", requestId: "r1", provider: "p", model: "m", messages: [] },
+      at(2, { delegationId: "d1", agent: "a", task: "1", status: "started" }),
+      at(3, { delegationId: "d2", agent: "b", task: "2", status: "started" }),
+      at(4, { delegationId: "d3", agent: "c", task: "3", status: "started" }),
+    ] as unknown as LogRecord[];
+    const view = projectTurn(records);
+    expect(view.delegations?.map((d) => d.agent)).toEqual(["a", "b", "c"]);
+  });
+
+  it("一条委派都没有时不出现这个字段（与 usage 同一个口径：没有 ≠ 空数组）", () => {
+    expect(projectTurn([ev({ type: "done" })]).delegations).toBeUndefined();
+  });
+
+  it("坏记录只跳过它自己：delegation 缺 agent 就整行不算数（不凭空造一条）", () => {
+    const { records, skipped } = parseLog(MINIMAL_DELEGATION_LINES);
+    expect(skipped).toBe(1);
+    expect(records).toHaveLength(1);
+  });
+});
+
+const MINIMAL_DELEGATION_LINES = `${JSON.stringify({ seq: 1, at: 1, requestId: "r1", type: "delegation", delegationId: "d1", agent: "a", task: "t", status: "started" })}
+${JSON.stringify({ seq: 2, at: 2, requestId: "r1", type: "delegation", delegationId: "d2", task: "没有 agent", status: "started" })}
+`;

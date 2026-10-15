@@ -343,6 +343,43 @@ export const SPAWN_AGENT_INPUT = z.object({
   context: z.string().max(2000).optional().describe("需要一并交代的背景材料"),
 });
 
+/*
+ * ── Phase 7.2：**一支小队**（coordinator / specialist）────────────────────
+ *
+ * 与 `spawn_agent` 的关系说清楚（这是**一个实现的两种入口**，不是两份实现）：
+ *
+ * - `spawn_agents` 是本体：一次派 N 件活，**并行**跑，各自按 AgentSpec 拿工具白名单与档位；
+ * - `spawn_agent` 留作单件入口（`tasks` 只有一项）—— 模型写单个任务时更自然，
+ *   而且既有日志/验收里全是这个名字，**改名会让历史记录与验收脚本一起失效**。
+ *
+ * ⚠️ 为什么值得多一个工具：并行是**语义上的一步**。让模型"派三次 spawn_agent"
+ * 做不到并行（它得等前面回来才发下一条），而"一次说清三件事"能让三个专家同时干活。
+ */
+export const SPAWN_AGENTS_TOOL = "spawn_agents";
+
+export const SPAWN_AGENTS_DESC = [
+  "把一件事**拆成几件**，交给几个各有所长的专家**同时**办，然后把几份要点汇合回来。",
+  "适合：互不依赖的几件事（一边查资料一边跑命令、三个来源分别读一遍）。",
+  "不适合：有先后依赖的步骤 —— 那种一步步来，别硬凑成一队。",
+  "每个专家只能办它那个角色的活（研究员只读、写手只写、跑命令的只跑），",
+  "而且**审批闸门对它同样有效**：它会把「想做但没被批准」如实告诉你。",
+  "`task` 要**自包含**（专家看不到你们这段对话）。",
+].join("");
+
+export const SPAWN_AGENTS_INPUT = z.object({
+  tasks: z
+    .array(
+      z.object({
+        agent: z.string().trim().min(1).describe("用哪个专家（researcher / writer / runner）"),
+        task: z.string().trim().min(1).max(500).describe("自包含的任务说明（它看不到当前对话）"),
+        context: z.string().max(2000).optional().describe("这件活要一并交代的背景材料"),
+      }),
+    )
+    .min(1)
+    .max(4)
+    .describe("要同时办的几件事（最多 4 件：再多会把成本与等待时间一起放大）"),
+});
+
 /**
  * 子智能体的提示词。
  *
@@ -408,6 +445,18 @@ export type SubagentReport = {
  * 依据 12-factor-agents 与 opencode 的做法：**跨边界的审批必须能带上下文回来**；
  * 不能因为「发生在子智能体里」就变成一条无法处置的通知。
  */
+/** 小队报告的形状（只取这里用得到的部分，避免与 `engine/runtime/team.ts` 强耦合）。 */
+export type TeamReportLike = {
+  ok: boolean;
+  summary: string;
+  /** 有几个成员失败（如实报，不掩盖）。 */
+  failed?: number;
+  members: { agent: string; ok: boolean }[];
+  usage?: { inputTokens?: number; outputTokens?: number };
+  blocked?: SubagentBlocked[];
+  error?: string;
+};
+
 export type SubagentBlocked = {
   toolCallId: string;
   name: string;
@@ -511,6 +560,7 @@ export function mergeToolTraces(existing: readonly ToolTrace[], incoming: readon
  * 现在补进来，并由 `engine/runtime/registry.test.ts` 盯着"表里的都在"与"在的都不少"。
  */
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
+  { name: SPAWN_AGENTS_TOOL, description: SPAWN_AGENTS_DESC, schema: SPAWN_AGENTS_INPUT },
   { name: MEMORY_SAVE_TOOL, description: MEMORY_SAVE_DESC, schema: MEMORY_SAVE_INPUT },
   { name: MEMORY_LIST_TOOL, description: MEMORY_LIST_DESC, schema: MEMORY_LIST_INPUT },
   { name: SCHEDULE_CREATE_TOOL, description: SCHEDULE_CREATE_DESC, schema: SCHEDULE_CREATE_INPUT },
@@ -548,6 +598,7 @@ export function toolLabel(name: string): string {
   if (name === SPAWN_AGENT_TOOL) return "子智能体";
   if (name === READ_FILE_TOOL) return "读文件";
   if (name === LIST_FILES_TOOL) return "列文件";
+  if (name === SPAWN_AGENTS_TOOL) return "派小队";
   if (name === WRITE_FILE_TOOL) return "写文件";
   if (name === EDIT_FILE_TOOL) return "改文件";
   if (name === LIST_DIR_TOOL) return "看目录";
@@ -757,6 +808,23 @@ export function describeToolResult(
     const cost = tokens ? `，约 ${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tokens` : "";
     const blocked = o.blocked?.length ? `，${o.blocked.length} 项等你确认` : "";
     return withArgs(toolLine(name, true, `完成（${o.steps ?? 0} 步${cost}${blocked}）`));
+  }
+  if (name === SPAWN_AGENTS_TOOL) {
+    const o = output as Partial<TeamReportLike> | undefined;
+    if (!o?.members?.length) return withArgs(toolLine(name, false, o?.error ?? "小队没有跑起来"));
+    /*
+     * 留痕要说清**几件事、成了几件、花了多少**：
+     * - "3 个专家"是用户最想知道的规模；
+     * - 有失败就**明写几件失败**（不掩盖 —— 失败的那件在正文报告里也有）；
+     * - token 上卷（与单个子智能体同一口径，用户看得见这一层花了多少）。
+     */
+    const total = o.members.length;
+    const failed = o.failed ?? o.members.filter((m) => !m.ok).length;
+    const tokens = (o.usage?.inputTokens ?? 0) + (o.usage?.outputTokens ?? 0);
+    const cost = tokens ? `，约 ${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tokens` : "";
+    const blocked = o.blocked?.length ? `，${o.blocked.length} 项等你确认` : "";
+    const bad = failed ? `，${failed} 个失败` : "";
+    return withArgs(toolLine(name, failed === 0, `${total} 个专家${bad}${cost}${blocked}`));
   }
   return withArgs(toolLine(name, true));
 }

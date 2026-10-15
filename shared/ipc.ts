@@ -132,7 +132,30 @@ export type AiStreamEvent =
   | { requestId: string; type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { requestId: string; type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
   | { requestId: string; type: "done"; usage?: { inputTokens?: number; outputTokens?: number } }
-  | { requestId: string; type: "error"; message: string };
+  | { requestId: string; type: "error"; message: string }
+  /*
+   * ── 一次委派的进度（Phase 7.3）───────────────────────────────
+   *
+   * ⚠️ 它是**流里的一等事件**，不是"塞在某个工具结果里的字段"。
+   * 理由是可观测性有**期间状态**：并行派三个专家时，"谁在跑、谁跑完了、谁失败了"
+   * 是过程中就该看得见的东西 —— 只体现在最后那份报告里的话，
+   * 中途被停/被拦下的那些就永远查不到（重启后更是一片空白）。
+   *
+   * `started` 与 `finished` 用 `delegationId` 配对（投影按它就地更新，不追加两条）。
+   */
+  | {
+      requestId: string;
+      type: "delegation";
+      delegationId: string;
+      agent: string;
+      task: string;
+      status: "started" | "finished";
+      /** 只在 `finished` 时有。 */
+      ok?: boolean;
+      summary?: string;
+      steps?: number;
+      error?: string;
+    };
 
 /** 用户放行一次工具调用时的请求（§144）。 */
 export type ToolRunRequest = {

@@ -167,15 +167,28 @@ export function createEngine(ports: EnginePorts): Engine {
         tools: request.useTools ? offeredToolNames(registry, request.mode, 0) : [],
       });
 
+      const events: TurnEvent[] = [];
+
+      /*
+       * 委派进度（Phase 7.3）：执行体上报 → 内核**记成事件**并转给宿主上屏。
+       *
+       * ⚠️ 走同一个出口（`record` + `onEvent`）是刻意的：与工具事件、用量、中止一样，
+       * "发生了什么"只有一个记录点。不然就会出现"界面上看到三个专家在跑、
+       * 日志里一个都没有"这种事后查不出原因的分叉。
+       */
       const ctx: ExecutorContext = {
         mode: request.mode,
         provider: request.provider,
         ...(request.model ? { model: request.model } : {}),
         ...(request.abortSignal ? { signal: request.abortSignal } : {}),
         depth: 0,
+        onDelegation: (event) => {
+          const turnEvent: TurnEvent = { type: "delegation", ...event };
+          events.push(turnEvent);
+          request.onEvent?.(turnEvent);
+          void record({ requestId, type: "delegation", ...event });
+        },
       };
-
-      const events: TurnEvent[] = [];
       const outcome = await runTurn(
         {
           provider: request.provider,

@@ -1,14 +1,12 @@
 import type { ToolSet } from "ai";
 
-import {
-  SPAWN_AGENT_TOOL,
-  subagentPrompt,
-} from "../../shared/agentTools";
+import { SPAWN_AGENT_TOOL, SPAWN_AGENTS_TOOL, subagentPrompt } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
 import { unknownToolNotice } from "../../engine/core/notices";
 import type { ExecutorContext, ToolExecutor, ToolResult } from "../../engine/ports/executor";
 import type { HealthStore } from "../../engine/ports/health";
 import { runSubagent } from "../../engine/runtime/subagent";
+import { runTeam } from "../../engine/runtime/team";
 import {
   describeListDirResult,
   describeSearchResult,
@@ -43,7 +41,14 @@ import { describeRunResult, runCommandForModel } from "../../engine/runtime/tool
  */
 
 /** 子智能体要用的工具集（由宿主注入：它需要注册表，而注册表需要执行体）。 */
-export type MakeTools = (mode: ConfirmMode, depth: number, provider: string, signal?: AbortSignal) => ToolSet;
+export type MakeTools = (
+  mode: ConfirmMode,
+  depth: number,
+  provider: string,
+  signal: AbortSignal | undefined,
+  /** 只要这些工具（agent 白名单，Phase 7.1）。省略 = 不限制。 */
+  only?: readonly string[],
+) => ToolSet;
 
 /**
  * 建一个 CLI 执行体。
@@ -168,6 +173,28 @@ export function createCliExecutor(opts: {
             : { error: result.error }),
         };
         return { ok: result.ok, output, ...(result.ok ? {} : { error: result.error }) };
+      }
+
+      /*
+       * 一支小队（Phase 7.2）：并行派几个专家，汇合回一份报告。
+       * 工具白名单按每个专家的 AgentSpec 生效（研究员的工具集里**没有**写工具）。
+       */
+      case SPAWN_AGENTS_TOOL: {
+        const { tasks } = input as { tasks: { agent: string; task: string; context?: string }[] };
+        return {
+          ok: true,
+          output: await runTeam({
+            tasks: tasks ?? [],
+            provider: ctx.provider,
+            ...(ctx.model ? { model: ctx.model } : {}),
+            callerMode: ctx.mode,
+            makeTools: (mode, depth, provider, signal, only) => makeTools(mode, depth, provider, signal, only),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+            depth: ctx.depth ?? 0,
+            ...(opts.health ? { health: opts.health } : {}),
+            ...(ctx.onDelegation ? { onDelegation: ctx.onDelegation } : {}),
+          }),
+        };
       }
 
       case SPAWN_AGENT_TOOL: {

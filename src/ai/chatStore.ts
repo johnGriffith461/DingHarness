@@ -669,6 +669,19 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           if (!flushTimer) flushTimer = setTimeout(flush, 80);
           return;
         }
+        /*
+         * ⚠️ **委派进度要显式认领**（Phase 7.3）。
+         *
+         * 这一串 if 的末尾有个"剩下的都当 error"的兜底（下面那段注释记着它的来历：
+         * 当年加了工具事件之后，每次调工具都被记成一次报错）。
+         * 新加事件类型时**必须**在这里认领，否则委派进度会变成一条红色的"失败"。
+         * 投影已经把它记进 `turn.delegations`（界面要显示就取那里），这里只做转发。
+         */
+        if (event.type === "delegation") {
+          flush();
+          // 投影里已经有了（`turn.delegations`）—— 界面要显示就取那里，这里只负责别掉进下面的 error 兜底
+          return;
+        }
         if (event.type === "done") {
           flush();
           /*

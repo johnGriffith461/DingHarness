@@ -72,6 +72,7 @@ const CLI_TOOLS = [
   "edit_file",
   "run_command",
   "spawn_agent",
+  "spawn_agents",
 ] as const;
 
 /* ────────────────────── 终端输出（走投影） ────────────────────── */

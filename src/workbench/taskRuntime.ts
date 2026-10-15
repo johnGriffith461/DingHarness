@@ -436,6 +436,15 @@ export async function runStream(
           const trace = project().traces.find((t) => t.toolCallId === event.toolCallId);
           onPatch({ activity: trace?.pending ? "等你确认" : "正在回复" });
         }
+        if (event.type === "delegation") {
+          /*
+           * 派活要有**期间状态**（Phase 7.3）：并行派三个专家时用户得看得见在等谁，
+           * 否则那段时间界面只有一行"正在回复"，看着像卡住了。
+           * 数目取自投影（不自己数事件——那就是第二份算法）。
+           */
+          const running = (finishTurn(turn).delegations ?? []).filter((d) => d.status === "started").length;
+          onPatch({ activity: running ? `正在等 ${running} 个专家` : "正在回复" });
+        }
         // error 不在这里处理：投影里记着，收尾时统一取（见下）
       },
     );

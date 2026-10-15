@@ -199,6 +199,21 @@ export type ProjectableEvent =
   | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number } }
   | { type: "error"; message: string }
   /*
+   * 一次委派的进度（Phase 7.3）：**不忽略** —— 它是团队进展的唯一记录。
+   * 形状与 `AiStreamEvent` 里那条一致，只是不带 `requestId`（与其余流事件同理）。
+   */
+  | {
+      type: "delegation";
+      delegationId: string;
+      agent: string;
+      task: string;
+      status: "started" | "finished";
+      ok?: boolean;
+      summary?: string;
+      steps?: number;
+      error?: string;
+    }
+  /*
    * 「一步结束了」：投影**忽略**它（它不改变正文/工具/用量，只用来数步数）。
    * 列在这里是为了让主循环（`runTurn`）的事件能**直接**喂进投影，不必到处 cast。
    */
@@ -219,11 +234,34 @@ export type LogInput = LogRecord extends infer T ? (T extends LogRecord ? Omit<T
  * 这是"这一轮发生了什么"的**唯一**说法：正文、工具、用量、成败。
  * 两条界面路径都从这个对象取值，不再各自解析事件流。
  */
+/** 投影里的一条委派（团队进展的一行）。 */
+export type DelegationView = {
+  delegationId: string;
+  agent: string;
+  task: string;
+  /** `started` = 还在跑；`finished` = 有结论了（成功或失败）。 */
+  status: "started" | "finished";
+  ok?: boolean;
+  summary?: string;
+  steps?: number;
+  error?: string;
+  /** 开始时刻（epoch ms）；有它才能看出"跑了多久"。 */
+  at: number;
+};
+
 export type TurnView = {
   /** 正文（原样累积，**含产物标签** —— 提取成卡片是界面的事，不属于"发生过什么"）。 */
   text: string;
   /** 工具调用的留痕（按发生顺序；`pending` 就是"被拦下了、还没执行"）。 */
   traces: ToolTrace[];
+  /**
+   * 这一轮派出去的活（Phase 7.3）。
+   *
+   * ⚠️ **它是"任意时刻的团队进展"**：`started` 的那条会一直在，
+   * 直到收到配对的 `finished`。所以**中途重放**（被打断的会话）也能看出
+   * "哪几个专家当时在跑" —— 这正是把它做成独立事件而不是塞进工具结果的理由。
+   */
+  delegations?: DelegationView[];
   /** 真实用量（provider 给的；拿不到就是 undefined —— **不编**）。 */
   usage?: { inputTokens?: number; outputTokens?: number };
   /** 这一轮以错误收尾时的那句话（含"已中止"）。 */
@@ -244,11 +282,13 @@ export type TurnView = {
 export type TurnState = TurnView & {
   /** 内部：等结果的调用（配对完就移出）。 */
   waiting: { toolCallId: string; name: string; input?: unknown }[];
+  /** 内部：委派进度（按 `delegationId` 就地更新，不重复追加）。 */
+  delegations: DelegationView[];
 };
 
 /** 空白的一轮。 */
 export function emptyTurn(): TurnState {
-  return { text: "", traces: [], done: false, waiting: [] };
+  return { text: "", traces: [], done: false, waiting: [], delegations: [] };
 }
 
 /**
@@ -341,6 +381,29 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
     return { ...state, traces };
   }
 
+  if (event.type === "delegation") {
+    /*
+     * 按 `delegationId` **就地更新**（不是追加一条新的）：
+     * 同一个专家的 `started` 与 `finished` 是**一件事的两端**，
+     * 追加的话界面上会出现"三个专家在跑"+"三个专家跑完了"两组，
+     * 而重启重放时更糟 —— 会看到六个。
+     */
+    const idx = state.delegations.findIndex((d) => d.delegationId === event.delegationId);
+    const next: DelegationView = {
+      delegationId: event.delegationId,
+      agent: event.agent,
+      task: event.task,
+      status: event.status,
+      at: "at" in event && typeof (event as { at?: unknown }).at === "number" ? (event as { at: number }).at : Date.now(),
+      ...(event.ok === undefined ? {} : { ok: event.ok }),
+      ...(event.summary === undefined ? {} : { summary: event.summary }),
+      ...(event.steps === undefined ? {} : { steps: event.steps }),
+      ...(event.error === undefined ? {} : { error: event.error }),
+    };
+    const delegations = idx >= 0 ? state.delegations.map((d, i) => (i === idx ? { ...next, at: d.at } : d)) : [...state.delegations, next];
+    return { ...state, delegations };
+  }
+
   if (event.type === "error") return { ...state, done: true, error: event.message };
 
   /*
@@ -418,11 +481,13 @@ export type ProjectOptions = {
  * @returns 可显示/可落库的投影
  */
 export function finishTurn(state: TurnState, opts: ProjectOptions = {}): TurnView {
-  const { text, traces, usage, error, done } = state;
+  const { text, traces, usage, error, done, delegations } = state;
   const base: TurnView = {
     text,
     traces: [...traces],
     done,
+    // 一条都没有就不出现这个字段（与 usage 同一个口径：没有 ≠ 空数组）
+    ...(delegations.length ? { delegations: [...delegations] } : {}),
     ...(usage ? { usage } : {}),
     ...(error ? { error } : {}),
   };
@@ -594,6 +659,13 @@ export type ResumedSession = {
   turns: TurnChunk[];
   /** 还没处置的待确认调用（重启之后要重新摆到界面上，别让用户以为自己的决定丢了）。 */
   pending: PendingApproval[];
+  /**
+   * **还在跑、没等到结论的委派**（Phase 7.3）。
+   *
+   * 重启之后这些不会自己接着跑（进程没了），但它们**必须被看见** ——
+   * 否则用户会以为"那三个专家还在干活"，或者反过来"怎么多花了那么多钱却没结果"。
+   */
+  runningDelegations: DelegationView[];
 };
 
 /**
@@ -620,7 +692,13 @@ export function resumeSession(records: readonly LogRecord[], opts: ProjectOption
    * 这里原来自己写了一段 for —— 而"审批闸门的语义"只能有一处，
    * 否则界面上的待办与本函数还原出来的清单会慢慢分叉。
    */
-  return { turns, pending: pendingGates(turns) };
+  const runningDelegations: DelegationView[] = [];
+  for (const chunk of turns) {
+    for (const d of chunk.view.delegations ?? []) {
+      if (d.status === "started") runningDelegations.push(d);
+    }
+  }
+  return { turns, pending: pendingGates(turns), runningDelegations };
 }
 
 /* ────────────────────── 落盘：一行一条 ────────────────────── */
@@ -674,6 +752,15 @@ export function parseLogLine(line: string): LogRecord | null {
     return o as ApprovalRecord;
   }
   if (typeof o.requestId !== "string") return null;
+  /*
+   * 委派进度：`delegationId` / `agent` / `status` 少一样就不是一条能重放的记录
+   * （缺 agent 的那条重放出来会是一个没有名字的专家，比丢掉它更坏）。
+   */
+  if (o.type === "delegation") {
+    if (typeof o.delegationId !== "string" || typeof o.agent !== "string" || typeof o.task !== "string") return null;
+    if (o.status !== "started" && o.status !== "finished") return null;
+    return o as LoggedEvent;
+  }
   const known = ["text", "tool-call", "tool-result", "done", "error"];
   if (!known.includes(o.type)) return null;
   return o as LoggedEvent;

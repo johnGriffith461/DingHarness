@@ -51,7 +51,25 @@ export type TurnEvent =
   /** 一步结束（AI SDK 的 `finish`）—— 数步数用。**投影会忽略它**（它不改变内容）。 */
   | { type: "step-finish" }
   | { type: "done"; usage?: TurnUsage }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /**
+   * 一次委派的进度（Phase 7.3）。
+   *
+   * ⚠️ 它**不是** SDK 流里来的 —— 是工具执行体（派活的那个）直接吐给引擎的。
+   * 放在同一套事件里，是因为对宿主与投影来说它就是"这一轮里发生的一件事"，
+   * 不需要第二条通道（第二条通道 = 第二处要记得记日志的地方）。
+   */
+  | {
+      type: "delegation";
+      delegationId: string;
+      agent: string;
+      task: string;
+      status: "started" | "finished";
+      ok?: boolean;
+      summary?: string;
+      steps?: number;
+      error?: string;
+    };
 
 /** 一次调用的输入。 */
 /*

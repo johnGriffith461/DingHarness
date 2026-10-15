@@ -2,6 +2,7 @@ import { jsonSchema, type ToolSet } from "ai";
 import { isMcpTool, parseMcpToolName } from "../../shared/mcp";
 import {
   CANVAS_ADD_NODE_TOOL,
+  SPAWN_AGENTS_TOOL,
   EDIT_FILE_TOOL,
   LIST_DIR_TOOL,
   LIST_FILES_TOOL,
@@ -39,6 +40,7 @@ import { callMcpTool, mcpToolBindings } from "./mcpStore";
 import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "../../engine/runtime/tools/searchTool";
 import { listDrive, ownedDirs } from "./driveStore";
 import { runSubagent } from "../../engine/runtime/subagent";
+import { runTeam } from "../../engine/runtime/team";
 
 /**
  * 工具的**执行**绑定（§141）。
@@ -291,6 +293,36 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
   },
 
   /**
+   * 派**一支小队**（Phase 7.2）：几件事并行交给几个专家，汇合后回一份报告。
+   *
+   * 与下面 `spawn_agent` 的关系：**一个原语（`runSubagent`）的两个入口**。
+   * 单件走 `spawn_agent`（沿用原有提示词，历史行为一字不变）；
+   * 多件走这里（按 `AgentSpec` 派活、并行、进度可见）。
+   * 分开而不是合并，是因为合并会改掉单件那条路的行为 —— 而那一路有既有日志与验收在看着。
+   */
+  [SPAWN_AGENTS_TOOL]: async (input, env) => {
+    const { tasks } = input as { tasks: { agent: string; task: string; context?: string }[] };
+    return runTeam({
+      tasks: tasks ?? [],
+      provider: env.provider,
+      ...(env.model ? { model: env.model } : {}),
+      callerMode: env.mode,
+      makeTools: (mode, depth, provider, signal, only) =>
+        agentTools({
+          ...env,
+          mode,
+          depth,
+          provider,
+          ...(signal ? { signal } : {}),
+          ...(only ? { only } : {}),
+        }),
+      ...(env.signal ? { signal: env.signal } : {}),
+      depth: env.depth ?? 0,
+      ...(env.onDelegation ? { onDelegation: env.onDelegation } : {}),
+    });
+  },
+
+  /**
    * 派一个子智能体（§150）。
    *
    * 这里只做三件事：建**同一档位**的工具集（审批穿透）→ 跑 → 把要点报告回给父级。
@@ -380,6 +412,19 @@ export type ToolEnv = {
   provider: string;
   model?: string;
   depth?: number;
+  /** 只有这些工具（agent 白名单，Phase 7.1）。省略 = 不限制。 */
+  only?: readonly string[];
+  /** 委派进度上报（Phase 7.3）—— 小队用它让"谁在跑"可见。 */
+  onDelegation?: (event: {
+    delegationId: string;
+    agent: string;
+    task: string;
+    status: "started" | "finished";
+    ok?: boolean;
+    summary?: string;
+    steps?: number;
+    error?: string;
+  }) => void;
   /**
    * 这一轮的中止信号（C2-3）。
    *
@@ -406,6 +451,7 @@ export const hostExecutor: ToolExecutor = {
       ...(ctx.model ? { model: ctx.model } : {}),
       ...(ctx.depth === undefined ? {} : { depth: ctx.depth }),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
+      ...(ctx.onDelegation ? { onDelegation: ctx.onDelegation } : {}),
     }),
 };
 
@@ -441,12 +487,14 @@ export function agentTools(env: ToolEnv): ToolSet {
     registry: createToolRegistry({ extra: mcpToolEntries() }),
     mode: env.mode,
     executor: hostExecutor,
+    ...(env.only ? { only: env.only } : {}),
     ctx: {
       mode: env.mode,
       provider: env.provider,
       ...(env.model ? { model: env.model } : {}),
       ...(env.signal ? { signal: env.signal } : {}),
       ...(env.depth === undefined ? {} : { depth: env.depth }),
+      ...(env.onDelegation ? { onDelegation: env.onDelegation } : {}),
     },
   });
 }
@@ -465,6 +513,7 @@ function describeMcpLine(server: string, tool: string, failed: boolean): string 
 
 /** 供测试与"未知工具回注"用的清单。 */
 export const TOOL_NAMES = [
+  SPAWN_AGENTS_TOOL,
   MEMORY_SAVE_TOOL,
   MEMORY_LIST_TOOL,
   SCHEDULE_CREATE_TOOL,
