@@ -16,7 +16,19 @@ import { describeBudget } from "../../engine/runtime/budget";
 import { modelInfoOf } from "../../engine/runtime/models";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
-import { auditLedger, installFromDir, pluginPaths, readLedger, readManifestFromDir, setEnabled, uninstall } from "../../engine/adapters/pluginStore";
+import {
+  auditLedger,
+  installFromDir,
+  installFromNpm,
+  makePackDir,
+  packNpm,
+  pluginPaths,
+  readLedger,
+  readManifestFromDir,
+  readManifestFromTarball,
+  setEnabled,
+  uninstall,
+} from "../../engine/adapters/pluginStore";
 import { loadEnabledPlugins, loadedPlugins, pluginToolEntries, withheldCapabilities } from "../../engine/runtime/pluginHost";
 import { ENFORCED_PERMISSIONS, PLUGIN_PERMISSIONS, checkManifest, type PluginPermission } from "../../engine/runtime/plugins";
 import { AGENT_SPECS } from "../../engine/runtime/agents";
@@ -458,12 +470,25 @@ async function cmdPlugins(p: Parsed): Promise<number> {
 
   if (sub === "install") {
     if (!name) {
-      console.error("用法：ding plugins install <目录> [--yes] [--grant tools:register,hooks:register]");
+      console.error("用法：ding plugins install <目录|npm:包名> [--yes] [--grant tools:register,hooks:register]");
       return 2;
     }
-    const from = path.resolve(name);
-    // 先干跑一遍拿清单（不写盘），把"它要什么权限"如实打出来
-    const probe = readManifestFromDir(from);
+    /*
+     * 两个渠道（Phase 8.2）：本地目录 `install <目录>`，npm 包 `install npm:<包名>`。
+     *
+     * ⚠️ npm 那条走**两段式**：先取包（`npm pack`）、读出清单给用户看，
+     * 用户加 `--yes` 之后才真装。合成一步的话，"权限确认"就只能发生在
+     * **已经下载并解开之后** —— 那不叫确认，那叫通知。
+     */
+    const isNpm = name.startsWith("npm:");
+    const packDir = isNpm ? makePackDir() : "";
+    const probe = isNpm
+      ? (() => {
+          const packed = packNpm(name.slice(4), packDir);
+          if (!packed.ok) return { note: packed.errors.join("；") };
+          return readManifestFromTarball(packed.tgz);
+        })()
+      : readManifestFromDir(path.resolve(name));
     if (!probe.raw) {
       console.error(`读不到清单：${probe.note ?? "未知原因"}`);
       return 1;
@@ -498,7 +523,9 @@ async function cmdPlugins(p: Parsed): Promise<number> {
           .map((x) => x.trim())
           .filter((x): x is PluginPermission => PLUGIN_PERMISSIONS.includes(x as PluginPermission))
       : undefined;
-    const got = installFromDir({ paths, from, ...(granted ? { granted } : {}) });
+    const got = isNpm
+      ? installFromNpm({ paths, spec: name.slice(4), ...(granted ? { granted } : {}) })
+      : installFromDir({ paths, from: path.resolve(name), ...(granted ? { granted } : {}) });
     if (!got.ok) {
       console.error("装不上：");
       for (const e of got.errors) console.error(`  · ${e}`);
@@ -577,7 +604,7 @@ function cmdHelp(): number {
       "  ding replay <快照文件>",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
-      "  ding plugins [list|install <目录> --yes|enable|disable|remove|doctor]",
+      "  ding plugins [list|install <目录|npm:包名> --yes|enable|disable|remove|doctor]",
       "",
       `数据目录：${dataDir()}（DH_DATA_DIR 可覆盖）`,
       "",

@@ -1,4 +1,6 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 
 import { checkManifest, type PluginManifest, type PluginPermission } from "../runtime/plugins";
@@ -201,6 +203,143 @@ export function installFromDir(input: {
   const installed = [plugin, ...before.ledger.installed.filter((p) => p.name !== plugin.name)];
   writeLedger(paths, { installed });
   return { ok: true, plugin };
+}
+
+/**
+ * 从**一个 .tgz** 装（npm 渠道的最后一跳，也是唯一可离线测的那一跳）。
+ *
+ * ⚠️ 这一跳单独拆出来，是因为"取包"（`npm pack`）要网络而"装包"不要。
+ * 拆开之后：**安装逻辑（校验 + 落台账 + 权限判定）能在测试里真跑**，
+ * 而网络那一层只是一层薄壳。不拆的话，整条 npm 渠道就永远测不到 ——
+ * 而那正是"装上了但没起作用"最容易藏身的地方。
+ *
+ * @param input.paths 插件路径
+ * @param input.tgz 一个 npm 包压缩包（`.tgz`）
+ * @param input.granted 用户批准的那一组权限
+ * @returns 安装结果
+ */
+export function installFromTarball(input: {
+  paths: PluginPaths;
+  tgz: string;
+  granted?: readonly PluginPermission[];
+  now?: number;
+}): InstallResult {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "dh-plugin-tgz-"));
+  try {
+    /*
+     * 解包用系统 `tar`（Windows 10+ 自带 bsdtar）。不引 tar 依赖：
+     * 我们只需要"解开一个 npm 包"，而多一个依赖就多一份供应链面。
+     *
+     * ⚠️ 先把包**拷进临时目录**，再用**相对文件名**解 —— 不能直接把绝对路径交给 tar：
+     * GNU tar 会把 `C:\...` 里的 `C:` 当成**远程主机**，报
+     * `Cannot connect to C: resolve failed`（实测）。拷一份是最省事的跨实现办法
+     * （bsdtar 不在乎、GNU tar 也不在乎）。
+     */
+    const localTgz = path.join(tmp, "pkg.tgz");
+    cpSync(input.tgz, localTgz);
+    const res = spawnSync("tar", ["-xzf", "pkg.tgz", "-C", "."], { encoding: "utf8", cwd: tmp });
+    if (res.error || res.status !== 0) {
+      return { ok: false, errors: [`解包失败：${res.error?.message ?? res.stderr ?? `退出码 ${res.status}`}`] };
+    }
+    const pkgDir = path.join(tmp, "package");
+    if (!existsSync(pkgDir)) return { ok: false, errors: ["压缩包里没有 package/ 目录（不是标准 npm 包？）"] };
+    return installFromDir({
+      paths: input.paths,
+      from: pkgDir,
+      ...(input.granted ? { granted: input.granted } : {}),
+      ...(input.now === undefined ? {} : { now: input.now }),
+    });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * 取包（`npm pack`）到一个目录，返回 `.tgz` 的路径。
+ *
+ * 单独拆出来是为了 CLI 那套**两段式确认**：先取包、读出清单给用户看、
+ * 用户点头之后才安装。合成一步的话，"权限确认"就只能发生在
+ * **已经下载并解开**之后 —— 那不叫确认，那叫通知。
+ *
+ * @param spec 包名（可带 @版本）
+ * @param dir 放 `.tgz` 的目录
+ * @param timeoutMs 超时
+ * @returns `.tgz` 路径或错误
+ */
+export function packNpm(spec: string, dir: string, timeoutMs = 120_000): { ok: true; tgz: string } | { ok: false; errors: string[] } {
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const res = spawnSync(npm, ["pack", spec, "--pack-destination", dir, "--silent"], {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    shell: process.platform === "win32",
+  });
+  if (res.error) return { ok: false, errors: [`取包失败：${res.error.message}`] };
+  if (res.status !== 0) {
+    const why = (res.stderr || res.stdout || "").trim().slice(0, 300);
+    return { ok: false, errors: [`取包失败（${spec}）：${why || `退出码 ${res.status}`}`] };
+  }
+  const tgz = readdirSync(dir).find((n) => n.endsWith(".tgz"));
+  if (!tgz) return { ok: false, errors: ["npm pack 没有产出 .tgz"] };
+  return { ok: true, tgz: path.join(dir, tgz) };
+}
+
+/**
+ * 从一个 `.tgz` 里**只读清单**（不安装）。
+ *
+ * CLI 的两段式确认靠它：先把"它要什么权限"给用户看，再决定装不装。
+ *
+ * @param tgz 包路径
+ * @returns 清单原文或错误
+ */
+export function readManifestFromTarball(tgz: string): { raw?: unknown; note?: string } {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "dh-plugin-peek-"));
+  try {
+    const localTgz = path.join(tmp, "pkg.tgz");
+    cpSync(tgz, localTgz);
+    const res = spawnSync("tar", ["-xzf", "pkg.tgz", "-C", "."], { encoding: "utf8", cwd: tmp });
+    if (res.status !== 0) return { note: `解包失败：${res.stderr ?? res.status}` };
+    return readManifestFromDir(path.join(tmp, "package"));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/** 临时目录（CLI 取包用）。 */
+export function makePackDir(): string {
+  return mkdtempSync(path.join(os.tmpdir(), "dh-plugin-pack-"));
+}
+
+/**
+ * 从 **npm 包**装（`npm:包名` 或 `npm:包名@版本`）。
+ *
+ * ⚠️ 这一步**要网络**，而且是 v1 里唯一会联网的安装路径。
+ * 它只做三件事：取包（`npm pack`）→ 交给 `installFromTarball` → 报结果。
+ * 校验、权限判定、落台账**都不在这里**（那部分在可离线测的那一跳里）。
+ *
+ * @param input.paths 插件路径
+ * @param input.spec 包名（可带 @版本）
+ * @param input.granted 用户批准的那一组权限
+ * @param input.timeoutMs 取包超时
+ * @returns 安装结果
+ */
+export function installFromNpm(input: {
+  paths: PluginPaths;
+  spec: string;
+  granted?: readonly PluginPermission[];
+  timeoutMs?: number;
+}): InstallResult {
+  const tmp = makePackDir();
+  try {
+    const packed = packNpm(input.spec, tmp, input.timeoutMs);
+    if (!packed.ok) return { ok: false, errors: packed.errors };
+    return installFromTarball({
+      paths: input.paths,
+      tgz: packed.tgz,
+      ...(input.granted ? { granted: input.granted } : {}),
+    });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 /**

@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { pluginPaths, installFromDir, readLedger, setEnabled, uninstall } from "../adapters/pluginStore";
+import { spawnSync } from "node:child_process";
+import { pluginPaths, installFromDir, installFromTarball, readLedger, setEnabled, uninstall } from "../adapters/pluginStore";
 import { checkManifest, grantedCapabilities, isPluginTool, parsePluginToolName, pluginToolName } from "./plugins";
 import { loadEnabledPlugins, pluginToolEntries, resetPlugins, runHooks, runPluginTool, withheldCapabilities } from "./pluginHost";
 import { buildToolSet, createToolRegistry } from "./registry";
@@ -22,6 +23,12 @@ import { buildToolSet, createToolRegistry } from "./registry";
 let work: string;
 let dataDir: string;
 let srcDir: string;
+
+/** 读一个文件（小帮手，省得在断言里再 import 一遍 fs）。 */
+function readFileSyncCompat(p: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require("node:fs").readFileSync(p, "utf8") as string;
+}
 
 /** 写一个插件目录（清单 + 入口）。 */
 function makePlugin(opts: {
@@ -323,6 +330,34 @@ describe("整条链路：装 → 装载 → 调工具", () => {
     const paths = pluginPaths(dataDir);
     expect(uninstall(paths, "nope").ok).toBe(false);
     expect(setEnabled(paths, "nope", false).ok).toBe(false);
+  });
+
+  it("⭐ npm 那一跳（解 .tgz 安装）：整条链路能离线跑通", () => {
+    /*
+     * 拆出 `installFromTarball` 就是为了这个：**取包要网络、装包不要**。
+     * 于是"装一个 npm 包"这件事里最要紧的那半（校验 + 权限判定 + 落台账）
+     * 能在测试里真跑一遍，而网络那层只是薄壳。
+     */
+    const dir = makePlugin({ name: "tgz-plugin" });
+    // 按 npm 包的形状打包（内容放在 package/ 下）
+    const stage = path.join(work, "stage", "package");
+    mkdirSync(stage, { recursive: true });
+    for (const f of ["ding-plugin.json", "index.mjs"]) {
+      writeFileSync(path.join(stage, f), readFileSyncCompat(path.join(dir, f)), "utf8");
+    }
+    /*
+     * ⚠️ `-f` 用**相对文件名** + `cwd`：绝对路径里的 `C:` 会被 GNU tar 当成远程主机
+     * （`Cannot connect to C: resolve failed`）。生产代码里也是这么绕的（先拷贝再相对解包）。
+     */
+    const res = spawnSync("tar", ["-czf", "pkg.tgz", "-C", "stage", "package"], { encoding: "utf8", cwd: work });
+    expect(res.status, `打 tgz 失败：${res.stderr ?? ""}`).toBe(0);
+
+    const got = installFromTarball({ paths: pluginPaths(dataDir), tgz: path.join(work, "pkg.tgz") });
+    expect(got.ok, got.ok ? "" : got.errors.join("；")).toBe(true);
+    if (got.ok) {
+      expect(got.plugin.name).toBe("tgz-plugin");
+      expect(got.plugin.source.startsWith("dir:")).toBe(true); // 记账的是"从哪儿解出来装的"
+    }
   });
 
   it("清单不合法的目录：装不上，并给出人话原因", () => {
