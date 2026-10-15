@@ -7,6 +7,8 @@ import type { ExecutorContext, ToolExecutor, ToolResult } from "../../engine/por
 import type { HealthStore } from "../../engine/ports/health";
 import { runSubagent } from "../../engine/runtime/subagent";
 import { runTeam } from "../../engine/runtime/team";
+import { isPluginTool } from "../../engine/runtime/plugins";
+import { runPluginTool } from "../../engine/runtime/pluginHost";
 import {
   describeListDirResult,
   describeSearchResult,
@@ -214,6 +216,16 @@ export function createCliExecutor(opts: {
       }
 
       default:
+        /*
+         * 插件工具（Phase 8.3）：名字带前缀，运行时按前缀分流（与 MCP 同一条思路）。
+         */
+        if (isPluginTool(name)) {
+          try {
+            return { ok: true, output: await runPluginTool(name, input) };
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) };
+          }
+        }
         // 未知工具：回一句"没有这个工具"，而不是抛异常（口径同 unknownToolNotice）
         return { ok: false, error: unknownToolNotice(name) };
     }

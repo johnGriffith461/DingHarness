@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,12 +10,16 @@ import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/co
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import type { ToolExecutor } from "../../engine/ports/executor";
-import { buildToolSet, createToolRegistry } from "../../engine/runtime/registry";
+import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } from "../../engine/runtime/registry";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
 import { describeBudget } from "../../engine/runtime/budget";
 import { modelInfoOf } from "../../engine/runtime/models";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
+import { auditLedger, installFromDir, pluginPaths, readLedger, readManifestFromDir, setEnabled, uninstall } from "../../engine/adapters/pluginStore";
+import { loadEnabledPlugins, loadedPlugins, pluginToolEntries, withheldCapabilities } from "../../engine/runtime/pluginHost";
+import { ENFORCED_PERMISSIONS, PLUGIN_PERMISSIONS, checkManifest, type PluginPermission } from "../../engine/runtime/plugins";
+import { AGENT_SPECS } from "../../engine/runtime/agents";
 
 /**
  * `ding` —— **CLI 宿主**（Phase 2）。
@@ -145,6 +150,11 @@ const flag = (p: Parsed, name: string): string | undefined => flagAll(p, name).a
 
 /* ────────────────────── 装配 ────────────────────── */
 
+/** 内置（限本宿主能跑的那批）+ 插件，进同一张注册表。 */
+function createRegistryWithPlugins(pluginEntries: readonly ToolEntry[]): ToolRegistry {
+  return createToolRegistry({ include: CLI_TOOLS, extra: pluginEntries });
+}
+
 /**
  * 建一个供本次运行使用的引擎。
  *
@@ -155,30 +165,45 @@ const flag = (p: Parsed, name: string): string | undefined => flagAll(p, name).a
  * 所以先给执行体一个**取值函数**，等注册表建好再把它填上 —— 环在装配期解开，
  * 运行期没有 null 检查。
  */
-function buildEngine(dirs: readonly string[]): { engine: Engine; close: () => void } {
+async function buildEngine(dirs: readonly string[]): Promise<{ engine: Engine; close: () => void; plugins: string[] }> {
   const store = createSqliteSessionStore(dataDir());
 
-  let makeTools: ((mode: ConfirmMode, depth: number, provider: string, signal?: AbortSignal) => ReturnType<typeof buildToolSet>) | null = null;
+  let makeTools: ((mode: ConfirmMode, depth: number, provider: string, signal?: AbortSignal, only?: readonly string[]) => ReturnType<typeof buildToolSet>) | null = null;
   const executor: ToolExecutor = createCliExecutor({
     dirs,
-    makeTools: (mode, depth, provider, signal) => {
+    makeTools: (mode, depth, provider, signal, only) => {
       if (!makeTools) throw new Error("工具集还没装配好（不应该发生）");
-      return makeTools(mode, depth, provider, signal);
+      return makeTools(mode, depth, provider, signal, only);
     },
   });
 
-  const registry = createToolRegistry({ include: CLI_TOOLS });
-  makeTools = (mode, depth, provider, signal) =>
+  /*
+   * 插件（Phase 8.3）：把台账里**开着**的装载起来，它们的工具与内置工具进**同一个注册表**。
+   *
+   * ⚠️ 装载失败**不拦着跑**：一个坏插件不该让 CLI 起不来（`problems` 打出来给用户看）。
+   */
+  const paths = pluginPaths(dataDir());
+  const loaded = await loadEnabledPlugins(readLedger(paths).ledger.installed);
+  const plugins = loaded.flatMap((p) => (p.problems.length ? p.problems.map((x) => `${p.name}：${x}`) : []));
+  const pluginEntries = pluginToolEntries();
+
+  /*
+   * 注册表带**两个来源**：内置（`include` 限定的那批）+ 插件。
+   * ⚠️ 插件走 `include` 会被滤掉（它只筛内置），所以必须显式并进来 ——
+   * 这正是"三个来源统一注册"的落点（builtin / mcp / plugin 都在这张表里）。
+   */
+  const registry = createRegistryWithPlugins(pluginEntries);
+  makeTools = (mode, depth, provider, signal, only) =>
     buildToolSet({
       registry,
       mode,
       executor,
       ctx: { mode, provider, depth, ...(signal ? { signal } : {}) },
+      ...(only ? { only } : {}),
     });
 
-  // 引擎内部自己建注册表（带 include）—— 这里传的 `include` 与上面那份必须一致
-  const engine = createEngine({ store, executor, include: CLI_TOOLS });
-  return { engine, close: () => store.close() };
+  const engine = createEngine({ store, executor, include: CLI_TOOLS, tools: pluginEntries });
+  return { engine, close: () => store.close(), plugins };
 }
 
 /* ────────────────────── 命令 ────────────────────── */
@@ -202,7 +227,9 @@ async function cmdRun(p: Parsed): Promise<number> {
 
   const mode = normalizeConfirmMode(flag(p, "mode") ?? "全部允许");
   const sessionId = cliSessionId(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
-  const { engine, close } = buildEngine(dirs);
+  const { engine, close, plugins } = await buildEngine(dirs);
+  for (const problem of plugins) process.stderr.write(`[33m[plugin] ${problem}[0m
+`);
 
   process.stdout.write(
     `\x1b[2m工作区：${dirs.join(" / ")}\nprovider：${provider}　档位：${mode}　会话：${sessionId}\x1b[0m\n`,
@@ -384,6 +411,160 @@ function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
   ].join("\n");
 }
 
+/**
+ * `ding plugins [子命令]` —— 插件管理（Phase 8.2 / 8.4 的 CLI 那一面）。
+ *
+ * ⚠️ 安装要求**显式确认**（`--yes`）：`install` 会把别人的代码装进你的机器，
+ * 而"权限确认"这件事在无头环境里只能靠一个明确的旗子表达 ——
+ * 没有它就把权限清单打出来并**拒绝安装**（而不是替你点了"同意"）。
+ */
+async function cmdPlugins(p: Parsed): Promise<number> {
+  const paths = pluginPaths(dataDir());
+  const sub = p.args[0] ?? "list";
+  const name = p.args[1];
+  const ledger = () => readLedger(paths).ledger.installed;
+
+  /*
+   * 先装载一遍开着的那批 —— 因为"哪些能力被扣下了"与"装载时发现了什么问题"
+   * **只有装载才知道**（不装载的话 doctor 永远说"没问题"，那正是"检查在空转"）。
+   */
+  await loadEnabledPlugins(ledger());
+  const problems = loadedPlugins().flatMap((pl) => pl.problems.map((x) => `${pl.name}：${x}`));
+
+  if (sub === "list") {
+    const list = ledger();
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify(list, null, 2));
+      return 0;
+    }
+    if (!list.length) {
+      console.log(`还没有装任何插件（目录：${paths.root}）`);
+      console.log("装一个：ding plugins install <目录> --yes");
+      return 0;
+    }
+    for (const item of list) {
+      const granted = item.granted.length ? item.granted.join(" / ") : "无";
+      console.log(`${item.name}@${item.version}　${item.enabled ? "开着" : "关着"}　权限：${granted}`);
+      console.log(`    ${item.description}`);
+    }
+    const { missing } = auditLedger(paths);
+    if (missing.length) console.error(`⚠️ 这些插件的目录不在了：${missing.join(" / ")}`);
+    for (const w of withheldCapabilities()) {
+      console.log(`（${w.plugin} 申请了但你没批：${w.permissions.join(" / ")}）`);
+    }
+    for (const problem of problems) console.log(`⚠️ ${problem}`);
+    return 0;
+  }
+
+  if (sub === "install") {
+    if (!name) {
+      console.error("用法：ding plugins install <目录> [--yes] [--grant tools:register,hooks:register]");
+      return 2;
+    }
+    const from = path.resolve(name);
+    // 先干跑一遍拿清单（不写盘），把"它要什么权限"如实打出来
+    const probe = readManifestFromDir(from);
+    if (!probe.raw) {
+      console.error(`读不到清单：${probe.note ?? "未知原因"}`);
+      return 1;
+    }
+    const checked = checkManifest(probe.raw);
+    if (!checked.ok) {
+      console.error("清单不合法：");
+      for (const e of checked.errors) console.error(`  · ${e}`);
+      return 1;
+    }
+    const m = checked.manifest;
+    console.log(`插件 ${m.name}@${m.version}`);
+    console.log(`  ${m.description}`);
+    console.log(`  它申请的权限：${m.permissions.length ? m.permissions.join(" / ") : "（无）"}`);
+    const enforced = m.permissions.filter((x) => ENFORCED_PERMISSIONS.includes(x));
+    const declaredOnly = m.permissions.filter((x) => !ENFORCED_PERMISSIONS.includes(x));
+    if (enforced.length) console.log(`  · 这几项**会真的生效**（不批就不接那根线）：${enforced.join(" / ")}`);
+    if (declaredOnly.length) {
+      console.log(`  · 这几项 v1 **拦不住**（插件与宿主同进程同权限）—— 是"知情"不是"限制"：${declaredOnly.join(" / ")}`);
+    }
+
+    if (!p.flags.has("yes")) {
+      console.error("");
+      console.error("确认之后再加 `--yes` 重跑（这一步就是权限确认：不替你点同意）。");
+      return 3;
+    }
+
+    const grantArg = flag(p, "grant");
+    const granted = grantArg
+      ? grantArg
+          .split(",")
+          .map((x) => x.trim())
+          .filter((x): x is PluginPermission => PLUGIN_PERMISSIONS.includes(x as PluginPermission))
+      : undefined;
+    const got = installFromDir({ paths, from, ...(granted ? { granted } : {}) });
+    if (!got.ok) {
+      console.error("装不上：");
+      for (const e of got.errors) console.error(`  · ${e}`);
+      return 1;
+    }
+    console.log("");
+    console.log(`✓ 装好了：${got.plugin.name}@${got.plugin.version} → ${got.plugin.dir}`);
+    return 0;
+  }
+
+  if (sub === "enable" || sub === "disable") {
+    if (!name) {
+      console.error(`用法：ding plugins ${sub} <名字>`);
+      return 2;
+    }
+    const got = setEnabled(paths, name, sub === "enable");
+    if (!got.ok) {
+      console.error(got.note ?? "没成功");
+      return 1;
+    }
+    console.log(`✓ ${name} 已${sub === "enable" ? "打开" : "关掉"}（下次运行生效）`);
+    return 0;
+  }
+
+  if (sub === "remove") {
+    if (!name) {
+      console.error("用法：ding plugins remove <名字>");
+      return 2;
+    }
+    const got = uninstall(paths, name);
+    if (!got.ok) {
+      console.error(got.note ?? "没成功");
+      return 1;
+    }
+    console.log(`✓ 卸载了 ${name}（台账与它拷贝进来的那份内容都清了；你给它的源目录没动）`);
+    return 0;
+  }
+
+  if (sub === "doctor") {
+    const { missing } = auditLedger(paths);
+    const withheld = withheldCapabilities();
+    console.log(`插件目录：${paths.root}`);
+    console.log(`台账：${paths.ledger}${existsSync(paths.ledger) ? "" : "（还没有）"}`);
+    console.log(`装载了 ${loadedPlugins().length} 个（开着的那批）`);
+    if (missing.length) console.log(`⚠️ 目录不在了：${missing.join(" / ")}`);
+    for (const w of withheld) console.log(`⚠️ ${w.plugin} 申请的这几项没被批准：${w.permissions.join(" / ")}`);
+    for (const problem of problems) console.log(`⚠️ ${problem}`);
+    if (!missing.length && !withheld.length && !problems.length) console.log("没有发现问题。");
+    return 0;
+  }
+
+  console.error(`不认识的子命令：${sub}（可用：list / install / enable / disable / remove / doctor）`);
+  return 2;
+}
+
+/** `ding agents` —— 列内置的专家（Phase 7.1 的数据化在这里可见）。 */
+function cmdAgents(): number {
+  for (const spec of AGENT_SPECS) {
+    const tools = spec.tools ? spec.tools.join(" / ") : "（不限）";
+    console.log(spec.name);
+    console.log(`    ${spec.description}`);
+    console.log(`    工具：${tools}　步数：${spec.maxSteps}`);
+  }
+  return 0;
+}
+
 function cmdHelp(): number {
   process.stdout.write(
     [
@@ -395,6 +576,8 @@ function cmdHelp(): number {
       "  ding record <会话 id> [--out <文件>]",
       "  ding replay <快照文件>",
       "  ding models",
+      "  ding agents                                    # 内置专家（AgentSpec）",
+      "  ding plugins [list|install <目录> --yes|enable|disable|remove|doctor]",
       "",
       `数据目录：${dataDir()}（DH_DATA_DIR 可覆盖）`,
       "",
@@ -419,7 +602,11 @@ try {
             ? await cmdReplay(parsed)
             : parsed.command === "models"
               ? cmdModels()
-              : cmdHelp();
+              : parsed.command === "plugins"
+                ? await cmdPlugins(parsed)
+                : parsed.command === "agents"
+                  ? cmdAgents()
+                  : cmdHelp();
   process.exit(code);
 } catch (error) {
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);

@@ -18,6 +18,7 @@ import {
   type ToolRegistry,
 } from "./runtime/registry";
 import { runTurn, type TurnEvent } from "./runtime/loop";
+import { runHooks } from "./runtime/pluginHost";
 
 /**
  * 内核的公开 API（Phase 1 D1 冻结）。
@@ -169,6 +170,9 @@ export function createEngine(ports: EnginePorts): Engine {
 
       const events: TurnEvent[] = [];
 
+      // 钩子：会话开始（Phase 8.3）。只看不改，异常不会影响这一轮
+      await runHooks("session:start", { sessionId: request.sessionId, provider: request.provider, model: request.model });
+
       /*
        * 委派进度（Phase 7.3）：执行体上报 → 内核**记成事件**并转给宿主上屏。
        *
@@ -231,6 +235,8 @@ export function createEngine(ports: EnginePorts): Engine {
       if (outcome.aborted) {
         await record({ requestId, type: "error", message: "已中止" });
       }
+
+      await runHooks("turn:end", { sessionId: request.sessionId, ok: outcome.ok, aborted: outcome.aborted });
 
       return {
         ok: outcome.ok,

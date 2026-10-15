@@ -22,6 +22,7 @@ import { unknownToolNotice } from "../../engine/core/notices";
 import {
   buildToolSet,
   createToolRegistry,
+  pluginToolEntries,
   type ToolEntry,
 } from "../../engine/runtime/registry";
 import type { ToolExecutor } from "../../engine/ports/executor";
@@ -41,6 +42,8 @@ import { describeListDirResult, describeSearchResult, listDirForModel, searchFil
 import { listDrive, ownedDirs } from "./driveStore";
 import { runSubagent } from "../../engine/runtime/subagent";
 import { runTeam } from "../../engine/runtime/team";
+import { isPluginTool } from "../../engine/runtime/plugins";
+import { runPluginTool } from "../../engine/runtime/pluginHost";
 
 /**
  * 工具的**执行**绑定（§141）。
@@ -390,6 +393,18 @@ export async function runToolOnce(
     };
   }
 
+  /*
+   * 插件工具（Phase 8.3）：与 MCP 同一条思路 —— 名字带前缀，运行时按前缀分流。
+   * 插件不在 `EXECUTORS` 静态表里（它们是用户装出来的，装什么得看台账）。
+   */
+  if (isPluginTool(name)) {
+    try {
+      return { ok: true, output: await runPluginTool(name, input) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   const run = EXECUTORS[name];
   // 未知工具：回一句"没有这个工具"，而不是抛异常（口径同 unknownToolNotice）
   if (!run) return { ok: false, error: unknownToolNotice(name) };
@@ -484,7 +499,8 @@ export function mcpToolEntries(): ToolEntry[] {
  */
 export function agentTools(env: ToolEnv): ToolSet {
   return buildToolSet({
-    registry: createToolRegistry({ extra: mcpToolEntries() }),
+    // 三个来源：内置（注册表自带）/ 连接器（MCP）/ 插件（Phase 8.3）
+    registry: createToolRegistry({ extra: [...mcpToolEntries(), ...pluginToolEntries()] }),
     mode: env.mode,
     executor: hostExecutor,
     ...(env.only ? { only: env.only } : {}),

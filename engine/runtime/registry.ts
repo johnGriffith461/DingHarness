@@ -11,6 +11,8 @@ import type { ConfirmMode } from "../../shared/ipc";
 import { pendingApprovalNotice, toolFailedNotice } from "../core/notices";
 import { decide, injectableTools } from "../core/policy";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
+import { runHooks } from "./pluginHost";
+export { pluginToolEntries } from "./pluginHost";
 
 /**
  * **工具注册表**（Phase 1 D5）。
@@ -176,7 +178,18 @@ export function buildToolSet(input: {
         if (decide(mode, entry.name) === "ask") {
           return { pending: true, notice: pendingApprovalNotice(entry.name, mode) };
         }
+        /*
+         * 钩子（Phase 8.3）：`tool:before` / `tool:after`。
+         *
+         * ⚠️ 它们是**只看不改**的（返回值忽略）：钩子若能改参数或拦调用，
+         * 一个坏插件就能让"模型说它调了 A、实际执行的是 B" —— 而那种事
+         * 在留痕里看不出来。要"改行为"的能力等 v2 的隔离方案。
+         *
+         * 钩子的异常由 `runHooks` 内部吞掉并打日志（插件坏了不该变成用户的故障）。
+         */
+        await runHooks("tool:before", { name: entry.name, input: value });
         const result = await executor.run(entry.name, value, ctx);
+        await runHooks("tool:after", { name: entry.name, ok: result.ok, ...(result.error ? { error: result.error } : {}) });
         /*
          * ⭐ 成功时返回执行体的**原始载荷**，不要那层 `{ ok, output }` 信封。
          *
