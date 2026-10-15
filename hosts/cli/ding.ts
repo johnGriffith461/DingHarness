@@ -14,8 +14,12 @@ import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } f
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
 import { describeBudget } from "../../engine/runtime/budget";
 import { modelInfoOf } from "../../engine/runtime/models";
-import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
+import { budgetOf } from "../../engine/runtime/budget";
+import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
+import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
+import { replPrecondition, runRepl } from "./repl";
+import { flag, flagAll, parseArgv, type Parsed } from "./args";
 import {
   auditLedger,
   installFromDir,
@@ -124,43 +128,15 @@ function render(records: readonly LogRecord[]): void {
   }
 }
 
-/* ────────────────────── 命令行解析 ────────────────────── */
-
-type Parsed = { command: string; args: string[]; flags: Map<string, string[]> };
-
-/** 极简 argv 解析（不引依赖）：`--k v` / `--k=v` / `-k v` 都认，其余当位置参数。 */
-function parseArgv(argv: readonly string[]): Parsed {
-  const args: string[] = [];
-  const flags = new Map<string, string[]>();
-  const add = (key: string, value: string) => flags.set(key, [...(flags.get(key) ?? []), value]);
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i]!;
-    if (!token.startsWith("-")) {
-      args.push(token);
-      continue;
-    }
-    const eq = token.indexOf("=");
-    if (eq > 0) {
-      add(token.slice(0, eq).replace(/^-+/, ""), token.slice(eq + 1));
-      continue;
-    }
-    const key = token.replace(/^-+/, "");
-    const next = argv[i + 1];
-    if (next && !next.startsWith("-")) {
-      add(key, next);
-      i += 1;
-    } else {
-      add(key, "true");
-    }
-  }
-  return { command: args[0] ?? "help", args: args.slice(1), flags };
+/** 目录表里关于这个模型的那几行（`ding models --json` 用；未登记就如实说）。 */
+function budgetInfo(modelId: string): Record<string, unknown> {
+  const got = budgetOf(modelId);
+  return {
+    registered: got.registered,
+    contextWindow: got.contextWindow,
+    stale: got.stale,
+  };
 }
-
-const flagAll = (p: Parsed, name: string): string[] => p.flags.get(name) ?? [];
-const flag = (p: Parsed, name: string): string | undefined => flagAll(p, name).at(-1);
-
-/* ────────────────────── 装配 ────────────────────── */
 
 /** 内置（限本宿主能跑的那批）+ 插件，进同一张注册表。 */
 function createRegistryWithPlugins(pluginEntries: readonly ToolEntry[]): ToolRegistry {
@@ -220,6 +196,13 @@ async function buildEngine(dirs: readonly string[]): Promise<{ engine: Engine; c
 
 /* ────────────────────── 命令 ────────────────────── */
 
+/**
+ * `--json`（Phase 9）：给 CI/脚本的输出模式。
+ *
+ * ⚠️ 它是**输出格式**开关，不是"另一种运行方式"：同一套代码路径，
+ * 只把给人看的那几行换成 JSON。所以它落在**每个命令的渲染那一处**，
+ * 而**判定只有这一处**（`flag(p,"json")`）—— 名字别改来改去。
+ */
 async function cmdRun(p: Parsed): Promise<number> {
   const task = p.args.join(" ").trim();
   if (!task) {
@@ -227,8 +210,17 @@ async function cmdRun(p: Parsed): Promise<number> {
     return 2;
   }
 
-  const dirs = workspaceDirs(flagAll(p, "dir"));
-  const provider = flag(p, "provider") ?? firstAvailableProvider()?.id;
+  /*
+   * 优先级：**命令行显式参数 > 环境变量 > config.json > 内置默认**
+   * （见 `hosts/cli/config.ts` 的文件头 —— 三层各有各的场合：
+   * CI 用环境变量、日常用配置、临时用命令行）。
+   */
+  const { config, note } = effectiveConfig(dataDir());
+  if (note) process.stderr.write(`[配置] ${note}\n`);
+
+  const dirs = workspaceDirs(flagAll(p, "dir").length ? flagAll(p, "dir") : (config.dirs ?? []));
+
+  const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider()?.id;
   if (!provider || !getProvider(provider)) {
     process.stderr.write(
       `没有可用的 provider。已登记的：${allProviders().map((x) => x.id).join(" / ")}\n` +
@@ -237,11 +229,10 @@ async function cmdRun(p: Parsed): Promise<number> {
     return 3;
   }
 
-  const mode = normalizeConfirmMode(flag(p, "mode") ?? "全部允许");
+  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "全部允许");
   const sessionId = cliSessionId(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
   const { engine, close, plugins } = await buildEngine(dirs);
-  for (const problem of plugins) process.stderr.write(`[33m[plugin] ${problem}[0m
-`);
+  for (const problem of plugins) process.stderr.write(`[plugin] ${problem}\n`);
 
   process.stdout.write(
     `\x1b[2m工作区：${dirs.join(" / ")}\nprovider：${provider}　档位：${mode}　会话：${sessionId}\x1b[0m\n`,
@@ -250,7 +241,7 @@ async function cmdRun(p: Parsed): Promise<number> {
   const request: EngineRunRequest = {
     sessionId,
     provider,
-    ...(flag(p, "model") ? { model: flag(p, "model") } : {}),
+    ...((flag(p, "model") ?? config.model) ? { model: flag(p, "model") ?? config.model } : {}),
     system: cliSystemPrompt(dirs, mode),
     messages: [{ role: "user", content: task }],
     mode,
@@ -259,7 +250,33 @@ async function cmdRun(p: Parsed): Promise<number> {
   };
 
   const outcome = await engine.run(request);
-  render(outcome.records);
+  if (p.flags.has("json")) {
+    /*
+     * JSON 输出给脚本用：**只把"发生过什么"结构化**，不夹一句人话。
+     * 正文与留痕出自投影（与终端渲染同一份数据），所以两种输出不会对不上。
+     */
+    const snap = await engine.record(sessionId);
+    const view = snap?.turns.at(-1)?.view;
+    console.log(
+      JSON.stringify(
+        {
+          ok: outcome.ok,
+          ...(outcome.error ? { error: outcome.error } : {}),
+          aborted: outcome.aborted,
+          provider: outcome.provider,
+          model: outcome.model,
+          sessionId,
+          text: view?.text ?? "",
+          traces: (view?.traces ?? []).map((t) => ({ name: t.name, ok: t.ok, pending: t.pending === true, line: t.line })),
+          ...(view?.usage ? { usage: view.usage } : {}),
+        },
+        null,
+        2,
+      ),
+    );
+  } else {
+    render(outcome.records);
+  }
   close();
 
   if (!outcome.ok && !outcome.aborted) {
@@ -400,7 +417,23 @@ async function cmdReplay(p: Parsed): Promise<number> {
  * ⚠️ "未登记模型"要明说：我们不知道它的上限，走的是保守默认。
  * 让人以为"这个数是模型的上限"，比不给这个数更坏（见 `engine/runtime/budget.ts`）。
  */
-function cmdModels(): number {
+function cmdModels(p: Parsed = { command: "", args: [], flags: new Map() }): number {
+  if (p.flags.has("json")) {
+    console.log(
+      JSON.stringify(
+        allProviders().map((provider) => ({
+          id: provider.id,
+          label: provider.label,
+          protocol: provider.protocol,
+          baseURL: provider.baseURL,
+          models: provider.models.map((m) => ({ id: m, ...budgetInfo(m) })),
+        })),
+        null,
+        2,
+      ),
+    );
+    return 0;
+  }
   for (const provider of allProviders()) {
     process.stdout.write(`${provider.id.padEnd(12)} ${provider.label}  [${provider.models.join(", ")}]\n`);
     for (const model of provider.models) {
@@ -581,8 +614,83 @@ async function cmdPlugins(p: Parsed): Promise<number> {
   return 2;
 }
 
+/**
+ * `ding config [--json]` / `ding config set <键> <值>` / `ding config unset <键>`
+ *
+ * ⚠️ 只改**这一个键**：先读回来再改再写（不是覆盖整份文件）——
+ * 否则以后加一个键，旧版本一跑就把新键抹掉了。
+ */
+function cmdConfig(p: Parsed): number {
+  const dir = dataDir();
+  const sub = p.args[0] ?? "show";
+
+  if (sub === "show") {
+    const { config, note } = effectiveConfig(dir);
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify({ dataDir: dir, ...config }, null, 2));
+      return 0;
+    }
+    if (note) console.log(`⚠️ ${note}`);
+    console.log(describeConfig(config));
+    console.log("");
+    console.log(`配置文件：${configPaths(dir).primary}${existsSync(configPaths(dir).primary) ? "" : "（还没有，set 一次就会建）"}`);
+    console.log("改：ding config set provider deepseek ｜ ding config unset model");
+    return 0;
+  }
+
+  if (sub === "set") {
+    const key = p.args[1];
+    const value = p.args.slice(2).join(" ").trim();
+    if (!key || !value) {
+      console.error("用法：ding config set <provider|model|mode|dirs> <值>（dirs 用逗号分隔）");
+      return 2;
+    }
+    if (!["provider", "model", "mode", "dirs"].includes(key)) {
+      console.error(`不认识的键：${key}（可用：provider / model / mode / dirs）`);
+      return 2;
+    }
+    const current = readConfig(dir).config;
+    const next = { ...current };
+    if (key === "dirs") next.dirs = value.split(",").map((d: string) => d.trim()).filter(Boolean);
+    else if (key === "mode") {
+      const mode = normalizeConfirmMode(value);
+      if (mode !== value) {
+        console.error(`「${value}」不是有效档位。可用：${CONFIRM_MODES.join(" / ")}`);
+        return 2;
+      }
+      next.mode = mode;
+    } else if (key === "provider") next.provider = value;
+    else next.model = value;
+
+    const file = writeConfig(dir, next);
+    console.log(`✓ ${key} = ${key === "dirs" ? next.dirs?.join(" / ") : value}`);
+    console.log(`  写进了 ${file}`);
+    return 0;
+  }
+
+  if (sub === "unset") {
+    const key = p.args[1] as keyof CliConfig | undefined;
+    if (!key || !["provider", "model", "mode", "dirs"].includes(key)) {
+      console.error("用法：ding config unset <provider|model|mode|dirs>");
+      return 2;
+    }
+    const current = { ...readConfig(dir).config };
+    delete current[key];
+    writeConfig(dir, current);
+    console.log(`✓ 已清掉 ${key}（回落到默认）`);
+    return 0;
+  }
+
+  console.error(`不认识的子命令：${sub}（可用：show / set / unset）`);
+  return 2;
+}
+
 /** `ding agents` —— 列内置的专家（Phase 7.1 的数据化在这里可见）。 */
-function cmdAgents(): number {
+function cmdAgents(p: Parsed = { command: "", args: [], flags: new Map() }): number {
+  if (p.flags.has("json")) {
+    console.log(JSON.stringify(AGENT_SPECS.map((a) => ({ name: a.name, description: a.description, tools: a.tools ?? null, maxSteps: a.maxSteps })), null, 2));
+    return 0;
+  }
   for (const spec of AGENT_SPECS) {
     const tools = spec.tools ? spec.tools.join(" / ") : "（不限）";
     console.log(spec.name);
@@ -592,7 +700,7 @@ function cmdAgents(): number {
   return 0;
 }
 
-function cmdHelp(): number {
+function cmdHelp(devMode = false): number {
   process.stdout.write(
     [
       "ding —— Ding Harness 的命令行宿主",
@@ -600,11 +708,19 @@ function cmdHelp(): number {
       '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
-      "  ding record <会话 id> [--out <文件>]",
-      "  ding replay <快照文件>",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|install <目录|npm:包名> --yes|enable|disable|remove|doctor]",
+      "  ding config [show|set <键> <值>|unset <键>]    # 默认 provider / 模型 / 档位 / 目录",
+      "  ding --json <命令>                             # 给脚本/CI 的 JSON 输出",
+      ...(devMode
+        ? [
+            "",
+            "工程模式（--dev，验收驱动器，不属于产品表面）：",
+            "  ding record <会话 id> [--out <文件>]",
+            "  ding replay <快照文件>",
+          ]
+        : ["", "（`--dev` 会多出两个工程模式命令：record / replay —— 那是验收驱动用的。）"]),
       "",
       `数据目录：${dataDir()}（DH_DATA_DIR 可覆盖）`,
       "",
@@ -613,11 +729,75 @@ function cmdHelp(): number {
   return 0;
 }
 
+/**
+ * 不给参数（或给了不认识的命令）：**进交互模式**（Phase 9）。
+ *
+ * ⚠️ 为什么"不认识的命令"也走这里而不是报错：终端里 `ding 你好` 这种写法很自然
+ * （人不会先想"我要不要加 run"）。进交互模式并把这句当成任务，比报
+ * "未知命令：你好"更贴近人的预期。而**真**打错的子命令（如 `ding sessionss`）
+ * 会被当成任务发给模型 —— 它会说"我不确定你想干什么"，这也不比报错差。
+ * 唯一要避免的是"静默什么都不做"，所以交互模式一定会有可见的回显。
+ */
+async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
+  // `help` / `--help` / `-h` 在任何时候都是帮助，不进交互
+  if (p.command === "help" || p.flags.has("help") || p.flags.has("h")) return cmdHelp(devMode);
+
+  const ready = replPrecondition();
+  if (!ready.ok) {
+    process.stderr.write(`${ready.reason}\n`);
+    return 3;
+  }
+
+  const { config, note } = effectiveConfig(dataDir());
+  if (note) process.stderr.write(`[配置] ${note}\n`);
+
+  const dirs = workspaceDirs(flagAll(p, "dir").length ? flagAll(p, "dir") : (config.dirs ?? []));
+  const built = await buildEngine(dirs);
+  for (const problem of built.plugins) process.stderr.write(`[plugin] ${problem}\n`);
+
+  const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider()!.id;
+  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "全部允许");
+  const sessionId = cliSessionId(`repl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+
+  try {
+    return await runRepl(
+      {
+        engine: built.engine,
+        sessionId,
+        provider,
+        ...((flag(p, "model") ?? config.model) ? { model: flag(p, "model") ?? config.model } : {}),
+        mode,
+        dataDir: dataDir(),
+        renderLatest: async () => {
+          const snap = await built.engine.record(sessionId);
+          if (snap) render(snap.records);
+        },
+      },
+      config,
+    );
+  } finally {
+    built.close();
+  }
+}
+
 /* ────────────────────── 入口 ────────────────────── */
 
-const parsed = parseArgv(process.argv.slice(2));
+/**
+ * 入口。
+ *
+ * ⚠️ 收进一个 `main()`，**不用顶层 await**：CLI 的发布产物是 **CommonJS**
+ * （见 `tsconfig.cli.json` 的说明：源码里的相对 import 不写扩展名，ESM 不认），
+ * 而 CJS 里顶层 await 是语法错误。tsx 直跑时两种都行 —— 所以这个坑只有
+ * 在**真的构建一次产物**时才会露出来。
+ */
+async function main(): Promise<void> {
+  const parsed = parseArgv(process.argv.slice(2));
 
-try {
+  /* `--dev`：工程模式（Phase 9）。`record` / `replay` 是**验收驱动器**，不是产品表面 ——
+   * 它们留在命令行里（脚本要用），但**不出现在默认帮助里**，除非显式 `--dev`。
+   * 这样"给人看的命令面"与"给工程用的命令面"分得开，而两者还在同一个二进制里。 */
+  const devMode = parsed.flags.has("dev");
+
   const code =
     parsed.command === "run"
       ? await cmdRun(parsed)
@@ -628,15 +808,19 @@ try {
           : parsed.command === "replay"
             ? await cmdReplay(parsed)
             : parsed.command === "models"
-              ? cmdModels()
+              ? cmdModels(parsed)
               : parsed.command === "plugins"
                 ? await cmdPlugins(parsed)
-                : parsed.command === "agents"
-                  ? cmdAgents()
-                  : cmdHelp();
+                : parsed.command === "config"
+                  ? cmdConfig(parsed)
+                  : parsed.command === "agents"
+                    ? cmdAgents(parsed)
+                    : await cmdDefault(parsed, devMode);
   process.exit(code);
-} catch (error) {
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  process.stderr.write(`\x1b[31m出错了：${detail}\x1b[0m\n`);
-  process.exit(1);
 }
+
+void main().catch((error: unknown) => {
+  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  process.stderr.write(`[31m出错了：${detail}[0m\n`);
+  process.exit(1);
+});

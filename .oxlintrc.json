@@ -28,6 +28,7 @@
   },
   "ignorePatterns": [
     "dist/**",
+    "dist-cli/**",
     "dist-electron/**",
     "release/**",
     "data/**",

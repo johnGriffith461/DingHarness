@@ -1,0 +1,32 @@
+{
+  /*
+   * CLI 的**独立构建**（Phase 9：CLI 产品化）。
+   *
+   * 为什么不复用 tsconfig.electron.json：那个是给**桌面主进程**的（产物要打进 asar、
+   * 要跟 Electron 的 Node 版本对齐）；CLI 是**另一个宿主**，它的产物要能被
+   * `npm i -g` 装到任意机器上用普通 Node 跑。两边的"运行时契约"不同，
+   * 混在一个 tsconfig 里就要加一堆条件（而那种条件没人会去维护）。
+   *
+   * module=CommonJS 与 electron 那份同理：源码里的相对 import 不写扩展名，
+   * Node 的 ESM 不认（要 `.js`），而 CommonJS 的 require 认。
+   * 产物目录会放一个 `{"type":"commonjs"}` 标记（根 package.json 是 `"type":"module"`）。
+   */
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "rootDir": ".",
+    "outDir": "dist-cli",
+    "types": ["node"],
+    "sourceMap": false,
+    "declaration": false,
+    "removeComments": false,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["hosts/**/*.ts", "engine/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["**/*.test.ts"]
+}

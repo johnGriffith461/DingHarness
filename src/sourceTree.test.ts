@@ -24,7 +24,7 @@ import { describe, expect, it } from "vitest";
  */
 const ROOT = path.resolve(__dirname, "..");
 const DIRS = ["src", "shared", "electron", "engine", "hosts"];
-const SKIP_DIRS = new Set(["node_modules", "dist", "dist-electron", "release", "data", ".verify", ".git"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", "dist-electron", "dist-cli", "release", "data", ".verify", ".git"]);
 
 function collect(dir: string, out: string[] = []): string[] {
   let entries;

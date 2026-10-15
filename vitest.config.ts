@@ -43,6 +43,10 @@ export default defineConfig({
      * 所以它能与渲染层一起在同一个 node 环境里被直接断言 —— 那是"可整包单测"
      * 这条不变量在工程上的落点（内核测试不需要起应用）。
      */
-    include: ["src/**/*.test.ts", "engine/**/*.test.ts"],
+    /*
+     * `hosts/**` 也在里面（Phase 9）：CLI 宿主的纯逻辑（参数解析、配置、REPL 的行解析）
+     * 同样该被单测钉住 —— 而它们跑起来不需要 Electron，与另外两层同一个环境。
+     */
+    include: ["src/**/*.test.ts", "engine/**/*.test.ts", "hosts/**/*.test.ts"],
   },
 });

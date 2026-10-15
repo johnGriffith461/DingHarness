@@ -10,6 +10,7 @@
   "scripts": {
     "build": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:web && pnpm electron:build && pnpm package:win && node scripts/verify-artifacts.mjs && node scripts/verify-packaged.mjs && node scripts/verify-acceptances.mjs",
     "build:web": "vite build",
+    "cli:build": "node scripts/build-cli.mjs",
     "dev:web": "vite",
     "ding": "tsx hosts/cli/ding.ts",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",
@@ -105,5 +106,15 @@
       "allowToChangeInstallationDirectory": true,
       "artifactName": "ding-harness-${version}-setup.${ext}"
     }
-  }
+  },
+  "bin": {
+    "ding": "dist-cli/hosts/cli/ding.js"
+  },
+  "files": [
+    "dist-cli/**/*",
+    "dist/**/*",
+    "dist-electron/**/*",
+    "README.md",
+    "LICENSE"
+  ]
 }
