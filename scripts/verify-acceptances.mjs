@@ -107,6 +107,12 @@ const CASES = [
    */
   ["accept-windowctl.mjs", "窗口控制（自绘一套按钮 / 标题栏是拖动区 / 底下无被压按钮 / 拖动·最大化·还原·最小化 / 跟随主题）"],
   /*
+   * 配置型 store 的 **SQLite KV 路径**（Phase 12.1）。批跑里那一大批脚本固定走文件后端
+   * （见 run() 里那段说明），所以"默认那条路在桌面里行不行"由这一条盯：
+   * 写进 stores.db / 不写 JSON 文件 / **重启后读得回** / 回退开关能退。
+   */
+  ["accept-kvstore.mjs", "配置型 store 走 SQLite KV（写进 stores.db / 不写 JSON / 重启后读得回 / 回退开关）"],
+  /*
    * 右侧面板（2026-10-15，M0 工单 2）。修前实测的三条事实写在脚本头部：
    * 摘要面板本来就能关、侧栏把手热区没被吞，真问题在**关的入口只有一颗 17px 的 `‹`**
    * 与两个面板都缺 Esc。断言落在"入口带字 / Esc 可关 / 往返各 10 次一致"。
@@ -401,6 +407,23 @@ function run(file) {
      */
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
+    /*
+     * ⭐ **批跑固定走文件后端**（2026-10-15，Phase 12.1 之后）。
+     *
+     * 配置型数据（任务/记忆/设置/会话/文档/智能体/搜索历史…）从那一天起**默认存 SQLite**
+     * （`stores.db`），而这一批脚本里有一大半是**用"写 JSON 文件"种数据、读 JSON 文件断言**的
+     * （`readStoreFile`）。切了介质之后它们全红 —— **红的是脚本读错了地方，不是产品坏了**
+     * （与 §56 那次"存储换 SQLite 之后脚本还在读 jsonl"是同一类，仓库里那段的说明写得很清楚：
+     * 验收脚本该走应用自己的口子，而不是直接翻文件）。
+     *
+     * 眼下这么做：**批跑跑文件后端**（它仍然是被支持、被单测覆盖的一条路，
+     * 而且这些脚本验的是**行为**——"设置重启后还在"——介质换不换不影响那条判据），
+     * KV 那条路由 `src/kvStores.test.ts`（机制）与 `accept-kvstore.mjs`（桌面端到端 + 重启）覆盖。
+     *
+     * 后续该做的：把这批脚本改成"经 IPC 种数据、经 IPC 断言"（`readAllSessionRecords` 已经是这个写法），
+     * 那时这个 pin 就可以撤掉。
+     */
+    env.DSH_STORE_BACKEND = "file";
     const child = spawn(process.execPath, [join(ACCEPT_DIR, file)], {
       stdio: ["ignore", "pipe", "pipe"],
       env,
