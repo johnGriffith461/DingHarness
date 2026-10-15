@@ -594,3 +594,20 @@
 .wb-mcp-tools { display: block; margin-top: 4px; color: var(--fg-3); font-size: 11.5px; word-break: break-all; }
 .wb-mcp-actions { display: flex; align-items: center; gap: 8px; }
 .wb-mcp-file { color: var(--fg-dim); font-size: 11.5px; word-break: break-all; }
+
+/*
+ * 外部插件（Phase 8.4）。
+ *
+ * ⚠️ 与连接器同一条视觉语言（一条一个卡片、状态与原因都看得见）——
+ * "用户装的外部东西"长得一样，学一次就够。
+ * 新类只有 head（标题行 + 安装按钮）与 ext（整段容器）两个，其余复用 wb-sched-*。
+ */
+.wb-plugin-ext { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.wb-plugin-ext-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}

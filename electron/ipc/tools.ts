@@ -25,6 +25,8 @@ import {
   pluginToolEntries,
   type ToolEntry,
 } from "../../engine/runtime/registry";
+
+export { pluginToolEntries };
 import type { ToolExecutor } from "../../engine/ports/executor";
 import { formatFileList } from "../../shared/fileList";
 import { addMemory, MEMORY_MAX } from "../../shared/memory";

@@ -527,6 +527,37 @@ export type ShellBridge = {
     list: (kind?: "chat" | "task" | "cli" | "all") => Promise<SessionSummary[]>;
     load: (sessionId: string) => Promise<{ records: unknown[]; skipped: number }>;
   };
+  /**
+   * 插件（Phase 8.4）。
+   *
+   * ⚠️ `install` **不接受渲染进程给的路径**：目录由系统对话框选
+   * （与"工作区授权"同一条理由 —— 否则"安装"等于"让主进程执行任意目录里的代码"）。
+   */
+  plugins: {
+    /** 列已装插件（含"申请了但没批"与装载时发现的问题）。 */
+    list: () => Promise<
+      {
+        name: string;
+        version: string;
+        description: string;
+        enabled: boolean;
+        granted: readonly string[];
+        requested: readonly string[];
+        withheld: readonly string[];
+        declaredOnly: readonly string[];
+        problems: string[];
+        toolCount: number;
+      }[]
+    >;
+    /** 选一个目录并安装（返回取消时 `canceled: true`）。 */
+    install: () => Promise<{ ok: boolean; canceled?: boolean; plugin?: string; errors?: string[]; list?: unknown }>;
+    /** 开/关（关 = 不装载它的工具与钩子，台账留着）。 */
+    setEnabled: (name: string, enabled: boolean) => Promise<{ ok: boolean; errors?: string[]; list?: unknown }>;
+    /** 卸载（台账与它拷贝进来的内容一起清；不碰用户给的源目录）。 */
+    uninstall: (name: string) => Promise<{ ok: boolean; errors?: string[]; list?: unknown }>;
+    /** 体检：目录不在的、被扣下能力的。 */
+    doctor: () => Promise<{ missing: string[]; withheld: { plugin: string; permissions: readonly string[] }[] }>;
+  };
   remote: {
     status: () => Promise<{ allowConnect: boolean; keepAwake: boolean }>;
     setKeepAwake: (on: boolean) => Promise<boolean>;

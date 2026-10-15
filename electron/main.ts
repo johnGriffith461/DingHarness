@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerAiIpc } from "./ipc/ai";
+import { loadPluginsAtStartup, registerPluginIpc } from "./ipc/pluginHost";
 import { registerSessionIpc } from "./ipc/sessionStore";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
@@ -278,6 +279,9 @@ ipcMain.handle("app:userDataDir", () => app.getPath("userData"));
 
 try {
   registerAiIpc();
+  registerPluginIpc(ipcMain, () => win);
+  // 插件装载**不 await**：它是"用户后来装的东西"，慢了或坏了都不该挡应用起来
+  void loadPluginsAtStartup();
   registerSessionIpc(ipcMain);
 } catch (error) {
   // AI 通道起不来不该拖垮整个应用：日志里说清楚，窗口照常开

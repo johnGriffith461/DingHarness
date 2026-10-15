@@ -100,6 +100,66 @@ export function PluginsPage() {
   }, [mode, manageTab, pullMcp]);
 
   /*
+   * ── 外部插件（Phase 8.4）──
+   *
+   * 与上面的「已安装清单」**不是同一类东西**（与连接器同一条区分）：
+   * 那些是应用内置目录里的条目（本应用自己长出来的能力），
+   * 这些是**用户装的第三方代码**（装在 `userData/plugins/`，与宿主同进程跑）。
+   *
+   * 所以这一段的界面重点不是"好不好看"，而是**把两件事如实说清**：
+   *   ① 它申请了什么权限、你批了哪几项（申请了没批的**真的不生效**）；
+   *   ② 哪些权限 v1 根本拦不住（资源类）—— 那是"知情"不是"限制"。
+   * 一个看着像权限、实际不生效的界面，比没有权限界面更坏。
+   */
+  const [plugins, setPlugins] = useState<
+    | {
+        name: string;
+        version: string;
+        description: string;
+        enabled: boolean;
+        granted: readonly string[];
+        requested: readonly string[];
+        withheld: readonly string[];
+        declaredOnly: readonly string[];
+        problems: string[];
+        toolCount: number;
+      }[]
+    | null
+  >(null);
+  const [pluginNote, setPluginNote] = useState("");
+
+  const pullPlugins = useCallback(() => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    void shell?.plugins
+      ?.list?.()
+      .then((r) => setPlugins(r ?? []))
+      .catch(() => setPlugins([]));
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "manage" || manageTab !== "插件") return;
+    pullPlugins();
+  }, [mode, manageTab, pullPlugins]);
+
+  /** 一次插件动作（安装/开关/卸载）：把结果里的清单接回来，失败的把原话显示出来。 */
+  const doPluginAction = useCallback(
+    (run: () => Promise<{ ok: boolean; errors?: string[]; list?: unknown }>, okNote: string) => {
+      void run()
+        .then((r) => {
+          if (!r.ok) {
+            setPluginNote((r.errors ?? ["没成功"]).join("；"));
+            return;
+          }
+          if (Array.isArray(r.list)) setPlugins(r.list as never);
+          setPluginNote(okNote);
+          window.setTimeout(() => setPluginNote(""), 3000);
+        })
+        .catch((e: unknown) => setPluginNote(String(e).slice(0, 120)));
+    },
+    [],
+  );
+
+  /*
    * 「添加」本机版的诚实对应物：**自己写一条能力**。
    * 本机版没有插件市场后端，所以让能力清单可扩展的路子是"用户自己写"，
    * 而不是假装能装一个远端插件。
@@ -278,6 +338,97 @@ export function PluginsPage() {
               {mcp?.file ? (
                 <div className="wb-mcp-file" data-testid="wb-mcp-file">
                   配置文件：{mcp.file}
+                </div>
+              ) : null}
+            </div>
+          ) : manageTab === "插件" ? (
+            /*
+             * 「插件」页签：**外部插件在前、内置清单在后**。
+             * 顺序有理由：外部插件是用户自己装的东西，他进这一页多半是为了管它们；
+             * 而内置清单（本应用长出来的能力）更稳定、更少变。
+             */
+            <div className="wb-plugin-ext" data-testid="wb-plugin-ext">
+              <div className="wb-plugin-ext-head">
+                <b>外部插件</b>
+                <span className="wb-sched-meta">
+                  {plugins === null ? "读取中…" : plugins.length ? `${plugins.length} 个` : "还没有"}
+                </span>
+                <span className="wb-spacer" />
+                <button
+                  className="wb-page-btn"
+                  data-testid="wb-plugin-install"
+                  onClick={() => {
+                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                    doPluginAction(() => shell!.plugins.install(), "装好了");
+                  }}
+                >
+                  <Plus size={14} /> 从目录安装
+                </button>
+              </div>
+
+              {plugins === null ? null : plugins.length === 0 ? (
+                <div className="wb-manage-empty" data-testid="wb-plugin-empty">
+                  还没有装外部插件。点「从目录安装」选一个插件目录（要有 ding-plugin.json 或带 ding 字段的 package.json）。
+                </div>
+              ) : (
+                <div className="wb-sched-list">
+                  {plugins.map((p) => (
+                    <div className="wb-sched-item" key={p.name} data-testid={`wb-plugin-${p.name}`}>
+                      <div className="wb-sched-item-main">
+                        <b>
+                          {p.name}
+                          <em>@{p.version}</em>
+                        </b>
+                        <em>{p.description}</em>
+                        <span className="wb-sched-meta" data-testid={`wb-plugin-state-${p.name}`}>
+                          {p.enabled ? "开着" : "关着"} · 接上 {p.toolCount} 个工具
+                        </span>
+                        <span className="wb-sched-meta" data-testid={`wb-plugin-perms-${p.name}`}>
+                          {p.granted.length ? `已批权限：${p.granted.join(" / ")}` : "没有批任何权限"}
+                        </span>
+                        {p.withheld.length ? (
+                          <span className="wb-cloud-note" data-testid={`wb-plugin-withheld-${p.name}`}>
+                            申请了但没批（**真的不生效**）：{p.withheld.join(" / ")}
+                          </span>
+                        ) : null}
+                        {p.declaredOnly.length ? (
+                          <span className="wb-sched-meta" data-testid={`wb-plugin-declared-${p.name}`}>
+                            v1 拦不住（只是声明）：{p.declaredOnly.join(" / ")}
+                          </span>
+                        ) : null}
+                        {p.problems.map((problem) => (
+                          <span className="wb-mcp-error" key={problem} data-testid={`wb-plugin-problem-${p.name}`}>
+                            {problem}
+                          </span>
+                        ))}
+                      </div>
+                      <button
+                        className="wb-page-btn"
+                        data-testid={`wb-plugin-toggle-${p.name}`}
+                        onClick={() => {
+                          const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                          doPluginAction(() => shell!.plugins.setEnabled(p.name, !p.enabled), p.enabled ? "已关掉" : "已打开");
+                        }}
+                      >
+                        {p.enabled ? "关掉" : "打开"}
+                      </button>
+                      <button
+                        className="wb-page-btn"
+                        data-testid={`wb-plugin-remove-${p.name}`}
+                        onClick={() => {
+                          const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                          doPluginAction(() => shell!.plugins.uninstall(p.name), "卸载了");
+                        }}
+                      >
+                        卸载
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {pluginNote ? (
+                <div className="wb-cloud-note" data-testid="wb-plugin-note">
+                  {pluginNote}
                 </div>
               ) : null}
             </div>

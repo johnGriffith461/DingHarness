@@ -50,6 +50,38 @@ import { checkManifest } from "./plugins";
  * 工具不进注册表、钩子不会被调用。这是 v1 里两类权限中能真拦的那一类。
  */
 
+/**
+ * 藏在编译背后的动态 `import`（`new Function` 让它不被 TS 改写成 `require`）。
+ */
+const compiledImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<PluginModule>;
+
+/**
+ * **加载一个插件模块**（两种宿主都要能跑，所以两条路都留着）。
+ *
+ * | 宿主 | 直接写 `import()` 会怎样 | 用 `compiledImport` 会怎样 |
+ * |---|---|---|
+ * | 桌面主进程（**CJS**） | TS 把它编译成 `require()` → **加载不了 ESM** | ✅ 真正的动态 import |
+ * | vitest（ESM） | ✅ | ❌ 报 "A dynamic import callback was not specified"（不在模块图里） |
+ *
+ * 所以：先走 `compiledImport`（桌面那条路必需），**只在它报"环境不支持"时**回落到普通
+ * `import()`（vitest 那条路必需）。删掉任何一条，都会有半边宿主炸 ——
+ * 而这半边炸的时候，错误信息离原因很远（`Cannot find module 'file:///…'`
+ * 那个格式其实是 **require** 的，不是 ESM 的）。
+ *
+ * @param url 模块 URL
+ * @returns 模块
+ */
+async function loadModule(url: string): Promise<PluginModule> {
+  try {
+    return await compiledImport(url);
+  } catch (error) {
+    const message = String(error instanceof Error ? error.message : error);
+    // 只在这类"这个环境里没有动态 import 回调"的错误上回落，别把插件自己的报错吞了
+    if (!/dynamic import callback|import\(\) is not a function|Cannot use import statement/i.test(message)) throw error;
+    return (await import(url)) as PluginModule;
+  }
+}
+
 /** 插件工具的运行体。 */
 export type PluginToolRun = (input: unknown, ctx: { sessionId?: string }) => Promise<unknown> | unknown;
 
@@ -173,8 +205,15 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
      * 动态 import：插件是**用户装的代码**，加载它等于执行它 —— 这正是 v1 的边界
      * （进程内、同权限）。`?v=<installedAt>` 是刻意的：改过插件之后重新装载
      * 不会被 Node 的模块缓存挡住（否则"改了没生效"会成为一个假 bug）。
+     *
+     * ⚠️⚠️ 必须用 `dynamicImport`（不是直接写 `import()`）：
+     * TypeScript 在 **CommonJS 目标**下会把 `import(x)` **编译成 `require(x)`**，
+     * 而 `require` 加载不了 ESM 插件 —— 桌面主进程正是 CJS（`tsconfig.electron.json`），
+     * 于是同一段代码在 CLI（tsx/ESM）里好好的、在桌面里报
+     * `Cannot find module 'file:///.../index.mjs'`（这个错误格式本身就是 require 的）。
+     * 用 `new Function` 把 `import` 藏过编译，两种宿主都拿到**真正的**动态 import。
      */
-    mod = (await import(`${pathToFileURL(entryFile).href}?v=${plugin.installedAt}`)) as PluginModule;
+    mod = await loadModule(`${pathToFileURL(entryFile).href}?v=${plugin.installedAt}`);
   } catch (error) {
     return { ...empty, withheld: caps.withheld, problems: [`装载失败：${error instanceof Error ? error.message : String(error)}`] };
   }

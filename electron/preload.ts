@@ -5,6 +5,7 @@ import { CLIPBOARD_CHANNEL } from "./ipc/clipboard";
 import { CODING_CHANNEL } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
+import { PLUGIN_CHANNEL } from "./ipc/pluginHost";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
 import { CANVAS_EXPORT_CHANNEL } from "./ipc/canvasExport";
 import { ARTIFACT_CHANNEL } from "./ipc/artifactStore";
@@ -138,6 +139,13 @@ const api = {
     /** 以一张已有图为输入做编辑（图生图）。 */
     edit: (request: { source: string; prompt: string; model?: string; size?: string }) =>
       ipcRenderer.invoke(IMAGE_CHANNEL.edit, request),
+  },
+  plugins: {
+    list: () => ipcRenderer.invoke(PLUGIN_CHANNEL.list),
+    install: () => ipcRenderer.invoke(PLUGIN_CHANNEL.install),
+    setEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke(PLUGIN_CHANNEL.setEnabled, name, enabled),
+    uninstall: (name: string) => ipcRenderer.invoke(PLUGIN_CHANNEL.uninstall, name),
+    doctor: () => ipcRenderer.invoke(PLUGIN_CHANNEL.doctor),
   },
   remote: {
     /** 读本机侧状态：许可 + 是否正在阻止休眠。 */

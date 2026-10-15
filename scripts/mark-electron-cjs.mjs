@@ -33,17 +33,49 @@ function walk(dir) {
 }
 
 let renamed = 0;
+/** 改写后**解不开**的相对路径（打包/启动时才会炸，所以在这里就报出来）。 */
+const brokenSpecs = [];
+
 for (const file of walk(outDir)) {
   let text = fs.readFileSync(file, "utf8");
   // require("./ipc/ai") → require("./ipc/ai.cjs")（只改相对路径，裸模块名不动）
   text = text.replace(/(require\(["'])(\.{1,2}\/[^"']+?)(["']\))/g, (_m, a, spec, c) => {
     if (/\.(cjs|json|node)$/.test(spec)) return `${a}${spec}${c}`;
-    return `${a}${spec}.cjs${c}`;
+    /*
+     * ⚠️ **目录导入**（`./protocols` → 实际文件是 `protocols/index.cjs`）
+     * 不能简单加 `.cjs`：那样会生成一个不存在的 `./protocols.cjs`，
+     * 而错误要等到**启动时**才报（`Cannot find module`，位置离原因很远 —— 实测踩过）。
+     * 所以先看这个相对路径是不是一个目录，是就补 `/index.cjs`。
+     */
+    const base = path.resolve(path.dirname(file), spec);
+    let out = `${spec}.cjs`;
+    try {
+      if (fs.statSync(base).isDirectory()) out = `${spec}/index.cjs`;
+    } catch {
+      /* 既不是文件也不是目录：交给下面的自检报出来 */
+    }
+    if (!fs.existsSync(path.resolve(path.dirname(file), out))) {
+      brokenSpecs.push(`${path.relative(outDir, file)} → ${spec}`);
+    }
+    return `${a}${out}${c}`;
   });
   const target = file.replace(/\.js$/, ".cjs");
   fs.writeFileSync(target, text, "utf8");
   fs.unlinkSync(file);
   renamed += 1;
+}
+
+/*
+ * 自检：改写完的每个相对路径都必须真的存在。
+ *
+ * 这一条是加出来的 —— 上面那个目录导入的坑就是**改写器自己埋的**，
+ * 而它的错误表现（启动时 Cannot find module）离原因很远。
+ * 与其等下一个人去翻 boot.log，不如在这里当场红。
+ */
+if (brokenSpecs.length) {
+  console.error(`[electron-cjs] ✗ 有 ${brokenSpecs.length} 个相对路径改写后解不开（启动时会 Cannot find module）：`);
+  for (const x of brokenSpecs.slice(0, 10)) console.error(`    ${x}`);
+  process.exit(1);
 }
 
 // 就近的 commonjs 标记继续保留：对非入口文件仍然有用

@@ -1,7 +1,7 @@
 import { ipcMain, type WebContents } from "electron";
 import { healthStore, listProvidersWithProbe, probeProviders } from "./aiProbe";
 import { desktopSessionStore } from "./sessionStore";
-import { hostExecutor, mcpToolEntries, runToolOnce, type ToolEnv } from "./tools";
+import { hostExecutor, mcpToolEntries, pluginToolEntries, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
 import { createEngine } from "../../engine/index";
 import type { LogInput } from "../../engine/core/events";
@@ -248,7 +248,14 @@ export function registerAiIpc(): void {
         store: desktopSessionStore(),
         executor: hostExecutor,
         health: healthStore,
-        tools: mcpToolEntries(),
+        /*
+         * 两个外部来源都并进来：连接器（MCP）与**插件**（Phase 8.3）。
+         *
+         * ⚠️ 漏掉插件这一处的后果很安静：插件装好了、界面上显示"接上 1 个工具"，
+         * 而模型那边**根本没拿到它** —— 日志的 `tools` 字段正是为逮这种事加的
+         * （它一比对就露：实测就是靠它发现桌面这条路只并了 MCP）。
+         */
+        tools: [...mcpToolEntries(), ...pluginToolEntries()],
       });
 
       try {
