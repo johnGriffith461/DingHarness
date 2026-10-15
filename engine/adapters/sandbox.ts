@@ -48,12 +48,22 @@ export function findSandboxBinary(): string {
   if (configured && existsSync(configured)) return configured;
 
   const name = process.platform === "win32" ? "ding-sandbox.exe" : "ding-sandbox";
+  /*
+   * ⚠️ **打包态那两条不能少**（2026-10-16 补）：
+   *
+   * 之前这里只看 `process.cwd()` —— 而装出来的应用 cwd 是"用户从哪儿启动的"，
+   * 于是**安装包里就算带了沙箱也找不到**（README 那句 ✅ 与现实不符，主人正是这么发现的）。
+   * 现在显式看两处打包位置：`extraResources` 落地的 `resources/`（`process.resourcesPath`），
+   * 以及 exe 自己所在目录。dev 态那两条保持不动。
+   */
   const candidates = [
+    /* 打包态：`extraResources` 把 ding-sandbox 放在 resources/ 下（见 package.json 的 build） */
+    ...(typeof process.resourcesPath === "string" && process.resourcesPath ? [path.join(process.resourcesPath, name)] : []),
+    /* 打包态：与 exe 同级 */
+    path.join(path.dirname(process.execPath), name),
     /* 开发态：cargo 的产物（`pnpm sandbox:build` 编到这儿） */
     path.join(process.cwd(), "sandbox", "target", "release", name),
     path.join(process.cwd(), "sandbox", "target", "debug", name),
-    /* 打包态：与 exe / 仓库同级 */
-    path.join(process.cwd(), name),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;

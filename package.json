@@ -133,7 +133,13 @@
         "deb"
       ],
       "category": "Utility"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "sandbox/target/release/ding-sandbox.exe",
+        "to": "ding-sandbox.exe"
+      }
+    ]
   },
   "bin": {
     "ding": "dist-cli/hosts/cli/ding.js"

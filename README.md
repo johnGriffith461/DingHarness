@@ -201,9 +201,9 @@ node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
 
 | 平台 | 桌面 | CLI 单二进制 | 命令的资源上限 | 密钥加密存储 |
 |---|---|---|---|---|
-| **Windows x64** | ✅ 打包 + 启动验过（`pnpm package:win`） | ✅ 编出来且**跑过**（`pnpm cli:bin` + `node scripts/verify-cli-bin.mjs`） | ✅ 作业对象（内存 / 子进程数 / 不留孤儿） | ✅ 桌面走 DPAPI；CLI 无 |
-| macOS（x64 / arm64） | ⚠️ 目标配置就位，**没在真机上跑过** | ⚠️ 编得出来，**没跑过** | ❌ 未做（只有直通） | ⚠️ 桌面可走 Keychain；未验证 |
-| Linux x64 | ⚠️ 同上（AppImage / deb），**桌面版没在 Linux 上跑过** | ✅ **跑过**：WSL Ubuntu 24.04 里 `--help` / `doctor` / `eval` 63/63（2026-10-16） | ❌ 未做（没有 seccomp） | ⚠️ 桌面可走 libsecret；未验证 |
+| **Windows x64** | ✅ 打包 + 启动验过（`pnpm package:win`） | ✅ 编出来且**跑过**（`pnpm cli:bin` + `node scripts/verify-cli-bin.mjs`） | ✅ 作业对象（内存 / 子进程数 / 不留孤儿）；**安装包带着 `ding-sandbox.exe`**（落在 `resources/`，应用自己找得到） | ✅ 桌面走 DPAPI；CLI 无 |
+| macOS（x64 / arm64） | ⚠️ 目标配置就位，**没在真机上跑过** | ⚠️ 编得出来，**没跑过** | ⚠️ 没打进去（只有 Windows 那份进了 `extraResources`） | ⚠️ 桌面可走 Keychain；未验证 |
+| Linux x64 | ⚠️ 同上（AppImage / deb），**桌面版没在 Linux 上跑过** | ✅ **跑过**：WSL Ubuntu 24.04 里 `--help` / `doctor` / `eval` 63/63（2026-10-16） | ⚠️ 同上（没打进去；实现只有 Windows 那份） | ⚠️ 桌面可走 libsecret；未验证 |
 
 **这张表就是"我们验过什么"的清单**：⚠️ 的那些是**能编出来但没在对应系统上执行过**，
 不是"已支持"。`ding doctor` 会把当前这台机器上缺的能力逐条列出来。

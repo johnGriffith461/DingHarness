@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
@@ -52,6 +54,26 @@ const missingInfo: SandboxInfo = {
 };
 
 describe("沙箱接线（Phase 14.1）", () => {
+  it("①a 打包态：resources/ 下那份找得到（2026-10-16 主人逮到的那条）", () => {
+    /*
+     * 主人发现的问题：README 写着 ✅「作业对象」，可**安装包里根本没有 ding-sandbox**，
+     * 而且 `findSandboxBinary` 只看 `process.cwd()` —— 装出来的应用 cwd 是"用户从哪儿启的"，
+     * 于是就算打了包也找不到。这条钉的就是那个查找顺序。
+     */
+    const dir = mkdtempSync(path.join(os.tmpdir(), "dh-packaged-"));
+    const name = process.platform === "win32" ? "ding-sandbox.exe" : "ding-sandbox";
+    writeFileSync(path.join(dir, name), "x");
+    const before = Object.getOwnPropertyDescriptor(process, "resourcesPath");
+    Object.defineProperty(process, "resourcesPath", { value: dir, configurable: true, writable: true });
+    try {
+      expect(findSandboxBinary(), "resources/ 下那份应当被找到").toBe(path.join(dir, name));
+    } finally {
+      if (before) Object.defineProperty(process, "resourcesPath", before);
+      else Reflect.deleteProperty(process, "resourcesPath");
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("① 找不到二进制时：直通 + **明说没有隔离**（不静默降级）", () => {
     const info = probeSandbox();
     if (info.found) {
