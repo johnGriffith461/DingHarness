@@ -122,4 +122,20 @@ describe("快照指纹的覆盖面（P232）", () => {
     );
     expect(diffSnapshot(want, got).differences).toEqual([]);
   });
+
+  it("⭐ C5 的 actor **不算**漂移（V5 §3.1：新字段不进投影 diff 比较集）", () => {
+    /*
+     * 为什么这条是硬要求：actor 是元数据（谁写的），不改变"发生了什么"。
+     * 若它进了比较集，**所有历史快照**都会在 actor 落地那一刻齐刷刷报漂移 ——
+     * 而那会让"零漂移"这个门禁失去意义（假红也叫狼来了）。
+     * 老快照（记录里没有 actor）与新记录（带 actor）必须比出 diff=0。
+     */
+    const old = snapshotOf("s", [REQ(), CALL({ path: "/a.md" }), RESULT("正文")]);
+    const withActors = snapshotOf("s", [
+      { ...REQ(), actor: { id: "local", kind: "user" } },
+      { ...CALL({ path: "/a.md" }), actor: { id: "main", kind: "agent" } },
+      { ...RESULT("正文"), actor: { id: "main", kind: "agent" } },
+    ]);
+    expect(diffSnapshot(old, withActors).differences, "actor 进了投影指纹 —— 历史快照会集体假红").toEqual([]);
+  });
 });

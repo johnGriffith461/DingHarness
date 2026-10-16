@@ -3,10 +3,12 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSyn
 import path from "node:path";
 
 import {
+  actorOf,
   conversationTitle,
   isChatSessionId,
   parseLogLine,
   SESSION_PREFIX,
+  type Actor,
   type LogRecord,
 } from "../core/events";
 import type { LogInputAt, SearchHit, SessionKind, SessionStore } from "../ports/store";
@@ -264,7 +266,7 @@ export function createSqliteSessionStore(
   };
 
   const insertEvent = prep(
-    "INSERT OR REPLACE INTO events(session_id, seq, at, type, payload, body) VALUES(?, ?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO events(session_id, seq, at, type, payload, body, actor_id, actor_kind) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const maxSeq = prep("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?");
   const upsertSession = prep(
@@ -488,7 +490,13 @@ export function createSqliteSessionStore(
           const payload = JSON.stringify({ seq, at, ...rest });
           // 检索用的正文**写的时候算好**（只算一次，读的时候不再解析 —— 审计 P136）
           const body = searchBodyOf(record as Record<string, unknown>);
-          insertEvent.run(sessionId, seq, at, record.type, payload, body);
+          /*
+           * actor 两列与 payload **同一口径**（C5，ADR-006）：缺字段 = legacy。
+           * ⚠️ 拿 `record` 判而不是 `stored` 那条解析结果判：两者此刻相等，
+           * 但 `actorOf` 是读路径的唯一口径，这里直接复用它（少一处各写各的）。
+           */
+          const actor = actorOf(record as { actor?: Actor });
+          insertEvent.run(sessionId, seq, at, record.type, payload, body, actor.id, actor.kind);
           bytes += rowBytes(payload, body);
           if (!title && record.type === "request") title = conversationTitle([{ seq, at, ...rest } as LogRecord]);
           stored.push(JSON.parse(payload) as LogRecord);

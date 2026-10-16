@@ -14,7 +14,7 @@ import {
   type MigrationStep,
 } from "./sqliteSchema";
 import { createSqliteSessionStore } from "./sqliteStore";
-import { chatSessionId } from "../core/events";
+import { chatSessionId, LEGACY_ACTOR } from "../core/events";
 
 /**
  * 会话库的**版本化迁移链**（V5-1 任务 3.3a；ADR-005）。
@@ -102,13 +102,14 @@ describe("三态：空库 / 旧库 / 已迁移库", () => {
 
     /*
      * 表在 = 基线（v1）已经应用过（最老那代连 `user_version` 都没写）——
-     * 所以待跑只有 v2；v1 属于"认领"，不算这次跑的。
+     * 所以待跑只剩它之后的每一步；v1 属于"认领"，不算这次跑的。
      */
-    expect(pendingMigrations(raw).map((m) => m.version), "只该剩 v2（v1 = 基线已在）").toEqual([2]);
+    const afterBaseline = MIGRATIONS.filter((m) => m.version > 1).map((m) => m.version);
+    expect(pendingMigrations(raw).map((m) => m.version), "只该剩 v1 之后的每一步（v1 = 基线已在）").toEqual(afterBaseline);
     const report = runMigrations(raw, now);
     expect(report.adopted, "v1 是认领来的（上线前就已应用），不该说成这次跑的").toEqual([1]);
-    expect(report.applied, "只有 v2 是这次真跑的").toEqual([2]);
-    expect(report).toMatchObject({ from: 1, to: 2 });
+    expect(report.applied, "只有 v1 之后的那些是这次真跑的").toEqual(afterBaseline);
+    expect(report).toMatchObject({ from: 1, to: SCHEMA_VERSION });
     /* 补了列、回填了正文（external-content 的 FTS 不会自动索引老行 —— 这一格就是 P101 那件事） */
     const body = String((raw.prepare("SELECT body FROM events WHERE session_id = ? AND seq = 1").get(sid) as { body?: string })?.body ?? "");
     expect(body).toContain("预算");
@@ -192,7 +193,11 @@ describe("熔断数据纪律：迁移前后重放 diff=0（§3.1）", () => {
 
     const store = openStore();
     const { records } = await store.load(sid);
-    expect(records, "迁移把老记录改写了（或漏了）").toEqual(payloads.map((p) => JSON.parse(p)));
+    /*
+     * 迁移把老记录**逐条原样**读回来 —— 除了 `actor`：那是 C5 的读兼容口径
+     * （老记录没有这个字段 → 读回时填 legacy，磁盘上那份没被改，见 events.test.ts）。
+     */
+    expect(records, "迁移把老记录改写了（或漏了）").toEqual(payloads.map((p) => ({ ...JSON.parse(p), actor: LEGACY_ACTOR })));
     /* 列表/标题也不受迁移影响 */
     expect((await store.list()).map((x) => x.conversationId)).toEqual(["diff"]);
   });
@@ -226,11 +231,13 @@ describe("失败回滚：某一步炸了，库停在旧版本", () => {
       apply: (d) => {
         d.exec("CREATE TABLE IF NOT EXISTS half_done(x TEXT)");
         d.exec("INSERT INTO half_done(x) VALUES('应该被回滚掉')");
-        throw new Error("第 3 步故意炸");
+        throw new Error("这一步故意炸");
       },
     };
 
-    expect(() => runMigrations(db, Date.now(), [...MIGRATIONS, failing])).toThrow(/迁移 v3（故意炸的一步）失败/);
+    expect(() => runMigrations(db, Date.now(), [...MIGRATIONS, failing])).toThrow(
+      new RegExp(`迁移 v${SCHEMA_VERSION + 1}（故意炸的一步）失败`),
+    );
     const pragma = Number((db.prepare("PRAGMA user_version").get() as { user_version?: number })?.user_version ?? 0);
     expect(pragma, "失败的迁移把版本号推上去了").toBe(SCHEMA_VERSION);
     expect(schemaLedger(db).map((r) => r.version), "失败的那一步被记进了账本").toEqual(MIGRATIONS.map((m) => m.version));
@@ -250,5 +257,67 @@ describe("顺带：全新库不产生备份", () => {
     openStore();
     expect(existsSync(path.join(dir, "sessions.db"))).toBe(true);
     expect(readdirSync(dir).filter((f) => f.endsWith(".pre-migrate.bak"))).toEqual([]);
+  });
+});
+
+/**
+ * C5（V5-1 3.4）：v3 那一步给 `events` 加的 actor 两列。
+ *
+ * 为什么要有**列**（payload 里已经有 actor 了）：审计要问"某人做过什么"，
+ * 不该把每行 JSON 解一遍。口径：两列与 payload **同一口径**（缺字段 = legacy）。
+ */
+describe("C5：actor 两列（迁移 v3）", () => {
+  it("⭐ 新写入：payload 里的 actor 原样落到两列；没有 actor 的记录落 'legacy'", async () => {
+    const store = openStore();
+    const sid = chatSessionId("c5");
+    await store.append(sid, [
+      { seq: 1, at: Date.now(), requestId: "r", type: "request", messages: [{ role: "user", content: "我来" }] } as never,
+    ]);
+    await store.append(sid, [
+      /* 带 actor 的事件（内核会这么写） */
+      { requestId: "r", type: "text", text: "我来回", actor: { id: "main", kind: "agent" } } as never,
+      /* 没有 actor 的（旧调用方 / 老记录）：两列必须是 legacy，payload 里不许被编出字段 */
+      { requestId: "r", type: "text", text: "无主" } as never,
+    ]);
+
+    const db = openSqlite(path.join(dir, "sessions.db"));
+    const rows = db.prepare("SELECT seq, actor_id, actor_kind, payload FROM events WHERE session_id = ? ORDER BY seq").all(sid) as {
+      seq: number;
+      actor_id: string;
+      actor_kind: string;
+      payload: string;
+    }[];
+    expect(rows.map((r) => [r.actor_id, r.actor_kind])).toEqual([
+      ["legacy", "legacy"],
+      ["main", "agent"],
+      ["legacy", "legacy"],
+    ]);
+    /* payload 是真相，列只是索引：没标 actor 的那条**不许**被存储偷偷补上字段 */
+    expect(rows[2]!.payload).not.toContain("actor");
+    db.close();
+  });
+
+  it("v3 之前的库（老行）：两列补出来就是 'legacy'（补列即完整迁移，不需要搬值）", () => {
+    const file = path.join(dir, "sessions.db");
+    const raw = openSqlite(file);
+    raw.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, bytes INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, at INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', PRIMARY KEY (session_id, seq));
+    `);
+    raw.prepare("INSERT INTO events(session_id, seq, at, type, payload, body) VALUES(?,?,?,?,?,?)").run(
+      chatSessionId("old"),
+      1,
+      Date.now(),
+      "text",
+      JSON.stringify({ seq: 1, at: Date.now(), requestId: "r", type: "text", text: "老话" }),
+      "老话",
+    );
+    runMigrations(raw);
+    const row = raw.prepare("SELECT actor_id, actor_kind FROM events WHERE session_id = ?").get(chatSessionId("old")) as {
+      actor_id: string;
+      actor_kind: string;
+    };
+    expect([row.actor_id, row.actor_kind]).toEqual(["legacy", "legacy"]);
+    raw.close();
   });
 });

@@ -42,7 +42,7 @@ import { adoptSearchBody } from "./sqliteSearch";
  */
 
 /** 会话库的**表结构版本**（最后一步迁移的版本号）。 */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** 一步迁移。 */
 export type MigrationStep = {
@@ -99,6 +99,25 @@ export const MIGRATIONS: readonly MigrationStep[] = [
     name: "正文列与回填（审计 P101 / P136）",
     apply: (db) => {
       adoptSearchBody(db);
+    },
+  },
+  {
+    version: 3,
+    name: "事件 actor 维度（C5）",
+    apply: (db) => {
+      /*
+       * 两列默认 `'legacy'`：**v3 之前的行不可能带 actor**（actor 与这两列同一笔
+       * 提交上线，见 ADR-006），所以"补列"本身就是完整的迁移 —— 不需要从 payload 搬值。
+       * 读回时 payload 说了算（`parseLogLine` 给老记录填 `LEGACY_ACTOR`），
+       * 这两列是给**查询/审计**用的（"某人做过什么"不该把每行 JSON 解一遍）。
+       */
+      const cols = queryAll(db, "PRAGMA table_info(events)") as { name?: string }[];
+      if (!cols.some((c) => c.name === "actor_id")) {
+        db.exec("ALTER TABLE events ADD COLUMN actor_id TEXT NOT NULL DEFAULT 'legacy'");
+      }
+      if (!cols.some((c) => c.name === "actor_kind")) {
+        db.exec("ALTER TABLE events ADD COLUMN actor_kind TEXT NOT NULL DEFAULT 'legacy'");
+      }
     },
   },
 ];

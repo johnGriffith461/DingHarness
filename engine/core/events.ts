@@ -46,6 +46,10 @@ export type LoggedEvent = AiStreamEvent & {
   seq: number;
   /** 落日志的时刻（epoch ms）。 */
   at: number;
+  /**
+   * 谁写下的（C5）。**可选**是刻意的（V5 §1 的"身份向后兼容"不变量：
+   * 新增字段带默认值，旧写入方零迁移成本）；读回来一定在（`parseLogLine` 填）。 */
+  actor?: Actor;
 };
 
 /**
@@ -73,6 +77,8 @@ export type TurnRequest = {
   seq: number;
   at: number;
   type: "request";
+  /** 谁发起的这一轮（C5；缺省读回 `legacy`，见 `actorOf`）。 */
+  actor?: Actor;
   provider: string;
   model: string;
   /** 模型看见的 system（**原样**，主进程不加工）。 */
@@ -116,6 +122,13 @@ export type ApprovalRecord = {
   seq: number;
   at: number;
   type: "approval";
+  /**
+   * 谁批的（C5）。
+   *
+   * ⚠️ 本机单用户阶段写的是 `LOCAL_USER`；**V5-1 3.7（C3）会把它换成"真正的裁决人"**
+   * （审批人集合里的那一个成员）—— 那时这一格就是审计答案"谁批的"本身。
+   */
+  actor?: Actor;
   /** 针对哪一次调用（与 `tool-call` / `tool-result` 同一个 id）。 */
   toolCallId: string;
   name: string;
@@ -128,6 +141,15 @@ export type ApprovalRecord = {
   /** 界面上那一行（主进程生成，与放行时返回给界面的**同一句**）。 */
   line: string;
 };
+
+/**
+ * **是谁写下了这条记录**（C5）—— 形状与四种 kind 的取舍在 `./actor.ts`（拆出去的理由也写在那儿：
+ * 本文件顶着巨石守卫的天花板，而 actor 的取舍值几十行注释）。
+ *
+ * 这里 import + 转发（既有 import 一律不变）：`events.ts` 仍是记录形状的公开面。
+ */
+import { normalizeActor, type Actor } from "./actor";
+export { actorOf, normalizeActor, LEGACY_ACTOR, LOCAL_USER, MAIN_AGENT, SYSTEM_ACTOR, type Actor, type ActorKind } from "./actor";
 
 /** 日志里可能出现的一条记录。 */
 export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord;
@@ -779,6 +801,10 @@ export function logLine(record: LogInput, seq: number, at: number): string {
   return `${JSON.stringify({ seq, at, ...record })}\n`;
 }
 
+/**
+ * 把一条记录里的 `actor` 收窄 —— **读兼容的唯一收口**（实现在 `./actor.ts`，
+ * 三种情况的口径也写在那儿：老记录 / 形状坏 / 正常）。
+ */
 /** 解析一行；不合法返回 null（**调用方跳过它，不放弃整段**）。 */
 export function parseLogLine(line: string): LogRecord | null {
   const text = line.trim();
@@ -793,6 +819,8 @@ export function parseLogLine(line: string): LogRecord | null {
   const o = raw as Record<string, unknown>;
   if (typeof o.seq !== "number" || typeof o.at !== "number") return null;
   if (typeof o.type !== "string") return null;
+  /* actor 只有这一处收窄（读回来的每条记录都带着它；见 normalizeActor 的三条口径） */
+  o.actor = normalizeActor(o.actor);
   /*
    * ⚠️ `requestId` 只对**流事件**是必需的（它们要按它归并到某一次请求）。
    * 决策记录（`approval`）可以没有 —— 用户可能在那一轮结束很久之后才点确认，

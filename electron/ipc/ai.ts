@@ -4,7 +4,7 @@ import { desktopSessionStore } from "./sessionStore";
 import { hostExecutor, mcpToolEntries, pluginToolEntries, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
 import { createEngine } from "../../engine/index";
-import type { LogInput } from "../../engine/core/events";
+import { LOCAL_USER, SYSTEM_ACTOR, type LogInput } from "../../engine/core/events";
 import { approvalRecord } from "../../engine/core/gates";
 import { humanError, resolveTurnTarget, type TurnEvent } from "../../engine/runtime/loop";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
@@ -150,7 +150,11 @@ export function registerAiIpc(): void {
          * 形状由 `approvalRecord()` 拼（`engine/core/gates.ts`）：批准与拒绝两条分支
          * 以前各手抄一遍同一个形状，抄漏一个字段不会报错、只会让留痕变成空壳。
          */
-        await storeAppend(request.sessionId, approvalRecord({ toolCallId: request.toolCallId, name: request.name, approved: false, line }));
+        await storeAppend(request.sessionId, {
+          ...approvalRecord({ toolCallId: request.toolCallId, name: request.name, approved: false, line }),
+          /* 谁拒的（C5）：本机单用户 = 本机用户；V5-1 3.7 接审批裁决权后换成真实成员 */
+          actor: LOCAL_USER,
+        });
       }
       return { ok: true, line };
     }
@@ -206,9 +210,8 @@ export function registerAiIpc(): void {
      * 只记"批过了"的话，重启后那条留痕会变成一个没有内容的空壳。
      */
     if (request.toolCallId) {
-      await storeAppend(
-        request.sessionId,
-        approvalRecord({
+      await storeAppend(request.sessionId, {
+        ...approvalRecord({
           toolCallId: request.toolCallId,
           name: request.name,
           approved: true,
@@ -216,7 +219,9 @@ export function registerAiIpc(): void {
           result: { ok: res.ok, ...(res.output === undefined ? {} : { output: res.output }), ...(res.error ? { error: res.error } : {}) },
           line,
         }),
-      );
+        /* 谁批的（C5）：同拒绝那条；3.7 的裁决权落地后换成真实审批人 */
+        actor: LOCAL_USER,
+      });
     }
     return { ...res, line };
   });
@@ -243,7 +248,10 @@ export function registerAiIpc(): void {
        * 所以这条错误由宿主自己记：不记的话，日志里会缺一次"用户发了话、什么都没发生"。
        */
       await desktopSessionStore()
-        .append(request.sessionId ?? "", [{ requestId, type: "error", message: target.error }])
+        .append(request.sessionId ?? "", [
+          /* 宿主写的（不是人、也不是模型）：actor = system（C5） */
+          { requestId, type: "error", message: target.error, actor: SYSTEM_ACTOR },
+        ])
         .catch(() => undefined);
       safeSend(sender, { requestId, type: "error", message: target.error });
       return { requestId, ok: false, error: target.error };

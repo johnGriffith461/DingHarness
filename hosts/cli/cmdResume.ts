@@ -1,5 +1,5 @@
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
-import { splitTurns } from "../../engine/core/events";
+import { SYSTEM_ACTOR, splitTurns } from "../../engine/core/events";
 import { recoveryViewOf } from "../../engine/core/recovery";
 import { firstAvailableProvider } from "../../engine/runtime/providers";
 import { normalizeConfirmMode } from "../../shared/ipc";
@@ -198,6 +198,8 @@ export async function cmdResume(p: Parsed, dataDir: string): Promise<number> {
           requestId: target.requestId,
           type: "error",
           message: "这一轮已由 `ding resume --continue` 重跑，不再算作被打断",
+          /* 宿主补的终止记录：actor = system（C5 —— 不是人也不是模型写的） */
+          actor: SYSTEM_ACTOR,
         },
       ]);
       if (asJson) {

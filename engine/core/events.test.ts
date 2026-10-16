@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { AiStreamEvent } from "@shared/ipc";
 import {
+  actorOf,
   applyEvent,
   emptyTurn,
   finishTurn,
   isPendingOutput,
+  LEGACY_ACTOR,
   logLine,
   parseLog,
+  parseLogLine,
   projectTurn,
   splitTurns,
   chatSessionId,
@@ -260,12 +263,39 @@ describe("INV-2：流式与投影走的是同一条路", () => {
 });
 
 describe("日志行（jsonl）", () => {
-  it("序列化 → 解析：往返一致（含 seq/at）", () => {
+  it("序列化 → 解析：往返一致（含 seq/at；actor 由读端补齐，见下一条）", () => {
     const line = logLine(ev({ type: "text", text: "你好" }), 3, T(3));
     expect(line.endsWith("\n")).toBe(true);
     const { records, skipped } = parseLog(line);
     expect(skipped).toBe(0);
-    expect(records).toEqual([{ requestId: "r1", type: "text", text: "你好", seq: 3, at: T(3) }]);
+    expect(records).toEqual([
+      { requestId: "r1", type: "text", text: "你好", seq: 3, at: T(3), actor: LEGACY_ACTOR },
+    ]);
+  });
+
+  it("⭐ C5 读兼容（V5 §3.1 明文口径）：老记录（没有 actor）读回 actor=legacy，不改磁盘", () => {
+    /* 一条**actor 维度上线之前**写下的行：字段就是那时候的样子 */
+    const old = `${JSON.stringify({ seq: 1, at: T(1), requestId: "r1", type: "text", text: "旧话" })}\n`;
+    const { records } = parseLog(old);
+    expect(records[0]?.actor, "老记录没有拿到 legacy 兜底").toEqual({ id: "legacy", kind: "legacy" });
+    expect(actorOf(records[0]).id).toBe("legacy");
+    /* 磁盘上那份**没被改**（读兼容不是迁移：我们只填读回来的对象） */
+    expect(old).not.toContain("actor");
+  });
+
+  it("actor 写进去就原样读回来（新记录）；形状坏掉时兜底 legacy，而不是判成坏行", () => {
+    const line = logLine(
+      { requestId: "r1", type: "text", text: "新话", actor: { id: "local", kind: "user" } },
+      1,
+      T(1),
+    );
+    expect(parseLogLine(line)?.actor).toEqual({ id: "local", kind: "user" });
+
+    /* 手改坏 / 被截断的 actor：**不该把这一行判成坏行**（记录讲的事仍然成立） */
+    const broken = `${JSON.stringify({ seq: 2, at: T(2), requestId: "r1", type: "text", text: "还被认", actor: "谁啊" })}\n`;
+    const parsed = parseLog(broken);
+    expect(parsed.skipped, "actor 坏掉把整行判成了坏行").toBe(0);
+    expect(parsed.records[0]?.actor).toEqual({ id: "legacy", kind: "legacy" });
   });
 
   it("⭐ 坏行只跳过它自己（断电/强杀留下的半行不许让整段历史消失）", () => {

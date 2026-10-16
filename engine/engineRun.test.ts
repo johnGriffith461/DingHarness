@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createEngine, type EnginePorts, type EngineRunRequest } from "./index";
-import type { LogInput, LogRecord } from "./core/events";
+import type { Actor, LogInput, LogRecord } from "./core/events";
 import type { SessionStore } from "./ports/store";
 
 /**
@@ -152,4 +152,51 @@ describe("P127：history 真的进这一轮（不再是凭空重跑）", () => {
       | undefined;
     expect(request?.messages?.map((m) => m.content)).toEqual(["你好"]);
   }, 20_000);
+});
+
+/**
+ * C5：事件 actor 维度（V5-1 3.4）。
+ *
+ * 判据是"**新写入全带**"（V5 §3.1 的口径）：`request` 那条 = 发起人，
+ * 这一轮里 agent 写的事件 = 主循环；标注发生在内核的**记录出口那一处**
+ * （每个 emit 点各标一次迟早会漏 —— 那正是这条用例要挡住的方式）。
+ */
+describe("C5：actor 维度（谁写的）", () => {
+  it("⭐ 默认：request → 本机用户；这一轮的事件全 → 主循环 agent", async () => {
+    const store = memoryStore();
+    await engineWith(store).run(baseRequest("c5-default"));
+    const all = store.all();
+    expect(all.length, "这一轮一条记录都没有？").toBeGreaterThan(1);
+
+    const request = all.find((r) => r.type === "request") as { actor?: Actor } | undefined;
+    expect(request?.actor, "request 记录没带 actor").toEqual({ id: "local", kind: "user" });
+
+    const events = all.filter((r) => r.type !== "request");
+    expect(events.length).toBeGreaterThan(0);
+    for (const event of events) {
+      expect((event as { actor?: Actor }).actor, `事件 ${event.type} 没带 actor`).toEqual({ id: "main", kind: "agent" });
+    }
+  }, 20_000);
+
+  it("宿主给了 actor 就用它（request 那条）——将来接成员身份就是从这里进去的", async () => {
+    const store = memoryStore();
+    await engineWith(store).run({ ...baseRequest("c5-custom"), actor: { id: "u-42", kind: "user" } });
+    const request = store.all().find((r) => r.type === "request") as { actor?: Actor } | undefined;
+    expect(request?.actor).toEqual({ id: "u-42", kind: "user" });
+  }, 20_000);
+
+  it("⭐ 体积预算（V5 §8）：一条记录的 actor 字段 ≤ 40 字节（三种标准形状实测）", () => {
+    const shapes: Actor[] = [
+      { id: "local", kind: "user" },
+      { id: "main", kind: "agent" },
+      { id: "system", kind: "system" },
+    ];
+    for (const actor of shapes) {
+      /* 与落盘形态同一口径：记录被 JSON.stringify 时 actor 增了多少字节 */
+      const base = JSON.stringify({ seq: 1, at: 0, requestId: "r", type: "text", text: "" });
+      const withActor_ = JSON.stringify({ seq: 1, at: 0, requestId: "r", type: "text", text: "", actor });
+      const delta = Buffer.byteLength(withActor_) - Buffer.byteLength(base);
+      expect(delta, `actor=${JSON.stringify(actor)} 让每条记录胖了 ${delta} 字节`).toBeLessThanOrEqual(40);
+    }
+  });
 });

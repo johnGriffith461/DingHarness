@@ -1,5 +1,8 @@
 import {
+  LOCAL_USER,
+  MAIN_AGENT,
   resumeSession,
+  type Actor,
   type LogInput,
   type LogRecord,
   type ResumedSession,
@@ -106,6 +109,17 @@ export type EngineRunRequest = {
   only?: readonly string[];
   /** 步数上限（父 4 / 子 6 是各自的经验值，作为参数传进来）。 */
   maxSteps?: number;
+  /**
+   * **谁发起的这一轮**（C5，2026-10-17）。
+   *
+   * 缺省 = `LOCAL_USER`（本机单用户）。它是 `request` 记录的 actor；
+   * 这一轮里 agent 写的事件一律标 `MAIN_AGENT` —— 两种标注都由内核在**记录出口那一处**
+   * 统一做（每个 emit 点各标一次迟早会漏，见 `run()` 里 `record` 的说明）。
+   *
+   * ⚠️ 与 C1 的"会话归属"是**两回事**（V5-1 3.5 会给 `ownerActor`）：
+   * 这里是"这一句谁说的"，那里是"这段会话归谁"。
+   */
+  actor?: Actor;
   abortSignal?: AbortSignal;
   /**
    * 宿主的**上屏出口**（可选，同步调用，与 `runTurn` 的 `onEvent` 同一个位置）。
@@ -187,6 +201,8 @@ export function createEngine(ports: EnginePorts): Engine {
       const records: LogRecord[] = [];
       /** 落盘失败的原因（见 `EngineRunResult.recordErrors`）。 */
       const recordErrors: string[] = [];
+      /** 这一轮的发起人（C5）：默认本机用户；V5-2/3 接成员身份时由宿主传真实成员。 */
+      const requester: Actor = request.actor ?? LOCAL_USER;
 
       /**
        * 落一条记录（**发事件与记日志是同一个出口** —— 两处各写一份必然漂移）。
@@ -200,7 +216,17 @@ export function createEngine(ports: EnginePorts): Engine {
       const record = async (record: LogInput): Promise<void> => {
         if (!request.sessionId) return; // 不属于任何会话：不入库（见上面 sessionId 的说明）
         try {
-          const stored = await ports.store.append(request.sessionId, [record]);
+          /*
+           * ⭐ **谁写下的**（C5，2026-10-17）：`request` 那条 = 发起这一轮的人
+           * （默认本机用户）；其余事件 = 主循环这个 agent。标注只在这一处发生 ——
+           * 每个 emit 点各标一次的话，迟早有新的 emit 点忘了标（那正是"新写入全带"
+           * 会烂掉的方式）。`record.actor` 若已被调用方标过就尊重它（子智能体/宿主自定义）。
+           */
+          const tagged: LogInput = {
+            ...record,
+            ...(record.actor ? {} : { actor: record.type === "request" ? requester : MAIN_AGENT }),
+          } as LogInput;
+          const stored = await ports.store.append(request.sessionId, [tagged]);
           records.push(...stored);
         } catch (error) {
           const why = error instanceof Error ? error.message : String(error);
