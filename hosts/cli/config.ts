@@ -52,6 +52,16 @@ export function configPaths(dataDir: string): { primary: string; legacy: string 
   return { primary: path.join(dataDir, "config.json"), legacy: path.join(dataDir, "config") };
 }
 
+/**
+ * 配置文件里**允许**出现的键（与 `CliConfig` 一一对应）。
+ *
+ * ⚠️ 这张表是 doctor 的"配置文件合法"那格"按**原文**比对"用的（审计 P202 / NEW-N7-8）：
+ * `normalizeConfig` 会把不认识的键与类型不符的值**静默丢掉**，于是只看收窄后的值
+ * 就永远报"合法"—— 而用户看到的表现是"我明明配了啊"。
+ * （2026-10-17 从 doctor 搬到这里：配置的合法键属于配置模块，自检只借它用。）
+ */
+export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd"] as const;
+
 /** 收窄从磁盘读回来的配置（**磁盘不可信**：坏值一律丢掉，别让它影响一次真实运行）。 */
 export function normalizeConfig(raw: unknown): CliConfig {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};

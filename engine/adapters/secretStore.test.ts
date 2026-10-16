@@ -233,7 +233,12 @@ describe("真话守卫（审计 P114 / P120 / D3 复核）：自述必须与实�
 
   it("简陋但必要：密钥文件常量与 doctor 那格的名字都对得上", () => {
     expect(SECRETS_FILE).toBe("secrets.dat");
-    const doctor = readFileSync(path.join(ROOT, "hosts/cli/doctor.ts"), "utf8");
+    /*
+     * ⚠️ 2026-10-17：doctor 本体从 `hosts/cli/doctor.ts` 搬到了 `engine/runtime/doctor.ts`
+     * （桌面也要跑同一套自检，而 hosts/** 不进 Electron 构建；CLI 那侧只剩包装器）。
+     * 这条判据盯的是"自检真的调了凭据那格的实现"，所以跟着实现走。
+     */
+    const doctor = readFileSync(path.join(ROOT, "engine/runtime/doctor.ts"), "utf8");
     expect(doctor).toContain("credentialProtection");
     mkdirSync(freshDir(), { recursive: true });
   });

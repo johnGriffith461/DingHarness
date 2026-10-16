@@ -1,23 +1,30 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { credentialsPath, hasSecret } from "../../engine/runtime/credentials";
-import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
-import { MODEL_CATALOG, STALE_DAYS, UNKNOWN_MODEL_BUDGET, isStale } from "../../engine/runtime/models";
+import { credentialsPath, hasSecret } from "./credentials";
+import { allProviders, firstAvailableProvider, getProvider } from "./providers";
+import { MODEL_CATALOG, STALE_DAYS, UNKNOWN_MODEL_BUDGET, isStale } from "./models";
 import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
-import { sqliteRuntimeName } from "../../engine/adapters/sqliteDriver";
-import { probeSandbox } from "../../engine/adapters/sandbox";
-import { credentialProtection, secretsEncrypted } from "../../engine/adapters/secretStore";
-import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
-import { normalizeConfig } from "./config";
+import { sqliteRuntimeName } from "../adapters/sqliteDriver";
+import { probeSandbox } from "../adapters/sandbox";
+import { credentialProtection, secretsEncrypted } from "../adapters/secretStore";
+import { createSqliteSessionStore } from "../adapters/sqliteStore";
 
 /**
- * `ding doctor` —— 一键自检（Phase 11.4）。
+ * 一键自检（Phase 11.4；2026-10-17 从 `hosts/cli/doctor.ts` 搬进 `engine/runtime/`）。
+ *
+ * ## 为什么在 engine 而不是 CLI 宿主里
+ *
+ * 桌面版也要跑同一套自检（「反馈」那颗按钮导出的诊断包就复用这里的检查项，
+ * 见 `electron/ipc/diagnostics.ts`）——而 `hosts/**` **不进 Electron 构建**
+ * （tsconfig.electron.json 的 exclude），桌面 import 宿主文件会把那条边界捅穿。
+ * 自检本身不认宿主：它只依赖 engine 的适配器（凭据/模型/沙箱/SQLite）与注入进来的
+ * 配置视图，放 engine 才两边都够得着。**检查项只有这一份实现**。
+ * CLI 侧的调用口径（配置从 `config.json` 收窄、合法键表）留在 `hosts/cli/doctor.ts`。
  *
  * ## 与 `ding plugins doctor` 的区别
  *
- * 那个只查**插件**（装了什么、权限批没批、清单漂没漂）。这个是**整装自检**：
- * 用户说"跑不起来"时第一条该敲的命令。
+ * ⚠️ `ding doctor`（整装自检）与 `ding plugins doctor`（只查插件）是两件事。
  *
  * ## 方案的硬要求（11.4 的验收）
  *
@@ -75,6 +82,28 @@ export type DoctorInput = {
    * "这一格恒 ok:true、承诺的版本检查没有代码"）。
    */
   versions?: { node?: string; bun?: string };
+  /**
+   * 宿主的**配置视图**（engine 不认识宿主各自的配置文件）。
+   *
+   * · `normalized`：收窄后的 provider / model / dirs。
+   *   CLI 传 `normalizeConfig(rawConfig)`（`hosts/cli/doctor.ts` 的包装器负责收起）；
+   *   桌面传 settings.json 折算出来的默认通道（`electron/ipc/diagnostics.ts`）。
+   * · `allowedKeys`：配置文件里**允许**出现的键 —— "配置文件合法"那格按**原文**比对用
+   *   （审计 P202：收窄会把不认识的键静默丢掉，只看收窄值就永远报"合法"）。
+   *
+   * 省略 = 这个宿主没有配置层：那几格按"没配"报，而不是编一个默认值出来。
+   */
+  config?: {
+    normalized: { provider?: string; model?: string; dirs?: string[] };
+    allowedKeys: readonly string[];
+  };
+  /**
+   * 不适用于本宿主的检查（按 `Check.name`）。
+   *
+   * 桌面没有"工作目录"这个概念 —— 与其显示一句不成立的现状
+   * （"没配（每次跑用当前目录）"），不如**不显示这一格**（诚实优先于凑数）。
+   */
+  skip?: readonly string[];
 };
 
 /**
@@ -112,15 +141,6 @@ export function runtimeVersionProblem(versions: { node?: string; bun?: string })
   return `${bun ? "Bun" : "Node"} ${bun ?? versions.node} 低于下限 ${floor.label} —— SQLite 驱动不存在，库打不开。`;
 }
 
-/**
- * 配置文件里**允许**出现的键（与 `./config.ts` 的 `CliConfig` 一一对应）。
- *
- * ⚠️ 这张表是"按**原文**比对"用的（审计 P202 / NEW-N7-8）：`normalizeConfig` 会把
- * 不认识的键与类型不符的值**静默丢掉**，于是 doctor 只看收窄后的值就永远报"合法"——
- * 而用户看到的表现是"我明明配了啊"。
- */
-export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd"] as const;
-
 /** 配置原文里的问题（全是"收窄会被丢掉、但 doctor 该告诉你"的那类）。 */
 export type ConfigIssues = {
   /** 不认识的键（拼错 / 改名 / 已删掉的项）。 */
@@ -135,8 +155,11 @@ export type ConfigIssues = {
  * 按已知键白名单看一遍配置**原文**（审计 P202 / NEW-N7-8）。
  *
  * 判据一律落在**原文**上，不用收窄后的值 —— 收窄过的值永远"合法"。
+ *
+ * @param raw 配置文件原文（不可信，可能是任何东西）
+ * @param allowedKeys 这个宿主的配置文件**允许**出现的键（CLI 是一组，桌面是另一组）
  */
-export function configIssues(raw: unknown): ConfigIssues {
+export function configIssues(raw: unknown, allowedKeys: readonly string[]): ConfigIssues {
   const out: ConfigIssues = { unknownKeys: [], badTypes: [] };
   if (raw === undefined || raw === null) return out;
   if (typeof raw !== "object" || Array.isArray(raw)) {
@@ -145,7 +168,7 @@ export function configIssues(raw: unknown): ConfigIssues {
   }
   const o = raw as Record<string, unknown>;
   for (const key of Object.keys(o)) {
-    if (!(CONFIG_KEYS as readonly string[]).includes(key)) out.unknownKeys.push(key);
+    if (!allowedKeys.includes(key)) out.unknownKeys.push(key);
   }
   const isText = (v: unknown) => typeof v === "string" && v.trim() !== "";
   if (o.provider !== undefined && !isText(o.provider)) out.badTypes.push("provider（要非空字符串）");
@@ -166,6 +189,12 @@ export function configIssues(raw: unknown): ConfigIssues {
 /** 跑完整套自检。**不抛异常**：谁的机器都不该因为自检本身崩掉。 */
 export function runDoctor(input: DoctorInput): Check[] {
   const out: Check[] = [];
+  /**
+   * 宿主配置视图：CLI 是 `config.json` 收窄出来的，桌面是 settings.json 折算出来的。
+   * 没给 = 这个宿主没有配置层（那几格按"没配"报）。
+   */
+  const cfg = input.config?.normalized ?? {};
+  const allowedKeys = input.config?.allowedKeys ?? [];
 
   /* ① 运行时：够不够新 + **这个平台有哪些能力不可用**（如实标注，不装全能） */
   {
@@ -285,7 +314,6 @@ export function runDoctor(input: DoctorInput): Check[] {
 
   /* ⑤ provider：配了名字但那条没 key（"我明明配了啊"） */
   {
-    const cfg = normalizeConfig(input.rawConfig);
     const wanted = cfg.provider;
     const def = wanted ? getProvider(wanted) : undefined;
     if (!wanted) {
@@ -318,7 +346,6 @@ export function runDoctor(input: DoctorInput): Check[] {
 
   /* ⑥ 模型：钉的那个在不在目录表里 + 目录表数据新不新鲜 */
   {
-    const cfg = normalizeConfig(input.rawConfig);
     const model = cfg.model;
     if (model) {
       const known = MODEL_CATALOG.some((m) => m.id === model);
@@ -345,7 +372,7 @@ export function runDoctor(input: DoctorInput): Check[] {
 
   /* ⑦ 配置合法性：写错的值不该悄悄改变行为 */
   {
-    const issues = configIssues(input.rawConfig);
+    const issues = configIssues(input.rawConfig, allowedKeys);
     const ok = !issues.unknownKeys.length && !issues.badTypes.length && issues.badMode === undefined;
     const problems: string[] = [];
     if (issues.badMode !== undefined) problems.push(`mode 写的是 ${JSON.stringify(issues.badMode)}，不认识`);
@@ -357,14 +384,13 @@ export function runDoctor(input: DoctorInput): Check[] {
       detail: ok ? input.configPath : problems.join("；"),
       next: ok
         ? "无需处理"
-        : `档位只能写：${CONFIRM_MODES.join(" / ")}；可写的键只有：${CONFIG_KEYS.join(" / ")}` +
+        : `档位只能写：${CONFIRM_MODES.join(" / ")}；可写的键只有：${allowedKeys.join(" / ")}` +
           `（拼错或写错类型的项会被**静默丢掉**，表现就是"我明明配了啊"）。改不掉就删掉它：ding config unset <键>`,
     });
   }
 
   /* ⑧ 工作目录：配了但不存在的目录，工具会一律报"不在可写范围内" */
   {
-    const cfg = normalizeConfig(input.rawConfig);
     const dirs = cfg.dirs ?? [];
     const missing = dirs.filter((d) => !fs.existsSync(d));
     const ok = missing.length === 0;
@@ -411,21 +437,24 @@ export function runDoctor(input: DoctorInput): Check[] {
     });
   }
 
-  return out;
+  /* 宿主不适用的检查按名字剔掉（见 `DoctorInput.skip`）——**剔掉不是改成绿** */
+  const skip = new Set(input.skip ?? []);
+  return skip.size ? out.filter((c) => !skip.has(c.name)) : out;
+}
+
+/** 自检结果的结构化形态（JSON 输出与诊断包共用这一份，别再各写一遍）。 */
+export function doctorReport(checks: readonly Check[]): { ok: boolean; failed: number; checks: Check[] } {
+  return {
+    ok: checks.every((c) => c.ok),
+    failed: checks.filter((c) => !c.ok).length,
+    checks: [...checks],
+  };
 }
 
 /** 把自检结果写成给人看的文本。 */
 export function formatDoctor(checks: readonly Check[], opts: { json: boolean }): string {
   if (opts.json) {
-    return JSON.stringify(
-      {
-        ok: checks.every((c) => c.ok),
-        failed: checks.filter((c) => !c.ok).length,
-        checks,
-      },
-      null,
-      2,
-    );
+    return JSON.stringify(doctorReport(checks), null, 2);
   }
   const lines = ["ding doctor —— 一键自检", ""];
   for (const c of checks) {
