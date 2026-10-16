@@ -132,97 +132,108 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           （上一行如实写着），没有账号可管 —— 摆一颗点不动的按钮只会让人以为登录坏了。
         */}
 
-        {subPage ? (
-          <SettingsPages
-            page={subPage}
-            pinned={pinnedModel}
-            choices={modelChoices}
-            onBack={() => setSubPage(null)}
-            /*
-             * 「开启新话题」：真的开一段新对话（新任务 = 空上下文），
-             * 并照 `settings_clear_context_toast_new` 说一句「已开启新话题」。
-             */
-            onNewTopic={() => {
+        {/* ⚠️ 2026-10-16：改成 **ZCode 的两列形态** —— 左列是分区，右列是内容。
+            原来这里是"要么一列行、要么整块子页"（二选一）—— 那看不出"我在哪一层"。
+            ⚠️ 面包屑 / 搜索框还没加（见 docs/ZCODE-设置与模型选择-反解.md 的清单）。 */}
+        <div className="wb-set-shell">
+          <nav className="wb-set-rail" data-testid="wb-set-rail">
+          {[0, 1].map((group) => (
+            <div className="wb-modal-group" key={group}>
+              {rows
+                .filter((r) => r.group === group)
+                .map((r) => (
+                  <div key={r.label}>
+                    <button
+                      className={`wb-modal-row${r.todo ? " is-todo" : ""}`}
+                      data-testid={`wb-set-${r.label}`}
+                      title={r.todo ?? ""}
+                      disabled={Boolean(r.todo)}
+                      onClick={() => {
+                        if (r.label === "插件·技能·伙伴") {
+                          setSubPage("plugins");
+                          return;
+                        }
+                        if (r.label === "模型") {
+                          setSubPage("models");
+                          return;
+                        }
+                        if (r.label === "记忆") {
+                          setMemoryOpen((v) => !v);
+                          return;
+                        }
+                        /*
+                          标准套餐 / 账号：本体里是**独立路由**
+                          （`chat/settings/profile` / `chat/settings/account`），
+                          我把它们做成了弹窗里的子页（同「记忆」那套做法）。
+                        */
+                        if (r.label === "标准套餐") {
+                          setSubPage("profile");
+                          return;
+                        }
+                        if (r.label === "通用") {
+                          setSubPage("general");
+                          return;
+                        }
+                        if (r.label === "关于") {
+                          setSubPage("about");
+                          return;
+                        }
+                        if (r.label === "账号") {
+                          setSubPage("account");
+                          return;
+                        }
+                      }}
+                    >
+                      <span className="wb-modal-row-icon">{r.icon}</span>
+                      <span className="wb-modal-row-label">{r.label}</span>
+                      {/*
+                        ⚠️ 2026-10-16：这里原来还有一行「声音选择」的值（显示实际选中的音色）——
+                        主人说那一行没用（「声音选择，有必要吗，没用啊，不要了」），
+                        整行连它的音色列表一起拆了。朗读还在（用系统默认音色），
+                        只是不再让你挑音色。
+                      */}
+                      {r.value && r.label === "外观" ? (
+                        <em data-testid="wb-set-theme-value">{r.value}</em>
+                      ) : r.value ? (
+                        <em>{r.value}</em>
+                      ) : null}
+                      <ChevronRight size={13} />
+                    </button>
+                    {r.label === "记忆" && memoryOpen ? <MemoryPanel /> : null}
+                  </div>
+                ))}
+            </div>
+          ))}
+          </nav>
+          <section className="wb-set-panel" data-testid="wb-set-panel">
+            {subPage ? (
+  
+            <SettingsPages
+              page={subPage}
+              pinned={pinnedModel}
+              choices={modelChoices}
+              onBack={() => setSubPage(null)}
               /*
-               * 「开启新话题」= 回到「新工作任务」的空上下文状态（§182）。
-               * 用视图切换而不是"再造一个空任务"：后者会在历史里留一条空任务。
+               * 「开启新话题」：真的开一段新对话（新任务 = 空上下文），
+               * 并照 `settings_clear_context_toast_new` 说一句「已开启新话题」。
                */
-              useWorkbenchStore.getState().setView("home");
-              setSubPage(null);
-              onClose();
-            }}
-          />
-        ) : (
-          <>
-        {[0, 1].map((group) => (
-          <div className="wb-modal-group" key={group}>
-            {rows
-              .filter((r) => r.group === group)
-              .map((r) => (
-                <div key={r.label}>
-                  <button
-                    className={`wb-modal-row${r.todo ? " is-todo" : ""}`}
-                    data-testid={`wb-set-${r.label}`}
-                    title={r.todo ?? ""}
-                    disabled={Boolean(r.todo)}
-                    onClick={() => {
-                      if (r.label === "插件·技能·伙伴") {
-                        setSubPage("plugins");
-                        return;
-                      }
-                      if (r.label === "模型") {
-                        setSubPage("models");
-                        return;
-                      }
-                      if (r.label === "记忆") {
-                        setMemoryOpen((v) => !v);
-                        return;
-                      }
-                      /*
-                        标准套餐 / 账号：本体里是**独立路由**
-                        （`chat/settings/profile` / `chat/settings/account`），
-                        我把它们做成了弹窗里的子页（同「记忆」那套做法）。
-                      */
-                      if (r.label === "标准套餐") {
-                        setSubPage("profile");
-                        return;
-                      }
-                      if (r.label === "通用") {
-                        setSubPage("general");
-                        return;
-                      }
-                      if (r.label === "关于") {
-                        setSubPage("about");
-                        return;
-                      }
-                      if (r.label === "账号") {
-                        setSubPage("account");
-                        return;
-                      }
-                    }}
-                  >
-                    <span className="wb-modal-row-icon">{r.icon}</span>
-                    <span className="wb-modal-row-label">{r.label}</span>
-                    {/*
-                      ⚠️ 2026-10-16：这里原来还有一行「声音选择」的值（显示实际选中的音色）——
-                      主人说那一行没用（「声音选择，有必要吗，没用啊，不要了」），
-                      整行连它的音色列表一起拆了。朗读还在（用系统默认音色），
-                      只是不再让你挑音色。
-                    */}
-                    {r.value && r.label === "外观" ? (
-                      <em data-testid="wb-set-theme-value">{r.value}</em>
-                    ) : r.value ? (
-                      <em>{r.value}</em>
-                    ) : null}
-                    <ChevronRight size={13} />
-                  </button>
-                  {r.label === "记忆" && memoryOpen ? <MemoryPanel /> : null}
-                </div>
-              ))}
-          </div>
-        ))}
-          </>
-        )}
+              onNewTopic={() => {
+                /*
+                 * 「开启新话题」= 回到「新工作任务」的空上下文状态（§182）。
+                 * 用视图切换而不是"再造一个空任务"：后者会在历史里留一条空任务。
+                 */
+                useWorkbenchStore.getState().setView("home");
+                setSubPage(null);
+                onClose();
+              }}
+            />
+            ) : (
+              <div className="wb-set-hint" data-testid="wb-set-hint">
+                左边选一项 —— 模型 / 记忆 / 插件·技能·伙伴 / 标准套餐 / 账户 / 通用 / 关于。
+              </div>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

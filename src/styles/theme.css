@@ -15,7 +15,7 @@
    文字色 #1b1d21，两块深色叠在一起）。
 
    ⚠️ **这套变量的实际作用，只有一条：让全局那条 `button:hover` 在工作台里取到浅色值。**
-   工作台自己的样式**几乎不用变量** —— 实测（`.verify/measure-theme.py`）：
+   工作台自己的样式**几乎不用变量** —— 实测（`.verify/measure-theme.py`）⚠️（该依据未入库、本机也找不到 —— 无法复核）：
      工作台相关规则 347 条，其中用主题变量的 **0 条**、含硬编码颜色的 **223 条**。
 
    所以**不要**把它读成"工作台已经可主题化、做深色主题只要改这几个值"。
@@ -70,12 +70,17 @@
    * 时长与曲线**必须走令牌**（不许在规则里裸写 ms/曲线）—— 这样"整体快一点/慢一点"
    * 只要改这里一处，而不是满仓 grep。
    */
-  --dur-quick: 140ms;
-  --dur: 200ms;
-  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
-  /** 主色之上的前景色（按钮压在 accent 上时用）——**不写死白色**：主题棘轮盯着硬编码颜色。 */
-  --on-accent: #fff;
+  /*
+   * ⚠️ 2026-10-16（审计 G30 把判据改成"每个主题各一份"之后，这里立刻红了）：
+   * 下面这几个令牌原来在**本文件**与 `ding-harness-tokens.css` 里**各定义了一份**，
+   * 而本文件在层叠里更后 —— 于是设计系统那份被悄悄盖掉，实测两处真差异：
+   *   · `--on-accent`：设计系统写的是**纸白 `#fbfaf7`**（"朱红上的字用纸白，不用纯白"），
+   *     这里写的是 `#fff` → 生效的是纯白；
+   *   · `--focus-ring`：设计系统是**暖墨** `rgba(27, 26, 20, 0.42)`（配"纸白 + 暖墨"），
+   *     这里与 :650 是**冷墨** → 生效的是冷墨。
+   * 按"令牌只有一份来源"删掉本文件里的重复：以 `ding-harness-tokens.css`（设计系统的家）为准。
+   * （时长与曲线那几个两边**值相同**，删掉不改变行为。）
+   */
   /*
     ── z-index 的既有阶梯（2026-10-14 记录**实况**，照 `baseline-ui` 的
        "MUST use a fixed z-index scale"）──
@@ -104,7 +109,6 @@
    * 焦点指示**一个就够**，颜色用**中性墨色**（不抢品牌色，也不会突兀），
    * 宽度保证在浅/深底上都到得了 3:1（WCAG 1.4.11 对非文本构件的要求）。
    */
-  --focus-ring: rgba(16, 24, 40, 0.45);
   /*
    * ── 阴影：**分层**，不是一团糊（2026-10-14，照本地设计 skill 改）──
    *
@@ -230,6 +234,19 @@
     边界阴影也不例外：借 `.wb` 的浅色值会在深底上糊成一片灰。
     （守卫 `canvasThemeVars.test.ts` 会盯着这件事。）
   */
+  /*
+   * ⚠️ 2026-10-16（审计 G20 把守卫的作用域修对之后，这里立刻红了）：
+   * 画布那两张样式表（`canvas.css` / `canvas-nodes.css`）一直在用
+   * `--text` / `--muted` / `--fg-3` / `--accent` / `--dh-font-mono`，
+   * 而 `.wb-canvas` **一个都没声明** —— 它们会从 `.wb` 取到**浅色**值，
+   * 结果就是审计量到的那条：深色画布上的文字对比度≈1.0:1（几乎看不见）。
+   * 这里按 `.wb` 的浅色同名值给出**对应深色值**（同一族，只换明度）。
+   */
+  --text: var(--fg);
+  --muted: var(--fg-dim);
+  --fg-3: #9aa4b2;
+  --accent: #d9603a;
+  --dh-font-mono: "Martian Mono Variable", "Martian Mono", "Cascadia Code", Consolas, monospace;
   /*
    * 深色底上"层次阴影基本看不见"（`better-ui/surfaces.md` 明说），
    * 所以边界靠**一条浅发丝环**交代，抬升只留一层柔和的（不用生硬的大黑投影 ——
@@ -555,7 +572,7 @@
    推导时撞过两次「看着对其实坏了」（面塌平、字塌黑），教训写在 §85.2。
 
    ⚠️ 尚未在真机上复核观感 —— 接线与复核见 §85.5。
-   要改对比度时先跑 .verify/measure-theme.py 与 WCAG 对比度计算，不要凭眼估。
+   要改对比度时按 WCAG 公式现算，不要凭眼估。（`.verify/measure-theme.py` 未入库、本机也找不到 —— 无法复核。）
    ============================================================ */
 
 [data-theme="dark"] .wb {
@@ -634,7 +651,6 @@
 
   /* 深色底上浅阴影等于没有 —— 换更强的黑，方向不变。 */
   /* 深色底上焦点环要用浅的（深灰在暗底上看不见） */
-  --focus-ring: rgba(255, 255, 255, 0.55);
   /* 面板面在深色下是"比底色略亮"的那一层（与 `--bg-2` 同一档） */
   --surface: #1b2029;
   --surface-sunken: #141821;
@@ -1045,3 +1061,11 @@
   padding-left: 4px;
 }
 .wb-model-manage { justify-content: center; margin-top: 6px; border-top: 1px solid var(--line); }
+
+/* ---------- 设置外壳：两列（照 ZCode 的形态，2026-10-16） ---------- */
+.wb-set-shell { display: flex; gap: 14px; align-items: flex-start; min-height: 240px; }
+/* 左列：分区导航（窄，可滚） */
+.wb-set-rail { width: 208px; flex: 0 0 208px; max-height: 60vh; overflow-y: auto; }
+/* 右列：内容面板（子页整块放这儿） */
+.wb-set-panel { flex: 1; min-width: 0; max-height: 60vh; overflow-y: auto; }
+.wb-set-hint { padding: 18px 4px; font-size: 12.5px; color: var(--fg-dim); }
