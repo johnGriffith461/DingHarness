@@ -13,6 +13,7 @@ import {
 } from "./plugins";
 import { manifestDrifted, readManifestFromDir, type InstalledPlugin } from "../adapters/pluginStore";
 import { checkManifest } from "./plugins";
+import type { HooksPort } from "../ports/hooks";
 
 /**
  * **插件的装载与运行**（Phase 8.3）。
@@ -337,3 +338,12 @@ export async function runHooks(hook: HookName, payload: unknown): Promise<void> 
     }
   }
 }
+
+/**
+ * 把这一份实现接到内核的钩子端口上（V5-4 4.1）。
+ *
+ * Node 侧的宿主（CLI / 桌面）在 `createEngine` 时注入它；最小嵌入面
+ * （`@ding/engine-core`）不注入 —— 那时内核用 `noopHooks`，
+ * "没装插件"与"没有钩子能力"在那里是同一件事。
+ */
+export const pluginHooks: HooksPort = { run: runHooks };

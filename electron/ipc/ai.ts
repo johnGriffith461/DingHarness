@@ -8,6 +8,8 @@ import { LOCAL_USER, SYSTEM_ACTOR, type LogInput } from "../../engine/core/event
 import type { ApprovalRecord } from "../../engine/core/events";
 import { canDecide, decidedByOf, DEFAULT_APPROVER, pendingFor, approvalRecord } from "../../engine/core/gates";
 import { humanError, resolveTurnTarget, type TurnEvent } from "../../engine/runtime/loop";
+import { resolveSecret } from "../../engine/runtime/credentials";
+import { pluginHooks } from "../../engine/runtime/pluginHost";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 
 /**
@@ -289,7 +291,8 @@ export function registerAiIpc(): void {
      * 渲染层拿 `{provider, model}` 显示"这次用的谁"，所以这一步不能挪进异步体。
      * 规则只有一份（`resolveTurnTarget`），引擎内部用的也是它。
      */
-    const target = resolveTurnTarget(request.provider, request.model);
+    /* 凭据解析显式给：桌面这一路要读凭据库与加密库（V5-4 4.1 的端口化） */
+    const target = resolveTurnTarget(request.provider, request.model, resolveSecret);
     if (!target.ok) {
       /*
        * 连 provider 都没解析出来 —— 这一轮**没跑**，引擎不会介入（它连注册表都没见过）。
@@ -364,6 +367,9 @@ export function registerAiIpc(): void {
         store: desktopSessionStore(),
         executor: hostExecutor,
         health: healthStore,
+        /* 两个 IO 端口（V5-4 4.1）：凭据库 + 插件钩子 —— 内核只认端口，不认它们 */
+        secret: resolveSecret,
+        hooks: pluginHooks,
         /*
          * 两个外部来源都并进来：连接器（MCP）与**插件**（Phase 8.3）。
          *

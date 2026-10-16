@@ -1,4 +1,4 @@
-import { hasSecret } from "./credentials";
+import { envSecret, type SecretPort } from "../ports/secret";
 import type { Protocol } from "./models";
 
 /**
@@ -228,8 +228,13 @@ export type ProviderInfo = {
   keyRef: string;
 };
 
-/** 列出所有 provider 及其可用性。 */
-export function listProviders(): ProviderInfo[] {
+/**
+ * 列出所有 provider 及其可用性。
+ *
+ * `secret` 不给 = 只看环境变量（V5-4 4.1 的端口化）：宿主（CLI / 桌面 / 自检）
+ * 一律显式传自己的凭据解析，否则"用户在设置里填的 key"会被当成没配。
+ */
+export function listProviders(secret: SecretPort = envSecret): ProviderInfo[] {
   return allProviders().map((p) => ({
     id: p.id,
     label: p.label,
@@ -237,7 +242,7 @@ export function listProviders(): ProviderInfo[] {
     note: p.note,
     /* 2026-10-16：设置页「填 key」要知道写到哪个名字下（只是名字，不是密钥） */
     keyRef: p.keyRef,
-    available: hasSecret(p.keyRef),
+    available: secret(p.keyRef) !== null,
   }));
 }
 
@@ -246,7 +251,7 @@ export function getProvider(id: string): ProviderDef | undefined {
   return allProviders().find((p) => p.id === id);
 }
 
-/** 第一个有 key 的 provider（用来自动选默认值）。 */
-export function firstAvailableProvider(): ProviderDef | undefined {
-  return allProviders().find((p) => hasSecret(p.keyRef));
+/** 第一个有 key 的 provider（用来自动选默认值）。`secret` 的口径同上。 */
+export function firstAvailableProvider(secret: SecretPort = envSecret): ProviderDef | undefined {
+  return allProviders().find((p) => secret(p.keyRef) !== null);
 }

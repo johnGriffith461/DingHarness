@@ -6,9 +6,9 @@ import { reasoningProviderOptions, type ReasoningEffort } from "./protocols/reas
 import type { StepUsage } from "../../shared/cost";
 import type { HealthStore } from "../ports/health";
 import { noopHealth } from "../ports/health";
+import { envSecret, type SecretPort } from "../ports/secret";
 import { getProvider, protocolOf } from "./providers";
 import { adapterFor } from "./protocols";
-import { resolveSecret } from "./credentials";
 import { humanFailure } from "../../shared/errors";
 
 /**
@@ -225,13 +225,19 @@ function realModelBlocked(baseURL: string): boolean {
 export function resolveTurnTarget(
   providerId: string,
   model?: string,
+  /**
+   * **凭据解析**（V5-4 4.1 端口化）：默认只读环境变量 —— 那是**不碰文件系统**的那一半。
+   * 宿主（CLI / 桌面）注入 `runtime/credentials.ts` 的 `resolveSecret` 之后，
+   * 凭据库与桌面加密库也一并生效（注入点见 `EnginePorts.secret`）。
+   */
+  secret: SecretPort = envSecret,
 ): { ok: true; provider: NonNullable<ReturnType<typeof getProvider>>; model: string } | { ok: false; error: string } {
   const provider = getProvider(providerId);
   if (!provider) return { ok: false, error: `未知 provider：${providerId}` };
   if (realModelBlocked(provider.baseURL)) {
     return { ok: false, error: blockedReason(provider.label, provider.baseURL) };
   }
-  if (!resolveSecret(provider.keyRef)) {
+  if (!secret(provider.keyRef)) {
     return { ok: false, error: `${provider.label} 没有可用密钥（需要 ${provider.keyRef}）` };
   }
   const picked = model && provider.models.includes(model) ? model : (provider.models[0] ?? "");
@@ -248,6 +254,12 @@ export function resolveTurnTarget(
  */
 export type TurnDeps = {
   health?: HealthStore;
+  /**
+   * **凭据解析**（V5-4 4.1）：内核不认识"凭据库"这个东西 —— 它只要一个
+   * "这个引用名对应的密钥是什么"的函数。默认 `envSecret` 只读环境变量（无 IO），
+   * 宿主注入 `resolveSecret` 之后才读凭据库 / 桌面加密库。见 `ports/secret.ts`。
+   */
+  secret?: SecretPort;
 };
 
 /**
@@ -287,6 +299,7 @@ export async function runTurn(
   deps: TurnDeps = {},
 ): Promise<TurnOutcome> {
   const health = deps.health ?? noopHealth;
+  const secret = deps.secret ?? envSecret;
 
   /*
    * ⭐ provider / 模型 / 「禁真模型」闸**只有一份判定**：`resolveTurnTarget`。
@@ -298,7 +311,7 @@ export async function runTurn(
    *
    * 被复制一份的判定，就是会被绕过的那一份。
    */
-  const target = resolveTurnTarget(input.provider, input.model);
+  const target = resolveTurnTarget(input.provider, input.model, secret);
   if (!target.ok) {
     onEvent({ type: "error", message: target.error });
     return { ok: false, error: target.error, aborted: false, provider: input.provider, model: "" };
@@ -306,7 +319,7 @@ export async function runTurn(
   const provider = target.provider;
   const model = target.model;
 
-  const apiKey = resolveSecret(provider.keyRef);
+  const apiKey = secret(provider.keyRef);
   if (!apiKey) {
     const message = `${provider.label} 没有可用密钥（需要 ${provider.keyRef}）`;
     onEvent({ type: "error", message });

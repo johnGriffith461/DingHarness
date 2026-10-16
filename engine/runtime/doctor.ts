@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { credentialsPath, hasSecret } from "./credentials";
+import { credentialsPath, hasSecret, resolveSecret } from "./credentials";
 import { allProviders, firstAvailableProvider, getProvider } from "./providers";
 import { MODEL_CATALOG, STALE_DAYS, UNKNOWN_MODEL_BUDGET, isStale } from "./models";
 import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
@@ -317,7 +317,7 @@ export function runDoctor(input: DoctorInput): Check[] {
     const wanted = cfg.provider;
     const def = wanted ? getProvider(wanted) : undefined;
     if (!wanted) {
-      const pick = firstAvailableProvider();
+      const pick = firstAvailableProvider(resolveSecret);
       out.push({
         name: "默认 provider",
         ok: Boolean(pick),

@@ -2,7 +2,8 @@ import { createEngine, type Engine } from "../../engine/index";
 import { createSqliteSessionStore, type OpenOptions } from "../../engine/adapters/sqliteStore";
 import type { ToolExecutor } from "../../engine/ports/executor";
 import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } from "../../engine/runtime/registry";
-import { loadEnabledPlugins, pluginToolEntries } from "../../engine/runtime/pluginHost";
+import { loadEnabledPlugins, pluginHooks, pluginToolEntries } from "../../engine/runtime/pluginHost";
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { pluginPaths, readLedger } from "../../engine/adapters/pluginStore";
 import type { ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
@@ -94,6 +95,17 @@ export async function buildEngine(
       ...(only ? { only } : {}),
     });
 
-  const engine = createEngine({ store, executor, include: CLI_TOOLS, tools: pluginEntries as readonly ToolEntry[] });
+  /*
+   * 两个 IO 端口（V5-4 4.1）显式注入：凭据库与插件钩子都在 Node 这一侧 ——
+   * 内核不认它们，只认 `SecretPort` / `HooksPort` 两个形状。
+   */
+  const engine = createEngine({
+    store,
+    executor,
+    include: CLI_TOOLS,
+    tools: pluginEntries as readonly ToolEntry[],
+    secret: resolveSecret,
+    hooks: pluginHooks,
+  });
   return { engine, close: () => store.close(), plugins };
 }

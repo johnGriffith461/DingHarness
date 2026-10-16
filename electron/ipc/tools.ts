@@ -19,12 +19,9 @@ import {
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
 import { unknownToolNotice } from "../../engine/core/notices";
-import {
-  buildToolSet,
-  createToolRegistry,
-  pluginToolEntries,
-  type ToolEntry,
-} from "../../engine/runtime/registry";
+import { buildToolSet, createToolRegistry, type ToolEntry } from "../../engine/runtime/registry";
+/* 插件工具从 pluginHost 直接来（registry 不再转手 re-export —— V5-4 4.1 把 IO 移出最小面） */
+import { pluginToolEntries } from "../../engine/runtime/pluginHost";
 
 export { pluginToolEntries };
 import type { ToolExecutor } from "../../engine/ports/executor";

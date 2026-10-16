@@ -141,7 +141,7 @@ export function markProviderFailed(providerId: string, note: string): void {
  */
 export async function listProvidersWithProbe(): Promise<ProviderInfo[]> {
   const probes = await readProbes();
-  return listProviders().map((info) => {
+  return listProviders(resolveSecret).map((info) => {
     const probe = probes[info.id];
     return {
       ...info,
@@ -165,11 +165,10 @@ export type ProbeOutcome = { id: string; ok: boolean; ms: number; error?: string
 export async function probeProviders(timeoutMs = 8000): Promise<ProbeOutcome[]> {
   const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
   const { generateText } = await import("ai");
-  const { resolveSecret } = await import("../../engine/runtime/credentials");
 
   const out: ProbeOutcome[] = [];
   for (const def of allProviders()) {
-    const info = listProviders().find((p) => p.id === def.id);
+    const info = listProviders(resolveSecret).find((p) => p.id === def.id);
     if (!info?.available) continue;
     const key = resolveSecret(def.keyRef);
     const started = Date.now();

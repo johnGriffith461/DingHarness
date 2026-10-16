@@ -1,3 +1,4 @@
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { SYSTEM_ACTOR, splitTurns } from "../../engine/core/events";
 import { recoveryViewOf } from "../../engine/core/recovery";
@@ -142,7 +143,7 @@ export async function cmdResume(p: Parsed, dataDir: string): Promise<number> {
      * `firstAvailableProvider()` 兜底，而这里原来只有 `config.provider ?? ""` ——
      * 于是同一台机器上 `ding run` 能跑、`ding resume --continue` 报"未知 provider：（空）"。
      */
-    const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider()?.id ?? "";
+    const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider(resolveSecret)?.id ?? "";
     /*
      * ⭐ 把**已完成的历史**带上（2026-10-16，审计 P127）。
      *

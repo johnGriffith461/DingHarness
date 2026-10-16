@@ -1,3 +1,4 @@
+import { resolveSecret } from "../../engine/runtime/credentials";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -250,7 +251,7 @@ export async function cmdRecipe(p: Parsed, dataDir: string): Promise<number> {
       const outcome = await built.engine.run({
         sessionId: `recipe-${Date.now().toString(36)}`,
         /* provider 回落与 `ding run` / REPL 同一口径（审计 P208）：只有环境变量 key 时也能跑 */
-        provider: flag(p, "provider") ?? config.provider ?? firstAvailableProvider()?.id ?? "",
+        provider: flag(p, "provider") ?? config.provider ?? firstAvailableProvider(resolveSecret)?.id ?? "",
         ...((flag(p, "model") ?? config.model) ? { model: flag(p, "model") ?? config.model } : {}),
         messages: [{ role: "user", content: recipe.prompt }],
         mode,

@@ -13,8 +13,7 @@ import { decideForMember, injectableTools } from "../core/policy";
 import { DEFAULT_APPROVER } from "../core/gates";
 import type { MemberRole } from "../core/members";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
-import { runHooks } from "./pluginHost";
-export { pluginToolEntries } from "./pluginHost";
+import { noopHooks, type HooksPort } from "../ports/hooks";
 
 /**
  * **工具注册表**（Phase 1 D5）。
@@ -158,8 +157,16 @@ export function buildToolSet(input: {
    * 人轴与工具轴叠加的规则在 `engine/core/policy.ts` 的 `decideForMember`（矩阵在 ADR-007）。
    */
   memberRoles?: readonly MemberRole[];
+  /**
+   * **钩子端口**（V5-4 4.1）：`tool:before` / `tool:after`。
+   *
+   * 不给 = 没有钩子（`noopHooks`）—— 最小嵌入面（`@ding/engine-core`）不装载插件，
+   * 而不装载与不接线在这里是同一件事。Node 宿主注入 `pluginHost` 的 `pluginHooks`。
+   */
+  hooks?: HooksPort;
 }): ToolSet {
   const { registry, mode, executor, ctx } = input;
+  const hooks = input.hooks ?? noopHooks;
   const depth = ctx.depth ?? 0;
 
   const kept = new Set(injectableTools(mode, registry.list().map((e) => e.name)));
@@ -220,11 +227,11 @@ export function buildToolSet(input: {
          * 一个坏插件就能让"模型说它调了 A、实际执行的是 B" —— 而那种事
          * 在留痕里看不出来。要"改行为"的能力等 v2 的隔离方案。
          *
-         * 钩子的异常由 `runHooks` 内部吞掉并打日志（插件坏了不该变成用户的故障）。
+         * 钩子的异常由端口实现内部吞掉并打日志（插件坏了不该变成用户的故障）。
          */
-        await runHooks("tool:before", { name: entry.name, input: value });
+        await hooks.run("tool:before", { name: entry.name, input: value });
         const result = await executor.run(entry.name, value, ctx);
-        await runHooks("tool:after", { name: entry.name, ok: result.ok, ...(result.error ? { error: result.error } : {}) });
+        await hooks.run("tool:after", { name: entry.name, ok: result.ok, ...(result.error ? { error: result.error } : {}) });
         /*
          * ⭐ 成功时返回执行体的**原始载荷**，不要那层 `{ ok, output }` 信封。
          *

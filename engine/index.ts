@@ -12,6 +12,7 @@ import type { MemberRole } from "./core/members";
 import type { ExecutorContext, ToolExecutor } from "./ports/executor";
 import type { HealthStore } from "./ports/health";
 import { noopHealth } from "./ports/health";
+import { noopHooks, type HooksPort } from "./ports/hooks";
 import type { SessionStore } from "./ports/store";
 import type { ConfirmMode } from "../shared/ipc";
 import {
@@ -21,8 +22,8 @@ import {
   type ToolEntry,
   type ToolRegistry,
 } from "./runtime/registry";
+import { envSecret, type SecretPort } from "./ports/secret";
 import { runTurn, type TurnEvent } from "./runtime/loop";
-import { runHooks } from "./runtime/pluginHost";
 import type { ReasoningEffort } from "./runtime/protocols/reasoning";
 
 /**
@@ -59,6 +60,22 @@ export type EnginePorts = {
   executor: ToolExecutor;
   /** provider 健康账本（省略 = 不记）。 */
   health?: HealthStore;
+  /**
+   * **凭据解析**（V5-4 4.1）：`keyRef` → 明文密钥。
+   *
+   * 省略 = 只读环境变量（`envSecret`）—— **那是不碰文件系统的那一半**，
+   * 也正是最小嵌入面（`@ding/engine-core`）的全部能力。
+   * CLI / 桌面注入 `runtime/credentials.ts` 的 `resolveSecret`：
+   * 多出来的来源是凭据库与桌面加密库（要 fs / safeStorage，那是宿主的事）。
+   */
+  secret?: SecretPort;
+  /**
+   * **插件钩子**（V5-4 4.1）：`session:start` / `tool:before` / `tool:after` / `turn:end`。
+   *
+   * 省略 = 没有钩子（`noopHooks`）。装插件要读盘、要跑外部代码 —— 那是宿主的事；
+   * Node 宿主注入 `runtime/pluginHost.ts` 的 `pluginHooks`。
+   */
+  hooks?: HooksPort;
   /** 额外的工具来源（MCP 工具 / Phase 8 的插件工具）。 */
   tools?: readonly ToolEntry[];
   /** 只要内置里的这些（宿主能力不同：CLI 登记不了落到桌面界面 store 上的工具）。省略 = 全部。 */
@@ -213,6 +230,9 @@ export type Engine = {
  */
 export function createEngine(ports: EnginePorts): Engine {
   const health = ports.health ?? noopHealth;
+  /* 两个 IO 端口（V5-4 4.1）：不给 = 保守的默认（环境变量 / 没有钩子）—— 最小面就长这样 */
+  const secret = ports.secret ?? envSecret;
+  const hooks = ports.hooks ?? noopHooks;
   const registry = createToolRegistry({
     ...(ports.tools ? { extra: ports.tools } : {}),
     ...(ports.include ? { include: ports.include } : {}),
@@ -286,7 +306,7 @@ export function createEngine(ports: EnginePorts): Engine {
       const events: TurnEvent[] = [];
 
       // 钩子：会话开始（Phase 8.3）。只看不改，异常不会影响这一轮
-      await runHooks("session:start", { sessionId: request.sessionId, provider: request.provider, model: request.model });
+      await hooks.run("session:start", { sessionId: request.sessionId, provider: request.provider, model: request.model });
 
       /*
        * 委派进度（Phase 7.3）：执行体上报 → 内核**记成事件**并转给宿主上屏。
@@ -330,6 +350,8 @@ export function createEngine(ports: EnginePorts): Engine {
                   ...(request.only?.length ? { only: request.only } : {}),
                   /* 人轴（C2）：没声明就不传 —— 判定层按 owner 兜底（老路径） */
                   ...(request.memberRoles?.length ? { memberRoles: request.memberRoles } : {}),
+                  /* 钩子端口（V5-4 4.1）：最小面里它是 no-op */
+                  hooks,
                 }),
                 maxSteps: request.maxSteps ?? 4,
               }
@@ -352,7 +374,8 @@ export function createEngine(ports: EnginePorts): Engine {
            */
           void record({ requestId, ...event } as LogInput);
         },
-        { health },
+        /* 端口往下传（V5-4 4.1）：凭据解析与健康账本都从这一处进来 */
+        { health, secret },
       );
 
       /*
@@ -374,7 +397,7 @@ export function createEngine(ports: EnginePorts): Engine {
         await record({ requestId, type: "error", message: "已中止" });
       }
 
-      await runHooks("turn:end", { sessionId: request.sessionId, ok: outcome.ok, aborted: outcome.aborted });
+      await hooks.run("turn:end", { sessionId: request.sessionId, ok: outcome.ok, aborted: outcome.aborted });
 
       return {
         ok: outcome.ok,
