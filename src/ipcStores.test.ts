@@ -186,20 +186,23 @@ describe("应用设置（settings.json）", () => {
   /** 路径取自模块自己导出的函数：硬编文件名的话，改了名字这里会静默测到别处去。 */
   const raw = (): string => readFileSync(appSettingsPath(), "utf8");
 
+  /* 收窄**总是带上 `navCollapsed`**（P187/P191：丢了就是"界面以为记住了、重启仍然忘"，
+     那条守卫在 `appSettingsNav.test.ts`），所以这里的期望是一份两字段的完整形状 */
   it("⭐ 旧格式（裸对象）读得出来；坏值被收窄成默认", async () => {
     writeFileSync(appSettingsPath(), JSON.stringify({ pinnedModel: "deepseek/deepseek-chat" }), "utf8");
-    expect(await loadAppSettings()).toEqual({ pinnedModel: "deepseek/deepseek-chat" });
+    expect(await loadAppSettings()).toEqual({ pinnedModel: "deepseek/deepseek-chat", navCollapsed: false });
 
     writeFileSync(appSettingsPath(), JSON.stringify({ pinnedModel: 42 }), "utf8");
-    expect(await loadAppSettings()).toEqual({ pinnedModel: "" });
+    expect(await loadAppSettings()).toEqual({ pinnedModel: "", navCollapsed: false });
   });
 
   it("往返 + 落盘带信封", async () => {
     expect(await saveAppSettings({ pinnedModel: "deepseek/deepseek-reasoner" })).toEqual({
       pinnedModel: "deepseek/deepseek-reasoner",
+      navCollapsed: false,
     });
     expect((JSON.parse(raw()) as { __schema: number }).__schema).toBe(SCHEMA_VERSION);
-    expect(await loadAppSettings()).toEqual({ pinnedModel: "deepseek/deepseek-reasoner" });
+    expect(await loadAppSettings()).toEqual({ pinnedModel: "deepseek/deepseek-reasoner", navCollapsed: false });
   });
 
   it("⚠️ 磁盘上是更新的版本 → 拒绝覆盖", async () => {
