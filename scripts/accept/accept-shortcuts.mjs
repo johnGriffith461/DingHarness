@@ -9,7 +9,7 @@ import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort } fro
  * 也就是"标签在承诺一个能力，而能力不存在"。只查"角标渲染出来没有"的断言对它完全无感
  * （角标一直在）。所以这条**真按键、看视图换了没有**，并且验两个负面情形。
  *
- * 键位依据本体左栏原文（`app-triage/dynamic-ui/route-sweep.json` 的 head）：
+ * 键位依据本体左栏原文（`app-triage/dynamic-ui/route-sweep.json` 的 head）：  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 新工作任务 Ctrl N / 定时任务 Ctrl Shift T / 插件·技能·伙伴 Ctrl Shift S / 云盘 Ctrl Shift D
  */
 const DATA = ".verify/sc-data";
@@ -62,10 +62,8 @@ await waitForPort(__port, 40000);
   await page.keyboard.press("Control+Shift+T");
   await page.waitForTimeout(700);
   out.ctrlShiftT = { nav: await activeNav(page), page: (await has('[data-testid="wb-sched-empty"]')) || (await has('[data-testid="wb-sched-list"]')) };
+  /* ⚠️ 2026-10-16：Ctrl Shift S（插件·技能·伙伴）随那一页搬进设置一起撤掉 —— 这条断言删。 */
 
-  await page.keyboard.press("Control+Shift+S");
-  await page.waitForTimeout(700);
-  out.ctrlShiftS = { nav: await activeNav(page), page: await has('[data-testid="wb-plugin-tabs"]') };
 
   await page.keyboard.press("Control+n");
   await page.waitForTimeout(700);
@@ -92,8 +90,6 @@ await waitForPort(__port, 40000);
   const bad = [];
   if (out.ctrlShiftT?.nav !== "定时任务") bad.push("Ctrl Shift T 没切到定时任务");
   if (!out.ctrlShiftT?.page) bad.push("Ctrl Shift T 后没看到定时任务页的内容");
-  if (out.ctrlShiftS?.nav !== "插件·技能·伙伴") bad.push("Ctrl Shift S 没切到插件页");
-  if (!out.ctrlShiftS?.page) bad.push("Ctrl Shift S 后没看到插件页的内容");
   /* ⚠️ 2026-10-16：Ctrl Shift D（云盘）随云盘整页一起拆了 —— 那条映射与它的断言都删掉，
      不是改个期望值：快捷键没了就是没了。 */
   if (out.ctrlN?.nav !== "新工作任务") bad.push("Ctrl N 没回到新工作任务");

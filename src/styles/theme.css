@@ -1086,6 +1086,32 @@
 }
 .wb-set-crumb-root { border: none; background: transparent; color: var(--fg-dim); font-size: 12.5px; cursor: pointer; padding: 0; }
 .wb-set-crumb-root:hover { color: var(--fg); }
+
+/* ---------- 设置：ZCode 那种卡片（标签 + 说明 + 控件；2026-10-16） ---------- */
+.wb-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  margin-bottom: 12px;
+}
+.wb-card-head { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.wb-card-note { font-size: 11.5px; color: var(--fg-dim); margin: 4px 0; }
+/* 一行：标签在左、说明跟着、控件贴右（ZCode 图二里每块设置就是这个形状） */
+.wb-card-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.wb-card-label { flex: 0 0 auto; min-width: 76px; font-size: 12.5px; color: var(--fg); }
+.wb-card-desc { flex: 1; min-width: 0; font-size: 11.5px; color: var(--fg-dim); }
+.wb-card-input {
+  flex: 0 0 200px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--fg); font-size: 12.5px;
+}
+/* 左列底部：账号块 */
+.wb-setfull .wb-set-rail { display: flex; flex-direction: column; }
+.wb-setfull-account {
+  margin-top: auto; padding: 10px 8px 2px; display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--fg-dim); border-top: 1px solid var(--bg-4);
+}
+.wb-setfull-avatar { width: 20px; height: 20px; border-radius: 50%; background: var(--fg-dim); opacity: 0.6; }
 .wb-set-crumb b { color: var(--fg); }
 
 /* 模型项：「视觉」徽标（轻量圆 pill，贴名字后）与模型名（不许挤压） */

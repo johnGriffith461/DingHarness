@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Search, Blocks, Sparkles, Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
@@ -125,7 +126,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     { group: 1, icon: <Sparkles size={13} />, label: "模型", value: "provider / 模型 / 拉取" },
     { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
   ];
-  return (
+  return createPortal(
     <div className="wb-setfull" data-testid="wb-settings">
       {/* 整页顶部：返回 + 标题（ZCode 的设置也是一整页，顶部是它的层级区） */}
       <div className="wb-setfull-bar">
@@ -237,6 +238,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           ))}
           </nav>
+          {/* 左列底部：账号（照 ZCode 图二左下角那块） */}
+          <div className="wb-setfull-account" data-testid="wb-setfull-account">
+            <span className="wb-setfull-avatar" aria-hidden />
+            <span>本机用户 · 标准套餐</span>
+          </div>
           <section className="wb-set-panel" data-testid="wb-set-panel">
             {/* 面包屑：告诉用户"我在哪一层"（ZCode 的 settings-header-breadcrumb） */}
             <div className="wb-set-crumb" data-testid="wb-set-crumb">
@@ -280,7 +286,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </section>
         </div>
       </div>
-    </div>
+    </div>,
+    /* ⚠️ 挂到 body：fixed 会被左栏那层的 containing block 框住（截图里就是这么错的） */
+    document.body,
   );
 }
 

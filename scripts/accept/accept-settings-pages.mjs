@@ -69,7 +69,11 @@ try {
   const bad = [];
   if ((out.rowsVisible?.账号 ?? 0) !== 1) bad.push("没有「账号」行");
   if (!out.profilePage) bad.push("「标准套餐」没打开个人资料页");
-  if (!out.rowsHiddenOnSub) bad.push("子页开了但主列表还在");
+  /*
+   * ⚠️ 2026-10-16：原来这里断言「子页开了主列表就该消失」—— 那是**弹窗**时代的口径。
+   * 设置改成 ZCode 那种**整页两列**之后，左轨本来就该一直在（那正是两列的意思），
+   * 所以这条断言**退休**：现在只要求「子页真的打开了」（上面那条 profilePage 已经在盯）。
+   */
   if (!out.backToRows) bad.push("返回没回到主列表");
   if (!out.accountPage) bad.push("「账号」没打开账号页");
   if (out.error) bad.push("异常: " + out.error);
