@@ -5,10 +5,8 @@ import net from "node:net";
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CwdNotAllowedError } from "../cwd";
-import { startAgentServer, type ServerOptions } from "./agentServer";
+import type { ServerOptions } from "./agentServer";
 import { createSyncRelay } from "../../engine/sync/relay";
-import { parseSse } from "../cli/cmdConnect";
 
 /**
  * Agent Server（Phase 17；2026-10-16 按审计第 1 单收紧）。
@@ -33,119 +31,15 @@ import { parseSse } from "../cli/cmdConnect";
  * 于是这一组测的是**协议与安全口径**，毫秒级、不需要任何 key。
  */
 
-type FakeBehaviour = {
-  /** 跑一轮挂起，直到 abortSignal 触发（用来测取消通道与关闭路径）。 */
-  hang?: boolean;
-  /** 这些 cwd 一律拒绝（模拟真实宿主里的 `CwdNotAllowedError`）。 */
-  rejectCwd?: string[];
-};
-
-function fakeEngineFactory(behaviour: FakeBehaviour = {}) {
-  const opened: string[] = [];
-  const messages: string[] = [];
-  const sessionIds: (string | undefined)[] = [];
-  let aborted = 0;
-  return {
-    opened,
-    messages,
-    sessionIds,
-    get aborted() {
-      return aborted;
-    },
-    makeEngine: async (cwd: string) => {
-      if (behaviour.rejectCwd?.includes(cwd)) throw new CwdNotAllowedError(`工作目录不在授权范围内：${cwd}`);
-      opened.push(cwd);
-      return {
-        engine: {
-          async run(request: { messages: { content: string }[]; sessionId?: string; onEvent?: (e: unknown) => void; abortSignal?: AbortSignal }) {
-            messages.push(request.messages[0]!.content);
-            sessionIds.push(request.sessionId);
-            if (behaviour.hang) {
-              return await new Promise((resolve) => {
-                const done = () => {
-                  aborted += 1;
-                  resolve({ ok: false, aborted: true, events: [], records: [], requestId: "r1", provider: "fake", model: "fake" });
-                };
-                if (request.abortSignal?.aborted) done();
-                else request.abortSignal?.addEventListener("abort", done, { once: true });
-              });
-            }
-            request.onEvent?.({ type: "text", text: "你好" });
-            return { ok: true, aborted: false, events: [], records: [], requestId: "r1", provider: "fake", model: "fake" };
-          },
-          async resume() {
-            return { turns: [], pending: [] };
-          },
-          tools: {},
-        },
-        close: () => undefined,
-      };
-    },
-  } as never as {
-    opened: string[];
-    messages: string[];
-    sessionIds: (string | undefined)[];
-    readonly aborted: number;
-    makeEngine: (cwd: string) => Promise<{ engine: never; close: () => void }>;
-  };
-}
-
-/**
- * 起过的服务统一在结算时 `stop()`。
- *
- * keep-alive 连接（`node:http` 的全局 agent 默认开着）会拖住普通的
- * `server.close()` —— 它要等所有连接结束，而连接要等客户端；测试进程
- * 因此会挂住。`stop()` 会销毁在途连接，也正是产品里那条关闭路径，
- * 顺带每次都被这批测试走到。
+/*
+ * 装置从 `./testKit` 拿（提取的原因写在那个文件头：这个测试文件撞过巨石守卫）。
+ * 这一组自己只留"算签名"与"Bearer 头"两个小件。
  */
-const running: Array<() => Promise<void>> = [];
+import { boot, call, stopEverything } from "./testKit";
+
 afterEach(async () => {
-  for (const stop of running.splice(0)) await stop();
+  await stopEverything();
 });
-
-/** 起一个服务并拿它的地址（端口给 0 = 系统分配）。 */
-async function boot(over: Partial<ServerOptions> = {}, behaviour: FakeBehaviour = {}) {
-  const fake = fakeEngineFactory(behaviour);
-  const logs: string[] = [];
-  const started = await startAgentServer({
-    port: 0,
-    makeEngine: fake.makeEngine as never,
-    mode: "按需确认",
-    provider: "fake",
-    cwd: process.cwd(),
-    log: (line) => logs.push(line),
-    ...over,
-  });
-  running.push(started.stop);
-  return { ...started, fake, logs };
-}
-
-/**
- * 发一条请求。
- *
- * 用 `node:http` 而不是 `fetch`：这几条断言要的就是"能自己控制 Host / Origin /
- * Sec-Fetch 这类头"，而 fetch 对这些头有它自己的想法。
- */
-function call(
-  port: number,
-  path: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
-): Promise<{ status: number; text: string }> {
-  return new Promise((resolve, reject) => {
-    const req = httpRequest(
-      { host: "127.0.0.1", port, path, method: init.method ?? "GET", headers: init.headers ?? {} },
-      (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => (text += chunk));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
-      },
-    );
-    req.on("error", reject);
-    if (init.body) req.write(init.body);
-    req.end();
-  });
-}
 
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -797,87 +691,5 @@ describe("成员 token 与 owner 过滤（V5-2 2.2）", () => {
     await expect(boot({ members: [{ id: "  ", token: "x" }] })).rejects.toThrow(/缺 id/);
     await expect(boot({ members: [{ id: "a", token: "   " }] })).rejects.toThrow(/口令是空的/);
     await expect(boot({ token: "same-token", members: [{ id: "a", token: "same-token" }] })).rejects.toThrow(/与主口令相同/);
-  });
-});
-
-/**
- * SSE 事件流的 actor 维度（V5-2 任务 2.3）。
- *
- * 判据三条：① 第一帧 `started` 说明"谁发起的"（成员身份）；
- * ② 事件帧与 `done` 帧都带 agent 那一侧的 actor（与内核记日志同一个常量）；
- * ③ 成员往**别人的会话**里写：先拒（403）—— 归属在 C1 是硬墙，
- *    而"跑完发现记不进去"那种静默是这一层要避免的。
- */
-describe("SSE 事件流带上 actor（V5-2 2.3）", () => {
-  /** 收一整段 SSE（`/v1/run` 那种真流）。 */
-  function collectSse(port: number, path: string, body: string, headers: Record<string, string>): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const req = httpRequest({ host: "127.0.0.1", port, path, method: "POST", headers }, (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => (text += chunk));
-        res.on("end", () => resolve(text));
-      });
-      req.on("error", reject);
-      req.end(body);
-    });
-  }
-
-  it("⭐ 第一帧说明谁发起的；事件帧与 done 帧带 agent 的 actor", async () => {
-    const members = [{ id: "alice", token: "sk-alice-123" }];
-    const { port } = await boot({ members });
-    const text = await collectSse(
-      port,
-      "/v1/run",
-      JSON.stringify({ message: "你好" }),
-      { Authorization: "Bearer sk-alice-123", "content-type": "application/json" },
-    );
-    const frames = parseSse(text).events;
-    const names = frames.map((f) => f.event);
-    expect(names[0], "第一帧不是 started").toBe("started");
-    expect((frames[0]!.data as { actor: { id: string; kind: string } }).actor).toEqual({ id: "alice", kind: "user" });
-
-    const eventFrames = frames.filter((f) => f.event === "event");
-    expect(eventFrames.length, "一条事件帧都没有？").toBeGreaterThan(0);
-    for (const frame of eventFrames) {
-      expect((frame.data as { actor?: { id: string } }).actor, `事件帧没带 actor：${JSON.stringify(frame.data)}`).toEqual({
-        id: "main",
-        kind: "agent",
-      });
-    }
-    const done = frames.find((f) => f.event === "done");
-    expect((done?.data as { actor?: { id: string } }).actor).toEqual({ id: "main", kind: "agent" });
-  });
-
-  it("⭐ 成员往别人的会话里写：403（不是「跑完发现记不进去」）", async () => {
-    const members = [{ id: "alice", token: "sk-alice-123" }];
-    const { port } = await boot({
-      members,
-      listSessions: async () => [
-        { sessionId: "task-1", conversationId: "task-1", title: "本机主人的", updatedAt: 1, bytes: 1, owner: "local" },
-      ],
-    });
-    const res = await call(port, "/v1/run", {
-      method: "POST",
-      headers: { Authorization: "Bearer sk-alice-123", "content-type": "application/json" },
-      body: JSON.stringify({ message: "插一句", sessionId: "task-1" }),
-    });
-    expect(res.status).toBe(403);
-    expect(res.text).toContain("归 local");
-  });
-
-  it("主人往任何会话里写：照旧（老口径不回归）", async () => {
-    const { port, token } = await boot({
-      listSessions: async () => [
-        { sessionId: "task-1", conversationId: "task-1", title: "谁的都行", updatedAt: 1, bytes: 1, owner: "alice" },
-      ],
-    });
-    const text = await collectSse(
-      port,
-      "/v1/run",
-      JSON.stringify({ message: "你好", sessionId: "task-1" }),
-      { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-    );
-    expect(parseSse(text).events.some((f) => f.event === "started")).toBe(true);
   });
 });

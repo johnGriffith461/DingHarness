@@ -5,7 +5,11 @@ import { networkInterfaces } from "node:os";
 
 import type { Engine } from "../../engine/index";
 import type { SyncRelay } from "../../engine/sync/relay";
-import { MAIN_AGENT, type Actor } from "../../engine/core/actor";
+import type { SpaceStore } from "../../engine/adapters/spaceStore";
+import type { MemberRole } from "../../engine/core/members";
+import { canReadSession, handleJoin, handleSpaceRoute, spaceOf } from "./spaceApi";
+import { handleRunRoute, handleHookRoute } from "./runApi";
+import { handleStreamRoute } from "./streamApi";
 import { humanFailure } from "../../shared/errors";
 import type { ConfirmMode, SessionSummary } from "../../shared/ipc";
 import { PRODUCT_NAME, PRODUCT_VERSION } from "../../shared/product";
@@ -81,6 +85,14 @@ export type ServerOptions = {
    * 重复 id / 空口令在**启动时**就拒（fail fast，不等到有人请求）。
    */
   members?: readonly ServerMember[];
+  /**
+   * **团队空间**（V5-3 3.1）：名册 + 配对码 + 成员口令 + 共享清单的落盘账本。
+   *
+   * 给了它，`/v1/space/*` 那一族路由才开门（邀请/兑码/成员管理/共享/接管）——
+   * 与 `listSessions` 同一个口径：**没接线就 501**。成员口令**当场生效、当场失效**
+   * （每一请求都读账本 —— U8-5 的"撤权即时生效"靠的就是不缓存）。
+   */
+  space?: SpaceStore;
   /** 会话列表（宿主注入的真实实现）。不给 = `/v1/sessions` 回 501。 */
   listSessions?: () => Promise<SessionSummary[]>;
   /**
@@ -127,6 +139,11 @@ export type ServerMember = {
 /** 服务端认出来的"现在是谁在请求"。 */
 export type RequesterIdentity = {
   id: string;
+  /**
+   * 空间里的角色（V5-3 3.1：成员口令从空间名册上取得；静态 `--member` 没有角色 = 最保守）。
+   * ⚠️ **每一请求现算、不缓存** —— 改角色/移除成员要立刻生效（U8-5）。
+   */
+  roles?: readonly MemberRole[];
   /**
    * 是不是**本机主人**（单口令那条路）。
    *
@@ -211,11 +228,16 @@ export async function startAgentServer(opts: ServerOptions): Promise<StartedAgen
   /* 成员表在**启动前**收窄（坏配置立刻拒，别等有人请求才发现） */
   const members = normalizeMembers(opts.members, token);
   const authFailures = new Map<string, { count: number; until: number }>();
+  /**
+   * 每个人**在跑**的连接（V5-3 3.5：撤销成员要把他的同步通道关掉 —— U8-5）。
+   * 键是成员 id；值是那条 SSE / 那一轮的中止句柄。
+   */
+  const runsByActor = new Map<string, Set<AbortController>>();
   const activeRuns = new Set<AbortController>();
   const sockets = new Set<Socket>();
 
   const server = createServer((req, res) => {
-    handle(req, res, opts, token, members, hostNames, authFailures, activeRuns).catch((error: unknown) => {
+    handle(req, res, opts, token, members, hostNames, authFailures, activeRuns, runsByActor).catch((error: unknown) => {
       /* 兜底：这一层再漏出去就是"未处理拒绝"（进程会被带走）—— 宁可留一行日志 */
       opts.log?.(`handler 未处理异常：${String((error as Error)?.message ?? error)}`);
       if (!res.headersSent) {
@@ -343,17 +365,40 @@ function sameToken(a: string, b: string): boolean {
  * @param members 成员表（可能为空）
  * @returns 身份；凭据不对/没带给 null（调用方按 401 + 限速处理）
  */
-function identify(req: IncomingMessage, ownerToken: string, members: readonly ServerMember[]): RequesterIdentity | null {
+function identify(
+  req: IncomingMessage,
+  ownerToken: string,
+  members: readonly ServerMember[],
+  spaceMembers: ReadonlyArray<{ id: string; token: string; roles: readonly MemberRole[] }> = [],
+): RequesterIdentity | null {
   const header = req.headers.authorization ?? "";
   const got = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!got) return null;
   let identity: RequesterIdentity | null = null;
   /* 主口令优先（它是主人；成员的 id 万一也叫 local，主人身份不该被成员抢走） */
-  if (sameToken(got, ownerToken)) identity = { id: LOCAL_OWNER_ID, owner: true };
+  if (sameToken(got, ownerToken)) identity = { id: LOCAL_OWNER_ID, owner: true, roles: ["owner"] };
   for (const member of members) {
     if (sameToken(got, member.token) && !identity) identity = { id: member.id, owner: false };
   }
+  for (const member of spaceMembers) {
+    if (sameToken(got, member.token) && !identity) identity = { id: member.id, owner: false, roles: member.roles };
+  }
   return identity;
+}
+
+/** 空间成员的口令表（每一请求现读 —— 见 `RequesterIdentity.roles` 的说明）。 */
+function spaceMembersOf(space: SpaceStore | undefined): Array<{ id: string; token: string; roles: readonly MemberRole[] }> {
+  if (!space) return [];
+  const got = space.read();
+  if (got.status !== "ok") return [];
+  const { roster, tokens } = got.space;
+  return Object.entries(tokens)
+    .map(([id, token]) => ({
+      id,
+      token,
+      roles: roster.members.find((m) => m.id === id)?.roles ?? [],
+    }))
+    .filter((x) => Boolean(x.token));
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -415,6 +460,7 @@ async function handle(
   hostNames: ReadonlySet<string>,
   authFailures: Map<string, { count: number; until: number }>,
   activeRuns: Set<AbortController>,
+  runsByActor: Map<string, Set<AbortController>>,
 ): Promise<void> {
   const ip = req.socket.remoteAddress ?? "?";
   const startedAt = Date.now();
@@ -473,8 +519,8 @@ async function handle(
     json(res, 429, { error: "认证失败次数过多，稍后再试" });
     return;
   }
-  const identity = identify(req, token, members);
-  if (!identity) {
+  /** 记一次认证失败（猜口令与**猜配对码**同一条限速）。 */
+  const countAuthFailure = (): void => {
     const entry = authFailures.get(ip) ?? { count: 0, until: 0 };
     entry.count += 1;
     if (entry.count >= AUTH_FAIL_LIMIT) {
@@ -482,6 +528,24 @@ async function handle(
       entry.until = Date.now() + AUTH_LOCK_MS;
     }
     authFailures.set(ip, entry);
+  };
+  /*
+   * ⭐ `/v1/space/join` 的**唯一例外**（V5-3 3.1）：要被邀请的人还没有口令
+   * （口令正是这一次要发给他的），那条路的凭据是**配对码本身**（限时 + 一次性）。
+   * 兑错码同样记一次认证失败 —— 猜码与猜口令一条限速。
+   */
+  if (path === "/v1/space/join") {
+    if (!opts.space) {
+      note = "space 未接线";
+      json(res, 501, { error: "这个服务没有接团队空间（宿主没把 space 账本交给它）" });
+      return;
+    }
+    if (await handleJoin(req, res, { store: opts.space, note: (t) => (note = t), countAuthFailure })) return;
+  }
+
+  const identity = identify(req, token, members, spaceMembersOf(opts.space));
+  if (!identity) {
+    countAuthFailure();
     note = "凭据不对/没带";
     json(res, 401, { error: "需要 Authorization: Bearer <token>" });
     return;
@@ -509,6 +573,32 @@ async function handle(
       return;
     }
 
+    /* ── 团队空间（V5-3 3.1/3.2/3.5）：整族路由在 `./spaceApi.ts` ── */
+    if (path.startsWith("/v1/space")) {
+      if (!opts.space) {
+        note = "space 未接线";
+        json(res, 501, { error: "这个服务没有接团队空间（宿主没把 space 账本交给它）" });
+        return;
+      }
+      const handled = await handleSpaceRoute(path, req, res, {
+        store: opts.space,
+        identity,
+        note: (t) => (note = t),
+        abortRunsOf: (memberId) => {
+          const set = runsByActor.get(memberId);
+          if (!set) return 0;
+          let n = 0;
+          for (const controller of set) {
+            controller.abort();
+            n += 1;
+          }
+          runsByActor.delete(memberId);
+          return n;
+        },
+      });
+      if (handled) return;
+    }
+
     if (path === "/v1/sessions" && req.method === "GET") {
       /*
        * ⚠️ 宿主没把会话库交给服务层时回 **501**，不是"假装一个空列表"：
@@ -530,13 +620,22 @@ async function handle(
        */
       if (!identity.owner && wanted && wanted !== identity.id) {
         note = `成员 ${identity.id} 想看 ${wanted} 的会话`;
-        json(res, 403, { error: `只能查归你的会话（你是 ${identity.id}）` });
+        json(res, 403, {
+          error: `只能查归你的会话（你是 ${identity.id}）；共享给你的那些不用带 ?owner=`,
+        });
         return;
       }
       const all = await opts.listSessions();
-      const ownerWanted = identity.owner ? wanted : identity.id;
-      const sessions = ownerWanted ? all.filter((s) => (s.owner ?? LOCAL_OWNER_ID) === ownerWanted) : all;
-      note = `${sessions.length} 段会话${ownerWanted ? `（owner=${ownerWanted}）` : ""}`;
+      /*
+       * 可见集（V5-3 3.2/U8-2）：主人 = 全部；成员 = **自己的 + 共享出去的**。
+       * 共享之后成员看得见主人的那段会话（内容与主人一致 —— 同一个本地库同一批记录）。
+       */
+      const space = opts.space ? spaceOf(opts.space) : null;
+      const emptySpace = space ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], holders: {}, rooms: {} };
+      const sessions = identity.owner
+        ? (wanted ? all.filter((s) => (s.owner ?? LOCAL_OWNER_ID) === wanted) : all)
+        : all.filter((s) => canReadSession(emptySpace, identity, s.sessionId, s.owner));
+      note = `${sessions.length} 段会话${identity.owner && wanted ? `（owner=${wanted}）` : !identity.owner ? `（${identity.id} 的 + 共享的）` : ""}`;
       json(res, 200, { sessions, you: { id: identity.id, owner: identity.owner } });
       return;
     }
@@ -565,175 +664,24 @@ async function handle(
       return;
     }
 
-    /* ── 同步中继（V5-2 2.1）：/v1/streams/* ──────────────────────────────
-     *
-     * 中继没接线就**回 501**（与 /v1/sessions 同一个口径：不假装一条空流）。
-     * 形状与 `engine/sync/relay.ts` 一一对应 —— 这一层只是把它的返回值搬上网，
-     * 协议语义（去重/fencing/gap/引用门）**一个字都不在这里重写**。
-     */
-    const streamPath = /^\/v1\/streams\/([^/]+)(\/(push|pull|claim))?$/.exec(path);
-    if (streamPath) {
-      if (!opts.relay) {
-        note = "streams 未接线";
-        json(res, 501, { error: "这个服务没有接同步中继（宿主没把 relay 交给它）" });
-        return;
-      }
-      const streamId = safeDecode(streamPath[1]!);
-      if (streamId === null) {
-        note = "流 id 解码不了";
-        json(res, 400, { error: "流 id 的百分号编码不合法（解码失败）" });
-        return;
-      }
-      const action = streamPath[3];
+    /* ── 同步中继（V5-2 2.1）：整族在 `./streamApi.ts` ── */
+    if (await handleStreamRoute(path, req, res, { relay: opts.relay, json, safeDecode, readBody, note: (t) => (note = t) })) return;
 
-      if (!action && req.method === "PUT") {
-        const created = opts.relay.createStream(streamId);
-        note = created.ok ? "建流" : "流 id 形状不对";
-        json(res, created.ok ? 200 : 400, created.ok ? { ok: true, streamId } : { error: created.message });
-        return;
-      }
-      if (!action && req.method === "GET") {
-        const state = opts.relay.state(streamId);
-        note = state ? `流 ${streamId}` : "没有这条流";
-        json(res, state ? 200 : 404, state ? { state } : { error: `没有这条流：${streamId}` });
-        return;
-      }
-      if (action === "claim" && req.method === "POST") {
-        const raw = await readBody(req);
-        let body: { holder?: unknown } = {};
-        try {
-          body = JSON.parse(raw.toString("utf8") || "{}") as typeof body;
-        } catch {
-          note = "body 不是 JSON";
-          json(res, 400, { error: "body 必须是 JSON：{\"holder\":\"端名\"}" });
-          return;
-        }
-        const got = opts.relay.claim(streamId, String(body.holder ?? ""));
-        note = got.ok ? `接管：epoch ${got.epoch}` : "没有这条流";
-        json(res, got.ok ? 200 : 404, got.ok ? got : { error: got.message });
-        return;
-      }
-      if (action === "push" && req.method === "POST") {
-        const raw = await readBody(req);
-        let body: { producerId?: unknown; epoch?: unknown; events?: unknown } = {};
-        try {
-          body = JSON.parse(raw.toString("utf8") || "{}") as typeof body;
-        } catch {
-          note = "body 不是 JSON";
-          json(res, 400, { error: "body 必须是 JSON：{producerId, epoch, events:[{seq,type,payload}]}" });
-          return;
-        }
-        if (typeof body.producerId !== "string" || !Array.isArray(body.events)) {
-          note = "push 参数不全";
-          json(res, 400, { error: "push 需要 producerId（字符串）、epoch（数字）与 events（数组）" });
-          return;
-        }
-        const got = opts.relay.push(streamId, {
-          producerId: body.producerId,
-          epoch: Number(body.epoch ?? 0),
-          events: body.events as Parameters<SyncRelay["push"]>[1]["events"],
-        });
-        /* 协议层的拒绝（fenced/gap/too-large…）用 **409**：请求本身没毛病，是状态不允许 —— 
-           调用方按 code 处理（`/v1/run` 那些 4xx 是"参数不对"，两者别混）。 */
-        note = got.ok ? `收 ${got.accepted} 条（重复 ${got.duplicates}）` : `${got.code}`;
-        json(res, got.ok ? 200 : 409, got.ok ? got : got);
-        return;
-      }
-      if (action === "pull" && req.method === "GET") {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        const from = Number(url.searchParams.get("from") ?? "0");
-        const limitRaw = url.searchParams.get("limit");
-        const got = opts.relay.pull(streamId, {
-          from: Number.isFinite(from) ? from : 0,
-          ...(limitRaw === null ? {} : { limit: Number(limitRaw) }),
-        });
-        note = got.ok ? `${got.events.length} 条` : "没有这条流";
-        json(res, got.ok ? 200 : 404, got.ok ? got : { error: got.message });
-        return;
-      }
 
-      note = "streams 用错了方法/动作";
-      json(res, 405, { error: `不支持 ${req.method} ${path}（可用：PUT 建流 / POST claim / POST push / GET pull / GET 状态）` });
-      return;
-    }
-
-    if (path === "/v1/run" && req.method === "POST") {
-      const raw = await readBody(req);
-      let body: { message?: unknown; cwd?: unknown; sessionId?: unknown };
-      try {
-        body = JSON.parse(raw.toString("utf8") || "{}") as typeof body;
-      } catch {
-        note = "请求体不是 JSON";
-        json(res, 400, { error: "请求体不是合法 JSON" });
-        return;
-      }
-      const message = typeof body.message === "string" ? body.message.trim() : "";
-      if (!message) {
-        note = "缺 message";
-        json(res, 400, { error: "要一个非空的 message" });
-        return;
-      }
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-      if (sessionId !== undefined && !SESSION_ID_OK.test(sessionId)) {
-        note = "sessionId 形状不对";
-        json(res, 400, { error: "sessionId 只接受 1–200 个字母/数字/._:- 字符" });
-        return;
-      }
-      const cwd = typeof body.cwd === "string" ? body.cwd : opts.cwd;
-      note = `run${sessionId ? ` session=${sessionId}` : ""}`;
-      /* 成员往别人的会话里写：**先拒**（比"跑完发现记不进去"诚实 —— 归属冲突在 C1 是硬墙） */
-      if (!identity.owner && sessionId && opts.listSessions) {
-        const mine = (await opts.listSessions()).find((x) => x.sessionId === sessionId);
-        if (mine && (mine.owner ?? LOCAL_OWNER_ID) !== identity.id) {
-          note = `成员 ${identity.id} 想写 ${mine.owner} 的会话`;
-          json(res, 403, { error: `这段会话归 ${mine.owner ?? LOCAL_OWNER_ID}，你写不进去（你是 ${identity.id}）` });
-          return;
-        }
-      }
-      await runStreaming(res, opts, message, cwd, sessionId, activeRuns, identity);
-      return;
-    }
-
-    const hookMatch = /^\/v1\/hooks\/([^/]+)$/.exec(path);
-    if (hookMatch && req.method === "POST") {
-      const name = safeDecode(hookMatch[1]!) ?? "";
-      if (!name) {
-        note = "hook 名字解码不了";
-        json(res, 400, { error: "hook 名字的百分号编码不合法（解码失败）" });
-        return;
-      }
-      /*
-       * ⚠️ 用 `Object.hasOwn` 而不是真值判断：`opts.hooks` 是普通对象字面量，
-       * `hooks["constructor"]` 会命中 `Object` 构造函数（truthy）——
-       * 于是 `POST /v1/hooks/constructor` 能穿过"只跑配过的名字"这道门（审计 P182）。
-       */
-      if (!opts.hooks || !Object.hasOwn(opts.hooks, name)) {
-        note = `hook 不存在：${name}`;
-        json(res, 404, {
-          error: `没有这个 hook：${name}（可用的：${Object.keys(opts.hooks ?? {}).join(" / ") || "（一个都没配）"}）`,
-        });
-        return;
-      }
-      const raw = await readBody(req);
-      /*
-       * ⭐ webhook **一律验签**：没配密钥就整体拒绝（缺省 fail-closed），
-       * 配了密钥但缺签名/签名不对同样 403。原来这里连请求体都不读 ——
-       * "想验签"的余地都没留（审计 P172）。
-       */
-      const secret = opts.hooksSecret?.trim() ?? "";
-      if (!secret || !signatureOk(raw, req.headers["x-hub-signature-256"], secret)) {
-        note = `hook ${name} 签名不通过`;
-        json(res, 403, {
-          error: secret
-            ? "webhook 必须带 X-Hub-Signature-256 签名（HMAC-SHA256，对请求体的原始字节）"
-            : "服务没配 webhook 密钥（--hook-secret / DH_HOOK_SECRET）：webhook 一律拒绝",
-        });
-        return;
-      }
-      note = `hook=${name}`;
-      await runStreaming(res, opts, opts.hooks[name]!, opts.cwd, undefined, activeRuns, identity);
-      return;
-    }
+    /* ── 跑一轮的两条入口（V5-2 2.3 / V5-3 3.2 的写侧规则）：在 `./runApi.ts` ── */
+    const runCtx = {
+      opts,
+      identity,
+      activeRuns,
+      runsByActor,
+      json,
+      readBody,
+      safeDecode,
+      signatureOk,
+      note: (t: string) => (note = t),
+    };
+    if (await handleRunRoute(path, req, res, runCtx)) return;
+    if (await handleHookRoute(path, req, res, runCtx)) return;
 
     note = "没有这个路径";
     json(res, 404, { error: `没有这个路径：${req.method} ${path}` });
@@ -755,104 +703,5 @@ async function handle(
     }
     note = "内部错误";
     json(res, 500, { error: humanFailure(String((error as Error)?.message ?? error)) });
-  }
-}
-
-/**
- * 跑一轮并把事件以 SSE 推出去。
- *
- * ⚠️ 三件事按这个顺序：**先建引擎，再写 200 的 SSE 头**。反过来的话，
- * 建引擎失败时头已经发出去，只能掐连接（客户端看到的是"流突然断了"，
- * 而不是一句能看懂的错）。
- *
- * ⚠️ 客户端断开（`res` close）→ `abort()`：这一轮**真的停下**。
- * 原来没有取消通道 —— 断开之后回合继续跑完，孤儿回合持续烧钱且杀不掉（审计 P171）。
- */
-async function runStreaming(
-  res: ServerResponse,
-  opts: ServerOptions,
-  message: string,
-  cwd: string,
-  sessionId: string | undefined,
-  activeRuns: Set<AbortController>,
-  identity: RequesterIdentity,
-): Promise<void> {
-  /*
-   * V5-2 2.3：**事件流带上 actor 维度**（谁发起的、谁在答）。
-   *
-   * 与日志同一条口径（C5）：人那一侧 = 请求者身份（2.2 认出来的）、
-   * agent 那一侧 = 主循环（`MAIN_AGENT`，与内核记日志用的是同一个常量）。
-   * 这里做的是**透传**：SSE 每一帧多一个 `actor` 字段，事件本体一个字不改。
-   */
-  const requester: Actor = { id: identity.id, kind: "user" };
-  /* 建引擎（cwd 不在授权范围会抛 CwdNotAllowedError → 外层翻成 400，且此时还没开头） */
-  const built = await opts.makeEngine(cwd);
-
-  const controller = new AbortController();
-  activeRuns.add(controller);
-  const onClose = () => {
-    if (!res.writableEnded) controller.abort();
-  };
-  res.once("close", onClose);
-
-  /* 建引擎期间客户端就走掉了：这一轮不用跑（也别再去写一条已经没了的连接） */
-  if (res.destroyed || res.writableEnded) {
-    res.off("close", onClose);
-    activeRuns.delete(controller);
-    built.close();
-    return;
-  }
-  res.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-cache",
-    connection: "keep-alive",
-  });
-  const send = (event: string, data: unknown) => {
-    if (res.writableEnded || res.destroyed) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
-
-  /*
-   * 第一帧：**这一轮是谁发起的**（V5-2 2.3；协作场景里"群里谁问的"必须看得见）。
-   * 新增一种帧类型是加法：旧客户端认不出就跳过（`ding connect` 按 `event:` 名收，
-   * 未知帧不炸 —— 测试里钉着）。
-   */
-  send("started", { actor: requester, ...(sessionId ? { sessionId } : {}) });
-
-  try {
-    const outcome = await built.engine.run({
-      ...(sessionId ? { sessionId } : {}),
-      /* C5/C1 的接线：这一轮的记录归发起人；**新会话也归他**（已有会话的归属不会被改） */
-      actor: requester,
-      ownerActor: requester,
-      provider: opts.provider,
-      ...(opts.model ? { model: opts.model } : {}),
-      messages: [{ role: "user", content: message }],
-      mode: opts.mode,
-      useTools: true,
-      maxSteps: 8,
-      abortSignal: controller.signal,
-      onEvent: (event) => send("event", { ...event, actor: MAIN_AGENT }),
-    });
-    send("done", {
-      ok: outcome.ok,
-      aborted: outcome.aborted,
-      actor: MAIN_AGENT,
-      cwd, // 生效的工作目录（审计 P181：不回显的话，客户端看不出目录被换过）
-      ...(outcome.error ? { error: humanFailure(outcome.error) } : {}),
-    });
-  } catch (error) {
-    send("done", {
-      ok: false,
-      aborted: controller.signal.aborted,
-      actor: MAIN_AGENT,
-      cwd,
-      error: humanFailure(String((error as Error)?.message ?? error)),
-    });
-  } finally {
-    res.off("close", onClose);
-    activeRuns.delete(controller);
-    built.close();
-    if (!res.writableEnded) res.end();
   }
 }

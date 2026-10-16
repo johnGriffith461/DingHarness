@@ -7,6 +7,7 @@ import { AcpAgent } from "../acp/agent";
 import { authorizeCwd, CwdNotAllowedError } from "../cwd";
 import { startAgentServer } from "../server/agentServer";
 import { createSyncRelay } from "../../engine/sync/relay";
+import { createSpaceStore } from "../../engine/adapters/spaceStore";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { flag, flagAll, parseIntFlagValue, type Parsed } from "./args";
 import { buildEngine } from "./assembly";
@@ -167,6 +168,11 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
        * 不是数据本身（离线续传靠客户端持久化的 offset 游标，2.6）。
        */
       relay: createSyncRelay(),
+      /*
+       * 团队空间（V5-3 3.1）：名册 + 配对码 + 成员口令 + 共享清单都落这一个账本。
+       * 每一请求现读 —— 改角色/移除成员**立刻生效**（U8-5）。
+       */
+      space: createSpaceStore(dataDir),
       log: (line) => process.stderr.write(`[serve] ${line}\n`),
     });
   } catch (error) {
@@ -187,7 +193,7 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
       `  口令：${started.token}${token ? "" : "（本次随机生成；要固定就 --token 或 DH_SERVE_TOKEN）"}`,
       `  用法：curl -H "Authorization: Bearer ${started.token}" ${started.url}/v1/info`,
       `  成员：${members.length ? members.map((m) => m.id).join(" / ") + "（各自一把口令；只能看归自己的会话）" : "无（只有主口令）"}`,
-      `  接口：GET /healthz　GET /v1/info　GET /v1/sessions　POST /v1/run（SSE）　PUT/POST/GET /v1/streams/<流>（同步中继：建流/接管/推/拉）${hookNames.length ? `　POST /v1/hooks/<名字>（${hookNames.join(" / ")}，要签名）` : ""}`,
+      `  接口：GET /healthz　GET /v1/info　GET /v1/sessions　POST /v1/run（SSE）　PUT/POST/GET /v1/streams/<流>（同步中继）　/v1/space/*（团队空间：邀请/入团/成员/共享/接管）${hookNames.length ? `　POST /v1/hooks/<名字>（${hookNames.join(" / ")}，要签名）` : ""}`,
       ...(deps.mode === "按需确认"
         ? ["  ⚠️ 档位是「按需确认」：服务态没有审批通道，需要确认的工具会被拦下（不会执行），对外如实报失败"]
         : []),
