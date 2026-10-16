@@ -131,6 +131,30 @@ export function Composer({
    * 换成单值之后，"最多只有一个开着"是**结构上保证的**，不靠每处记得去关别人。
    * 以后再加 chip 也不会重犯这个问题。
    */
+  /**
+   * picker 的打开态（模型 / 档位 / 项目 / … **互斥**：同时只可能有一个）。
+   *
+   * ⚠️ 还要一个**token**：旧的 picker 关闭时会走「迟到」的回调，
+   * 那种回调只能关掉**它自己那次打开的那个**，不许把已经接管的兄弟一起关掉
+   * （ZCode 的 chat-model-select-menu 明确写了这条：迟到回调只清理自己）。
+   */
+  const popToken = useRef(0);
+  /*
+   * Ctrl+M：**只唤起模型菜单**（ZCode 的规矩：不按顺序循环切换 —— 换模型必须由用户在菜单里明确选）。
+   * 焦点在输入框里也照样唤起（这条快捷键本来就是给键盘用户用的）。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.key.toLowerCase() !== "m") return;
+      e.preventDefault();
+      popToken.current += 1;
+      setOpenPop((cur) => (cur === "model" ? null : "model"));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  /** 这一轮在跑吗（跑着的时候不许换模型 —— ZCode 的锁定语义）。 */
+  const taskRunning = useWorkbenchStore((s) => (s.tasks.find((x) => x.id === s.activeTaskId)?.stage ?? "") === "running");
   const [openPop, setOpenPop] = useState<
     null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"
   >(null);
@@ -168,6 +192,11 @@ export function Composer({
    *
    * @param which 要切换的下拉
    */
+  /** 关掉某个 picker：**只关它自己那次打开的**（见上面 token 的说明）。 */
+  const closePop = (token: number): void => {
+    if (popToken.current === token) setOpenPop(null);
+  };
+
   const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"): void =>
     setOpenPop((cur) => (cur === which ? null : which));
 
@@ -738,13 +767,24 @@ export function Composer({
         {/* 模型 · 思考：真选择器（组件在 ModelChip.tsx） */}
         <ModelChip
           open={openPop === "model"}
-          onToggle={() => togglePop("model")}
-          onClose={() => setOpenPop(null)}
+          onToggle={() => {
+            popToken.current += 1;
+            togglePop("model");
+          }}
+          onClose={() => closePop(popToken.current)}
+          busy={taskRunning}
           /* 「管理模型」→ 打开设置（开关在 NavSidebar；跨组件用一条 DOM 事件，不引全局 store） */
           onOpenSettings={() => window.dispatchEvent(new CustomEvent("dsh-open-settings"))}
         />
         {/* 思考强度是**另一颗**（主人的口径：模型一颗、档位一颗） */}
-        <EffortChip open={openPop === "effort"} onToggle={() => togglePop("effort")} onClose={() => setOpenPop(null)} />
+        <EffortChip
+          open={openPop === "effort"}
+          onToggle={() => {
+            popToken.current += 1;
+            togglePop("effort");
+          }}
+          onClose={() => closePop(popToken.current)}
+        />
 
         {/*
           ⚠️ 这里原来有一颗 `disabled` 的「模型档位」chip，写死显示 `AUTO · LOW`。

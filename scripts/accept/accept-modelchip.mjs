@@ -56,6 +56,31 @@ try {
   const options = await page.locator('[data-testid^="wb-model-option-"]').count();
   if (options < 1) bad.push("展开一级之后二级一个模型都没有");
   note();
+  /* ②b ZCode 的两条细则：Ctrl+M 只唤起模型菜单；档位与模型**互斥**（开一个关另一个） */
+  await page.keyboard.press("Escape");
+  await sleep(400);
+  /*
+   * ⚠️ Ctrl+M 是 **toggle**：弹层开着时按会把它收起来（规矩是「只唤起/收起自己、不循环切换」）——
+   * 所以按之前必须确认它是关着的，否则量到的是「又关了一次」（第一版就是这么红的）。
+   */
+  if (await page.locator('[data-testid="wb-model-pop"]').count()) {
+    await page.keyboard.press("Control+m");
+    await sleep(400);
+  }
+  await page.keyboard.press("Control+m");
+  await sleep(600);
+  const afterCtrlM = await page.locator('[data-testid="wb-model-pop"]').count();
+  if (!afterCtrlM) bad.push("Ctrl+M 没有唤起模型菜单");
+  await page.locator('[data-testid="wb-effort"]').click();
+  await sleep(500);
+  const modelStill = await page.locator('[data-testid="wb-model-pop"]').count();
+  if (modelStill) bad.push("打开档位时模型菜单没关掉（两个 picker 应当互斥）");
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  await page.locator('[data-testid="wb-model"]').click();
+  await sleep(600);
+  note(`Ctrl+M 唤起 ${afterCtrlM ? "✓" : "✗"} / 互斥（开档位时模型菜单 ${modelStill ? "还在 ✗" : "已关 ✓"}）`);
+
   /* ③ 选一条 → 真落盘 + 文案跟着走 */
   const first = page.locator('[data-testid^="wb-model-option-"]').first();
   const picked = ((await first.getAttribute("data-testid")) ?? "").replace("wb-model-option-", "");

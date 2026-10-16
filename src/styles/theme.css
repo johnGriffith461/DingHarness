@@ -1087,3 +1087,10 @@
 .wb-set-crumb-root { border: none; background: transparent; color: var(--fg-dim); font-size: 12.5px; cursor: pointer; padding: 0; }
 .wb-set-crumb-root:hover { color: var(--fg); }
 .wb-set-crumb b { color: var(--fg); }
+
+/* 模型项：「视觉」徽标（轻量圆 pill，贴名字后）与模型名（不许挤压） */
+.wb-model-modelname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-model-flag {
+  flex: 0 0 auto; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: 10.5px; font-style: normal; color: var(--fg-dim); background: var(--bg-2);
+}
