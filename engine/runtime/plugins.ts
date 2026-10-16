@@ -55,6 +55,16 @@ export type HookName = "session:start" | "tool:before" | "tool:after" | "turn:en
 export const HOOK_NAMES: readonly HookName[] = ["session:start", "tool:before", "tool:after", "turn:end"];
 
 /** 插件清单。 */
+/** 发布者（`publisher` 字段）：身份是 `id`，证据是 `key`。 */
+export type PluginPublisher = {
+  /** 发布者 id（与插件名同一套形状：小写字母开头、小写字母/数字/连字符，2–41 字符）。 */
+  id: string;
+  /** 给人看的名字（可选）。 */
+  name?: string;
+  /** ed25519 公钥（base64 的 SPKI DER）—— 只放公钥，私钥永远不进插件。 */
+  key: string;
+};
+
 export type PluginManifest = {
   name: string;
   version: string;
@@ -71,6 +81,17 @@ export type PluginManifest = {
   permissions: readonly PluginPermission[];
   /** 兼容的宿主版本（`engines.ding`，语义化范围，例如 `>=0.2.0`）。 */
   engines: { ding: string };
+  /**
+   * **发布者与签名**（V5-4 4.4；可选 —— 不给就是 v1 插件，照样能装能跑）。
+   *
+   * 签名覆盖的是**整棵目录的文件清单**（算法在 `runtime/pluginSignature.ts`），
+   * 于是"装完之后改一个字节"能被验出来。两者**必须成对**：只有 publisher 没有
+   * signature（或者反过来）是清单错误 —— 单边出现的话，"有身份"与"有签名"
+   * 就都能各自假装成功。
+   */
+  publisher?: PluginPublisher;
+  /** 上面那把钥匙对文件清单的签名（base64）。 */
+  signature?: string;
   /**
    * 入口文件（相对插件目录），默认 `index.mjs`。
    *
@@ -178,6 +199,31 @@ export function checkManifest(raw: unknown): ManifestCheck {
     }
   }
 
+  /* 发布者与签名（V5-4 4.4）：**成对出现**，且各自形状要对 */
+  let publisher: PluginPublisher | undefined;
+  const hasAnySignatureField = m.publisher !== undefined || m.signature !== undefined;
+  if (hasAnySignatureField) {
+    const raw = m.publisher as Record<string, unknown> | undefined;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      errors.push("publisher 必须是对象：{id, name?, key}（有 signature 就必须有 publisher，两者成对）");
+    } else {
+      const id = typeof raw.id === "string" ? raw.id.trim() : "";
+      const key = typeof raw.key === "string" ? raw.key.trim() : "";
+      const label = typeof raw.name === "string" ? raw.name.trim() : undefined;
+      if (!NAME_RE.test(id)) {
+        errors.push(`publisher.id 不合法：${JSON.stringify(raw.id)}（与插件名同一套形状：小写字母开头，2–41 字符）`);
+      }
+      /* ed25519 SPKI DER 的 base64 长度不会低于 40；一眼能看出"这不是个钥匙" */
+      if (key.length < 40 || !/^[A-Za-z0-9+/]+={0,2}$/.test(key)) {
+        errors.push("publisher.key 应该是 base64 的 ed25519 公钥（SPKI DER）—— 私钥不许进插件");
+      }
+      if (id && key) publisher = { id, key, ...(label ? { name: label } : {}) };
+    }
+    const signature = typeof m.signature === "string" ? m.signature.trim() : "";
+    if (!signature) errors.push("有 publisher 就必须有 signature（两者成对 —— 单边出现等于两边都能假装成功）");
+    else if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signature)) errors.push("signature 应该是 base64");
+  }
+
   const engines = m.engines as { ding?: unknown } | undefined;
   if (!engines || typeof engines.ding !== "string" || !engines.ding.trim()) {
     errors.push("engines.ding 必填（说明它兼容的宿主版本，例如 \">=0.2.0\"）");
@@ -194,6 +240,8 @@ export function checkManifest(raw: unknown): ManifestCheck {
       ...(hooks.length ? { hooks } : {}),
       permissions,
       engines: { ding: (engines as { ding: string }).ding },
+      ...(publisher ? { publisher } : {}),
+      ...(publisher && typeof m.signature === "string" ? { signature: m.signature.trim() } : {}),
       ...(main ? { main } : {}),
     },
   };

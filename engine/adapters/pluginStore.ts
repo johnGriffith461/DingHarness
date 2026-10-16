@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
-import { checkManifest, type PluginManifest, type PluginPermission } from "../runtime/plugins";
+import { checkManifest, type PluginManifest, type PluginPermission, type PluginPublisher } from "../runtime/plugins";
+import { verifyPluginSignature } from "../runtime/pluginSignature";
+import { rememberPublisher } from "./pluginTrust";
 
 /**
  * 插件的**安装台账**（Phase 8.2）。
@@ -46,6 +48,14 @@ export type InstalledPlugin = {
   granted: readonly PluginPermission[];
   /** 开着还是关着。装完默认开着（用户刚点过确认）。 */
   enabled: boolean;
+  /**
+   * **签名与发布者**（V5-4 4.4）。三态口径见 `pluginTrust.ts` 的表：
+   * `unsigned`（v1 插件，没签）/ `unverified`（签名真、身份第一次见）/ `trusted`（同一把钥匙，见过）。
+   *
+   * ⚠️ 这一格是**装的时候算出来的事实**，不是界面文案 —— 它进台账，
+   * 于是"这个插件是谁签的"在装完之后仍然答得上来。
+   */
+  signature: { trust: "unsigned" } | { publisher: PluginPublisher; trust: "unverified" | "trusted" };
 };
 
 /** 台账文件的形状。 */
@@ -93,6 +103,14 @@ export function readLedger(paths: PluginPaths): { ledger: PluginLedger; note?: s
         permissions: Array.isArray(p.permissions) ? (p.permissions as PluginPermission[]) : [],
         granted: Array.isArray(p.granted) ? (p.granted as PluginPermission[]) : [],
         enabled: p.enabled === true,
+        /*
+         * 签名状态读回来（v1 台账里没有这一格 → `unsigned`）：
+         * 老条目一律当"没签名"，**不猜**它当年签过没有 —— 猜出来的"已签名"比没有更坏。
+         */
+        signature:
+          p.signature && typeof p.signature === "object" && (p.signature as { publisher?: unknown }).publisher
+            ? (p.signature as InstalledPlugin["signature"])
+            : { trust: "unsigned" },
       });
     }
     return { ledger: { installed } };
@@ -179,10 +197,44 @@ export function installFromDir(input: {
     return { ok: false, errors: [`入口文件不存在：${path.basename(main)}（清单可写 main 指定，默认 index.mjs）`] };
   }
 
+  /*
+   * ⭐ **签名（V5-4 4.4）：有签名就必须验得过。**
+   *
+   * 验的是**源目录的真文件**（不是清单里那些名字）—— 摘要逐文件算。验不过一律拒，
+   * 而且**拒在拷贝之前**：装了再验，插件内容已经躺在插件目录里了
+   * （"拒了但东西在"这种状态最容易被下一个 bug 捡起来用）。
+   * 没签名（v1 插件）**照样装** —— 那是"没有签名"，不是"签名坏了"。
+   */
+  if (manifest.publisher && manifest.signature) {
+    const verdict = verifyPluginSignature({
+      dir: from,
+      /* 原始清单（不是规范化过的那份）：签名是作者对他写下的字节做的 */
+      rawManifest: got.raw,
+      publisher: manifest.publisher,
+      signature: manifest.signature,
+    });
+    if (!verdict.ok) return { ok: false, errors: [verdict.message] };
+  }
+
   const target = path.join(paths.root, manifest.name);
   rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });
   cpSync(from, target, { recursive: true, filter: (src) => !src.includes(`${path.sep}node_modules${path.sep}`) });
+
+  /*
+   * 签名状态（拷贝之后才登记信任）：`id → key` 第一次见就钉住（TOFU），
+   * **换钥匙一律拒**（理由在 `pluginTrust.ts`）。钉之前先落内容，是为了
+   * "装失败不留痕" —— 信任表只记真的装成了的那些。
+   */
+  let signature: InstalledPlugin["signature"] = { trust: "unsigned" };
+  if (manifest.publisher) {
+    const remembered = rememberPublisher(paths, manifest.publisher, input.now);
+    if (!remembered.ok) {
+      rmSync(target, { recursive: true, force: true });
+      return { ok: false, errors: [remembered.message] };
+    }
+    signature = { publisher: manifest.publisher, trust: remembered.trust };
+  }
 
   const granted = input.granted ? [...input.granted] : [...manifest.permissions];
   const plugin: InstalledPlugin = {
@@ -196,6 +248,7 @@ export function installFromDir(input: {
     permissions: manifest.permissions,
     granted,
     enabled: true,
+    signature,
   };
 
   const before = readLedger(paths);
