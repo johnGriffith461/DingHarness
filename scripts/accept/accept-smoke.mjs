@@ -130,12 +130,11 @@ await step("设置对话框：能开能关", async () => {
   await sleep(800);
   if ((await page.locator('[data-testid="wb-settings"]').count()) === 0) throw new Error("点「设置」没打开弹窗");
   /*
-   * ⚠️ 这颗关闭键**没有 testid**（只有类名 `.wb-modal-close`，见 `SettingsDialog.tsx`）——
-   * 第一版按 testid 找，于是超时；而弹窗没关掉又把后面那一步一起挡住
-   * （全屏遮罩 `.wb-modal-mask` 会吃掉后面的点击）。所以这里按类名找，
-   * **并且关不掉的后果是"后面全红"** —— 这正是冒烟要暴露的形状。
+   * ⚠️ 关闭键 2026-10-16 换了载体：设置整页化之后，模态时代那颗 `.wb-modal-close`
+   * （没有 testid、还散在 body 里压着导航）收成了顶栏右侧一颗 `wb-settings-close`。
+   * 判据没变，只是选择器变得可查；关不掉的后果依然是"后面全红" —— 正是冒烟要暴露的形状。
    */
-  await page.locator(".wb-modal-close").first().click();
+  await page.locator('[data-testid="wb-settings-close"]').first().click();
   await sleep(450);
   if ((await page.locator('[data-testid="wb-settings"]').count()) > 0) throw new Error("点关闭之后弹窗还在");
 });

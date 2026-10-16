@@ -1139,6 +1139,22 @@
   color: var(--fg-dim); font-size: 12.5px; padding: 4px 10px; cursor: pointer;
 }
 .wb-setfull-back:hover { color: var(--fg); border-color: var(--line-strong); }
+/* 顶栏右侧：身份那句 + 关闭（2026-10-16 从模态时代的孤儿挪进来，见 SettingsDialog.tsx 的注释） */
+.wb-setfull-mode { font-size: 12px; color: var(--fg-dim); }
+.wb-setfull-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: none; border-radius: 8px;
+  background: transparent; color: var(--fg-dim); cursor: pointer;
+}
+.wb-setfull-close:hover { background: var(--bg-2); color: var(--fg); }
+/* 首屏卡片：一张一格**真值**，点进去就是那一页（原来这里是大半页空白） */
+.wb-card-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px; margin-top: 14px; max-width: 900px;
+}
+.wb-card-link { display: block; text-align: left; cursor: pointer; font: inherit; color: inherit; margin-bottom: 0; }
+.wb-card-link:hover { border-color: var(--line-strong); background: var(--bg-2); }
+.wb-card-value { font-size: 14px; color: var(--fg); margin: 2px 0; }
 /* 两列铺满整页（不再是弹窗里的 60vh） */
 .wb-setfull-body { flex: 1; min-height: 0; display: flex; gap: 16px; }
 .wb-setfull .wb-set-rail { width: 232px; max-height: none; }
@@ -1186,9 +1202,17 @@
 }
 .wb-setfull .wb-modal-row:hover { background: var(--bg-2); }
 .wb-setfull .wb-modal-row.is-on { background: var(--bg-2); font-weight: 600; }
-.wb-setfull .wb-modal-row-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * 行的两段宽度：**标签不截断、值截断**。
+ * 原来两个都给 `flex: 1`，于是窄列里先牺牲的是标签 —— 截图上出现「标… 还没选模型通道」，
+ * 而"标…"是哪一项根本看不出来；值是可以截的（它本来就长）。
+ */
+.wb-setfull .wb-modal-row-label { flex: 0 0 auto; white-space: nowrap; }
 .wb-setfull .wb-modal-row-icon { flex: 0 0 auto; display: inline-flex; }
-.wb-setfull .wb-modal-row em { font-size: 11.5px; font-style: normal; color: var(--fg-dim); white-space: nowrap; }
+.wb-setfull .wb-modal-row em {
+  flex: 1 1 auto; min-width: 0; font-size: 11.5px; font-style: normal; color: var(--fg-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right;
+}
 .wb-setfull .wb-modal-row > svg:last-child { flex: 0 0 auto; color: var(--fg-faint, var(--fg-dim)); }
 /* 身份块：贴左列底部（不再飘在正文里） */
 .wb-setfull .wb-modal-avatar { display: none; }

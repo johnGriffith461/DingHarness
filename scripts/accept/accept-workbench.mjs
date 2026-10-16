@@ -2,7 +2,10 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openCanvas, openSummary, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, openCanvas, openSummary, pickPort, shot, waitForPort } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 工作台外壳验收（阶段 10）。
@@ -114,9 +117,10 @@ await page.waitForTimeout(800);
 report.settingsRows = await page.$$eval(".wb-modal-row", (els) =>
   els.map((e) => e.textContent.replace(/\s+/g, " ").trim()),
 );
-report.settingsId = await page.locator(".wb-modal-id").textContent();
+/* 身份那句与关闭键 2026-10-16 挪进了顶栏（原来是散在 body 里的 `.wb-modal-id` / `.wb-modal-close`） */
+report.settingsId = await page.locator('[data-testid="wb-set-mode"]').textContent();
 await shot(page, path.join(shots, "wb-07-settings.png"));
-await page.locator(".wb-modal-close").click();
+await page.locator('[data-testid="wb-settings-close"]').click();
 await page.waitForTimeout(400);
 
 // 5) 画布产物面板开合

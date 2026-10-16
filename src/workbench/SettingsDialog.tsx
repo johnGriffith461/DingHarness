@@ -14,12 +14,19 @@ import { listProviders } from "@/ai/aiClient";
 import { useMemoryStore } from "./memoryStore";
 import MemoryPanel from "./MemoryPanel";
 import SettingsPages, { type SettingsSubPage } from "./SettingsPages";
+import { THEME_OPTIONS, readTheme } from "./theme";
 
 /** 左轨的两段（照 ZCode 的分段：能力在前、基础在后）。 */
 const GROUP_LABEL: Record<number, string> = {
   0: "Agent 能力",
   1: "基础设置",
 };
+
+/** 主题的展示名（跟随系统 / 浅色模式 / 深色模式）—— 读的是**当前生效**的那一格。 */
+function themeLabelOf(): string {
+  const t = readTheme();
+  return THEME_OPTIONS.find((o) => o.value === t)?.label ?? t;
+}
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   /*
@@ -62,6 +69,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void loadMemory();
   }, [loadMemory]);
+
+  /*
+   * 首屏卡片上那一格「主题」。
+   * 只在渲染时读一次会**滞后**：用户在「通用」里换完主题、返回首屏，卡片还写着旧的。
+   * 主题就是 `<html data-theme>` 这个属性（theme.ts:106 定的载体），所以直接听它。
+   */
+  const [themeLabel, setThemeLabel] = useState(() => themeLabelOf());
+  useEffect(() => {
+    const mo = new MutationObserver(() => setThemeLabel(themeLabelOf()));
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => mo.disconnect();
+  }, []);
 
   /*
    * 「套餐」在本机版的真实对应物就是**当前在用的模型通道** —— 写死一个「已开通」
@@ -135,21 +154,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </button>
         <b>设置</b>
         <span className="wb-spacer" />
-      </div>
-      <div className="wb-setfull-body">
-        <button className="wb-modal-close" onClick={onClose} aria-label="关闭" title="关闭">
+        {/*
+          ⚠️ 2026-10-16：这两颗原来在 `.wb-setfull-body` 里，是**模态时代**留下的孤儿
+          （`.wb-modal-name`「本机用户 ›」/ `.wb-modal-id`「本机模式 · 未登录」/ `.wb-modal-close`）——
+          整页化之后它们在 body 里没有定位约束，就散在左上角、还压在导航上（主人截图里那两行飘着的字就是它们）。
+          身份那句挪进顶栏如实显示；关闭收成顶栏右侧一颗 ✕（「返回」也在，两个都能关）。
+          旧的类名不再用：它们带着模态的定位样式，正是当初把整页顶坏的那一批。
+        */}
+        <span className="wb-setfull-mode" data-testid="wb-set-mode">本机模式 · 未登录</span>
+        <button className="wb-setfull-close" data-testid="wb-settings-close" onClick={onClose} aria-label="关闭设置" title="关闭设置">
           <X size={15} />
         </button>
-        <div className="wb-modal-name">
-          本机用户 <ChevronRight size={13} />
-        </div>
-        <div className="wb-modal-id">本机模式 · 未登录</div>
-        {/*
-          ⚠️ 这里原来是「账号管理」的死按钮（`disabled` + "本机版没有账号服务端"）。
-          2026-10-15（M0 工单 3）按工单口径**移除**：本机版就是"本机用户 · 未登录"
-          （上一行如实写着），没有账号可管 —— 摆一颗点不动的按钮只会让人以为登录坏了。
-        */}
-
+      </div>
+      <div className="wb-setfull-body">
         {/* ⚠️ 2026-10-16：改成 **ZCode 的两列形态** —— 左列是分区，右列是内容。
             原来这里是"要么一列行、要么整块子页"（二选一）—— 那看不出"我在哪一层"。
             ⚠️ 面包屑 / 搜索框还没加（见 docs/ZCODE-设置与模型选择-反解.md 的清单）。 */}
@@ -279,7 +296,51 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   {sectionLabel || "设置"}
                 </h1>
                 <div className="wb-set-hint" data-testid="wb-set-hint">
-                  左边选一项 —— 模型 / 记忆 / 插件·技能·伙伴 / 标准套餐 / 账户 / 通用 / 关于。
+                  设置都存在这台机器上：没有账号体系、没有云盘。左边选一项，或点下面的卡片。
+                </div>
+                {/*
+                  ⚠️ 2026-10-16：这一屏原来是**一句提示 + 大半页空白**（主人截图上骂的就是这个：
+                  "你这是啥设置页面啊"）。现在换成几张卡片：每张都显示**当前真值**
+                  （默认通道 / 记忆条数 / 主题 / 身份），点进去就是对应那一页。
+                  值是现算的 —— 卡片上不许写死任何一句"已启用"。
+                */}
+                <div className="wb-card-grid">
+                  {[
+                    { key: "models", label: "模型", value: pinnedLabel(pinnedModel), desc: pinnedDead ? "钉住的这个现在不可用" : "新对话默认用它" },
+                    {
+                      key: "memory",
+                      label: "记忆",
+                      value: memOn ? (memCount === 0 ? "暂无条目" : `${memCount} 条`) : "已关闭",
+                      desc: memOn ? "跨对话记住的事" : "关掉了，不会记",
+                    },
+                    { key: "theme", label: "主题", value: themeLabel, desc: "纸白 / 暖墨两档" },
+                    { key: "plugins", label: "插件·技能·伙伴", value: "管理", desc: "本机装的东西都在这儿" },
+                    { key: "account", label: "账号", value: "本机模式", desc: "本机版没有账号服务端" },
+                  ].map((c) => (
+                    <button
+                      key={c.key}
+                      className="wb-card wb-card-link"
+                      data-testid={`wb-homecard-${c.key}`}
+                      onClick={() => {
+                        if (c.key === "memory") {
+                          setMemoryOpen(true);
+                          setSectionLabel("记忆");
+                          return;
+                        }
+                        if (c.key === "theme" || c.key === "account") {
+                          setSubPage(c.key === "theme" ? "general" : "account");
+                          setSectionLabel(c.key === "theme" ? "通用" : "账号");
+                          return;
+                        }
+                        setSubPage(c.key === "models" ? "models" : "plugins");
+                        setSectionLabel(c.key === "models" ? "模型" : "插件·技能·伙伴");
+                      }}
+                    >
+                      <div className="wb-card-head">{c.label}</div>
+                      <div className="wb-card-value" data-testid={`wb-homecard-value-${c.key}`}>{c.value}</div>
+                      <div className="wb-card-note">{c.desc}</div>
+                    </button>
+                  ))}
                 </div>
               </>
             )}
@@ -287,8 +348,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </div>,
-    /* ⚠️ 挂到 body：fixed 会被左栏那层的 containing block 框住（截图里就是这么错的） */
-    document.body,
+    /*
+     * ⚠️ 挂载点必须是 `.wb`（工作台根），**不是 `document.body`**。
+     *
+     * 这条路径上两个失败方式都踩过（2026-10-16，主人两次截图）：
+     * ① 就地渲染 → `position: fixed` 被左栏那层的 containing block 框住，
+     *    整页被挤成左栏里的一条窄柱；
+     * ② 挂到 `document.body` → **设计令牌全丢**。令牌（`--bg` / `--fg` / `--surface` /
+     *    `--win-titlebar-h` …）是定义在 `.wb` 上的，body 上的后代一个都拿不到，
+     *    于是 `background: var(--surface)` 失效成透明（主页从底下透出来）、
+     *    `inset: var(--win-titlebar-h) 0 0 0` 整条失效成 `auto`（整页塌回静态位置）。
+     * `.wb` 既是令牌的载体、又是铺满窗口的根 —— 挂在它下面，①②一起没了。
+     */
+    document.querySelector(".wb") ?? document.body,
   );
 }
 

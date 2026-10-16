@@ -142,11 +142,20 @@ try {
 
   /*
    * 光"渲染出外壳"还不够 —— 那可能是个空壳。所以再走两步真实交互：
-   * 切到插件页（验路由）、打开添加表单（验渲染 + 事件）。
+   * 进插件·技能页（验跳转）、打开添加表单（验渲染 + 事件）。
    * 这两步都不依赖模型，跑得快，但能把"壳起来了、里面是死的"挡在外面。
+   *
+   * ⚠️ 2026-10-16：这两步原来按 `wb-nav-plugins` 点 —— 那个导航项当天被**移走了**
+   * （插件·技能·伙伴挪进设置里），于是这条验证在等一个永远不会出现的元素、30 秒后报
+   * "界面没渲染出来"（真实原因与此无关）。现在走用户真走的那条路：
+   * 账号菜单 → 设置 → 左列「插件·技能·伙伴」。判据一条没动。
    */
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
-  await page.waitForTimeout(1500);
+  await page.locator('[data-testid="wb-account"]').click();
+  await page.waitForTimeout(500);
+  await page.locator('[data-testid="wb-acct-settings"]').click();
+  await page.waitForTimeout(900);
+  await page.locator('[data-testid="wb-set-插件·技能·伙伴"]').click();
+  await page.waitForTimeout(1400);
   const pluginsOk = (await page.locator('[data-testid="wb-plugin-add"]').count()) === 1;
 
   await page.locator('[data-testid="wb-plugin-add"]').click();
