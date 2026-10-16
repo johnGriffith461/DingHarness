@@ -11,6 +11,7 @@ import { canReadSession, handleJoin, handleSpaceRoute, spaceOf } from "./spaceAp
 import { handleRunRoute, handleHookRoute } from "./runApi";
 import { handleStreamRoute } from "./streamApi";
 import { handleChannelRoute } from "./channelApi";
+import type { Recipe } from "../../engine/core/recipes";
 import { humanFailure } from "../../shared/errors";
 import type { ConfirmMode, SessionSummary } from "../../shared/ipc";
 import { PRODUCT_NAME, PRODUCT_VERSION } from "../../shared/product";
@@ -104,6 +105,8 @@ export type ServerOptions = {
    * 不给 = 审计端点回 501（不假装"没有记录"）。
    */
   loadSession?: (sessionId: string) => Promise<{ records: unknown[] }>;
+  /** 模板清单（V5-3 3.7 的模板共享要读本体）—— 不给 = 模板共享端点回 501。 */
+  listRecipes?: () => Promise<Recipe[]>;
   /**
    * **同步中继**（V5-2 任务 2.1）。
    *
@@ -594,6 +597,7 @@ async function handle(
         /* 审计（3.3）扫会话要这两个 —— 与 `/v1/sessions` 同一个来源 */
         ...(opts.listSessions ? { listSessions: opts.listSessions } : {}),
         ...(opts.loadSession ? { loadSession: opts.loadSession } : {}),
+        ...(opts.listRecipes ? { listRecipes: opts.listRecipes } : {}),
         identity,
         note: (t) => (note = t),
         abortRunsOf: (memberId) => {
@@ -643,7 +647,7 @@ async function handle(
        * 共享之后成员看得见主人的那段会话（内容与主人一致 —— 同一个本地库同一批记录）。
        */
       const space = opts.space ? spaceOf(opts.space) : null;
-      const emptySpace = space ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], holders: {}, rooms: {} };
+      const emptySpace = space ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], sharedRecipes: [], holders: {}, rooms: {} };
       const sessions = identity.owner
         ? (wanted ? all.filter((s) => (s.owner ?? LOCAL_OWNER_ID) === wanted) : all)
         : all.filter((s) => canReadSession(emptySpace, identity, s.sessionId, s.owner));

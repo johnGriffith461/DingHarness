@@ -8,6 +8,7 @@ import { authorizeCwd, CwdNotAllowedError } from "../cwd";
 import { startAgentServer } from "../server/agentServer";
 import { createSyncRelay } from "../../engine/sync/relay";
 import { createSpaceStore } from "../../engine/adapters/spaceStore";
+import { listRecipes } from "./cmdRecipe";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { flag, flagAll, parseIntFlagValue, type Parsed } from "./args";
 import { buildEngine } from "./assembly";
@@ -161,6 +162,8 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
           store.close();
         }
       },
+      /* 模板清单（V5-3 3.7 的模板共享要读本体 —— 与 `ding recipe list` 同一条数据路） */
+      listRecipes: () => listRecipes(dataDir),
       /* 逐段读（审计 V5-3 3.3 用；与上面同一个库，但它要扫很多段，所以不建引擎） */
       loadSession: async (sessionId: string) => {
         const store = createSqliteSessionStore(dataDir, "sessions.db", {}, { protectBefore: startedAt });

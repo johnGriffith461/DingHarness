@@ -127,6 +127,19 @@ function resolveRecipeDirs(p: Parsed, recipe: Recipe, config: { dirs?: readonly 
   return out;
 }
 
+/**
+ * 这台机器上的模板清单（内置 + 导入的合并）——**给服务端注入**（V5-3 3.7 的模板共享）。
+ *
+ * ⚠️ 与 `cmdRecipe list` 是同一条数据路：**只是没有终端输出那一半** ——
+ * 另写一份读法就会出现"服务端共享的模板与 `ding recipe list` 看到的不是一批"。
+ *
+ * @param dataDir 数据目录
+ * @returns 模板清单（坏的条目按 `readImported` 的口径跳过）
+ */
+export async function listRecipes(dataDir: string): Promise<Recipe[]> {
+  return mergeRecipes(readImported(dataDir).recipes);
+}
+
 export async function cmdRecipe(p: Parsed, dataDir: string): Promise<number> {
   const sub = p.args[0] ?? "list";
   const id = p.args[1];

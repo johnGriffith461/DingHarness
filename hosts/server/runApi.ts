@@ -75,7 +75,7 @@ export async function handleRunRoute(
     const owned = opts.listSessions ? (await opts.listSessions()).find((x) => x.sessionId === sessionId) : undefined;
     const space = opts.space ? spaceOf(opts.space) : null;
     const allowed = canWriteSession(
-      space ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], holders: {}, rooms: {} },
+      space ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], sharedRecipes: [], holders: {}, rooms: {} },
       identity,
       sessionId,
       owned?.owner,

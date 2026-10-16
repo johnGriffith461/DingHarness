@@ -28,6 +28,8 @@ export type SpaceFile = {
   tokens: Record<string, string>;
   /** 共享出去、成员可读的会话（V5-3 3.2）。 */
   shared: string[];
+  /** 共享出去的模板 id（V5-3 3.7；模板本体在 `recipes.json`，这里只记"哪些共享了"）。 */
+  sharedRecipes: string[];
   /**
    * 这段会话当前的**接管人**（V5-3 3.2；fencing 语义：接管之后老持有人在写侧失效）。
    * 键是会话 id，值是成员 id。
@@ -58,6 +60,7 @@ export function emptySpaceFile(owner = "local"): SpaceFile {
     roster: normalizeRoster({}, owner),
     tokens: {},
     shared: [],
+    sharedRecipes: [],
     holders: {},
     rooms: {},
   };
@@ -77,6 +80,9 @@ export function normalizeSpaceFile(raw: unknown, fallbackOwner = "local"): Space
     if (typeof token === "string" && token.trim() && id.trim()) tokens[id.trim()] = token;
   }
   const shared = Array.isArray(o.shared) ? [...new Set(o.shared.filter((x): x is string => typeof x === "string" && x.trim() !== ""))] : [];
+  const sharedRecipes = Array.isArray(o.sharedRecipes)
+    ? [...new Set(o.sharedRecipes.filter((x): x is string => typeof x === "string" && x.trim() !== ""))]
+    : [];
   const holders: Record<string, string> = {};
   for (const [sessionId, holder] of Object.entries(o.holders ?? {})) {
     if (typeof holder === "string" && holder.trim() && sessionId.trim()) holders[sessionId.trim()] = holder.trim();
@@ -86,7 +92,7 @@ export function normalizeSpaceFile(raw: unknown, fallbackOwner = "local"): Space
     const roomId = (room as { roomId?: unknown } | null)?.roomId;
     if (typeof roomId === "string" && roomId.trim()) rooms[streamId.trim()] = { roomId: roomId.trim() };
   }
-  return { roster: normalizeRoster(o.roster, fallbackOwner), tokens, shared, holders, rooms };
+  return { roster: normalizeRoster(o.roster, fallbackOwner), tokens, shared, sharedRecipes, holders, rooms };
 }
 
 /**

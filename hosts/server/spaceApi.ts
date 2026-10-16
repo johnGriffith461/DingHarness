@@ -14,6 +14,7 @@ import { emptySpaceFile, issueToken, type SpaceFile, type SpaceStore } from "../
 import { auditOf, auditQuery, auditSummary, type AuditEntry } from "../../engine/core/audit";
 import { ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
 import { sumUsage } from "../../shared/cost";
+import type { Recipe } from "../../engine/core/recipes";
 import type { RequesterIdentity } from "./agentServer";
 
 /**
@@ -37,6 +38,8 @@ export type SpaceCtx = {
   /** 会话清单 + 逐段读取（审计查询要扫日志）—— 宿主注入（没有就是 501）。 */
   listSessions?: () => Promise<Array<{ sessionId: string; owner?: string }>>;
   loadSession?: (sessionId: string) => Promise<{ records: unknown[] }>;
+  /** 模板清单（V5-3 3.7：共享模板要先把本体读出来）—— 宿主注入。 */
+  listRecipes?: () => Promise<Recipe[]>;
   /** 当前身份（已由主鉴权认出来）。 */
   identity: RequesterIdentity & { roles?: readonly MemberRole[] };
   /** 在跑的那条连接的中止句柄（撤销成员时要把他的通道关掉 —— U8-5）。 */
@@ -301,6 +304,56 @@ export async function handleSpaceRoute(
     ctx.note(`移除：${memberId}（中止 ${aborted} 条在跑通道）`);
     json(res, 200, { ok: true, aborted });
     return true;
+  }
+
+  /* ── 3.7：模板共享（模板本体在宿主的 recipes.json；这里只记"哪些共享了"） ── */
+
+  if (path === "/v1/space/recipes" && req.method === "GET") {
+    if (!ctx.listRecipes) {
+      ctx.note("模板共享未接线");
+      json(res, 501, { error: "这个服务没有接模板库（宿主没给 listRecipes）" });
+      return true;
+    }
+    const all = await ctx.listRecipes();
+    /* 共享出去的那些，**给完整 JSON**（别人要能照着装 —— 与 `ding recipe export` 同一份形状） */
+    const shared = all.filter((r) => space.sharedRecipes.includes(r.id));
+    ctx.note(`共享模板：${shared.length} 份`);
+    json(res, 200, { recipes: shared, shared: space.sharedRecipes });
+    return true;
+  }
+
+  const recipeMatch = /^\/v1\/space\/recipes\/([^/]+)\/share$/.exec(path);
+  if (recipeMatch) {
+    if (!canManage(roles) && me !== space.roster.owner) {
+      ctx.note("模板共享被拒（不是主人/管理员）");
+      json(res, 403, { error: "只有空间主人/管理员能把模板共享出去" });
+      return true;
+    }
+    const recipeId = decodeURIComponent(recipeMatch[1]!);
+    if (req.method === "POST") {
+      if (!ctx.listRecipes) {
+        json(res, 501, { error: "这个服务没有接模板库（宿主没给 listRecipes）" });
+        return true;
+      }
+      const all = await ctx.listRecipes();
+      if (!all.some((r) => r.id === recipeId)) {
+        ctx.note(`没有这份模板：${recipeId}`);
+        json(res, 404, { error: `没有这份模板：${recipeId}` });
+        return true;
+      }
+      const sharedRecipes = space.sharedRecipes.includes(recipeId) ? space.sharedRecipes : [...space.sharedRecipes, recipeId];
+      ctx.store.write({ ...space, sharedRecipes });
+      ctx.note(`共享模板：${recipeId}`);
+      json(res, 200, { ok: true, sharedRecipes });
+      return true;
+    }
+    if (req.method === "DELETE") {
+      const sharedRecipes = space.sharedRecipes.filter((x) => x !== recipeId);
+      ctx.store.write({ ...space, sharedRecipes });
+      ctx.note(`取消共享模板：${recipeId}`);
+      json(res, 200, { ok: true, sharedRecipes });
+      return true;
+    }
   }
 
   /* ── 3.2：共享 / 接管 ─────────────────────────────────────────── */

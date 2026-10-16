@@ -5,6 +5,7 @@ import { mkdtempSync } from "node:fs";
 
 import { parseSse } from "../cli/cmdConnect";
 import { createSpaceStore } from "../../engine/adapters/spaceStore";
+import { mergeRecipes, resolveRecipeMode, validateRecipe } from "../../engine/core/recipes";
 import type { ServerOptions } from "./agentServer";
 import { boot, call, cleanupDirs, collectSse, stopEverything } from "./testKit";
 
@@ -416,6 +417,61 @@ describe("团队空间（V5-3 3.1/3.2/3.5）", () => {
       (await call(port, `/v1/channels/${encodeURIComponent("带 空格")}`, { method: "POST", headers: bridge, body: JSON.stringify({ from: "a", text: "x" }) }))
         .status,
     ).toBe(400);
+  });
+
+  it("⭐ 3.7 模板共享：主人共享 → 成员拉到本体 → 校验+合并（`ding recipe import` 那条路）→ 装得上", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "dh-rec-"));
+    const store = createSpaceStore(dir);
+    /* 主人机器上的模板（含一份**别人的**：归属随分享走） */
+    const mine = {
+      id: "weekly",
+      title: "周报",
+      description: "把一周的事写成简报",
+      prompt: "写一份本周简报",
+      tools: ["list_dir"],
+      owner: "local",
+    };
+    const { port, token } = await boot({ space: store, listRecipes: async () => [mine] });
+    const boss = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    /* 没共享时成员拉不到（空清单 + shared 也空） */
+    const code = JSON.parse((await call(port, "/v1/space/invite", { method: "POST", headers: boss, body: "{}" })).text).code as string;
+    const aliceToken = JSON.parse(
+      (
+        await call(port, "/v1/space/join", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code, memberId: "alice" }),
+        })
+      ).text,
+    ).token as string;
+    const alice = { Authorization: `Bearer ${aliceToken}`, "content-type": "application/json" };
+    expect((JSON.parse((await call(port, "/v1/space/recipes", { headers: alice })).text) as { recipes: unknown[] }).recipes).toEqual([]);
+
+    /* viewer 不能共享（要 owner/admin）；主人共享之后成员拉得到本体 */
+    expect((await call(port, "/v1/space/recipes/weekly/share", { method: "POST", headers: alice })).status).toBe(403);
+    expect((await call(port, "/v1/space/recipes/weekly/share", { method: "POST", headers: boss })).status).toBe(200);
+    const got = JSON.parse((await call(port, "/v1/space/recipes", { headers: alice })).text) as { recipes: Array<Record<string, unknown>> };
+    expect(got.recipes).toHaveLength(1);
+    expect(got.recipes[0]).toMatchObject({ id: "weekly", owner: "local" });
+
+    /* 「他人模板安装可用」：成员那边按 import 那条路校验 + 合并 —— 装得上、能跑 */
+    const imported = validateRecipe(got.recipes[0]);
+    expect(imported.ok).toBe(true);
+    if (imported.ok) {
+      const merged = mergeRecipes([imported.recipe]);
+      const mineCopy = merged.find((r) => r.id === "weekly");
+      expect(mineCopy?.title).toBe("周报");
+      expect(mineCopy?.owner, "归属要随模板一起过来（这是谁的模板）").toBe("local");
+      expect(resolveRecipeMode("全部允许", imported.recipe), "模板只能收紧不能放松").toBe("全部允许");
+      expect(resolveRecipeMode("按需确认", { ...imported.recipe, mode: "每步确认" })).toBe("每步确认");
+    }
+
+    /* 共享不存在的模板 → 404；没接模板库 → 501 */
+    expect((await call(port, "/v1/space/recipes/nope/share", { method: "POST", headers: boss })).status).toBe(404);
+    const bare = await boot();
+    expect((await call(bare.port, "/v1/space/recipes", { headers: { Authorization: `Bearer ${bare.token}` } })).status).toBe(501);
+    cleanupDirs.push(dir);
   });
 
   it("空间没接线：/v1/space/* 回 501（join 也一样 —— 不假装能入团）", async () => {

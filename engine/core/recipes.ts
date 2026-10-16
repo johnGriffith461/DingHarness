@@ -48,7 +48,18 @@ export type Recipe = {
   dirs?: string[];
   /** 作者（分享时写谁写的；不填就是"本机"）。 */
   author?: string;
+  /**
+   * **模板归谁**（V5-3 3.7；成员 id）。
+   *
+   * `author` 是"给人看的署名"，这一格是**归属**（与 C1 的会话归属、C5 的 actor
+   * 同一个 id 空间）—— 分享出去之后"这是谁的模板"要能查。
+   * 缺省 `local`（旧模板与手写文件的兼容口径）。
+   */
+  owner?: string;
 };
+
+/** 模板归属的默认值（本机用户；与 C1/C4/C5 同一个 id 空间）。 */
+export const LOCAL_RECIPE_OWNER = "local";
 
 /** 内置 Recipe（跟着产品走的几个；用户自己的从文件导入）。 */
 export const BUILTIN_RECIPES: readonly Recipe[] = [
@@ -127,6 +138,8 @@ export function validateRecipe(raw: unknown): { ok: true; recipe: Recipe } | { o
       ...(r.mode ? { mode: r.mode } : {}),
       ...(r.dirs?.length ? { dirs: [...r.dirs] } : {}),
       ...(typeof r.author === "string" && r.author.trim() ? { author: r.author.trim() } : {}),
+      /* 归属：坏值/缺省一律落本机（与 C1 的 owner 兼容口径一致） */
+      owner: typeof r.owner === "string" && r.owner.trim() ? r.owner.trim() : LOCAL_RECIPE_OWNER,
     },
   };
 }
@@ -164,6 +177,8 @@ export function recipeToJson(recipe: Recipe): string {
         ...(recipe.mode ? { mode: recipe.mode } : {}),
         ...(recipe.dirs ? { dirs: recipe.dirs } : {}),
         ...(recipe.author ? { author: recipe.author } : {}),
+        /* 归属**一定要导出去**（分享出去之后"这是谁的模板"要跟着走） */
+        owner: recipe.owner ?? LOCAL_RECIPE_OWNER,
       },
       null,
       2,
