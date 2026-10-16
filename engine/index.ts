@@ -120,6 +120,16 @@ export type EngineRunRequest = {
    * 这里是"这一句谁说的"，那里是"这段会话归谁"。
    */
   actor?: Actor;
+  /**
+   * **这段会话归谁**（C1，V5-1 3.5 加）。
+   *
+   * 只在**新建**会话那一刻生效（归属是创建时的事实，之后不再改）；
+   * 已有会话的归属与这里不同时，`append` 会拒绝并抛错（宿主把它当"这一轮落不了盘"报）。
+   *
+   * 缺省 = 不声明归属（存储按兼容口径落 `local`）—— 老宿主/老调用方零迁移成本。
+   * V5-2/3 的成员身份接上来之后，宿主会把真实成员传进来。
+   */
+  ownerActor?: Actor;
   abortSignal?: AbortSignal;
   /**
    * 宿主的**上屏出口**（可选，同步调用，与 `runTurn` 的 `onEvent` 同一个位置）。
@@ -166,8 +176,14 @@ export type EngineRunResult = {
 export type Engine = {
   /** 跑一轮，并把这一轮完整记进会话日志。 */
   run(request: EngineRunRequest): Promise<EngineRunResult>;
-  /** 从日志还原一段会话（重启之后把界面恢复到"那一刻的样子"）。 */
-  resume(sessionId: string): Promise<ResumedSession>;
+  /**
+   * 从日志还原一段会话（重启之后把界面恢复到"那一刻的样子"）。
+   *
+   * @param sessionId 会话 id
+   * @param opts.owner 归属校验（C1）：给了而与这段会话的 owner 不同 → 返回**空会话**
+   *   并置 `denied: "owner"`（不返回任何内容，也不说"它存在但不是你的"）
+   */
+  resume(sessionId: string, opts?: { owner?: string }): Promise<ResumedSession>;
   /** 重放一份快照并与它自己录下来的投影 diff（快照验收的执行器）。 */
   replay(fixture: Snapshot): Promise<SnapshotDiff>;
   /** 录一份快照（把一段会话的记录与投影一起存下来）。 */
@@ -226,7 +242,9 @@ export function createEngine(ports: EnginePorts): Engine {
             ...record,
             ...(record.actor ? {} : { actor: record.type === "request" ? requester : MAIN_AGENT }),
           } as LogInput;
-          const stored = await ports.store.append(request.sessionId, [tagged]);
+          const stored = await ports.store.append(request.sessionId, [tagged], {
+            ...(request.ownerActor ? { owner: request.ownerActor.id } : {}),
+          });
           records.push(...stored);
         } catch (error) {
           const why = error instanceof Error ? error.message : String(error);
@@ -358,8 +376,14 @@ export function createEngine(ports: EnginePorts): Engine {
       };
     },
 
-    async resume(sessionId: string): Promise<ResumedSession> {
-      const { records } = await ports.store.load(sessionId);
+    async resume(sessionId: string, opts?: { owner?: string }): Promise<ResumedSession> {
+      /*
+       * C1（V5-1 3.5）：给了 `opts.owner` 就校验归属 —— 陌生 owner **不返回内容**。
+       * 存储那一层回 `denied`（不抛错），这里把它翻成"空会话 + 说清原因"：
+       * 调用方拿到的不是"这段历史是空的"，而是"没有可给你的内容"。
+       */
+      const { records, denied } = await ports.store.load(sessionId, { ...(opts?.owner ? { owner: opts.owner } : {}) });
+      if (denied === "owner") return { turns: [], pending: [], runningDelegations: [], denied: "owner" };
       return resumeSession(records);
     },
 

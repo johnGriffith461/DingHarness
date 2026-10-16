@@ -42,7 +42,7 @@ import { adoptSearchBody } from "./sqliteSearch";
  */
 
 /** 会话库的**表结构版本**（最后一步迁移的版本号）。 */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** 一步迁移。 */
 export type MigrationStep = {
@@ -117,6 +117,21 @@ export const MIGRATIONS: readonly MigrationStep[] = [
       }
       if (!cols.some((c) => c.name === "actor_kind")) {
         db.exec("ALTER TABLE events ADD COLUMN actor_kind TEXT NOT NULL DEFAULT 'legacy'");
+      }
+    },
+  },
+  {
+    version: 4,
+    name: "会话归属（C1）",
+    apply: (db) => {
+      /*
+       * `owner` 默认 `'local'`：V5 §3.1 兼容矩阵的明文口径（"旧会话零迁移可读"）。
+       * 补列即完整迁移：老会话没有归属这个事实，默认成本机用户 —— **不编别的**。
+       * V5-2/3 的成员模型接上来之后，新会话会写真实成员 id（见 `AppendOptions.owner`）。
+       */
+      const cols = queryAll(db, "PRAGMA table_info(sessions)") as { name?: string }[];
+      if (!cols.some((c) => c.name === "owner")) {
+        db.exec("ALTER TABLE sessions ADD COLUMN owner TEXT NOT NULL DEFAULT 'local'");
       }
     },
   },

@@ -151,6 +151,14 @@ export type SessionSummary = {
   /** 最后写入时间（epoch ms）。 */
   updatedAt: number;
   bytes: number;
+  /**
+   * 这段会话归谁（C1，V5-1 3.5）。
+   *
+   * ⚠️ **可选**：老库补列之前没有这个字段，读出来一律按 `local`（兼容矩阵口径）。
+   * 本机单用户阶段恒为 `local`；V5-2 的 `?owner=` 过滤与 V5-3 的成员空间接上来之后
+   * 才会出现别的值。
+   */
+  owner?: string;
 };
 
 /**

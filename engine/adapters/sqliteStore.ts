@@ -11,7 +11,7 @@ import {
   type Actor,
   type LogRecord,
 } from "../core/events";
-import type { LogInputAt, SearchHit, SessionKind, SessionStore } from "../ports/store";
+import type { AppendOptions, LoadOptions, LogInputAt, SearchHit, SessionKind, SessionStore } from "../ports/store";
 import { excerptOf, prepareSearchIndex, searchBodyOf } from "./sqliteSearch";
 import { pendingMigrations, runMigrations } from "./sqliteSchema";
 import type { SessionSummary } from "../../shared/ipc";
@@ -270,11 +270,13 @@ export function createSqliteSessionStore(
   );
   const maxSeq = prep("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?");
   const upsertSession = prep(
-    `INSERT INTO sessions(id, kind, title, updated_at, bytes) VALUES(?, ?, ?, ?, ?)
+    `INSERT INTO sessions(id, kind, title, updated_at, bytes, owner) VALUES(?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET updated_at = ?, bytes = bytes + ?,
        title = CASE WHEN sessions.title = '' THEN excluded.title ELSE sessions.title END`,
   );
   const selectEvents = prep("SELECT payload FROM events WHERE session_id = ? ORDER BY seq ASC");
+  /** 这段会话归谁（C1）：不存在给 null。 */
+  const ownerOf = prep("SELECT owner FROM sessions WHERE id = ?");
   /*
    * 检索的两条路（见 search() 的说明）：
    *   · FTS：走倒排索引（英文/词形），`bm25` 让更相关的排前面；
@@ -315,9 +317,9 @@ export function createSqliteSessionStore(
      ORDER BY last_at DESC
      LIMIT ?`,
   );
-  const sessionById = prep("SELECT id, title, updated_at, bytes FROM sessions WHERE id = ?");
+  const sessionById = prep("SELECT id, title, updated_at, bytes, owner FROM sessions WHERE id = ?");
   const selectSessions = prep(
-    "SELECT id, title, updated_at, bytes FROM sessions ORDER BY updated_at DESC",
+    "SELECT id, title, updated_at, bytes, owner FROM sessions ORDER BY updated_at DESC",
   );
   const countSessions = prep("SELECT COUNT(*) AS n FROM sessions");
   const totalBytes = prep("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions");
@@ -448,7 +450,7 @@ export function createSqliteSessionStore(
   }
 
   return {
-    async append(sessionId: string, records: readonly LogInputAt[]): Promise<LogRecord[]> {
+    async append(sessionId: string, records: readonly LogInputAt[], opts?: AppendOptions): Promise<LogRecord[]> {
       if (!records.length) return [];
       const kind = kindOf(sessionId);
       const stored: LogRecord[] = [];
@@ -465,6 +467,23 @@ export function createSqliteSessionStore(
        */
       db.exec("BEGIN IMMEDIATE");
       try {
+        /*
+         * ⭐ C1（V5-1 3.5）：归属只对**新建**会话生效，且**冲突要拒绝**。
+         *
+         * · 调用方没给 owner（老路径）：什么都不查，行为与从前一致（本机单用户）。
+         * · 给了 owner：先看这段会话在不在。
+         *   - 不在 → 这次写入就是它的创建，owner 定下来（之后不再改：归属是创建时的事实）；
+         *   - 在且 owner 相同 → 正常追加；
+         *   - 在但 owner 不同 → **抛错拒绝**（不让 B 往 A 的会话里写）。
+         *     拒绝而不是静默改写：后者会让归属这条线永远说不清。
+         */
+        if (opts?.owner) {
+          const existing = (ownerOf.get(sessionId) as { owner?: string } | undefined)?.owner;
+          if (existing !== undefined && existing !== opts.owner) {
+            throw new Error(`会话归属冲突：${sessionId} 归 ${existing}，不是 ${opts.owner}（拒绝写入）`);
+          }
+        }
+
         const row = maxSeq.get(sessionId) as { m?: number } | undefined;
         let seq = Number(row?.m ?? 0);
         let bytes = 0;
@@ -512,7 +531,8 @@ export function createSqliteSessionStore(
          *   两个口径各管各的，谁也不许拿它冒充另一个。
          */
         const at = Date.now();
-        upsertSession.run(sessionId, kind, title, at, bytes, at, bytes);
+        /* owner 只在**新建**那一刻写进去（ON CONFLICT 那支不碰它 —— 首次写入者定归属） */
+        upsertSession.run(sessionId, kind, title, at, bytes, opts?.owner ?? "local", at, bytes);
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
@@ -521,7 +541,16 @@ export function createSqliteSessionStore(
       return stored;
     },
 
-    async load(sessionId: string): Promise<{ records: LogRecord[]; skipped: number }> {
+    async load(sessionId: string, loadOpts?: LoadOptions): Promise<{ records: LogRecord[]; skipped: number; denied?: "owner" }> {
+      /*
+       * C1（V5-1 3.5）：给了 owner 就校验归属 —— 陌生 owner **不返回内容**。
+       * 回空 + `denied` 而不是抛错：调用方按"没有内容"处理即可，
+       * 也不必从错误里反推"它存在但不是你的"（那本身也是信息泄漏）。
+       */
+      if (loadOpts?.owner) {
+        const owner = (ownerOf.get(sessionId) as { owner?: string } | undefined)?.owner;
+        if (owner !== undefined && owner !== loadOpts.owner) return { records: [], skipped: 0, denied: "owner" };
+      }
       const rows = selectEvents.all(sessionId) as { payload: string }[];
       const records: LogRecord[] = [];
       let skipped = 0;
@@ -656,7 +685,7 @@ export function createSqliteSessionStore(
     },
 
     async list(opts?: { kind?: SessionKind }): Promise<SessionSummary[]> {
-      const rows = selectSessions.all() as { id: string; title: string; updated_at: number; bytes: number }[];
+      const rows = selectSessions.all() as { id: string; title: string; updated_at: number; bytes: number; owner?: string }[];
       const out: SessionSummary[] = [];
       for (const row of rows) {
         const kind = kindOf(row.id);
@@ -668,6 +697,8 @@ export function createSqliteSessionStore(
           title: row.title,
           updatedAt: Number(row.updated_at),
           bytes: Number(row.bytes),
+          /* C1：归属跟着摘要一起给（老库补列后一律 'local'） */
+          owner: row.owner ?? "local",
         });
       }
       return out;

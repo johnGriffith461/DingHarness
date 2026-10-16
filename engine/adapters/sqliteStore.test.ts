@@ -785,3 +785,58 @@ describe('连接的默认设置：busy_timeout + WAL（审计 P39）', () => {
     expect(String(got?.journal_mode ?? '').toLowerCase(), '还停在原来的 journal 模式：一边写一边读会互相挡').toBe('wal');
   });
 });
+
+/**
+ * C1（V5-1 3.5）：会话归属。
+ *
+ * 三件事必须同时成立（V5 §3.2b 的 `sessions: + owner` 与 §3.1 的兼容矩阵）：
+ *   ① 老路径零迁移：不给 owner 的调用照旧，新会话落默认 `local`；
+ *   ② 新会话**必带归属**：第一次写入那一刻定下来，之后不再改（首次写入者定归属）；
+ *   ③ 跨 owner **拒绝**：写要拒（抛错、整批回滚）、读不返回内容（`denied`）。
+ */
+describe("C1：会话归属（owner）", () => {
+  it("⭐ 不给 owner = 老行为：新会话落 'local'，list 里看得见", async () => {
+    const store = openStore();
+    const sid = chatSessionId("owner-default");
+    await store.append(sid, [request("写一句")]);
+    const row = (await store.list()).find((x) => x.sessionId === sid);
+    expect(row?.owner, "默认归属不是 local").toBe("local");
+  });
+
+  it("⭐ 显式 owner：第一次写入定归属，之后的写入不刷它", async () => {
+    const store = openStore();
+    const sid = chatSessionId("owner-alice");
+    await store.append(sid, [request("alice 说的")], { owner: "alice" });
+    expect((await store.list()).find((x) => x.sessionId === sid)?.owner).toBe("alice");
+    /* 同一个 owner 继续写：正常 */
+    await store.append(sid, [ev({ type: "text", text: "继续" })], { owner: "alice" });
+    expect((await store.load(sid, { owner: "alice" })).records).toHaveLength(2);
+  });
+
+  it("⭐ 跨 owner 写入：拒绝（抛错），而且整批一个字节都没落", async () => {
+    const store = openStore();
+    const sid = chatSessionId("owner-conflict");
+    await store.append(sid, [request("alice 的会话")], { owner: "alice" });
+    await expect(store.append(sid, [ev({ type: "text", text: "bob 想插一句" })], { owner: "bob" })).rejects.toThrow(
+      /归属冲突/,
+    );
+    const { records } = await store.load(sid, { owner: "alice" });
+    expect(records, "被拒绝的那批写进去了").toHaveLength(1);
+  });
+
+  it("⭐ 跨 owner 读取：不返回内容（denied），也不在错误里泄漏「它存在」", async () => {
+    const store = openStore();
+    const sid = chatSessionId("owner-read");
+    await store.append(sid, [request("alice 的秘密")], { owner: "alice" });
+
+    const alien = await store.load(sid, { owner: "bob" });
+    expect(alien.records).toEqual([]);
+    expect(alien.denied).toBe("owner");
+
+    /* 本主读得到；不给 owner 的调用（老路径）照旧读得到 —— 兼容矩阵 */
+    expect((await store.load(sid, { owner: "alice" })).records).toHaveLength(1);
+    expect((await store.load(sid)).records).toHaveLength(1);
+    /* 不存在的会话：空，但**不是** denied（"没有"与"不是你的"要分得开） */
+    expect(await store.load("没这段", { owner: "bob" })).toEqual({ records: [], skipped: 0 });
+  });
+});

@@ -321,3 +321,41 @@ describe("C5：actor 两列（迁移 v3）", () => {
     raw.close();
   });
 });
+
+/**
+ * C1（V5-1 3.5）：v4 那一步给 `sessions` 加的 `owner`。
+ *
+ * 兼容矩阵的明文口径：**旧会话零迁移可读** —— 补列即完整迁移，老会话按 `local` 读。
+ */
+describe("C1：sessions.owner（迁移 v4）", () => {
+  it("⭐ 老库（没有 owner 列的会话行）：补列之后按 'local' 读，旧数据一字不动", async () => {
+    const file = path.join(dir, "sessions.db");
+    const raw = openSqlite(file);
+    raw.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, bytes INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, at INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', PRIMARY KEY (session_id, seq));
+    `);
+    const now = Date.now();
+    raw.prepare("INSERT INTO sessions(id, kind, title, updated_at, bytes) VALUES(?,?,?,?,?)").run(chatSessionId("legacy-owner"), "chat", "老会话", now, 10);
+    raw.close();
+
+    /* 打开 = 跑链（这份库有 pending） */
+    const store = openStore();
+    const row = (await store.list()).find((x) => x.sessionId === chatSessionId("legacy-owner"));
+    expect(row?.owner, "老会话的归属不是兼容口径的 local").toBe("local");
+    expect(row?.title, "补列把旧数据动了").toBe("老会话");
+  });
+
+  it("显式归属的新会话与老会话并存（迁移不碰新写入的归属）", async () => {
+    const store = openStore();
+    await store.append(chatSessionId("new-alice"), [
+      { seq: 1, at: Date.now(), requestId: "r", type: "request", messages: [{ role: "user", content: "x" }] } as never,
+    ], { owner: "alice" });
+    await store.append(chatSessionId("new-default"), [
+      { seq: 1, at: Date.now(), requestId: "r", type: "request", messages: [{ role: "user", content: "y" }] } as never,
+    ]);
+    const byId = new Map((await store.list()).map((x) => [x.sessionId, x.owner]));
+    expect(byId.get(chatSessionId("new-alice"))).toBe("alice");
+    expect(byId.get(chatSessionId("new-default"))).toBe("local");
+  });
+});

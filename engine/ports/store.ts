@@ -59,9 +59,10 @@ export type SessionStore = {
    *
    * @param sessionId 会话 id（宿主负责收窄；实现仍应自证一次）
    * @param records 还没分配 `seq` 的记录；**可以**自带原始 `at`（`LogInputAt`）
+   * @param opts 见 `AppendOptions`
    * @returns 落盘形态（带 `seq`/`at`），顺序与入参一致
    */
-  append(sessionId: string, records: readonly LogInputAt[]): Promise<LogRecord[]>;
+  append(sessionId: string, records: readonly LogInputAt[], opts?: AppendOptions): Promise<LogRecord[]>;
 
   /**
    * 读回一段会话。
@@ -69,10 +70,17 @@ export type SessionStore = {
    * ⚠️ 坏数据**只跳过它自己**，并把跳过数报出来（"写入被打断"不该让整段历史消失，
    * 也不该被静默吞掉）。这是现有 `parseLog` 的口径，端口把它固定下来。
    *
+   * ## C1（V5-1 3.5）：归属校验是这一层的事
+   *
+   * 给了 `opts.owner` 而这段会话的 owner 是**别人**时，回**空内容**并置 `denied` ——
+   * 不是抛错（调用方按"没有内容"处理即可，也不必知道"它存在但不是你的"）。
+   * 不给 `opts.owner` = 老行为（本机单用户，调用方隐含就是 owner）。
+   *
    * @param sessionId 会话 id
+   * @param opts 见 `LoadOptions`
    * @returns 记录（按 `seq` 升序）与跳过数；会话不存在时给空数组（不是错误）
    */
-  load(sessionId: string): Promise<{ records: LogRecord[]; skipped: number }>;
+  load(sessionId: string, opts?: LoadOptions): Promise<{ records: LogRecord[]; skipped: number; denied?: "owner" }>;
 
   /**
    * 按内容检索（Phase 12.4 的本地检索）。
@@ -139,6 +147,19 @@ export type SearchHit = SessionSearchHit;
 
 /** 会话种类。前缀语义取自 `engine/core/events.ts` 的 `SESSION_PREFIX`。 */
 export type SessionKind = "chat" | "task" | "cli";
+
+/**
+ * `append` 的选项（C1，V5-1 3.5）。
+ *
+ * `owner` 只对**新建**会话生效（第一次写入的那一刻定归属，之后不再改 ——
+ * "这段会话归谁"是创建时的事实，不是每次写入刷一遍的字段）。
+ * 对**已有**会话：owner 不同 → **拒绝**（抛错，消息里说清是归属冲突）；
+ * 不传 owner = 老行为（本机单用户；实现用默认 `local` 建库）。
+ */
+export type AppendOptions = { owner?: string };
+
+/** `load` 的选项（C1）：给了 `owner` 就做归属校验（陌生 owner 不返回内容）。 */
+export type LoadOptions = { owner?: string };
 
 /**
  * 一步到位建一个 store（宿主按自己的数据位置调它）。

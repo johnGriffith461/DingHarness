@@ -49,22 +49,41 @@ afterAll(async () => {
 });
 
 /** 假的会话库：记在内存里；可以按开关让 `append` 抛错（P38 要它）。 */
-function memoryStore(opts: { failAppend?: boolean } = {}): SessionStore & { all(): LogRecord[] } {
+function memoryStore(opts: { failAppend?: boolean } = {}): SessionStore & { all(): LogRecord[]; ownerOf(id: string): string | undefined } {
   const log: LogRecord[] = [];
+  const owners = new Map<string, string>();
   let seq = 0;
   return {
-    append: async (_sessionId: string, records: readonly LogInput[]) => {
+    append: async (sessionId: string, records: readonly LogInput[], appendOpts?: { owner?: string }) => {
       if (opts.failAppend) throw new Error("磁盘满了（测试造）");
+      /*
+       * C1 的口径照实现抄一份（首次写入定归属 + 冲突拒绝）——
+       * 这条假库要能替真库回答"内核有没有把 owner 传下来"。
+       */
+      if (appendOpts?.owner) {
+        const existing = owners.get(sessionId);
+        if (existing !== undefined && existing !== appendOpts.owner) throw new Error(`会话归属冲突：${sessionId}`);
+        owners.set(sessionId, appendOpts.owner);
+      } else if (!owners.has(sessionId)) {
+        owners.set(sessionId, "local");
+      }
       const stored = records.map((r) => ({ ...r, seq: (seq += 1), at: Date.now() }) as LogRecord);
       log.push(...stored);
       return stored;
     },
-    load: async () => ({ records: log, skipped: 0 }),
+    load: async (sessionId: string, loadOpts?: { owner?: string }) => {
+      const owner = owners.get(sessionId);
+      if (loadOpts?.owner && owner !== undefined && owner !== loadOpts.owner) {
+        return { records: [], skipped: 0, denied: "owner" as const };
+      }
+      return { records: log, skipped: 0 };
+    },
     search: async () => [],
     list: async () => [],
     prune: async () => ({ deleted: [], kept: 0 }),
     close: () => {},
     all: () => log,
+    ownerOf: (id: string) => owners.get(id),
   };
 }
 
@@ -198,5 +217,41 @@ describe("C5：actor 维度（谁写的）", () => {
       const delta = Buffer.byteLength(withActor_) - Buffer.byteLength(base);
       expect(delta, `actor=${JSON.stringify(actor)} 让每条记录胖了 ${delta} 字节`).toBeLessThanOrEqual(40);
     }
+  });
+});
+
+/**
+ * C1（V5-1 3.5）：会话归属。
+ *
+ * 这一层只管**两件接线**（校验本身在存储与 resume 的纯逻辑里，各有各的用例）：
+ *   · `run()` 把 `ownerActor` 传给存储（新会话的归属从这一刻定下来）；
+ *   · `resume(sessionId, {owner})` 把存储回的 `denied` **翻成"空会话 + 说清原因"**，
+ *     而不是让调用方以为"这段历史是空的"。
+ */
+describe("C1：会话归属（ownerActor / resume 校验）", () => {
+  it("⭐ run 给了 ownerActor：存储收到它（新会话的归属）", async () => {
+    const store = memoryStore();
+    await engineWith(store).run({ ...baseRequest("c1-owned"), ownerActor: { id: "alice", kind: "user" } });
+    expect(store.ownerOf("c1-owned"), "ownerActor 没有传到存储 —— 新会话的归属就丢了").toBe("alice");
+  });
+
+  it("不给 ownerActor：老路径照旧（存储按兼容口径落 local）", async () => {
+    const store = memoryStore();
+    await engineWith(store).run(baseRequest("c1-default"));
+    expect(store.ownerOf("c1-default")).toBe("local");
+  });
+
+  it("⭐ resume 跨 owner：不返回内容，并如实标 denied（不是「这段历史是空的」）", async () => {
+    const store = memoryStore();
+    const engine = engineWith(store);
+    await engine.run({ ...baseRequest("c1-read"), ownerActor: { id: "alice", kind: "user" } });
+
+    const alien = await engine.resume("c1-read", { owner: "bob" });
+    expect(alien.turns, "陌生 owner 拿到了内容").toEqual([]);
+    expect(alien.denied).toBe("owner");
+
+    /* 本主与老路径（不给 owner）都读得到 */
+    expect((await engine.resume("c1-read", { owner: "alice" })).turns.length).toBeGreaterThan(0);
+    expect((await engine.resume("c1-read")).denied).toBeUndefined();
   });
 });
