@@ -29,6 +29,7 @@
 import { MCP_TOOL_PREFIX } from "../../shared/mcp";
 import { isPluginTool } from "../runtime/plugins";
 import type { ConfirmMode } from "../../shared/ipc";
+import { rolesOf, type MemberRole } from "./members";
 
 /** 工具的读写性质 —— 决定"按需确认"档要不要拦它。 */
 export type ToolKind = "read" | "write";
@@ -171,6 +172,82 @@ export function decide(mode: ConfirmMode, name: string): Verdict {
  */
 export function injectableTools(mode: ConfirmMode, all: readonly string[]): string[] {
   return all.filter((name) => decide(mode, name) !== "hide");
+}
+
+/* ============================================================
+ * 人轴：成员角色（C2，V5-1 3.6b / 3.6c）
+ * ============================================================ */
+
+/** 两轴叠加之后的一次判定。 */
+export type MemberDecision =
+  | { verdict: "run" }
+  | { verdict: "ask" }
+  | { verdict: "hide" }
+  /** 工具轴这边会放行/待批，但**这个人**没这个权限 —— 直接拒（并回注人话）。 */
+  | { verdict: "deny"; notice: string };
+
+/**
+ * **两轴叠加矩阵**（ADR-007 的落点，逐条在 `policy.test.ts` 里有断言）。
+ *
+ * | 工具轴 \ 人轴 | owner | admin | specialist | viewer |
+ * |---|---|---|---|---|
+ * | `hide` | hide | hide | hide | hide |
+ * | 读 + `run` | run | run | run | run |
+ * | 读 + `ask` | ask | ask | ask | ask |
+ * | 写 + `run` | run | run | run | **deny** |
+ * | 写 + `ask` | ask | ask | ask | **deny** |
+ *
+ * 三句话概括这张表（ADR-007 里的"为什么"就是它们）：
+ *
+ * · **角色是上限，档位是旋钮**：档位只能在角色允许的范围内收紧或放松。
+ *   所以 viewer 的写操作在「全部允许」档下**也拒** —— 那一档说的是"我信这个模型"，
+ *   不是"改写文件的人是谁"。
+ * · **hide 与角色无关**：工具没注入给模型，跟"谁在用"没关系（模型根本不知道它存在）。
+ * · **读不受人轴影响**：只读操作对任何角色都一样（拦它只会让只读成员什么都干不了）。
+ *
+ * @param member 发起人（`undefined` = **不知道是谁** —— 本机单用户阶段按 owner 处理；
+ *   ⚠️ V5-2 把成员 token 映射接上之后，"未认证/查不到"一律按 **viewer** 处理，
+ *   那是多用户系统的安全默认 —— 这条边界记在 ADR-007 里，别混）
+ * @param mode 工具档位
+ * @param name 工具名
+ * @returns 判定（`deny` 带一句给模型的回注）
+ */
+export function decideForMember(
+  member: { roles: readonly MemberRole[] } | undefined,
+  mode: ConfirmMode,
+  name: string,
+): MemberDecision {
+  const tool = decide(mode, name);
+  if (tool === "hide") return { verdict: "hide" };
+  /* 不知道是谁（本机单用户）= owner：老路径一字不变 */
+  const roles: readonly MemberRole[] = member ? rolesOf(member) : ["owner"];
+  /* "只读成员" = 只有 viewer 这一个角色（多角色是并集，带 admin 的人当然能写） */
+  const onlyViewer = roles.length === 1 && roles[0] === "viewer";
+  if (onlyViewer && policyOf(name).kind === "write") {
+    /*
+     * ⭐ 这张表最有产品含义的一格（V5 §3.6 举的例子）：viewer 的写操作
+     * **直接拒**，不是"交给有权限的人批"。理由两条：
+     *   ① 让只读成员去点一个"允许"按钮，点了也不该生效 —— 那是把权限问题
+     *      伪装成审批问题（用户会以为"批了就能做"）；
+     *   ② 模型该**尽早**知道这条路走不通（错误即结果，Factor 9），
+     *      而不是花一轮去等一个不会成立的批准。
+     */
+    return { verdict: "deny", notice: viewerDeniedNotice(name) };
+  }
+  return { verdict: tool };
+}
+
+/**
+ * 「只读成员被拒」的那句话（给模型看的回注）。
+ *
+ * 为什么写这么直接：模型看到"被拒"之后**能做对的事**只有两件 ——
+ * 停下、或者把这件事交给有权限的人。所以这句话要同时说清"为什么"与"下一步"。
+ */
+export function viewerDeniedNotice(name: string): string {
+  return (
+    `「${name}」需要写权限，而当前成员是**只读成员**（viewer）：这次调用**没有执行**，直接拒绝。` +
+    `请不要重试；把这件事交给所有者/管理员，或请他们给这个成员相应的角色。`
+  );
 }
 
 /*

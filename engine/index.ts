@@ -8,6 +8,7 @@ import {
   type ResumedSession,
 } from "./core/events";
 import { diffSnapshot, snapshotOf, type Snapshot, type SnapshotDiff } from "./core/snapshot";
+import type { MemberRole } from "./core/members";
 import type { ExecutorContext, ToolExecutor } from "./ports/executor";
 import type { HealthStore } from "./ports/health";
 import { noopHealth } from "./ports/health";
@@ -130,6 +131,14 @@ export type EngineRunRequest = {
    * V5-2/3 的成员身份接上来之后，宿主会把真实成员传进来。
    */
   ownerActor?: Actor;
+  /**
+   * **发起人的角色**（C2，V5-1 3.6b）：人轴那一侧，与工具档位叠加判工具调用。
+   *
+   * 缺省 = 不声明（本机单用户）→ 按 **owner** 处理（老路径一字不变）。
+   * 判定规则与矩阵在 `engine/core/policy.ts` 的 `decideForMember` / ADR-007；
+   * ⚠️ V5-2 把成员 token 映射接上之后，"未认证/查不到"一律按 **viewer**（安全默认）。
+   */
+  memberRoles?: readonly MemberRole[];
   abortSignal?: AbortSignal;
   /**
    * 宿主的**上屏出口**（可选，同步调用，与 `runTurn` 的 `onEvent` 同一个位置）。
@@ -317,6 +326,8 @@ export function createEngine(ports: EnginePorts): Engine {
                   executor: ports.executor,
                   ctx,
                   ...(request.only?.length ? { only: request.only } : {}),
+                  /* 人轴（C2）：没声明就不传 —— 判定层按 owner 兜底（老路径） */
+                  ...(request.memberRoles?.length ? { memberRoles: request.memberRoles } : {}),
                 }),
                 maxSteps: request.maxSteps ?? 4,
               }

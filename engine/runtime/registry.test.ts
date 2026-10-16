@@ -75,3 +75,55 @@ describe("工具注册表", () => {
     expect(registry.list().filter((e) => e.name === "read_file")).toHaveLength(1);
   });
 });
+
+/**
+ * 两轴闸门接在**执行点**上（C2，V5-1 3.6c）。
+ *
+ * 判定层的矩阵在 `engine/core/policy.test.ts` 逐格钉着；这里要挡的是**接线**：
+ * `deny` 必须变成"没执行 + 抛出一句人话"（模型看到"失败"并知道别重试），
+ * 而**不是**一个 pending（那会让它等一个永远不会成立的批准）。
+ */
+describe("人轴接在执行点上（C5 之后：deny ≠ ask）", () => {
+  const executor = { run: async () => ({ ok: true, output: { ran: true } }) };
+  const ctx = { mode: "全部允许" as const, provider: "p" };
+
+  it("⭐ viewer 调写类工具：不执行、抛回注（不是 pending）", async () => {
+    let ran = 0;
+    const registry = createToolRegistry();
+    const tools = buildToolSet({
+      registry,
+      mode: "全部允许",
+      executor: { run: async () => ((ran += 1), { ok: true }) },
+      ctx,
+      memberRoles: ["viewer"],
+    });
+    await expect((tools.write_file!.execute as (v: unknown) => Promise<unknown>)({ path: "a.md" })).rejects.toThrow(
+      /只读成员/,
+    );
+    expect(ran, "被拒的调用还是执行了").toBe(0);
+  });
+
+  it("viewer 调**只读**工具：照常执行（人轴不该拦只读）", async () => {
+    const registry = createToolRegistry();
+    const tools = buildToolSet({ registry, mode: "全部允许", executor, ctx, memberRoles: ["viewer"] });
+    await expect((tools.read_file!.execute as (v: unknown) => Promise<unknown>)({ path: "a.md" })).resolves.toBeTruthy();
+  });
+
+  it("admin/owner/不给角色（老路径）：写类工具照常执行", async () => {
+    for (const memberRoles of [undefined, ["owner"] as const, ["admin"] as const, ["specialist"] as const]) {
+      const registry = createToolRegistry();
+      const tools = buildToolSet({ registry, mode: "全部允许", executor, ctx, ...(memberRoles ? { memberRoles } : {}) });
+      await expect(
+        (tools.write_file!.execute as (v: unknown) => Promise<unknown>)({ path: "a.md" }),
+        `角色 ${memberRoles?.join(",") ?? "(缺省)"} 被拦了`,
+      ).resolves.toBeTruthy();
+    }
+  });
+
+  it("viewer + 按需确认档：写类工具是**拒**（不是等确认），只读工具不拦", async () => {
+    const registry = createToolRegistry();
+    const tools = buildToolSet({ registry, mode: "按需确认", executor, ctx: { ...ctx, mode: "按需确认" }, memberRoles: ["viewer"] });
+    await expect((tools.write_file!.execute as (v: unknown) => Promise<unknown>)({ path: "a.md" })).rejects.toThrow(/只读成员/);
+    await expect((tools.read_file!.execute as (v: unknown) => Promise<unknown>)({ path: "a.md" })).resolves.toBeTruthy();
+  });
+});

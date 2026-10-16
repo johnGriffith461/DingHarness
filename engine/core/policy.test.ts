@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CONFIRM_MODES, normalizeConfirmMode } from "@shared/ipc";
 import {
   TOOL_POLICY,
   decide,
+  decideForMember,
   injectableTools,
   policyOf,
 } from "@engine/core/policy";
+import { MEMBER_ROLES, type MemberRole } from "@engine/core/members";
 import { pendingApprovalNotice } from "@engine/core/notices";
 import { pluginToolName } from "@engine/runtime/plugins";
 import { AGENT_TOOLS } from "@shared/agentTools";
@@ -152,5 +154,86 @@ describe("被拦下时回给模型的话", () => {
     expect(msg).toContain("按需确认");
     expect(msg).toContain("还没有执行");
     expect(msg).toContain("不要重试");
+  });
+});
+
+/**
+ * 两轴叠加矩阵（C2，V5-1 3.6b / 3.6c；ADR-007 的那张表**逐格**在这里）。
+ *
+ * 这一组是 C2 的核心证据：**工具档位 × 成员角色**的每一种组合都有明确判定 ——
+ * 而且 `deny`（人轴不够）与 `ask`（工具轴要问）必须分得开：
+ * 前者"没执行、也不等人批"，后者"等用户点一下"。
+ */
+describe("两轴矩阵：工具档位 × 成员角色（ADR-007）", () => {
+  /** 取一个角色的判定（用一个只读工具与一个写类工具各问一次）。 */
+  const verdict = (roles: MemberRole[], mode: Parameters<typeof decide>[0], name: string) =>
+    decideForMember({ roles }, mode, name).verdict;
+
+  const READ = "read_file";
+  const WRITE = "write_file";
+  /**
+   * `hide` 那一格要一个**被关掉的工具**。
+   *
+   * ⚠️ 内置工具目前一个都没有 `enabled:false`（"关掉某个工具"这条能力还没有界面入口），
+   * 所以这里**临时**往策略表里塞一条、用完删掉。为什么不用一个真的关掉的工具：
+   * 没有 —— 为了测这一格去编一个"默认关着的工具"才是更坏的事（产品里多一个幽灵状态）。
+   * 同一文件内的用例是顺序跑的，插完就删，不会漏给别的用例。
+   */
+  const HIDDEN = "__test_hidden_tool";
+  beforeEach(() => {
+    TOOL_POLICY[HIDDEN] = { kind: "write", enabled: false };
+  });
+  afterEach(() => {
+    delete TOOL_POLICY[HIDDEN];
+  });
+
+  it("⭐ 矩阵逐格：4 角色 × 5 种（hide / 读·写 × run·ask）", () => {
+    /* 期望值就照 ADR-007 那张表抄 —— 改判定必须同时改这里，改不动就说明矩阵漂了 */
+    const table: Record<MemberRole, { readRun: string; readAsk: string; writeRun: string; writeAsk: string; hidden: string }> = {
+      owner: { readRun: "run", readAsk: "ask", writeRun: "run", writeAsk: "ask", hidden: "hide" },
+      admin: { readRun: "run", readAsk: "ask", writeRun: "run", writeAsk: "ask", hidden: "hide" },
+      specialist: { readRun: "run", readAsk: "ask", writeRun: "run", writeAsk: "ask", hidden: "hide" },
+      /* ⭐ 唯一不同的一行：viewer 的写操作在两个档位下都 **deny**（角色是上限） */
+      viewer: { readRun: "run", readAsk: "ask", writeRun: "deny", writeAsk: "deny", hidden: "hide" },
+    };
+    for (const role of MEMBER_ROLES) {
+      const want = table[role];
+      expect(verdict([role], "全部允许", READ), `${role} × 读×全部允许`).toBe(want.readRun);
+      expect(verdict([role], "每步确认", READ), `${role} × 读×每步确认`).toBe(want.readAsk);
+      expect(verdict([role], "全部允许", WRITE), `${role} × 写×全部允许`).toBe(want.writeRun);
+      expect(verdict([role], "每步确认", WRITE), `${role} × 写×每步确认`).toBe(want.writeAsk);
+      expect(verdict([role], "全部允许", HIDDEN), `${role} × hide`).toBe(want.hidden);
+    }
+  });
+
+  it("⭐ viewer 被拒时带回注人话（说清为什么 + 下一步，模型不该重试）", () => {
+    const got = decideForMember({ roles: ["viewer"] }, "全部允许", WRITE);
+    expect(got.verdict).toBe("deny");
+    if (got.verdict !== "deny") return;
+    expect(got.notice).toContain("只读成员");
+    expect(got.notice).toContain(WRITE);
+    expect(got.notice, "没告诉模型不要重试").toContain("不要重试");
+    expect(got.notice, "没告诉模型下一步该找谁").toMatch(/所有者|管理员/);
+  });
+
+  it("角色是**并集**：带 admin 的多角色成员照样能写（不至于被 viewer 卡住）", () => {
+    expect(verdict(["viewer", "admin"], "全部允许", WRITE)).toBe("run");
+    expect(verdict(["viewer", "specialist"], "全部允许", WRITE)).toBe("run");
+  });
+
+  it("不知道是谁（本机单用户）= owner：老路径一个字都不变", () => {
+    for (const mode of ["全部允许", "按需确认", "每步确认"] as const) {
+      for (const name of [READ, WRITE]) {
+        expect(decideForMember(undefined, mode, name).verdict, `${mode} × ${name}`).toBe(decide(mode, name));
+      }
+    }
+  });
+
+  it("`ask` 与 `deny` 是两回事：ask 的 notice 说「等你确认」，deny 的 notice 说「没执行、别等」", () => {
+    const asked = decideForMember({ roles: ["admin"] }, "每步确认", WRITE);
+    const denied = decideForMember({ roles: ["viewer"] }, "每步确认", WRITE);
+    expect(asked.verdict).toBe("ask");
+    expect(denied.verdict).toBe("deny");
+    if (denied.verdict === "deny") expect(denied.notice).not.toContain("交给用户确认");
   });
 });

@@ -9,7 +9,8 @@ import {
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
 import { pendingApprovalNotice, toolFailedNotice } from "../core/notices";
-import { decide, injectableTools } from "../core/policy";
+import { decideForMember, injectableTools } from "../core/policy";
+import type { MemberRole } from "../core/members";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
 import { runHooks } from "./pluginHost";
 export { pluginToolEntries } from "./pluginHost";
@@ -149,6 +150,13 @@ export function buildToolSet(input: {
    */
   only?: readonly string[];
   /** 当前深度（给 `only` 之外的第二道限制用）。 */
+  /**
+   * **发起人的角色**（C2，V5-1 3.6b）：人轴那一侧。
+   *
+   * 缺省 = 不知道是谁（本机单用户）→ 按 owner 处理（老路径一字不变）。
+   * 人轴与工具轴叠加的规则在 `engine/core/policy.ts` 的 `decideForMember`（矩阵在 ADR-007）。
+   */
+  memberRoles?: readonly MemberRole[];
 }): ToolSet {
   const { registry, mode, executor, ctx } = input;
   const depth = ctx.depth ?? 0;
@@ -174,8 +182,25 @@ export function buildToolSet(input: {
         /*
          * 闸门在这里、执行在宿主。注意判定用的是**当前档位**而不是"建工具集时的档位" ——
          * 两者此刻相同（同一轮），但从这里读一次比闭包捕获更不容易在将来出错。
+         *
+         * ⭐ **两轴判定**（C2，V5-1 3.6b）：工具档位 × 发起人的角色。
+         * `deny`（人轴不够）与 `ask`（工具轴要问）是**两回事**：
+         * 前者**没有执行、也不会等人批**（等一个不会成立的批准 = 白花一轮，见 ADR-007）。
          */
-        if (decide(mode, entry.name) === "ask") {
+        const gate = decideForMember(
+          input.memberRoles ? { roles: input.memberRoles } : undefined,
+          mode,
+          entry.name,
+        );
+        if (gate.verdict === "deny") {
+          /*
+           * 拒绝走**抛错**那条路（与执行失败同一条）：投影会算成 `ok=false`、
+           * 留痕写"失败"、模型拿到这句人话（不变量 3：错误即结果）。
+           * 返回一个"正常载荷"会被当成"工具跑成功了"——那是最坏的一种谎。
+           */
+          throw new Error(gate.notice);
+        }
+        if (gate.verdict === "ask") {
           return { pending: true, notice: pendingApprovalNotice(entry.name, mode) };
         }
         /*
