@@ -241,7 +241,13 @@ export type GenerateImageResult =
 
 /** 图生图请求。 */
 export type EditImageRequest = {
-  /** 输入图：`dshasset://<name>` 或 `data:image/...;base64,...`（就是节点上的 src）。 */
+  /**
+   * 输入图，认三种（**就是节点上的 `src`**）：
+   *   · `dshasset://<名字>` —— 生成图（名字走 host，小写安全字符）；
+   *   · `dshasset://file/<origin>/<名字>` —— 云盘/产物/导出那侧（名字走 path，
+   *     percent 编码，`origin` 是 `artifact|export|drive|asset`，见 `serveAssets`）；
+   *   · `data:image/...;base64,...` —— 内联的图。
+   */
   source: string;
   /** 编辑指令（"把背景换成…" 这类）。 */
   prompt: string;
@@ -260,16 +266,39 @@ export type EditImageResult =
 /**
  * 把输入图读成 buffer。
  *
- * @param source `dshasset://<name>` 或 data URL
- * @returns PNG 字节；读不到返回 null
+ * ⚠️ `dshasset://` 有**两种形态**（见 `serveAssets` 的说明），这里两种都要认 ——
+ * 审计 P20（2026-10-16 的清尾项）：原来只认 `dshasset://<名字>`（host 传名，
+ * 生成图那条），而云盘/产物/导出那侧引用图给的是 `dshasset://file/<origin>/<名字>`
+ * （path 传名，名字可带 percent 编码）。于是"从云盘/产物引用来的图"当图生图
+ * 输入时永远回「读不到输入图」—— 典型的**半态**：显示侧（协议）早就能serve两种，
+ * 读回侧只认一种。修法：`file/` 形态复用显示侧同一份解析（`resolveOwnedFile`），
+ * 白名单目录与 `..` 穿越防护自动一致。
+ *
+ * @param source `dshasset://<名字>`、`dshasset://file/<origin>/<名字>` 或 data URL
+ * @returns PNG 字节；读不到返回 null（调用方据此回注人话）
  */
-function readSourceImage(source: string): Buffer | null {
+export function readSourceImage(source: string): Buffer | null {
   const text = String(source ?? "");
   if (text.startsWith(`${ASSET_SCHEME}://`)) {
-    const name = text.slice(`${ASSET_SCHEME}://`.length);
-    const file = resolveAsset(name);
-    if (!file) return null;
-    return fs.readFileSync(file);
+    const rest = text.slice(`${ASSET_SCHEME}://`.length);
+    try {
+      // `dshasset://file/<origin>/<名字>` —— 与 `serveAssets` 同一份解析与白名单
+      if (rest.startsWith("file/")) {
+        const parts = rest.slice("file/".length).split("/");
+        const file = resolveOwnedFile(parts[0] ?? "", parts.slice(1).join("/"));
+        return file ? fs.readFileSync(file) : null;
+      }
+      // `dshasset://<名字>` —— 生成图（名字走 host，小写安全字符）
+      const file = resolveAsset(rest);
+      return file ? fs.readFileSync(file) : null;
+    } catch {
+      /*
+       * 名字里有坏的 percent 编码（`decodeURIComponent` 会抛）、或文件读到一半没了 ——
+       * 都按"读不到"处理：这条路的契约是"给不出 buffer 就回 null"，抛出去会让
+       * `image:edit` 整条 IPC reject，用户看到的是另一种话。
+       */
+      return null;
+    }
   }
   const m = /^data:image\/[a-z+.-]+;base64,(.+)$/i.exec(text);
   if (m) return Buffer.from(m[1], "base64");
