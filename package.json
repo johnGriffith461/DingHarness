@@ -39,6 +39,8 @@
     "package:linux": "node scripts/stage-app.mjs && electron-builder --linux AppImage deb",
     "verify:remote": "tsx scripts/verify-remote.ts",
     "verify:team": "tsx scripts/verify-team.ts",
+    "sdk:build": "node scripts/build-sdk.mjs",
+    "verify:sdk": "node scripts/verify-sdk.mjs",
     "longtask:real": "tsx scripts/longtask-real.ts"
   },
   "pnpm": {

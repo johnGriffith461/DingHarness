@@ -4,6 +4,8 @@ dist/
 dist-electron/
 dist-cli/
 dist-bin/
+# SDK 包的构建产物（`pnpm sdk:build` 生成）
+packages/*/dist/
 
 release/
 data/
