@@ -1094,3 +1094,90 @@
   flex: 0 0 auto; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px;
   font-size: 10.5px; font-style: normal; color: var(--fg-dim); background: var(--bg-2);
 }
+
+/* ---------- 设置：整页（2026-10-16，照 ZCode —— 不是弹窗，是独占一屏的页面） ---------- */
+.wb-setfull {
+  position: fixed;
+  inset: var(--win-titlebar-h) 0 0 0; /* 自绘标题栏之下（窗口按钮仍可点） */
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 20px 18px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.wb-setfull-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.wb-setfull-bar b { font-size: 15px; }
+.wb-setfull-back {
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  color: var(--fg-dim); font-size: 12.5px; padding: 4px 10px; cursor: pointer;
+}
+.wb-setfull-back:hover { color: var(--fg); border-color: var(--line-strong); }
+/* 两列铺满整页（不再是弹窗里的 60vh） */
+.wb-setfull-body { flex: 1; min-height: 0; display: flex; gap: 16px; }
+.wb-setfull .wb-set-rail { width: 232px; max-height: none; }
+.wb-setfull .wb-set-panel { max-height: none; }
+.wb-setfull .wb-set-shell { flex: 1; min-height: 0; align-items: stretch; }
+
+/* ============================================================
+ * 设置整页（第二版，2026-10-16 —— 照 ZCode 那张对照图重做）
+ * ------------------------------------------------------------
+ * 上一版坏在三处（对照图上一眼可见）：行被挤成竖排、头像飘在外面、右侧没有标题与卡片。
+ * 这一版：左列 = 分组标题 + 图标行（选中是高亮条）；右列 = 大标题 + 说明 + 卡片。
+ * ============================================================ */
+.wb-setfull { padding: 0; }                                  /* 顶部横条自己带内边距 */
+.wb-setfull-bar { height: 48px; padding: 0 16px; margin: 0; border-bottom: 1px solid var(--bg-4); }
+.wb-setfull-body { padding: 0; gap: 0; }
+
+/* 左列：分区导航（ZCode 的宽度约 240，行高 34，选中圆角条） */
+.wb-setfull .wb-set-rail {
+  width: 248px;
+  padding: 12px 10px;
+  border-right: 1px solid var(--bg-4);
+  background: var(--bg-1, var(--surface));
+}
+.wb-set-group {
+  padding: 10px 10px 4px;
+  font-size: 11px;
+  color: var(--fg-faint, var(--fg-dim));
+  letter-spacing: 0.04em;
+}
+/* ⚠️ 行必须**单行**（上一版就是这里没约束，字被挤成一列） */
+.wb-setfull .wb-modal-group { margin: 0; }
+.wb-setfull .wb-modal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--fg);
+  text-align: left;
+}
+.wb-setfull .wb-modal-row:hover { background: var(--bg-2); }
+.wb-setfull .wb-modal-row.is-on { background: var(--bg-2); font-weight: 600; }
+.wb-setfull .wb-modal-row-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-setfull .wb-modal-row-icon { flex: 0 0 auto; display: inline-flex; }
+.wb-setfull .wb-modal-row em { font-size: 11.5px; font-style: normal; color: var(--fg-dim); white-space: nowrap; }
+.wb-setfull .wb-modal-row > svg:last-child { flex: 0 0 auto; color: var(--fg-faint, var(--fg-dim)); }
+/* 身份块：贴左列底部（不再飘在正文里） */
+.wb-setfull .wb-modal-avatar { display: none; }
+
+/* 右列：大标题 + 说明 + 卡片 */
+.wb-setfull .wb-set-panel { padding: 22px 28px; }
+.wb-set-title { margin: 0 0 4px; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+.wb-set-crumb { margin-bottom: 6px; padding-bottom: 0; border-bottom: none; }
+.wb-set-hint { padding: 2px 0 16px; font-size: 12.5px; color: var(--fg-dim); }
+/* 卡片：ZCode 里每块设置是一张卡（标签 + 说明 + 控件） */
+.wb-setfull .wb-modelset,
+.wb-setfull .wb-setpage,
+.wb-setfull .wb-page {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+}

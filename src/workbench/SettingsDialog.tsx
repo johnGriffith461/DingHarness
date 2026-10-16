@@ -14,6 +14,12 @@ import { useMemoryStore } from "./memoryStore";
 import MemoryPanel from "./MemoryPanel";
 import SettingsPages, { type SettingsSubPage } from "./SettingsPages";
 
+/** 左轨的两段（照 ZCode 的分段：能力在前、基础在后）。 */
+const GROUP_LABEL: Record<number, string> = {
+  0: "Agent 能力",
+  1: "基础设置",
+};
+
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   /*
    * 记忆面板的开合与真实条数。
@@ -120,12 +126,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
   ];
   return (
-    <div className="wb-modal-mask" onClick={onClose} data-testid="wb-settings">
-      <div className="wb-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="wb-setfull" data-testid="wb-settings">
+      {/* 整页顶部：返回 + 标题（ZCode 的设置也是一整页，顶部是它的层级区） */}
+      <div className="wb-setfull-bar">
+        <button className="wb-setfull-back" data-testid="wb-settings-back" onClick={onClose} aria-label="返回工作台" title="返回工作台">
+          ‹ 返回
+        </button>
+        <b>设置</b>
+        <span className="wb-spacer" />
+      </div>
+      <div className="wb-setfull-body">
         <button className="wb-modal-close" onClick={onClose} aria-label="关闭" title="关闭">
           <X size={15} />
         </button>
-        <div className="wb-modal-avatar" />
         <div className="wb-modal-name">
           本机用户 <ChevronRight size={13} />
         </div>
@@ -153,6 +166,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </label>
           {[0, 1].map((group) => (
             <div className="wb-modal-group" key={group}>
+            {/* 分组标题：ZCode 的左列是按组分段的（基础设置 / Agent 能力 / …） */}
+            <div className="wb-set-group" data-testid={`wb-set-group-${group}`}>
+              {GROUP_LABEL[group] ?? ""}
+            </div>
               {rows
                 .filter((r) => r.group === group && (!setQuery.trim() || r.label.includes(setQuery.trim())))
                 .map((r) => (
@@ -251,9 +268,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               }}
             />
             ) : (
-              <div className="wb-set-hint" data-testid="wb-set-hint">
-                左边选一项 —— 模型 / 记忆 / 插件·技能·伙伴 / 标准套餐 / 账户 / 通用 / 关于。
-              </div>
+              <>
+                <h1 className="wb-set-title" data-testid="wb-set-title">
+                  {sectionLabel || "设置"}
+                </h1>
+                <div className="wb-set-hint" data-testid="wb-set-hint">
+                  左边选一项 —— 模型 / 记忆 / 插件·技能·伙伴 / 标准套餐 / 账户 / 通用 / 关于。
+                </div>
+              </>
             )}
           </section>
         </div>
