@@ -12,6 +12,8 @@ import {
 } from "../../engine/core/space";
 import { emptySpaceFile, issueToken, type SpaceFile, type SpaceStore } from "../../engine/adapters/spaceStore";
 import { auditOf, auditQuery, auditSummary, type AuditEntry } from "../../engine/core/audit";
+import { ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
+import { sumUsage } from "../../shared/cost";
 import type { RequesterIdentity } from "./agentServer";
 
 /**
@@ -180,6 +182,40 @@ export async function handleSpaceRoute(
     });
     ctx.note(`审计：${hits.length} 条（共 ${entries.length} 条在册）`);
     json(res, 200, { entries: hits, summary: auditSummary(entries) });
+    return true;
+  }
+
+  /* 成本账本（V5-3 3.4）：按成员/按天/合计 —— 同样的 owner/admin 门 */
+  if (path === "/v1/usage" && req.method === "GET") {
+    const spaceU = spaceOf(ctx.store);
+    const rolesU = spaceRolesOf(spaceU, ctx.identity);
+    if (!ctx.identity.owner && !canManage(rolesU)) {
+      ctx.note(`账本被拒（${ctx.identity.id} 不是 owner/admin）`);
+      json(res, 403, { error: "成本账本只有所有者/管理员能查" });
+      return true;
+    }
+    if (!ctx.listSessions || !ctx.loadSession) {
+      ctx.note("账本未接线");
+      json(res, 501, { error: "这个服务没有接账本需要的会话库（宿主没给 listSessions/loadSession）" });
+      return true;
+    }
+    const sessions = await ctx.listSessions();
+    const entries: LedgerEntry[] = [];
+    for (const s of sessions) {
+      const got = await ctx.loadSession(s.sessionId);
+      /* 三层身份：account = 这段会话的归属（空间/账目）；end_user 由渠道那侧注入（这里没有） */
+      entries.push(...ledgerOf(got.records as never[], s.sessionId, { accountId: s.owner ?? "local" }));
+    }
+    const byMember = rollup(entries, "member");
+    const byDay = rollup(entries, "day");
+    const byAccount = rollup(entries, "account");
+    const all = rollup(entries, "session");
+    const total = {
+      turns: entries.length,
+      usage: sumUsage(entries.map((e) => e.usage)) ?? null,
+    };
+    ctx.note(`账本：${entries.length} 轮 / ${byMember.length} 名成员`);
+    json(res, 200, { total, byMember, byDay, byAccount, bySession: all });
     return true;
   }
 

@@ -147,3 +147,103 @@ describe("成本账本 · 汇总", () => {
     expect(line).toContain("↓5");
   });
 });
+
+/**
+ * 成本分摊（V5-3 任务 3.4）：**三层身份** + 按成员汇总（U8-4「花钱按人算得清」）。
+ *
+ * 关键口径：**账本不新记一份"谁花的"** —— 它取自那条 `request` 记录的 actor（C5）。
+ * 另记一份的话，钱与人对不上时会分不清信哪份。account / end_user 两层由宿主注入
+ * （会话归属 / 渠道发送者），不进记录（加记录字段是一次契约变更，见 ADR-0010 的门）。
+ */
+describe("3.4 · 成本分摊（按人算得清）", () => {
+  /** 造一轮「某人花的钱」（request 记录带 actor）。 */
+  function turnBy(n: number, actorId: string, usage: { inputTokens: number; outputTokens: number }, endUser?: string): LogRecord[] {
+    return [
+      {
+        seq: n,
+        at: T(n),
+        type: "request",
+        requestId: `r${n}`,
+        provider: "deepseek",
+        model: "deepseek-chat",
+        messages: [{ role: "user", content: "x" }],
+        actor: { id: actorId, kind: "user" },
+      },
+      {
+        seq: n + 1,
+        at: T(n + 1),
+        type: "done",
+        requestId: `r${n}`,
+        usage,
+        actor: { id: "main", kind: "agent" },
+        ...(endUser ? {} : {}),
+      },
+    ] as unknown as LogRecord[];
+  }
+
+  it("⭐ 按成员汇总：每人一行，条数与 token 各自算对（不混账）", () => {
+    const records = [
+      ...turnBy(1, "alice", { inputTokens: 100, outputTokens: 10 }),
+      ...turnBy(10, "bob", { inputTokens: 20, outputTokens: 2 }),
+      ...turnBy(20, "alice", { inputTokens: 300, outputTokens: 30 }),
+    ];
+    const entries = ledgerOf(records, "task-1");
+    const byMember = rollup(entries, "member");
+    const map = new Map(byMember.map((r) => [r.key, r]));
+    expect([...map.keys()].sort()).toEqual(["alice", "bob"]);
+    expect(map.get("alice")?.turns).toBe(2);
+    expect(map.get("alice")?.usage).toMatchObject({ inputTokens: 400, outputTokens: 40 });
+    expect(map.get("bob")?.usage).toMatchObject({ inputTokens: 20, outputTokens: 2 });
+    /* 总额 = 各人之和（账要平） */
+    const total = byMember.reduce((n, r) => n + (r.usage?.inputTokens ?? 0), 0);
+    expect(total).toBe(420);
+  });
+
+  it("老记录（actor=legacy）落「未署名」那一格 —— 不硬塞给某个人", () => {
+    const records = [
+      { seq: 1, at: T(1), type: "request", requestId: "r1", provider: "p", model: "m", messages: [{ role: "user", content: "x" }] },
+      { seq: 2, at: T(2), type: "done", requestId: "r1", usage: { inputTokens: 5, outputTokens: 1 } },
+    ] as unknown as LogRecord[];
+    const byMember = rollup(ledgerOf(records, "s"), "member");
+    /* 老记录读回 actor=legacy；那一格如实叫 legacy（不是"未署名" —— 它有自己的名字） */
+    expect(byMember.map((r) => r.key)).toEqual(["legacy"]);
+  });
+
+  it("⭐ 三层身份：account（空间/账目）与 end_user（渠道发送者）由宿主注入", () => {
+    const records = [...turnBy(1, "alice", { inputTokens: 10, outputTokens: 1 })];
+    const entries = ledgerOf(records, "task-1", { accountId: "local", endUserId: "wecom:zhangsan" });
+    expect(entries[0]?.accountId).toBe("local");
+    expect(entries[0]?.endUserId).toBe("wecom:zhangsan");
+    expect(rollup(entries, "account").map((r) => r.key)).toEqual(["local"]);
+    expect(rollup(entries, "endUser").map((r) => r.key)).toEqual(["wecom:zhangsan"]);
+
+    /* 不给这两格：如实落"未归属账目 / 本机对话"（不编一个值） */
+    const bare = ledgerOf(records, "task-1");
+    expect(rollup(bare, "account").map((r) => r.key)).toEqual(["(未归属账目)"]);
+    expect(rollup(bare, "endUser").map((r) => r.key)).toEqual(["(本机对话)"]);
+  });
+
+  it("cache tokens 分列：sumUsage 把缓存读 / 写分开算（不进 input 那份重复计）", () => {
+    const records = [
+      {
+        seq: 1,
+        at: T(1),
+        type: "request",
+        requestId: "r1",
+        provider: "p",
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        actor: { id: "alice", kind: "user" },
+      },
+      {
+        seq: 2,
+        at: T(2),
+        type: "done",
+        requestId: "r1",
+        usage: { inputTokens: 100, outputTokens: 5, cacheReadTokens: 60, cacheWriteTokens: 10 },
+      },
+    ] as unknown as LogRecord[];
+    const usage = rollup(ledgerOf(records, "s"), "member")[0]?.usage;
+    expect(usage).toMatchObject({ inputTokens: 100, outputTokens: 5, cacheReadTokens: 60, cacheWriteTokens: 10 });
+  });
+});

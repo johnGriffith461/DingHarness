@@ -1,4 +1,5 @@
 import { sumUsage, type StepUsage } from "../../shared/cost";
+import { actorOf, type Actor } from "./actor";
 import type { LogRecord } from "./events";
 
 /**
@@ -32,8 +33,27 @@ export type LedgerEntry = {
   at: number;
   provider: string;
   model: string;
-  /** provider 上报的用量（**一定存在**：没有它就不入账）。 */
+  /** provider 上报的用量（**一定存在**：没有它就不入账**）。 */
   usage: StepUsage;
+  /**
+   * **谁花的**（V5-3 3.4：三层身份里的"人"那一层）。
+   *
+   * 取自这条请求对应的 `request` 记录的 actor（C5）—— 老记录读回 `legacy`。
+   * 账本**不新记一份**：钱是"那一轮花的"，而"谁发起的那一轮"日志里已经有了。
+   */
+  actor?: Actor;
+  /**
+   * **哪个账目/空间花的**（三层身份里的 account 那一层）。
+   *
+   * ⚠️ 由宿主在 `ledgerOf` 时注入（会话归属 / 空间），**不进记录** ——
+   * 加记录字段是一次契约变更（ADR-0010 的门），而这一格是"账本怎么看"的事。
+   */
+  accountId?: string;
+  /**
+   * **外部渠道的终端用户**（三层身份里的 end_user：V5-3 3.6 的多渠道）。
+   * 同样由宿主注入（渠道处理器知道是谁发的消息）。
+   */
+  endUserId?: string;
 };
 
 /**
@@ -90,14 +110,24 @@ export type LedgerTotal = {
  * @param sessionId 会话 id（不给就从记录里推不出来，只有 provider/model 有意义）
  * @returns 入账清单（按发生顺序）
  */
-export function ledgerOf(records: readonly LogRecord[], sessionId = ""): LedgerEntry[] {
+export function ledgerOf(
+  records: readonly LogRecord[],
+  sessionId = "",
+  opts: { accountId?: string; endUserId?: string } = {},
+): LedgerEntry[] {
   /** requestId → 那次请求的落账信息（等 done 来配）。 */
-  const pending = new Map<string, { at: number; provider: string; model: string }>();
+  const pending = new Map<string, { at: number; provider: string; model: string; actor?: Actor }>();
   const out: LedgerEntry[] = [];
 
   for (const record of records) {
     if (record.type === "request") {
-      pending.set(record.requestId, { at: record.at, provider: record.provider, model: record.model });
+      /* 谁发起的那一轮（C5 的 actor）—— 账本按人汇总靠它，不另记一份 */
+      pending.set(record.requestId, {
+        at: record.at,
+        provider: record.provider,
+        model: record.model,
+        actor: actorOf(record as { actor?: Actor }),
+      });
       continue;
     }
     if (record.type !== "done") continue;
@@ -112,6 +142,9 @@ export function ledgerOf(records: readonly LogRecord[], sessionId = ""): LedgerE
       provider: head?.provider ?? "",
       model: head?.model ?? "",
       usage,
+      ...(head?.actor ? { actor: head.actor } : {}),
+      ...(opts.accountId ? { accountId: opts.accountId } : {}),
+      ...(opts.endUserId ? { endUserId: opts.endUserId } : {}),
     });
   }
   return out;
@@ -134,7 +167,7 @@ export function localDay(at: number): string {
  */
 export function rollup(
   entries: readonly LedgerEntry[],
-  by: "session" | "day" | "model",
+  by: "session" | "day" | "model" | "member" | "account" | "endUser",
   labelOf: (key: string) => string = (k) => k,
   /**
    * 目录表查询（可选）。给了就在汇总行上标出"未登记模型"并估算花费。
@@ -143,8 +176,14 @@ export function rollup(
   modelInfo?: (modelId: string) => ModelInfo,
 ): LedgerTotal[] {
   const groups = new Map<string, LedgerEntry[]>();
-  const keyOf = (e: LedgerEntry): string =>
-    by === "session" ? e.sessionId || "(未知会话)" : by === "day" ? localDay(e.at) : e.model || "(未登记模型)";
+  const keyOf = (e: LedgerEntry): string => {
+    if (by === "session") return e.sessionId || "(未知会话)";
+    if (by === "day") return localDay(e.at);
+    if (by === "member") return e.actor?.id || "(未署名)";
+    if (by === "account") return e.accountId || "(未归属账目)";
+    if (by === "endUser") return e.endUserId || "(本机对话)";
+    return e.model || "(未登记模型)";
+  };
 
   for (const entry of entries) {
     const key = keyOf(entry);

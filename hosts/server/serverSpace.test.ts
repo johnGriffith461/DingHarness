@@ -335,6 +335,43 @@ describe("团队空间（V5-3 3.1/3.2/3.5）", () => {
     cleanupDirs.push(dir);
   });
 
+  it("⭐ 3.4 账本端点：按成员汇总（U8-4「花钱按人算得清」）；viewer 403；没接线 501", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "dh-usage-"));
+    const store = createSpaceStore(dir);
+    const turn = (n: number, actorId: string, input: number) => [
+      { seq: n, at: n * 10, type: "request", requestId: `r${n}`, provider: "p", model: "m", messages: [{ role: "user", content: "x" }], actor: { id: actorId, kind: "user" } },
+      { seq: n + 1, at: n * 10 + 1, type: "done", requestId: `r${n}`, usage: { inputTokens: input, outputTokens: 1 } },
+    ];
+    const records = [...turn(1, "alice", 100), ...turn(3, "bob", 20), ...turn(5, "alice", 300)];
+    const { port, token } = await boot({
+      space: store,
+      listSessions: async () => [
+        { sessionId: "task-1", conversationId: "task-1", title: "t", updatedAt: 1, bytes: 1, owner: "local" },
+      ],
+      loadSession: async () => ({ records }),
+    });
+    const boss = { Authorization: `Bearer ${token}` };
+
+    const res = await call(port, "/v1/usage", { headers: boss });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.text) as {
+      total: { turns: number; usage: { inputTokens: number } };
+      byMember: Array<{ key: string; turns: number; usage: { inputTokens: number } }>;
+      byDay: Array<{ key: string }>;
+      byAccount: Array<{ key: string }>;
+    };
+    expect(body.total).toMatchObject({ turns: 3 });
+    expect(body.total.usage.inputTokens).toBe(420);
+    const byMember = new Map(body.byMember.map((r) => [r.key, r]));
+    expect(byMember.get("alice")).toMatchObject({ turns: 2 });
+    expect(byMember.get("alice")?.usage.inputTokens).toBe(400);
+    expect(byMember.get("bob")?.usage.inputTokens).toBe(20);
+    /* account 那一层 = 会话归属（本地 = local）；按天也有 */
+    expect(body.byAccount.map((r) => r.key)).toEqual(["local"]);
+    expect(body.byDay.length).toBeGreaterThan(0);
+    cleanupDirs.push(dir);
+  });
+
   it("空间没接线：/v1/space/* 回 501（join 也一样 —— 不假装能入团）", async () => {
     const { port, token } = await boot();
     const boss = { Authorization: `Bearer ${token}` };

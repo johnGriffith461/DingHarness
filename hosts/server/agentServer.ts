@@ -582,7 +582,7 @@ async function handle(
     }
 
     /* ── 团队空间与审计（V5-3 3.1/3.2/3.3/3.5）：整族路由在 `./spaceApi.ts` ── */
-    if (path.startsWith("/v1/space") || path === "/v1/audit") {
+    if (path.startsWith("/v1/space") || path === "/v1/audit" || path === "/v1/usage") {
       if (!opts.space) {
         note = "space 未接线";
         json(res, 501, { error: "这个服务没有接团队空间（宿主没把 space 账本交给它）" });
