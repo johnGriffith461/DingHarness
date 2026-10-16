@@ -1,0 +1,113 @@
+/*
+ * 左栏搜索（2026-10-17，V5 开工前清尾 §2.4 #3）。
+ *
+ * 那颗键原来是个**装饰**（disabled + "本机版是装饰：仿浏览器工具条"）；
+ * 现在它是真检索：打开一个挂在那颗键下面的面板（输入框 + 命中列表）。
+ * 组件在 `src/workbench/NavSearch.tsx`，检索那一套在 `sessionSearch.ts`。
+ *
+ * ⚠️ 单独一个区域文件而不是塞进 `workbench.css`：那个文件已经贴着
+ * `structureGuard` 的 1500 行上限（新功能该有自己的地方）。
+ * `@import` 的位置在 `workbench.css` 之后、`theme.css` 之前 ——
+ * 层叠顺序与其它左栏规则相邻。
+ */
+
+.wb-navsearch-wrap { position: relative; display: inline-flex; }
+
+.wb-navsearch {
+  position: absolute;
+  top: 30px;
+  right: -4px;
+  width: 320px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-popover);
+  z-index: 20;
+}
+
+.wb-navsearch-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: 12.5px;
+  /*
+   * ⚠️ 这里**不许**写 `outline: none`（P252：压掉全局焦点环要按输入模态补偿）——
+   * 键盘 Tab 进来靠的就是全局 `:focus-visible` 那一圈，正是要留着的。
+   */
+}
+
+.wb-navsearch-list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.wb-navsearch-empty {
+  padding: 8px 9px;
+  font-size: 12px;
+  color: var(--fg-3);
+  line-height: 1.5;
+}
+
+/* 行：可打开的（任务）是按钮；只读行同形但不带指针与悬停 —— 不给点不动的假按钮 */
+.wb-navsearch-hit {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-navsearch-hit.is-readonly { cursor: default; }
+.wb-navsearch-hit:not(.is-readonly):hover { background: var(--bg-2); }
+
+.wb-navsearch-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.wb-navsearch-head b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.wb-navsearch-kind {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
+.wb-navsearch-count {
+  flex: none;
+  color: var(--fg-3);
+  font-size: 10.5px;
+}
+
+.wb-navsearch-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  line-height: 1.5;
+}

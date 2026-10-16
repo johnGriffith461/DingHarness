@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Blocks, Sparkles, Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
+import { Search, Blocks, Sparkles, Brain, ChevronRight, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -161,7 +161,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       }${pinnedLabel(pinnedModel)}${pinnedDead ? "（不可用）" : ""}`,
     },
     /* 关于（§182）：只说本机这一份的事实 */    { group: 1, icon: <Info size={13} />, label: "关于", value: "" },
-    { group: 0, icon: <CircleDollarSign size={13} />, label: "订阅与额度管理", todo: "需要账号服务端，本机版没有" },
+    /*
+      2026-10-17（V5 开工前清尾 §2.4 #8）：原来这里还有一行「订阅与额度管理」
+      （`disabled` + "需要账号服务端，本机版没有"）。用户裁定这个功能**不需要**，
+      按"不留死控件"的纪律**移除**（不是留灰）。本机版没有任何订阅/额度后端，
+      用量是真数字、显示在输入区那颗用量弹层里（`UsagePopover`）。
+    */
     /*
       记忆：原来写着「本机版没有」+ 写死的"已启用" —— 那是**错的**。
       本体路由里有 `chat/memory/list|clear|delete`，它就是个真实功能，
@@ -230,10 +235,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 .map((r) => (
                   <div key={r.label}>
                     <button
-                      className={`wb-modal-row${r.todo ? " is-todo" : ""}`}
+                      className="wb-modal-row"
                       data-testid={`wb-set-${r.label}`}
-                      title={r.todo ?? ""}
-                      disabled={Boolean(r.todo)}
                       onClick={() => {
                         setSectionLabel(r.label);
                         if (r.label === "插件·技能·伙伴") {

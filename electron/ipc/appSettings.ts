@@ -52,6 +52,15 @@ export function appSettingsPath(): string {
 export type AppSettings = { pinnedModel: string; navCollapsed?: boolean };
 
 /**
+ * 磁盘上这份设置**允许**出现的键（与 `AppSettings` 一一对应）。
+ *
+ * 给诊断包用（`./diagnostics.ts`）：它把 settings.json 的**原文**按这张表比对 ——
+ * 手写进去的坏键会被 `normalizeAppSettings` 静默丢掉，而"我明明设了啊"就是从这里来的
+ * （与 CLI 那边 `CONFIG_KEYS` 同一个理由，审计 P202）。
+ */
+export const APP_SETTINGS_KEYS = ["pinnedModel", "navCollapsed"] as const;
+
+/**
  * 把落盘的（不可信）值收窄。
  *
  * @param raw 落盘的值

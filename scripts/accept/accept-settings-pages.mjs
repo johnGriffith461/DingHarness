@@ -40,6 +40,11 @@ try {
     标准套餐: document.querySelectorAll('[data-testid="wb-set-标准套餐"]').length,
     账号: document.querySelectorAll('[data-testid="wb-set-账号"]').length,
     记忆: document.querySelectorAll('[data-testid="wb-set-记忆"]').length,
+    /*
+     * §2.4 #8（2026-10-17）：用户裁定「订阅与额度管理」不需要 → 按"不留死控件"的
+     * 纪律**移除**（原来是一行 disabled + "需要账号服务端"）。这里钉住"它不该再出现"。
+     */
+    订阅额度残留: document.querySelectorAll('[data-testid="wb-set-订阅与额度管理"]').length,
   }));
 
   // 点「标准套餐」→ profile
@@ -68,6 +73,8 @@ try {
   await killTree(child);
   const bad = [];
   if ((out.rowsVisible?.账号 ?? 0) !== 1) bad.push("没有「账号」行");
+  /* §2.4 #8：那一行已移除（不是留灰） */
+  if ((out.rowsVisible?.订阅额度残留 ?? -1) !== 0) bad.push("「订阅与额度管理」那一行还在（清尾口径：移除）");
   if (!out.profilePage) bad.push("「标准套餐」没打开个人资料页");
   /*
    * ⚠️ 2026-10-16：原来这里断言「子页开了主列表就该消失」—— 那是**弹窗**时代的口径。

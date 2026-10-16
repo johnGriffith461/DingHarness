@@ -157,7 +157,11 @@ try {
   /*
    * ⚠️ `wb-unpin-*`（左栏置顶行上那个「取消置顶」的 ★）原来也没有脚本点过（§208）。
    * 断**后果**：点下去之后**行上的置顶标记真的没了**（不是"点了没报错"）。
-   * 顺带把左栏那颗装饰用的搜索键钉住：本机版没有它，**必须如实禁用并说明**（杜绝假按钮）。
+   *
+   * ⚠️ 2026-10-17 口径反转（V5 开工前清尾 §2.4 #3）：左栏那颗搜索键原来钉的是
+   * "本机版没做搜索，必须如实禁用并说明"；现在它**真做了** —— 接 Phase 12.4 的
+   * 会话全文检索（行为级回归在 `accept-navsearch.mjs`：真发一条消息→搜到→点开进任务）。
+   * 这里只断"它不该再禁用 + 点了要出搜索框"（离得近，顺手钉住开合）。
    */
   out.unpinCtrl = await page.locator('[data-testid="wb-unpin-t-yest"]').count();
   if (out.unpinCtrl === 1) {
@@ -169,6 +173,14 @@ try {
     const e = document.querySelector('[data-testid="wb-search"]');
     return e ? { title: e.getAttribute("title") ?? "", disabled: e.hasAttribute("disabled") } : null;
   });
+  out.navSearchOpens = false;
+  if (out.navSearch) {
+    await page.locator('[data-testid="wb-search"]').click();
+    await page.waitForTimeout(500);
+    out.navSearchOpens = (await page.locator('[data-testid="wb-navsearch-input"]').count()) === 1;
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+  }
 
   // 删除 → 那一行消失
   await page.locator('[data-testid="wb-threads-menu-t-30d"]').click({ force: true });
@@ -216,10 +228,12 @@ try {
   if (out.pinnedFlag !== 1) bad.push("点了「置顶」那一行上没有出现置顶标记");
   if (out.unpinCtrl !== 1) bad.push("左栏置顶行上没有「取消置顶」（wb-unpin-*）");
   if (out.pinnedFlagAfterUnpin !== 0) bad.push("点了「取消置顶」标记还在");
-  if (!out.navSearch) bad.push("左栏没有那颗（装饰用的）搜索键");
+  if (!out.navSearch) bad.push("左栏没有那颗搜索键（wb-search）");
   else {
-    if (!out.navSearch.disabled) bad.push("⭐ 本机版没做搜索，那颗键应当是 disabled 的");
-    if (!out.navSearch.title) bad.push("那颗 disabled 的搜索键没说为什么（title 为空）");
+    /* 口径见上面那段注释（2026-10-17 反转）：它已经真做了，不许再是禁用的装饰 */
+    if (out.navSearch.disabled) bad.push("⭐ 搜索键还是 disabled —— 它已经真做了（接入会话检索）");
+    if (!out.navSearch.title) bad.push("搜索键没说它是干什么的（title 为空）");
+    if (!out.navSearchOpens) bad.push("⭐ 点了搜索键没有出搜索框（wb-navsearch-input）");
   }
   if (!out.deletedGone) bad.push("删除后那一行还在");
   if (out.error) bad.push("异常: " + out.error);

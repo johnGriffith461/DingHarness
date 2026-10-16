@@ -16,6 +16,7 @@ import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
 import { registerArtifactIpc } from "./ipc/artifactStore";
+import { registerDiagnosticsIpc } from "./ipc/diagnostics";
 import { registerDriveIpc } from "./ipc/driveStore";
 import { registerScheduleIpc } from "./ipc/scheduleStore";
 import { registerDocIpc } from "./ipc/docStore";
@@ -416,6 +417,8 @@ safeRegister("canvas-export", () => registerCanvasExportIpc(), logRegisterFailur
 safeRegister("asset-scheme", () => registerAssetScheme(), logRegisterFailure);
 safeRegister("image", () => registerImageIpc(), logRegisterFailure);
 safeRegister("artifact", () => registerArtifactIpc(ipcMain), logRegisterFailure);
+/* 诊断包导出（2026-10-17）：技能面板「反馈」的真归宿（本地形态，不上报） */
+safeRegister("diagnostics", () => registerDiagnosticsIpc(ipcMain), logRegisterFailure);
 safeRegister("drive", () => registerDriveIpc(ipcMain, () => win), logRegisterFailure);
 safeRegister("memory", () => registerMemoryIpc(), logRegisterFailure);
 safeRegister("schedule", () => registerScheduleIpc(ipcMain), logRegisterFailure);

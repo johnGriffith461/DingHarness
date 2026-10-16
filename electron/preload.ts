@@ -25,6 +25,7 @@ import { VIDEO_CHANNEL } from "./ipc/videoGen";
 import { REMOTE_CHANNEL } from "./ipc/remote";
 import { WINDOW_CHANNEL } from "./ipc/windowControls";
 import { IMAGE_CHANNEL } from "./ipc/imageGen";
+import { DIAG_CHANNEL } from "./ipc/diagnostics";
 
 /**
  * 渲染进程唯一的 Node 能力入口。
@@ -266,6 +267,11 @@ const api = {
     write: (next: { pinnedModel: string; navCollapsed?: boolean }): Promise<{ pinnedModel: string; navCollapsed?: boolean }> =>
       ipcRenderer.invoke(APP_SETTINGS_CHANNEL.write, next),
   },
+  /** 诊断包导出（2026-10-17）：写盘 + 在文件管理器里定位，返回真实路径。 */
+  diagnostics: {
+    export: (): Promise<{ ok: true; path: string; bytes: number } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(DIAG_CHANNEL.export),
+  },
   coding: {
     loadLiked: (): Promise<string[]> => ipcRenderer.invoke(CODING_CHANNEL.read),
     saveLiked: (liked: string[]): Promise<boolean> => ipcRenderer.invoke(CODING_CHANNEL.write, liked),
@@ -318,6 +324,8 @@ const api = {
     /** 读回一整段会话的记录（投影在渲染层做，主进程不重复算一遍）。 */
     load: (sessionId: string): Promise<{ records: unknown[]; skipped: number }> =>
       ipcRenderer.invoke(SESSION_CHANNEL.load, sessionId),
+    /** 全文检索会话记录（Phase 12.4）：左栏那颗搜索键走它（结果里带命中的那一小段）。 */
+    search: (query: string) => ipcRenderer.invoke(SESSION_CHANNEL.search, query),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */

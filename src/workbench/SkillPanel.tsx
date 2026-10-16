@@ -57,11 +57,16 @@ function commandsFor(canvasOpen: boolean): Command[] {
     /*
      * 这六条是照本体命令区抄的，但**能不能点要逐条说清**（2026-10-14）：
      *   选择项目 / 工作模式设置 / 技能管理 / 创建画布 → 本机版都接得上（走 onPick）
-     *   用量 / 反馈 → 没有账号服务端与反馈通道，如实标成 todo
      * 原来六条全是死按钮（`onPick` 根本没接），用户点了没反应只会以为坏了。
+     *
+     * ⚠️ 2026-10-17（V5 开工前清尾 §2.4）：
+     *   · 「反馈」**真做**了 —— 本机版的反馈通道 = 导出诊断包（`feedbackExport.ts`，
+     *     复用 doctor 那套自检；不上报任何东西），所以它不再 disabled；
+     *   · 「用量」保留禁用态，但文案改成**诚实版**（"团队版可用"）——
+     *     它真的归宿是 V5-3 的成本账本（账本按成员/团队汇总），本机版这一格没后端。
      */
     { icon: Folder, label: "选择项目" },
-    { icon: Sparkles, label: "用量", todo: "需要账号服务端，本机版没有" },
+    { icon: Sparkles, label: "用量", todo: "团队版可用" },
     { icon: Settings, label: "工作模式设置" },
     { icon: ListTodo, label: "技能管理" },
     /*
@@ -75,7 +80,7 @@ function commandsFor(canvasOpen: boolean): Command[] {
       label: canvasOpen ? "收起画布" : "创建画布",
       hint: canvasOpen ? "回到对话与任务" : "在无限画布中自由创建图片与视频",
     },
-    { icon: HelpCircle, label: "反馈", hint: "发送有关此聊天的反馈", todo: "需要反馈通道，本机版没有" },
+    { icon: HelpCircle, label: "反馈", hint: "导出诊断包（本机版的反馈通道；不会自动上报）" },
   ];
 }
 

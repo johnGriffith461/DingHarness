@@ -67,6 +67,8 @@ export const SESSION_CHANNEL = {
   list: "session:list",
   /** 读回一整段会话的记录（渲染层自己投影成消息）。 */
   load: "session:load",
+  /** 全文检索会话记录（Phase 12.4；左栏搜索框走它）。 */
+  search: "session:search",
 } as const;
 
 /* ────────────────────── 桌面会话库 ────────────────────── */
@@ -192,5 +194,15 @@ export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
     const id = safeSessionId(sessionId);
     if (!id) return { records: [], skipped: 0 };
     return desktopSessionStore().load(id);
+  });
+  ipcMain.handle(SESSION_CHANNEL.search, async (_event, query: unknown) => {
+    await ready();
+    /*
+     * 渲染进程给的查询串**不可信**：非字符串当没给；掐到 200 字（检索词不该是长文，
+     * 而且超长串进 FTS 的引号包法会让查询白跑）。空串回空数组 —— 不是"全部"。
+     */
+    const q = typeof query === "string" ? query.trim().slice(0, 200) : "";
+    if (!q) return [];
+    return desktopSessionStore().search(q, { limit: 30 });
   });
 }

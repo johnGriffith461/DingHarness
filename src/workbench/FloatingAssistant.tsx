@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Minus, Sparkles, Square, Volume2, X } from "lucide-react";
+import { Mic, Minus, Square, Volume2, X } from "lucide-react";
+import { EFFORT_LABEL } from "@engine/runtime/protocols/reasoning";
 import { streamChat } from "@/ai/aiClient";
 import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import type { ShellBridge } from "@shared/ipc";
 import { extractFilePaths, fileContextBlock } from "./fileContext";
 import type { PathRead } from "./fileContextTypes";
+import { useEffortStore } from "./effortStore";
 import { uiError } from "@/canvas/uiError";
 
 /**
@@ -30,6 +32,10 @@ import { uiError } from "@/canvas/uiError";
  * 原来它们都是 `disabled` + 一句"本机版没有/还没做" —— 工单口径不允许留这种形态：
  * 要么实现、要么移除、要么降级成非交互元素。这三颗本机版都没有对应能力，所以移除。
  * 真做出来的时候它们会带着真能力回来（附件要走已经存在的那套导入通道）。
+ *
+ * ⚠️ 2026-10-17（V5 开工前清尾 §2.4）：底栏的「本地电脑」chip 也**移除**了
+ * （主输入区同款早删，这是漏网的一颗；用户裁定不需要），「低」从写死的装饰
+ * 改成读 `effortStore` 的真实档位（与主界面「思考」chip 同上）。
  */
 
 type Bubble = { id: string; role: "user" | "assistant"; text: string };
@@ -106,6 +112,8 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
   const [speaking, setSpeaking] = useState(false);
   const scroller = useRef<HTMLDivElement | null>(null);
   const seq = useRef(0);
+  /** 当前思考档位（与主输入区同一份状态；`undefined` = 各家默认，见 `effortStore`）。 */
+  const effort = useEffortStore((s) => s.effort);
   /** 上一次已经发出去的预填问题（**记文本而不是布尔**：浮窗开着时换了新问题也要发 —— P89）。 */
   const seeded = useRef("");
 
@@ -366,11 +374,18 @@ ${block}` : value;
               }}
             />
             <div className="wb-float-bar">
-              <button className="wb-chip">
-                <Sparkles size={12} /> 本地电脑
-              </button>
+              {/*
+                ⚠️ 2026-10-17（V5 开工前清尾 §2.4）：
+                · 那颗「本地电脑」chip **移除** —— 主输入区同款早就删了（默认就是它，
+                  留着没有可选项），浮窗这颗是漏网的；用户裁定这个功能不需要。
+                · 「低」原来是一颗**写死**的装饰（不反映真实思考档位）。现在读
+                  `effortStore`（与主输入区的「思考」chip、画布那处**同一份状态**）——
+                  显示的就是这一轮真会用的档位；改档位在主界面那颗 chip 上。
+              */}
               <span className="wb-spacer" />
-              <span className="wb-float-level">低</span>
+              <span className="wb-float-level" title="思考强度（在主界面的「思考」chip 里改）">
+                {effort ? `思考${EFFORT_LABEL[effort]}` : "思考默认"}
+              </span>
               <button
                 className="wb-icon"
                 aria-label="语音输入"

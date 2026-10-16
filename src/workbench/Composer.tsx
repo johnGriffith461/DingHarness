@@ -24,6 +24,7 @@ import { useDocStore } from "./docStore";
 import { readConfirmMode, saveConfirmMode } from "./confirmMode";
 import { Square } from "lucide-react";
 import SkillPanel from "./SkillPanel";
+import { runFeedbackCommand } from "./feedbackExport";
 
 import { CONFIRM_MODES } from "./uiUtil";
 import { UsagePopover } from "./UsagePopover";
@@ -751,10 +752,9 @@ export function Composer({
                   return false;
                 }
                 /* 技能管理：跳到插件页的**管理子页**（本体口径：直接进管理，不是先落市场） */
-                if (label === "技能管理") {
-                  setPluginsIntent("manage");
-                  setView("plugins");
-                }
+                if (label === "技能管理") { setPluginsIntent("manage"); setView("plugins"); }
+                /* 反馈：本机版的反馈通道 = 导出诊断包（§2.4 #7）—— 成功/失败都要说出来 */
+                if (label === "反馈") runFeedbackCommand(showMaterialNote);
                 if (label !== "选择项目" && label !== "工作模式设置") setOpenPop(null);
               }}
             />

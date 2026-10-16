@@ -153,6 +153,19 @@ export type SessionSummary = {
   bytes: number;
 };
 
+/**
+ * 会话检索命中的一条（Phase 12.4 的全文检索，2026-10-17 接到左栏搜索框上）。
+ *
+ * ⚠️ 形状与 `engine/ports/store.ts` 的 `SearchHit` **是同一个**（那边直接引用本类型）——
+ * 契约只有一份，两处各写一遍迟早漂移。
+ */
+export type SessionSearchHit = SessionSummary & {
+  /** 命中的那一小段（截断后的），给用户看"为什么这条被搜出来"。 */
+  excerpt: string;
+  /** 这条会话里命中了几处。 */
+  hits: number;
+};
+
 export type ChatStartResult = {
   requestId: string;
   ok: boolean;
@@ -627,6 +640,22 @@ export type ShellBridge = {
      */
     list: (kind?: "chat" | "task" | "cli" | "all") => Promise<SessionSummary[]>;
     load: (sessionId: string) => Promise<{ records: unknown[]; skipped: number }>;
+    /**
+     * 全文检索会话记录（Phase 12.4；左栏那颗搜索键走的就是它）。
+     *
+     * 检索的是**会话记录正文**（不是标题），FTS + LIKE 并集在 store 层做完，
+     * 这里只搬结果。空串查询回空数组（不是"全部"）。
+     */
+    search: (query: string) => Promise<SessionSearchHit[]>;
+  };
+  /**
+   * 诊断包导出（2026-10-17）。
+   *
+   * 「反馈」的本地形态：没有上报服务端，导出一个 JSON 诊断包（自检结果 + 版本/路径），
+   * 导出后主进程会在文件管理器里定位它。**不含任何密钥值**（回归里钉着这条）。
+   */
+  diagnostics: {
+    export: () => Promise<{ ok: true; path: string; bytes: number } | { ok: false; error: string }>;
   };
   /**
    * 插件（Phase 8.4）。

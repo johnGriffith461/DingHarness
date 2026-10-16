@@ -152,8 +152,13 @@ try {
    * ── 命令区那六条：**能不能点要逐条说清**（2026-10-14）──
    *
    * 原来六条全是死按钮（`onPick` 从来没接）：点了没反应，用户只会以为坏了。
-   * 现在有后端的接上（选择项目 / 工作模式设置 / 技能管理 / 创建画布），
-   * 没后端的如实禁用并写明原因（用量 / 反馈）。
+   * 现在有后端的接上（选择项目 / 工作模式设置 / 技能管理 / 创建画布 / **反馈**），
+   * 没后端的如实禁用并写明原因（只剩 **用量** —— 它的真归宿是 V5-3 的成本账本）。
+   *
+   * ⚠️ 2026-10-17（V5 开工前清尾 §2.4 #7）：「反馈」从"如实禁用"变成**真做** ——
+   * 本机版的反馈通道 = 导出诊断包（`src/workbench/feedbackExport.ts` →
+   * `electron/ipc/diagnostics.ts`，自检项复用 doctor）。下面那段就是它的行为级回归：
+   * 点了要有提示条、提示条里要有**真实路径**、那个文件要**真的在盘上**。
    */
   out.commands = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-testid^="wb-cmd-"]')).map((e) => ({
@@ -162,6 +167,20 @@ try {
       reason: e.getAttribute("title") ?? "",
     })),
   );
+  /* 反馈：点下去 → 提示条给出真实路径 → 诊断包真的写出来了 */
+  out.feedbackNote = null;
+  out.feedbackFile = null;
+  if (out.commands.some((c) => c.label === "反馈" && !c.disabled)) {
+    await page.locator('[data-testid="wb-cmd-反馈"]').click();
+    await page.waitForTimeout(1200);
+    out.feedbackNote = (await page.locator('[data-testid="wb-material-note"]').textContent().catch(() => "")) ?? "";
+    const dir = `${DATA}/diagnostics`;
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+    out.feedbackFile = files.find((f) => f.endsWith(".json")) ?? null;
+    /* 点完一条命令面板会自己关（`onPick` 之后 onClose）—— 后面的「技能管理」要重新打开它 */
+    await page.locator('[data-testid="wb-skills"]').click();
+    await page.waitForTimeout(700);
+  }
   /* 「技能管理」应当**直接落到插件页的管理子页**（不是先落市场） */
   await page.locator('[data-testid="wb-cmd-技能管理"]').click();
   await page.waitForTimeout(1200);
@@ -287,6 +306,21 @@ try {
   }
   if (!cmds.some((c) => c.label === "用量" && c.disabled && c.reason)) {
     bad.push("「用量」本该如实禁用并说明（本机版没有账号服务端）");
+  }
+  /*
+   * 「反馈」2026-10-17 起是真能力（V5 开工前清尾 §2.4 #7）：点了要出提示条、
+   * 提示条里要有真实路径、诊断包要真的写进数据目录。
+   */
+  if (!cmds.some((c) => c.label === "反馈" && !c.disabled)) {
+    bad.push("⭐「反馈」本该能点（本机版反馈通道 = 导出诊断包）");
+  }
+  if (cmds.some((c) => c.label === "反馈" && !c.disabled)) {
+    if (!String(out.feedbackNote ?? "").includes("诊断包")) {
+      bad.push(`点「反馈」没有给出「诊断包…」的提示条（实际：${JSON.stringify(out.feedbackNote)}）`);
+    }
+    if (!out.feedbackFile) {
+      bad.push("点「反馈」之后数据目录的 diagnostics/ 里没有诊断包文件");
+    }
   }
   if (!cmds.some((c) => c.label === "技能管理" && !c.disabled)) {
     bad.push("「技能管理」本该能点（本机版接得上）");

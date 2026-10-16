@@ -363,6 +363,7 @@ const CASES = [
   ["accept-settings-pages.mjs", "设置子页（个人资料 / 账号 / 返回）"],
   ["accept-shortcuts.mjs", "左栏全局快捷键（Ctrl N / Ctrl Shift T·S·D）"],
   ["accept-threads.mjs", "管理历史对话（分档 / 摘要 / 行内操作 / 刷新后仍在）"],
+  ["accept-navsearch.mjs", "左栏搜索（真发一条→搜得中→点开进任务；后退/前进已移除）"],
   ["accept-suggestions.mjs", "首页推荐卡（三段结构 / 一列竖排 / 与标签对齐）"],
   ["accept-nodemenu.mjs", "画布节点右键菜单（画布操作）"],
   ["accept-layers.mjs", "画布图层操作（画布操作）"],

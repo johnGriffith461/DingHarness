@@ -14,7 +14,6 @@ import {
   FolderMinus,
   ListTodo,
   Minus,
-  MoreHorizontal,
   Pencil,
   Pin,
   Settings,
@@ -30,6 +29,7 @@ import { shortcutFor } from "./shortcuts";
 import AccountMenu from "./AccountMenu";
 import ContextMenu, { clampMenu } from "./ContextMenu";
 import { BrandMark } from "./brandMark";
+import { NavSearch } from "./NavSearch";
 
 import { setNoteIfAny } from "./uiUtil";
 import { SettingsDialog } from "./SettingsDialog";
@@ -150,17 +150,15 @@ export function NavSidebar() {
 
   return (
     <aside className={`wb-nav${navCollapsed ? " is-collapsed" : ""}`} data-testid="wb-nav">
+      {/*
+        ⚠️ 2026-10-17（V5 开工前清尾 §2.4）：这里原来还有「后退」「前进」两颗
+        **永久禁用**的浏览器式按钮（"仿浏览器工具条"）。Ding 不是浏览器 ——
+        历史导航这个概念在左栏+画布的结构里不成立，处置是**移除**（不是留灰）。
+        「搜索」那颗留下了：它从装饰变成了真检索（`NavSearch`，走 Phase 12.4 的会话检索）。
+      */}
       <div className="wb-nav-head">
         <BrandMark />
-        <button className="wb-icon" aria-label="后退" title="后退" disabled>
-          <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
-        </button>
-        <button className="wb-icon" aria-label="前进" title="前进" disabled>
-          <ChevronRight size={14} />
-        </button>
-        <button className="wb-icon" aria-label="搜索" title="搜索（本机版是装饰：仿浏览器工具条）" data-testid="wb-search" disabled>
-          <MoreHorizontal size={14} />
-        </button>
+        <NavSearch />
       </div>
 
       <nav className="wb-nav-list">

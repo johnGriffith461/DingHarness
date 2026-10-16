@@ -10,6 +10,12 @@
 @import "./styles/canvas.css";
 @import "./styles/canvas-nodes.css";
 @import "./styles/workbench.css";
+/*
+ * 左栏搜索（2026-10-17，V5 开工前清尾 §2.4 #3）：新功能自己的区域文件，
+ * 挨着 workbench.css 放 —— 与 `ding-harness-shell.css` 同一个理由
+ * （workbench.css 已贴着结构守卫的 1500 行上限）。**不动**既有那几行的顺序。
+ */
+@import "./styles/navsearch.css";
 @import "./styles/theme.css";
 @import "./styles/panels.css";
 @import "./styles/features.css";

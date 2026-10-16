@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, failOnMarks, freshDir, killTree, pickPort, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, failOnMarks, freshDir, killTree, pickPort, shot, verdict } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
 failOnMarks();
@@ -11,6 +11,11 @@ failOnMarks();
  * `05-top-icon3.png`）：
  *   · 产物在对话流里是一张卡片（标题 + 创建时间 + 打开），不只是右侧面板里的一行；
  *   · 悬浮窗可拖拽、自带输入区、**问一句答一句但不建任务**。
+ *
+ * ⚠️ 2026-10-17 补（V5 开工前清尾 §2.4 #4/#5）：这份脚本原来**只有 JSON 报告、没有判定**
+ * （批跑分类把它算 `no-judge` = 跑通但没测）。现在逐条落成 `bad`/`verdict`，并补上这次
+ * 清尾的两条：浮窗底栏的「本地电脑」chip **已移除**；「思考X」那一格与主输入区**同源**
+ * （选「高」之后浮窗显示的必须也是「思考高」，不许是写死的装饰）。
  */
 const DATA = ".verify/float-data";
 /*
@@ -34,6 +39,7 @@ await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
 await page.waitForTimeout(1500);
 
 const report = {};
+const bad = [];
 
 /* ---------- 悬浮助手窗 ---------- */
 // 先建一个任务，任务视图里才有顶栏图标
@@ -49,11 +55,24 @@ await page.waitForTimeout(2000);
 
 const tasksBeforeFloat = await page.locator('[data-testid^="wb-recent-"]').count();
 
+/* 思考档位：在主输入区选「高」—— 下面用浮窗那一格来验"两处同源"（§2.4 #5） */
+await page.locator('[data-testid="wb-effort"]').click();
+await page.waitForTimeout(400);
+if ((await page.locator('[data-testid="wb-effort-high"]').count()) === 1) {
+  await page.locator('[data-testid="wb-effort-high"]').click();
+}
+await page.waitForTimeout(400);
+
 await page.locator('[data-testid="wb-float-open"]').click();
 await page.waitForTimeout(800);
 report.floatOpened = await page.locator('[data-testid="wb-float"]').count();
 report.floatUser = await page.locator('[data-testid="wb-float-user"]').textContent().catch(() => null);
 report.floatEmptyShown = await page.locator(".wb-float-empty").count();
+report.floatLevel = ((await page.locator(".wb-float-level").textContent().catch(() => "")) ?? "").trim();
+report.floatLocalChip = await page.evaluate(() => {
+  const bar = document.querySelector(".wb-float-bar");
+  return bar ? (bar.textContent ?? "").includes("本地电脑") : null;
+});
 
 // 拖一下：面板位置应改变
 const before = await page.evaluate(() => {
@@ -137,6 +156,27 @@ report.afterOpenNote = await page.locator('[data-testid^="wb-artcard-"]').first(
 
 await shot(page, ".verify/shots-final/wb-17-artcard.png");
 
+/* ---------- 判定（原来只有 JSON 报告 —— no-judge = 在批跑里等于没测） ---------- */
+if (report.floatOpened !== 1) bad.push("悬浮窗打不开（wb-float）");
+if (!report.floatDrag?.moved) bad.push("浮窗拖不动（拖了标题栏位置没变）");
+if (!(report.floatReplyLength > 12)) bad.push(`浮窗问了一句没有回答（收到 ${report.floatReplyLength} 字）`);
+if ((report.taskCountUnchanged?.before ?? -1) !== (report.taskCountUnchanged?.after ?? -2)) {
+  bad.push(`浮窗问一句不该建任务，可左侧「最近」从 ${report.taskCountUnchanged?.before} 变成了 ${report.taskCountUnchanged?.after}`);
+}
+if (report.floatClosed !== 0) bad.push("浮窗关不掉（点了关闭还在）");
+/* §2.4 #4：底栏那颗「本地电脑」chip 已移除（主输入区同款早删，这是漏网的一颗） */
+if (report.floatLocalChip !== false) bad.push("浮窗底栏还挂着「本地电脑」chip（清尾口径：移除）");
+/* §2.4 #5：那一格要与主输入区**同源** —— 上面选了「高」，这里必须显示「思考高」 */
+if (!String(report.floatLevel).includes("思考高")) {
+  bad.push(`浮窗那一格没跟着真实档位（选了「高」，实际显示 ${JSON.stringify(report.floatLevel)}）`);
+}
+if (!(report.artifactCards > 0)) bad.push("没有出现产物卡（wb-artcard-*）");
+if (!report.cardHasCreatedTime) bad.push("产物卡上没有「创建时间」");
+if (!(report.cardInsideStream > 0)) bad.push("产物卡不在对话流里（右侧面板那种不算）");
+if (!report.cardKindAttr) bad.push("产物卡上没有 data-office-artifact-card-kind 属性");
+
 console.log(JSON.stringify(report, null, 2));
 await browser.close();
 await killTree(booted.child);
+
+verdict(bad, "浮窗（拖拽 / 不建任务 / 档位同源 / 本地电脑已移除）+ 产物卡在对话流里");

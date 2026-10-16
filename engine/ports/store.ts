@@ -1,5 +1,5 @@
 import type { LogInput, LogRecord } from "../core/events";
-import type { SessionSummary } from "../../shared/ipc";
+import type { SessionSearchHit, SessionSummary } from "../../shared/ipc";
 
 /**
  * 会话事件存储的端口（Phase 1 D1 冻结）。
@@ -128,13 +128,14 @@ export type SessionStore = {
   close(): void;
 };
 
-/** 检索命中的一条：会话摘要 + 在哪一句命中的。 */
-export type SearchHit = SessionSummary & {
-  /** 命中的那一小段（截断后的），给用户看"为什么这条被搜出来"。 */
-  excerpt: string;
-  /** 这条会话里命中了几处。 */
-  hits: number;
-};
+/**
+ * 检索命中的一条：会话摘要 + 在哪一句命中的。
+ *
+ * ⚠️ 2026-10-17 起**定义搬到 `shared/ipc.ts`**（`SessionSearchHit`）：
+ * 这条记录要经 IPC 走到渲染层（左栏搜索框），契约只有一份，
+ * 两处各写一遍迟早漂移。这里保留 `SearchHit` 这个名字给端口用。
+ */
+export type SearchHit = SessionSearchHit;
 
 /** 会话种类。前缀语义取自 `engine/core/events.ts` 的 `SESSION_PREFIX`。 */
 export type SessionKind = "chat" | "task" | "cli";
