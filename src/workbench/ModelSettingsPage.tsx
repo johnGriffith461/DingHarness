@@ -87,11 +87,15 @@ export function modelsForProvider(
 
 export function ModelSettingsPage() {
   const [providers, setProviders] = useState<
-    Array<{ id: string; label: string; models: string[]; available: boolean; verified?: boolean; note?: string }>
+    Array<{ id: string; label: string; models: string[]; available: boolean; verified?: boolean; note?: string; keyRef?: string }>
   >([]);
   const [active, setActive] = useState("");
   const [pulling, setPulling] = useState<{ id: string; note: string } | null>(null);
   const [store, setStore] = useState<Store>(() => readModelSettings());
+  /** 正在输入的密钥（**保存后立刻清空**：值不留在前端）。 */
+  const [keyDraft, setKeyDraft] = useState("");
+  /** 保存结果（成功 / 失败原因，原样来自主进程）。 */
+  const [keyNote, setKeyNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -116,6 +120,33 @@ export function ModelSettingsPage() {
     const merged = { ...got, ...next };
     setStore({ ...store, [active]: merged });
     saveProviderModels(active, merged);
+  };
+
+  /** 存这一家的密钥（走 `secrets:set` → safeStorage 加密写；拿不到能力就拒绝写）。 */
+  const saveKey = (): void => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    const refName = current?.keyRef ?? "";
+    if (!value0() || !refName) {
+      setKeyNote({ ok: false, text: refName ? "先填一条密钥" : "这家没有可写的密钥名（表里没登记）" });
+      return;
+    }
+    if (!shell?.secrets?.set) {
+      setKeyNote({ ok: false, text: "写密钥要在本应用里用（浏览器预览没有 IPC）" });
+      return;
+    }
+    void shell.secrets.set(refName, value0()).then((got) => {
+      if (got.ok) {
+        setKeyNote({ ok: true, text: `已加密存下（${refName}）—— 下一次请求就会用它` });
+        setKeyDraft("");
+      } else {
+        setKeyNote({ ok: false, text: got.reason ?? "写不进去" });
+      }
+    });
+  };
+  /** 当前输入框里的值（读一次，避免闭包拿到旧的）。 */
+  const value0 = (): string => {
+    const el = document.querySelector<HTMLInputElement>('[data-testid="wb-modelset-key"]');
+    return (el?.value ?? keyDraft).trim();
   };
 
   /** 拉这一家真实的模型清单（名字由对方给）。 */
@@ -179,6 +210,25 @@ export function ModelSettingsPage() {
               <b>{current.label}</b>
               {current.note ? <em>{current.note}</em> : null}
             </div>
+            <div className="wb-modelset-keyrow">
+              <span className="wb-modelset-keylabel">密钥</span>
+              <input
+                data-testid="wb-modelset-key"
+                type="password"
+                placeholder={current.keyRef ? `粘进 ${current.keyRef}（加密存，不回显）` : "这家没有可写的密钥名"}
+                value={keyDraft}
+                onChange={(e) => setKeyDraft(e.target.value)}
+                data-keyref={current.keyRef ?? ""}
+              />
+              <button className="wb-page-btn" data-testid="wb-modelset-key-save" onClick={saveKey}>
+                保存
+              </button>
+            </div>
+            {keyNote ? (
+              <div className="wb-modelset-note" data-testid="wb-modelset-keynote">
+                {keyNote.text}
+              </div>
+            ) : null}
             <div className="wb-modelset-actions">
               <button className="wb-page-btn" data-testid="wb-modelset-pull" onClick={pull}>
                 <RefreshCw size={13} /> 拉取模型

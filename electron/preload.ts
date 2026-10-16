@@ -108,9 +108,17 @@ const api = {
     },
     /** 主动探测各 provider 真实连通性（不在启动时自动跑）。 */
     probe: () => ipcRenderer.invoke(AI_CHANNEL.probe),
-    fetchModels: (target) => ipcRenderer.invoke(AI_CHANNEL.fetchModels, target),
+    /** 拉某家（或用户自填地址）真实的模型清单（见 `engine/runtime/modelsFetch.ts`）。 */
+    fetchModels: (target: { providerId: string } | { baseURL: string; apiKey: string }) =>
+      ipcRenderer.invoke(AI_CHANNEL.fetchModels, target),
     /** 用户放行后执行一次被拦下的工具调用（§144）。 */
     runTool: (request: unknown) => ipcRenderer.invoke(AI_CHANNEL.runTool, request),
+  },
+  /** 密钥的加密存储（桌面：safeStorage；CLI 侧没有这条路）。 */
+  secrets: {
+    status: () => ipcRenderer.invoke("secrets:status") as Promise<{ encrypted: boolean; where: string }>,
+    set: (refName: string, value: string) =>
+      ipcRenderer.invoke("secrets:set", refName, value) as Promise<{ ok: boolean; reason?: string }>,
   },
   canvas: {
     /** 载入画布文档（含崩溃回退信息）。 */

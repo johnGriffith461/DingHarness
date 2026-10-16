@@ -153,3 +153,32 @@ export function credentialProtection(dir: string): { detail: string; next: strin
 
   return { detail: parts.join("；"), next };
 }
+
+/**
+ * 桌面的**密钥目录**（2026-10-16）。
+ *
+ * 为什么要有它：writeSecret(dir, …) 一直带 dir，而「读」这条路从来没接过 ——
+ * 于是设置里存进去的 key 运行时读不到（表现是：存了还是说没密钥）。
+ * 宿主（桌面）在建窗口时把它注册进来，resolveSecret 就能把加密库当成最后一站。
+ */
+let secretDir = "";
+
+/** 注册密钥目录（桌面：app.getPath("userData")）。 */
+export function registerSecretDir(dir: string): void {
+  secretDir = dir;
+}
+
+/**
+ * 从加密库里取一条（读不到 / 解不开 / 没注册目录 → null：调用方继续用前面的来源）。
+ *
+ * @param refName 引用名（与 keyRef 同名，例如 DEEPSEEK_API_KEY）
+ */
+export function revealSecretFromStore(refName: string): string | null {
+  if (!secretDir) return null;
+  try {
+    const got = readSecrets(secretDir)[refName] ?? null;
+    return got && got.trim() ? got.trim() : null;
+  } catch {
+    return null;
+  }
+}

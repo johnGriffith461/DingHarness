@@ -23,7 +23,7 @@ import { registerMemoryIpc } from "./ipc/memoryStore";
 import { registerVideoIpc } from "./ipc/videoGen";
 import { registerRemoteIpc } from "./ipc/remote";
 import { attachWindowEvents, registerWindowIpc } from "./ipc/windowControls";
-import { registerDesktopSecretCipher } from "./ipc/secretStore";
+import { registerDesktopSecretCipher, registerSecretsIpc } from "./ipc/secretStore";
 import { registerClipboardIpc } from "./ipc/clipboard";
 import { registerCodingIpc } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL, loadAppSettings, saveAppSettings } from "./ipc/appSettings";
@@ -337,6 +337,8 @@ app.whenReady().then(() => {
    * 注册之后 `engine/adapters/secretStore` 才知道"这台机器上能不能加密地存 key"。
    */
   registerDesktopSecretCipher();
+  /* 设置里填 key 的那两个通道（见 electron/ipc/secretStore.ts） */
+  registerSecretsIpc(ipcMain);
   // 资源协议要在 ready 之后接上处理器
   try {
     serveAssets();

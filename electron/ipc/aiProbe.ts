@@ -4,7 +4,7 @@ import type { ProviderInfo } from "../../shared/ipc";
 import { modelIdsFromJson, modelsUrlFor } from "../../engine/runtime/modelsFetch";
 import { resolveSecret } from "../../engine/runtime/credentials";
 import { allProviders, getProvider, listProviders } from "../../engine/runtime/providers";
-import { blockedReason, realModelBlocked } from "../../engine/runtime/modelGate";
+import { blockedReason, fetchRemote, realModelBlocked } from "../../engine/runtime/modelGate";
 import { createJsonStore } from "./jsonStore";
 import type { HealthStore } from "../../engine/ports/health";
 
@@ -145,6 +145,7 @@ export async function listProvidersWithProbe(): Promise<ProviderInfo[]> {
     const probe = probes[info.id];
     return {
       ...info,
+      keyRef: info.keyRef,
       verified: probe?.ok === true,
       ...(probe && !probe.ok ? { note: probe.note ?? info.note } : {}),
     };
@@ -235,7 +236,12 @@ export async function fetchModelsFor(
   }
 
   try {
-    const res = await fetch(modelsUrlFor(baseURL), {
+    /*
+     * ⚠️ 必须走**过闸的** `fetchRemote`（2026-10-16）。这条是"拉 provider 的模型清单"，
+     * 也是真出网 —— `engine/runtime/modelGate.test.ts` 的源码守卫逮到过它：
+     * 新写的裸 `fetch(provider…)` 会让 `DSH_NO_REAL_MODEL` 这道闸被绕过。
+     */
+    const res = await fetchRemote(modelsUrlFor(baseURL), "拉取 provider 模型清单", {
       headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(20_000),
     });

@@ -224,6 +224,8 @@ export type ProviderInfo = {
   note: string;
   /** 是否检测到可用 key。 */
   available: boolean;
+  /** 密钥的引用名（只是名字，不是密钥本体；设置里填 key 要用它）。 */
+  keyRef: string;
 };
 
 /** 列出所有 provider 及其可用性。 */
@@ -233,6 +235,8 @@ export function listProviders(): ProviderInfo[] {
     label: p.label,
     models: p.models,
     note: p.note,
+    /* 2026-10-16：设置页「填 key」要知道写到哪个名字下（只是名字，不是密钥） */
+    keyRef: p.keyRef,
     available: hasSecret(p.keyRef),
   }));
 }

@@ -111,6 +111,21 @@ export function resolveSecret(envName: string): string | null {
   if (fromEnv && fromEnv.trim()) return fromEnv.trim();
   const fromFile = readCredentialRefs()[envName];
   if (fromFile && fromFile.trim()) return fromFile.trim();
+  /*
+   * 第三段：**桌面加密库**（safeStorage / DPAPI / Keychain）。
+   *
+   * 2026-10-16 补：用户能在设置里填 key 之后，存进去的那条必须能被读回来 ——
+   * 否则「存了还是说没密钥」。没注册目录（CLI / 测试）时它返回 null，行为与以前一样。
+   */
+  try {
+    const mod = require("../adapters/secretStore") as {
+      revealSecretFromStore?: (name: string) => string | null;
+    };
+    const fromStore = mod.revealSecretFromStore?.(envName);
+    if (fromStore) return fromStore;
+  } catch {
+    /* 引擎不该因为读不到加密库而炸 */
+  }
   return null;
 }
 

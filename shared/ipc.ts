@@ -20,6 +20,13 @@ export type ChatMessage = { role: ChatRole; content: string };
 
 /** 脱敏后的 provider 信息。 */
 export type ProviderInfo = {
+  /**
+   * 密钥的**引用名**（例如 `DEEPSEEK_API_KEY`）——只是名字，不是密钥本体。
+   *
+   * 2026-10-16 加：设置里「填 key」那一栏要用它决定写到哪个名字下（各家不一样，
+   * 不能按 id 拼）。密钥值永远不出主进程。
+   */
+  keyRef: string;
   id: string;
   label: string;
   models: string[];
@@ -287,6 +294,14 @@ export type ShellBridge = {
     /** 订阅最大化状态变化（双击标题栏 / Win+↑ / Snap 都会触发）。 */
     onMaximizedChange: (listener: (maximized: boolean) => void) => () => void;
   };
+  /** 密钥的加密存储（桌面：safeStorage；CLI 侧没有这条路）。 */
+  secrets: {
+    /** 加密能力可用吗（不可用时**拒绝写**，不退化成明文）。 */
+    status: () => Promise<{ encrypted: boolean; where: string }>;
+    /** 写一条（按引用名，例如 DEEPSEEK_API_KEY）。 */
+    set: (refName: string, value: string) => Promise<{ ok: boolean; reason?: string }>;
+  };
+
   ai: {
     listProviders: () => Promise<ProviderInfo[]>;
     /** 主动探测真实连通性（较慢，只在用户触发时跑）。 */
