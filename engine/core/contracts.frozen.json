@@ -1,0 +1,26 @@
+{
+  "__note": [
+    "六项契约的冻结面（V5-1 3.10b 的契约 diff 门的数据）。",
+    "规矩：这份清单里的每一项都必须带着它**来历的那份 ADR 文件名**；",
+    "改契约（加/改/删冻结面）要：① 先在 ADR/ 里加一份 ADR 说明为什么；",
+    "② 再更新这份清单（把新项标上那份 ADR）。守卫在 src/contractFreeze.test.ts。",
+    "⚠️ 这份文件只许**跟着 ADR 一起动** —— 它是门，不是文档。"
+  ],
+  "entries": {
+    "schema.version": { "adr": "0005-schema-版本化迁移链.md" },
+    "schema.migrations": { "adr": "0005-schema-版本化迁移链.md" },
+    "schema.tables": { "adr": "0005-schema-版本化迁移链.md" },
+    "record.request.keys": { "adr": "0006-actor-维度兼容策略.md" },
+    "record.text.keys": { "adr": "0006-actor-维度兼容策略.md" },
+    "record.approval.keys": { "adr": "0008-审批裁决权归属与流转.md" },
+    "session.owner": { "adr": "0010-契约冻结收口.md" },
+    "policy.confirmModes": { "adr": "0007-两轴权限矩阵.md" },
+    "policy.memberRoles": { "adr": "0007-两轴权限矩阵.md" },
+    "policy.matrix": { "adr": "0007-两轴权限矩阵.md" },
+    "gates.defaultApprover": { "adr": "0008-审批裁决权归属与流转.md" },
+    "gates.decisionCodes": { "adr": "0008-审批裁决权归属与流转.md" },
+    "memory.domains": { "adr": "0010-契约冻结收口.md" },
+    "canvas.eventTypes": { "adr": "0009-画布语义契约.md" },
+    "canvas.surface": { "adr": "0009-画布语义契约.md" }
+  }
+}
