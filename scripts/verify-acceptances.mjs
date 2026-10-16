@@ -144,12 +144,6 @@ const NOT_IN_BATCH = {
   "accept-installed.mjs": { kind: "needs-package", why: "验静默安装出来的那份应用能起来并渲染" },
   "accept-packaged-run.mjs": { kind: "needs-package", why: "打包版端到端（asar 内的入口、打包版真出图）——既要产物又要图像模型" },
 
-  /* ── 明账：本该进批跑，还没进 ── */
-  "accept-library.mjs": { kind: "debt", why: "不调模型、用 bootApp + 自隔离数据目录（插件装/启用/项目/置顶的持久化）—— 本该登记进批跑" },
-  "accept-canvasopen.mjs": { kind: "debt", why: "点产物卡片在画布里打开；自己 spawn Electron —— 改造后再进批跑" },
-  "accept-float.mjs": { kind: "debt", why: "对话流产物卡片 + 悬浮助手窗；自己 spawn Electron —— 改造后再进批跑" },
-  "accept-rowmenu.mjs": { kind: "debt", why: "左栏行悬停 ⋯ 菜单 + 标题重命名；自己 spawn Electron —— 改造后再进批跑" },
-  "accept-workbench.mjs": { kind: "debt", why: "工作台外壳三栏；自己 spawn Electron —— 改造后再进批跑" },
 
   "accept-size-spec.mjs": { kind: "needs-model", why: "图像尺寸规格：三档模式与规格表对不上就得真出图来验（它原来在 CASES 里被注释掉，理由写着「其实会出图」）" },
 
@@ -157,10 +151,6 @@ const NOT_IN_BATCH = {
   "accept-p5-prompt.mjs": { kind: "retired", why: "脚本头部自带退役声明（2026-10-14）：读的是 DEV-only 探针 window.__lastAiPrompt，打包产物里没有" },
   "accept-theme.mjs": { kind: "retired", why: "脚本头部自带退役声明（2026-10-14）：它点的「外观」行早已挪到账号菜单，导航是死的；判据已由 accept-accountmenu.mjs 接住，留文件是当墓碑" },
 
-  /* ── 化石：早就与产品脱节，要么重写进批跑、要么删掉 ── */
-  "accept-final.mjs": { kind: "fossil", why: "打的是 http://localhost:5173（vite dev server）+ 硬编码本机 Chromium 路径，不起真应用；判据是几何量。要么按 bootApp 重写、要么删" },
-  "accept-image.mjs": { kind: "fossil", why: "同上：dev server + 本机 Chromium 路径；验的是画布图片节点的几何量，与现在那条 accept-image-actions 不是一回事" },
-  "accept-p2.mjs": { kind: "fossil", why: "同上：dev server + 本机 Chromium 路径（画布阶段 2 的几何断言）" },
 };
 
 const CASES = [
@@ -298,6 +288,17 @@ const CASES = [
    * 且**往返期间正文只读**（2026-10-16 从"需要模型"那一类收进来试跑 —— 假通道能驱动它）。
    */
   ["accept-doc-action.mjs", "文档操作条（润色真改写 / 历史记由来 / 磁盘跟上 / 往返期间只读）"],
+  /*
+   * ── 2026-10-16：把"清单外的脚本并进批跑"（主人的要求）──
+   * 下面这五条原来列在"明账（本该进批跑、还没进）"里，理由都是"自己 spawn Electron（老一代写法）"。
+   * 它们**能**在批跑里跑（批跑自带假通道 + 隔离数据目录 + 只收拾自己起的应用），
+   * 所以收进来；跑不动的当场改，改不动就如实记回去。
+   */
+  ["accept-library.mjs", "插件安装与项目分组（装/启用/项目/置顶 的持久化）"],
+  ["accept-canvasopen.mjs", "点产物卡片在画布里打开（文本类进画布 / Office 交给系统程序）"],
+  ["accept-float.mjs", "对话流产物卡片 + 悬浮助手窗（可拖拽 / 自带输入区 / 问答不建任务）"],
+  ["accept-rowmenu.mjs", "左栏行悬停 ⋯ 菜单 + 任务标题点击重命名"],
+  ["accept-workbench.mjs", "工作台外壳三栏（左导航 / 中任务 / 右摘要）"],
   /*
    * §135/§136 新增的三条。它们比上面那批**更抗环境干扰**：开头用 `.verify/harness.mjs`
    * 的 `freshDir()` —— 先杀掉上一轮的残留 Electron 再删数据目录，而不是直接 `rmSync`。
@@ -538,7 +539,10 @@ function startLocalFakeModel() {
        *     `accept-sessionlog` 要验的是"tool-call 与 tool-result 成对落进日志"，
        *     假通道不回工具调用，这条就没法绿（它以前靠真模型）。
        *     参数里带上用户那句话 —— 脚本埋的标记词（如 "42"）就在里面。
-       *  ② 否则**分片 + 间隔**地吐正文（约 3 秒）：`accept-abort` 要验的正是
+       *  ② 消息里出现 `请产出 <kind> 产物` 时**吐一个产物块**（`<artifact type="…" title="…">`）：
+       *     产物那条链（对话流里的卡片、点开进画布、云盘/生成页）原来只能靠真模型触发，
+       *     于是"要模型的脚本"永远进不了批跑 —— 与工具调用同一个道理，这里把标记补全。
+       *  ③ 否则**分片 + 间隔**地吐正文（约 3 秒）：`accept-abort` 要验的正是
        *     "流式过程中正文在长、停止键在"，一次性吐完那一轮会瞬间结束，它什么都看不到。
        */
       const askTool = /请调用\s*([a-z_]+)\s*工具/.exec(lastUserText);
@@ -582,6 +586,36 @@ function startLocalFakeModel() {
        * （`accept-actions` 的「重新生成」那一格就是这么卡住的 —— 它 `after !== before` 恒为假）。
        * 真模型每轮的字当然不一样；这一句让**装置**也具备那个性质，判据才谈得上"能红"。
        */
+      /*
+       * ⭐ **产物块**（2026-10-16）：标记写成 `请产出 <kind> 产物`（例如「请产出 markdown 产物」），
+       * 回一个 `<artifact type="kind" title="…">正文</artifact>`。正文里带上用户原话 ——
+       * 脚本埋的标记词（如 "42"）就在里面，与工具那一路同一套口径。
+       */
+      const askArtifact = /请产出\s*(?:一个)?\s*([a-z]+)\s*产物/.exec(lastUserText);
+      if (askArtifact) {
+        const kind = askArtifact[1];
+        const body = `# 本地假通道产出的 ${kind}\n\n${lastUserText.slice(0, 80)}\n`;
+        const block = `<artifact type="${kind}" title="假通道产物">${body}</artifact>`;
+        const chunks = [block.slice(0, Math.ceil(block.length / 2)), block.slice(Math.ceil(block.length / 2))];
+        let k = 0;
+        const tickArtifact = () => {
+          if (k >= chunks.length) {
+            res.write(frame({}, "stop"));
+            res.write(
+              `data: ${JSON.stringify({ id: "accept", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 30, completion_tokens: 40, total_tokens: 70 } })}\n\n`,
+            );
+            res.write("data: [DONE]\n\n");
+            res.end();
+            return;
+          }
+          res.write(frame(k === 0 ? { role: "assistant", content: chunks[k] } : { content: chunks[k] }));
+          k += 1;
+          setTimeout(tickArtifact, 300);
+        };
+        tickArtifact();
+        return;
+      }
+
       const pieces = [
         `（本地假通道第 ${++round} 轮）`,
         "正在",

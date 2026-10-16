@@ -44,7 +44,7 @@ const KINDS = ["needs-model", "needs-package", "debt", "retired", "fossil"];
  * 外加 2 条"早就该进批跑、纯粹是没排上"的。改造一条、把它跑通后登记进 `CASES`，
  * 就把这里的数字减一 —— 与 `structureGuard` 的行数上限、`themeRatchet` 的硬编码上限同一个套路。
  */
-const MAX_DEBT = 5;
+const MAX_DEBT = 0;
 
 /**
  * `fossil`（化石：打 dev server / 硬编码本机路径，早与产品脱节）的棘轮上限。
@@ -52,7 +52,7 @@ const MAX_DEBT = 5;
  * 这一类比 `debt` 更该消失：`debt` 是"该进批跑还没进"，`fossil` 是"已经不是这个产品的验收了"。
  * 处理办法二选一：按 `bootApp` 重写（那就变成 debt → CASES），或者删掉（git 留着历史）。
  */
-const MAX_FOSSIL = 3;
+const MAX_FOSSIL = 0;
 
 /**
  * `retired`（墓碑）的上限。
@@ -126,7 +126,7 @@ describe("验收脚本的「在册」对账（DEFECT-PROTOCOL 第 4/5 步的机�
     expect(missing, `CASES 里登记了但文件不在：${missing.join(" / ")}`).toEqual([]);
   });
 
-  it(`④ 「本该进批跑、还没进」的明账只许少不许多（现在 ${MAX_DEBT} 条上限）`, () => {
+  it(`④ 「本该进批跑、还没进」的明账必须清零（现在 ${MAX_DEBT}）—— 清单外的脚本要并进来`, () => {
     /*
      * ⚠️ 这一条是给"借口"上的棘轮。散文式借口的根本问题是它能随便长，
      * 而这里 `debt` 的条数是**数字**，多一条就红。
@@ -152,7 +152,7 @@ describe("验收脚本的「在册」对账（DEFECT-PROTOCOL 第 4/5 步的机�
     expect(retired.length, "棘轮只许往下调：墓碑少了就把 MAX_RETIRED 也调小").toBe(MAX_RETIRED);
   });
 
-  it(`⑥ 化石也只许少不许多（现在 ${MAX_FOSSIL} 条上限）`, () => {
+  it(`⑥ 化石必须清零（现在 ${MAX_FOSSIL}）—— 不能跑的产品化石不留`, () => {
     const fossils = Object.entries(registry)
       .filter(([, e]) => e.kind === "fossil")
       .map(([name, e]) => `${name}：${e.why}`);

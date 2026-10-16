@@ -43,9 +43,16 @@ const report = {};
 const shots = ".verify/shots-final";
 
 try {
-  // 让模型产出一个 HTML 产物（文本类，能在画布里显示）
+  /*
+   * 让模型产出一个 HTML 产物（文本类，能在画布里显示）。
+   *
+   * ⚠️ 提示词里的「请产出一个 html 产物」是**批跑假通道的装置标记**（与工具那一路的
+   * 「请调用 <名字> 工具」同一套口径）：假通道按它回一个 `<artifact type="html">` 块。
+   * 判据一点没变 —— 下面断的仍然是"卡片真的出现 / 点开真的进画布 / 内容真的对上"，
+   * 变的只是"谁来产出那个产物"（原来必须真模型，于是这条永远进不了批跑）。
+   */
   await page.locator('[data-testid="wb-composer-input"]').fill(
-    "用 html 输出一个单文件页面，标题是「今日待办」，带一个列表。直接给完整 HTML。",
+    "请产出一个 html 产物：标题「今日待办」+ 一个列表，直接给完整 HTML。",
   );
   await page.locator('[data-testid="wb-send"]').click();
   await page.waitForTimeout(2000);

@@ -1,7 +1,5 @@
 import { chromium } from "playwright";
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import { connectWithRetry, failOnMarks, pickPort, shot, waitForPort } from "./harness.mjs";
+import { bootApp, connectWithRetry, failOnMarks, freshDir, killTree, pickPort, shot } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
 failOnMarks();
@@ -15,22 +13,21 @@ failOnMarks();
  *   · 悬浮窗可拖拽、自带输入区、**问一句答一句但不建任务**。
  */
 const DATA = ".verify/float-data";
-fs.rmSync(DATA, { recursive: true, force: true });
-const env = { ...process.env };
-delete env.ELECTRON_RUN_AS_NODE;
-env.DSH_CANVAS_DATA_DIR = DATA;
-
-/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
-const __port = await pickPort([12580]);
-const child = spawn(
-  "node_modules/electron/dist/electron.exe",
-  [".", "--remote-debugging-port=" + __port],
-  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
-);
-/* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
-await waitForPort(__port, 40000);
-
-const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
+/*
+ * ⚠️ 2026-10-16（主人的要求：把清单外的脚本并进批跑）：这份脚本原来**自己 spawn Electron**
+ * （裸 `spawn` + `waitForPort` + `connectOverCDP`）—— 这台机器上存在
+ * 「TCP 通、但 Electron 的调试服务器不答」的端口区间，于是它会**卡在连 CDP 那一步**
+ * （实测：整条脚本 200 秒一个字都没打出来）。换成 `bootApp`：它真的问一次 CDP，
+ * 不通就换底座重试；顺带给应用打上批跑的标记（清残留时才认领得到它，不误伤别人的进程）。
+ */
+await freshDir(DATA);
+const booted = await bootApp({ port: await pickPort([12580]), dataDir: DATA, timeoutMs: 40_000 });
+if (!booted.ok) {
+  console.error("[诊断] 应用输出尾部：" + (booted.getLog() || "(空)").slice(-1200));
+  await killTree(booted.child);
+  process.exit(1);
+}
+const browser = await connectWithRetry(chromium, `http://127.0.0.1:${booted.port}`);
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
@@ -40,7 +37,13 @@ const report = {};
 
 /* ---------- 悬浮助手窗 ---------- */
 // 先建一个任务，任务视图里才有顶栏图标
-await page.locator('[data-testid="wb-composer-input"]').fill("写一份简短周报");
+/*
+   * ⚠️ 提示词里的「请产出一个 markdown 产物」是**批跑假通道的装置标记**
+   * （与工具那一路的「请调用 <名字> 工具」同一套口径）：
+   * 这条脚本要验的是"对话流里出现产物卡片、点开能打开"，而**谁来产出那个产物**
+   * 原来只能靠真模型 —— 于是它一直进不了批跑。判据没变，变的只是装置。
+   */
+  await page.locator('[data-testid="wb-composer-input"]').fill("请产出一个 markdown 产物：写一份简短周报。");
 await page.locator('[data-testid="wb-send"]').click();
 await page.waitForTimeout(2000);
 
@@ -136,4 +139,4 @@ await shot(page, ".verify/shots-final/wb-17-artcard.png");
 
 console.log(JSON.stringify(report, null, 2));
 await browser.close();
-child.kill();
+await killTree(booted.child);
