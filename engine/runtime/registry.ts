@@ -10,6 +10,7 @@ import {
 import type { ConfirmMode } from "../../shared/ipc";
 import { pendingApprovalNotice, toolFailedNotice } from "../core/notices";
 import { decideForMember, injectableTools } from "../core/policy";
+import { DEFAULT_APPROVER } from "../core/gates";
 import type { MemberRole } from "../core/members";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
 import { runHooks } from "./pluginHost";
@@ -201,7 +202,16 @@ export function buildToolSet(input: {
           throw new Error(gate.notice);
         }
         if (gate.verdict === "ask") {
-          return { pending: true, notice: pendingApprovalNotice(entry.name, mode) };
+          /*
+           * 「待谁批」（C3，V5-1 3.7a）：**拦下那一刻**就写在载荷里 ——
+           * 默认 = 这一段会话的 owner（本机单用户 = local；执行上下文里带着它）。
+           * 读的时候不现编（见 `engine/core/gates.ts` 的 `approversOf`）。
+           */
+          return {
+            pending: true,
+            notice: pendingApprovalNotice(entry.name, mode),
+            approvers: [ctx.owner?.trim() || DEFAULT_APPROVER],
+          };
         }
         /*
          * 钩子（Phase 8.3）：`tool:before` / `tool:after`。

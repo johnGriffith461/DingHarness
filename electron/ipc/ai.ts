@@ -5,7 +5,8 @@ import { hostExecutor, mcpToolEntries, pluginToolEntries, runToolOnce, type Tool
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
 import { createEngine } from "../../engine/index";
 import { LOCAL_USER, SYSTEM_ACTOR, type LogInput } from "../../engine/core/events";
-import { approvalRecord } from "../../engine/core/gates";
+import type { ApprovalRecord } from "../../engine/core/events";
+import { canDecide, decidedByOf, DEFAULT_APPROVER, pendingFor, approvalRecord } from "../../engine/core/gates";
 import { humanError, resolveTurnTarget, type TurnEvent } from "../../engine/runtime/loop";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 
@@ -133,6 +134,37 @@ export function registerAiIpc(): void {
    */
   ipcMain.handle(AI_CHANNEL.runTool, async (_event, request: ToolRunRequest): Promise<ToolRunResult> => {
     /*
+     * C3（V5-1 3.7）：处置一条待决之前，先拿**会话日志**核对两件事 ——
+     *   ① 这条是不是已经处置过了（幂等：重复点/两个窗口同点 → 明确回一句，而不是又执行一次）；
+     *   ② 当前这个人有没有裁决权（现在只有本机用户一种身份，判定恒过；
+     *      V5-2 把成员 token 映射接上之后这一格就是真的墙）。
+     *
+     * ⚠️ **核对不上就按老路径放行**：`pending` 不在日志里可能只是"这段日志被截过 /
+     * 不是一个会话"，那种情况下拦下来会挡住本来能用的路 —— 而 stale 的判据要**确凿**
+     * （日志里真有一条同 id 的决策记录）才成立。
+     */
+    const decisionContext = async (): Promise<
+      { ok: true; approvers?: string[] } | { ok: false; error: string }
+    > => {
+      if (!request.sessionId || !request.toolCallId) return { ok: true };
+      try {
+        const { records } = await desktopSessionStore().load(request.sessionId);
+        const decidedBy = decidedByOf(records.filter((r) => r.type === "approval") as ApprovalRecord[], request.toolCallId);
+        const pending = pendingFor(records, request.toolCallId);
+        const check = canDecide({
+          approvers: pending?.approvers ?? [DEFAULT_APPROVER],
+          actorId: LOCAL_USER.id,
+          alreadyDecided: decidedBy !== null,
+        });
+        if (!check.ok) return { ok: false, error: check.message };
+        return { ok: true, ...(pending ? { approvers: pending.approvers } : {}) };
+      } catch {
+        /* 读不动日志不该把处置拦下（老路径：与从前一致） */
+        return { ok: true };
+      }
+    };
+
+    /*
      * ── 拒绝：不执行，只把决定记进日志（INV-3）──────────────────────
      *
      * 原来"拒绝"是**纯渲染层**的动作：连 IPC 都不发。后果是重启之后
@@ -142,6 +174,9 @@ export function registerAiIpc(): void {
     if (request.reject) {
       const line = rejectedLine(request.name);
       if (request.toolCallId) {
+        const context = await decisionContext();
+        /* `line` 是必填的（界面那一行）—— 核对不过时它就是那句原因 */
+        if (!context.ok) return { ok: false, error: context.error, line: context.error };
         /*
          * 走**同一个 store 端口**（不再直接抓写入器）：决策记录与事件流必须落在
          * 同一条编号序列上 —— 两个写入器各数一遍 seq 的后果，是重启后这条留痕
@@ -151,8 +186,16 @@ export function registerAiIpc(): void {
          * 以前各手抄一遍同一个形状，抄漏一个字段不会报错、只会让留痕变成空壳。
          */
         await storeAppend(request.sessionId, {
-          ...approvalRecord({ toolCallId: request.toolCallId, name: request.name, approved: false, line }),
-          /* 谁拒的（C5）：本机单用户 = 本机用户；V5-1 3.7 接审批裁决权后换成真实成员 */
+          ...approvalRecord({
+            toolCallId: request.toolCallId,
+            name: request.name,
+            approved: false,
+            line,
+            /* C3：谁处置的 + 当时待谁批（"谁能批"要可复盘） */
+            decidedBy: LOCAL_USER.id,
+            ...(context.approvers ? { approvers: context.approvers } : {}),
+          }),
+          /* 谁拒的（C5）：本机单用户 = 本机用户 */
           actor: LOCAL_USER,
         });
       }
@@ -210,6 +253,9 @@ export function registerAiIpc(): void {
      * 只记"批过了"的话，重启后那条留痕会变成一个没有内容的空壳。
      */
     if (request.toolCallId) {
+      /* C3：同拒绝那条 —— 先核对（幂等 + 裁决权），再把决定与结果记进日志 */
+      const context = await decisionContext();
+      if (!context.ok) return { ok: false, error: context.error, line: context.error };
       await storeAppend(request.sessionId, {
         ...approvalRecord({
           toolCallId: request.toolCallId,
@@ -218,8 +264,10 @@ export function registerAiIpc(): void {
           /* 批准要**把结果一起记**：重放时要能还原成"已保存，当前 N 条"那一行 */
           result: { ok: res.ok, ...(res.output === undefined ? {} : { output: res.output }), ...(res.error ? { error: res.error } : {}) },
           line,
+          decidedBy: LOCAL_USER.id,
+          ...(context.approvers ? { approvers: context.approvers } : {}),
         }),
-        /* 谁批的（C5）：同拒绝那条；3.7 的裁决权落地后换成真实审批人 */
+        /* 谁批的（C5）：同拒绝那条 */
         actor: LOCAL_USER,
       });
     }

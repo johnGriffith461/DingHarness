@@ -131,6 +131,10 @@ export type ApprovalRecord = {
   actor?: Actor;
   /** 针对哪一次调用（与 `tool-call` / `tool-result` 同一个 id）。 */
   toolCallId: string;
+  /** **谁批的**（C3，3.7b；老记录没有这一格 → 读回按 `"legacy"` 兜底，不编名字）。 */
+  decidedBy?: string;
+  /** 当时**待谁批**（成员 id 集合；也是可选的，老记录没有）。 */
+  approvers?: string[];
   name: string;
   /** 用户批了没有。 */
   approved: boolean;
@@ -845,6 +849,12 @@ export function parseLogLine(line: string): LogRecord | null {
     // ⚠️ 不要求 requestId：批准常常发生在那一轮结束之后（那时渲染层已拿不到它），见 ApprovalRecord
     if (typeof o.toolCallId !== "string" || typeof o.approved !== "boolean") return null;
     if (typeof o.line !== "string" || typeof o.name !== "string") return null;
+    /*
+     * C3 的两格（谁批的 / 当时待谁批）**可选**，但形状坏掉的要收窄掉 ——
+     * 留着 `decidedBy: 42` 会让读的人以为"有人批了"，而那个 id 谁都不是。
+     */
+    if (o.decidedBy !== undefined && (typeof o.decidedBy !== "string" || !o.decidedBy.trim())) delete o.decidedBy;
+    if (o.approvers !== undefined && (!Array.isArray(o.approvers) || !o.approvers.length)) delete o.approvers;
     return o as ApprovalRecord;
   }
   if (typeof o.requestId !== "string") return null;

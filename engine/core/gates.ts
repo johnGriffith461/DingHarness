@@ -1,4 +1,4 @@
-import type { ApprovalRecord, TurnChunk } from "./events";
+import { splitTurns, type ApprovalRecord, type LogRecord, type TurnChunk } from "./events";
 
 /**
  * **审批闸门的语义**（Phase 1 D5 尾部）。
@@ -43,7 +43,21 @@ export type GateRequest = {
   toolCallId: string;
   name: string;
   input?: unknown;
+  /**
+   * **待谁批**（C3，V5-1 3.7a）：审批人集合（成员 id）。
+   *
+   * 缺省 = `[DEFAULT_APPROVER]`（本机单用户；这段会话的 owner 就是那个用户）。
+   * 取值口径见 `pendingGates` —— 拦下来那一刻写在 pending 载荷里（`approvers`），
+   * 不在读的时候现编（"谁能批"是**拦下时就该定**的事实，与"当时谁在场"无关）。
+   */
+  approvers: string[];
 };
+
+/**
+ * 本机单用户那个审批人的 id（与 `LOCAL_USER.id` 同一个人，两处都写 `local` 是刻意的：
+ * 一个是"谁说的"、一个是"谁能批"，V5-3 团队空间接进来之前它们落到同一个身份上）。
+ */
+export const DEFAULT_APPROVER = "local";
 
 /**
  * 现在有哪些待办（按发生顺序）。
@@ -65,10 +79,112 @@ export function pendingGates(turns: readonly TurnChunk[]): GateRequest[] {
         toolCallId: trace.toolCallId,
         name: trace.name,
         ...(trace.input === undefined ? {} : { input: trace.input }),
+        approvers: approversOf(trace.output),
       });
     }
   }
   return out;
+}
+
+/**
+ * 从 pending 载荷里取审批人集合（读路径的**唯一口径**）。
+ *
+ * 三种来源，按优先级：
+ *   ① 载荷里带 `approvers`（拦下那一刻定的，2026-10-17 之后新产生的都带）；
+ *   ② 老载荷（没有这个字段）→ 默认 `[DEFAULT_APPROVER]` —— 兼容矩阵口径
+ *      （"旧审批（无审批人集合）→ 默认审批人=owner"，V5 §3.1）。
+ *   ③ 形状坏掉（不是字符串数组）→ 同 ②（**不**把它当"没人能批"：
+ *      那会让一条本来能处置的待办永远卡住）。
+ *
+ * @param payload 工具结果载荷（`{pending:true, approvers?}`）或留痕上的 output
+ * @returns 审批人 id（去重、保序；恒非空）
+ */
+export function approversOf(payload: unknown): string[] {
+  const raw = (payload as { approvers?: unknown } | null | undefined)?.approvers;
+  if (!Array.isArray(raw)) return [DEFAULT_APPROVER];
+  const got = [...new Set(raw.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()))];
+  return got.length ? got : [DEFAULT_APPROVER];
+}
+
+/** 一次裁决请求的核对结果（C3 状态机的**纯函数**那一半）。 */
+export type DecisionCheck =
+  | { ok: true }
+  | {
+      ok: false;
+      /**
+       * `stale`：这条已经不是待决了（已经处置过）；
+       * `not-approver`：这个人不在审批人集合里（**没有裁决权**）。
+       */
+      code: "stale" | "not-approver";
+      /** 给人看的一句话（直接可以显示/回注）。 */
+      message: string;
+    };
+
+/**
+ * **谁有裁决权 + 这条还开着吗**（C3，ADR-008）。
+ *
+ * 对齐 DeepSeek-Bot `approvals.js` 的两条机制（源码级参照记在 ADR-008）：
+ *   · **幂等 answer + stale 报错**（"这条审批已经不再开着"`bot/stale`）——
+ *     重复点、两个窗口同时点，第二次拿到的是明确的话，而不是"又执行一次"；
+ *   · **归属决定谁来批**（那边是 sessionId/botId/roomId 三元组 → approver 集合，
+ *     这里是 pending 载荷里的 `approvers`）。
+ *
+ * @param input.approvers 这条待决的审批人集合
+ * @param input.actorId 现在要处置的人
+ * @param input.alreadyDecided 这条是否已经被处置过（调用方从日志查，见 `decidedByOf`）
+ * @returns 能不能处置；不能的话给出代码与人话
+ */
+export function canDecide(input: {
+  approvers: readonly string[];
+  actorId: string;
+  alreadyDecided: boolean;
+}): DecisionCheck {
+  if (input.alreadyDecided) {
+    return {
+      ok: false,
+      code: "stale",
+      message: "这条待确认已经处置过了（重复点不会执行第二次）。刷新一下就能看到结论。",
+    };
+  }
+  if (!input.approvers.includes(input.actorId)) {
+    return {
+      ok: false,
+      code: "not-approver",
+      message: `这条待确认不归你批（待批的人：${input.approvers.join(" / ")}）—— 请让有裁决权的人处理，或请他们把裁决权授给你。`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * **授权他人批**（C3，3.7b）：把 target 加进这条待决的审批人集合。
+ *
+ * 规矩（ADR-008）：只有**现有审批人**能授权（不能自己挤进一张不属于自己的单子）、
+ * 目标必须是个非空 id、重复授权如实说"已经在名单里"（幂等，不算错）。
+ *
+ * @param input.approvers 现有集合
+ * @param input.byActorId 谁在授权
+ * @param input.targetId 授权给谁
+ * @returns 新的集合或拒绝原因
+ */
+export function authorizeApprover(input: {
+  approvers: readonly string[];
+  byActorId: string;
+  targetId: string;
+}): { ok: true; approvers: string[]; added: boolean } | { ok: false; code: "not-approver" | "invalid-target"; message: string } {
+  const target = String(input.targetId ?? "").trim();
+  if (!target) return { ok: false, code: "invalid-target", message: "要授权给谁？成员 id 是空的。" };
+  if (!input.approvers.includes(input.byActorId)) {
+    return {
+      ok: false,
+      code: "not-approver",
+      message: `你不是这条待确认的审批人（待批的人：${input.approvers.join(" / ")}），不能把裁决权转给别人。`,
+    };
+  }
+  if (input.approvers.includes(target)) {
+    return { ok: true, approvers: [...input.approvers], added: false };
+  }
+  return { ok: true, approvers: [...input.approvers, target], added: true };
 }
 
 /** 一次决策的输入。 */
@@ -86,6 +202,13 @@ export type GateDecision = {
   result?: { ok: boolean; output?: unknown; error?: string };
   /** 界面上那一行（主进程生成，与放行时返回给界面的**同一句**）。 */
   line: string;
+  /**
+   * **谁批的**（C3，3.7b）：成员 id。老路径（不传）= 不记 decidedBy
+   * —— 兼容矩阵口径：老决策记录没有这一格，读回来按 `legacy` 兜底（见 `decidedByOf`）。
+   */
+  decidedBy?: string;
+  /** 当时的审批人集合（记下来，"当时待谁批"才可复盘）。 */
+  approvers?: readonly string[];
 };
 
 /**
@@ -101,6 +224,8 @@ export function approvalRecord(decision: GateDecision): Omit<ApprovalRecord, "se
     toolCallId: decision.toolCallId,
     name: decision.name,
     approved: decision.approved,
+    ...(decision.decidedBy ? { decidedBy: decision.decidedBy } : {}),
+    ...(decision.approvers?.length ? { approvers: [...decision.approvers] } : {}),
     ...(decision.approved && result
       ? {
           ok: result.ok,
@@ -110,4 +235,28 @@ export function approvalRecord(decision: GateDecision): Omit<ApprovalRecord, "se
       : {}),
     line: decision.line,
   };
+}
+
+/**
+ * 从日志里找某一次调用**还没处置**的那条待决（C3 的宿主接线用）。
+ *
+ * @param records 整段会话日志（按 seq）
+ * @param toolCallId 哪次调用
+ * @returns 那条待决（含"待谁批"）；不在待决里（已批过 / 日志被截过）→ null
+ */
+export function pendingFor(records: readonly LogRecord[], toolCallId: string): GateRequest | null {
+  return pendingGates(splitTurns(records)).find((g) => g.toolCallId === toolCallId) ?? null;
+}
+
+/**
+ * 这条待决**已经处置过了吗**（`canDecide` 的 stale 判据从日志来）。
+ *
+ * @param records 整段会话日志（按 seq）
+ * @param toolCallId 哪次调用
+ * @returns 处置过 → 谁批的（老记录没记 `decidedBy` 时给 `"legacy"`）；没处置过 → null
+ */
+export function decidedByOf(records: readonly ApprovalRecord[], toolCallId: string): string | null {
+  const hit = records.find((r) => r.type === "approval" && r.toolCallId === toolCallId);
+  if (!hit) return null;
+  return hit.decidedBy?.trim() || "legacy";
 }
