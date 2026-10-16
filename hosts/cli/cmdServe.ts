@@ -6,6 +6,7 @@ import { firstAvailableProvider } from "../../engine/runtime/providers";
 import { AcpAgent } from "../acp/agent";
 import { authorizeCwd, CwdNotAllowedError } from "../cwd";
 import { startAgentServer } from "../server/agentServer";
+import { createSyncRelay } from "../../engine/sync/relay";
 import { normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { flag, flagAll, parseIntFlagValue, type Parsed } from "./args";
 import { buildEngine } from "./assembly";
@@ -140,6 +141,13 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
           store.close();
         }
       },
+      /*
+       * 同步中继（V5-2 2.1）：serve **hosts** 它（中继=事件总线+协调器，
+       * 本地 SQLite 仍是数据权威 —— 见 `engine/sync/relay.ts` 的文件头）。
+       * 一个进程一份，进程结束即消失：它搬的是"另一端此刻要拿到的事件"，
+       * 不是数据本身（离线续传靠客户端持久化的 offset 游标，2.6）。
+       */
+      relay: createSyncRelay(),
       log: (line) => process.stderr.write(`[serve] ${line}\n`),
     });
   } catch (error) {
@@ -159,7 +167,7 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
        */
       `  口令：${started.token}${token ? "" : "（本次随机生成；要固定就 --token 或 DH_SERVE_TOKEN）"}`,
       `  用法：curl -H "Authorization: Bearer ${started.token}" ${started.url}/v1/info`,
-      `  接口：GET /healthz　GET /v1/info　GET /v1/sessions　POST /v1/run（SSE）${hookNames.length ? `　POST /v1/hooks/<名字>（${hookNames.join(" / ")}，要签名）` : ""}`,
+      `  接口：GET /healthz　GET /v1/info　GET /v1/sessions　POST /v1/run（SSE）　PUT/POST/GET /v1/streams/<流>（同步中继：建流/接管/推/拉）${hookNames.length ? `　POST /v1/hooks/<名字>（${hookNames.join(" / ")}，要签名）` : ""}`,
       ...(deps.mode === "按需确认"
         ? ["  ⚠️ 档位是「按需确认」：服务态没有审批通道，需要确认的工具会被拦下（不会执行），对外如实报失败"]
         : []),

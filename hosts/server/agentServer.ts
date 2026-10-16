@@ -4,6 +4,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { networkInterfaces } from "node:os";
 
 import type { Engine } from "../../engine/index";
+import type { SyncRelay } from "../../engine/sync/relay";
 import { humanFailure } from "../../shared/errors";
 import type { ConfirmMode, SessionSummary } from "../../shared/ipc";
 import { PRODUCT_NAME, PRODUCT_VERSION } from "../../shared/product";
@@ -70,6 +71,16 @@ export type ServerOptions = {
   hooksSecret?: string;
   /** 会话列表（宿主注入的真实实现）。不给 = `/v1/sessions` 回 501。 */
   listSessions?: () => Promise<SessionSummary[]>;
+  /**
+   * **同步中继**（V5-2 任务 2.1）。
+   *
+   * 给了它，`/v1/streams/*` 那组端点才开门（create / claim / push / pull / 状态）——
+   * 与 `listSessions` 同一个口径：**没接线就回 501**，不假装"这条流是空的"。
+   *
+   * ⚠️ 中继是**事件总线 + 协调器**，不是数据主人（V5 §4）：本地 SQLite 仍是权威，
+   * 这一层只保证"事件按序、恰好一次地送达另一端"；并发接管靠 fencing（epoch 令牌）。
+   */
+  relay?: SyncRelay;
   log?: (line: string) => void;
 };
 
@@ -93,6 +104,25 @@ const AUTH_LOCK_MS = 30_000;
 
 /** 请求体上限（别让人用一个超大 body 把内存吃光）。 */
 const BODY_LIMIT = 1_000_000;
+
+/**
+ * 把 URL 路径里的一段**安全解码**。
+ *
+ * ⚠️ 2026-10-17（V5-2 2.1 实测逮到）：路径里的百分号序列不合法时
+ * （例如客户端按本机代码页编码、或手工拼错了 `%E6%89`），`decodeURIComponent`
+ * **会抛 URIError** —— 而它是"请求本身不对"，不该变成 **500 内部错误**。
+ * 同一形状原来在 sessions / hooks 两条路上也在（一个坏字节就让服务端答"我的错"）。
+ *
+ * @param segment 路径里的原始段（percent 编码）
+ * @returns 解码后的字符串；解不开给 null（调用方按 400 处理）
+ */
+function safeDecode(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
 
 export async function startAgentServer(opts: ServerOptions): Promise<StartedAgentServer> {
   /*
@@ -413,7 +443,12 @@ async function handle(
 
     const sessionMatch = /^\/v1\/sessions\/([^/]+)$/.exec(path);
     if (sessionMatch && req.method === "GET") {
-      const id = decodeURIComponent(sessionMatch[1]!);
+      const id = safeDecode(sessionMatch[1]!);
+      if (id === null) {
+        note = "sessionId 解码不了";
+        json(res, 400, { error: "sessionId 的百分号编码不合法（解码失败）" });
+        return;
+      }
       if (!SESSION_ID_OK.test(id)) {
         note = "sessionId 形状不对";
         json(res, 400, { error: "sessionId 形状不对" });
@@ -427,6 +462,98 @@ async function handle(
       } finally {
         built.close();
       }
+      return;
+    }
+
+    /* ── 同步中继（V5-2 2.1）：/v1/streams/* ──────────────────────────────
+     *
+     * 中继没接线就**回 501**（与 /v1/sessions 同一个口径：不假装一条空流）。
+     * 形状与 `engine/sync/relay.ts` 一一对应 —— 这一层只是把它的返回值搬上网，
+     * 协议语义（去重/fencing/gap/引用门）**一个字都不在这里重写**。
+     */
+    const streamPath = /^\/v1\/streams\/([^/]+)(\/(push|pull|claim))?$/.exec(path);
+    if (streamPath) {
+      if (!opts.relay) {
+        note = "streams 未接线";
+        json(res, 501, { error: "这个服务没有接同步中继（宿主没把 relay 交给它）" });
+        return;
+      }
+      const streamId = safeDecode(streamPath[1]!);
+      if (streamId === null) {
+        note = "流 id 解码不了";
+        json(res, 400, { error: "流 id 的百分号编码不合法（解码失败）" });
+        return;
+      }
+      const action = streamPath[3];
+
+      if (!action && req.method === "PUT") {
+        const created = opts.relay.createStream(streamId);
+        note = created.ok ? "建流" : "流 id 形状不对";
+        json(res, created.ok ? 200 : 400, created.ok ? { ok: true, streamId } : { error: created.message });
+        return;
+      }
+      if (!action && req.method === "GET") {
+        const state = opts.relay.state(streamId);
+        note = state ? `流 ${streamId}` : "没有这条流";
+        json(res, state ? 200 : 404, state ? { state } : { error: `没有这条流：${streamId}` });
+        return;
+      }
+      if (action === "claim" && req.method === "POST") {
+        const raw = await readBody(req);
+        let body: { holder?: unknown } = {};
+        try {
+          body = JSON.parse(raw.toString("utf8") || "{}") as typeof body;
+        } catch {
+          note = "body 不是 JSON";
+          json(res, 400, { error: "body 必须是 JSON：{\"holder\":\"端名\"}" });
+          return;
+        }
+        const got = opts.relay.claim(streamId, String(body.holder ?? ""));
+        note = got.ok ? `接管：epoch ${got.epoch}` : "没有这条流";
+        json(res, got.ok ? 200 : 404, got.ok ? got : { error: got.message });
+        return;
+      }
+      if (action === "push" && req.method === "POST") {
+        const raw = await readBody(req);
+        let body: { producerId?: unknown; epoch?: unknown; events?: unknown } = {};
+        try {
+          body = JSON.parse(raw.toString("utf8") || "{}") as typeof body;
+        } catch {
+          note = "body 不是 JSON";
+          json(res, 400, { error: "body 必须是 JSON：{producerId, epoch, events:[{seq,type,payload}]}" });
+          return;
+        }
+        if (typeof body.producerId !== "string" || !Array.isArray(body.events)) {
+          note = "push 参数不全";
+          json(res, 400, { error: "push 需要 producerId（字符串）、epoch（数字）与 events（数组）" });
+          return;
+        }
+        const got = opts.relay.push(streamId, {
+          producerId: body.producerId,
+          epoch: Number(body.epoch ?? 0),
+          events: body.events as Parameters<SyncRelay["push"]>[1]["events"],
+        });
+        /* 协议层的拒绝（fenced/gap/too-large…）用 **409**：请求本身没毛病，是状态不允许 —— 
+           调用方按 code 处理（`/v1/run` 那些 4xx 是"参数不对"，两者别混）。 */
+        note = got.ok ? `收 ${got.accepted} 条（重复 ${got.duplicates}）` : `${got.code}`;
+        json(res, got.ok ? 200 : 409, got.ok ? got : got);
+        return;
+      }
+      if (action === "pull" && req.method === "GET") {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const from = Number(url.searchParams.get("from") ?? "0");
+        const limitRaw = url.searchParams.get("limit");
+        const got = opts.relay.pull(streamId, {
+          from: Number.isFinite(from) ? from : 0,
+          ...(limitRaw === null ? {} : { limit: Number(limitRaw) }),
+        });
+        note = got.ok ? `${got.events.length} 条` : "没有这条流";
+        json(res, got.ok ? 200 : 404, got.ok ? got : { error: got.message });
+        return;
+      }
+
+      note = "streams 用错了方法/动作";
+      json(res, 405, { error: `不支持 ${req.method} ${path}（可用：PUT 建流 / POST claim / POST push / GET pull / GET 状态）` });
       return;
     }
 
@@ -460,7 +587,12 @@ async function handle(
 
     const hookMatch = /^\/v1\/hooks\/([^/]+)$/.exec(path);
     if (hookMatch && req.method === "POST") {
-      const name = decodeURIComponent(hookMatch[1]!);
+      const name = safeDecode(hookMatch[1]!) ?? "";
+      if (!name) {
+        note = "hook 名字解码不了";
+        json(res, 400, { error: "hook 名字的百分号编码不合法（解码失败）" });
+        return;
+      }
       /*
        * ⚠️ 用 `Object.hasOwn` 而不是真值判断：`opts.hooks` 是普通对象字面量，
        * `hooks["constructor"]` 会命中 `Object` 构造函数（truthy）——

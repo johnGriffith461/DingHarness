@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CwdNotAllowedError } from "../cwd";
 import { startAgentServer, type ServerOptions } from "./agentServer";
+import { createSyncRelay } from "../../engine/sync/relay";
 
 /**
  * Agent Server（Phase 17；2026-10-16 按审计第 1 单收紧）。
@@ -567,5 +568,143 @@ describe("端口约定", () => {
     const port = (server.address() as AddressInfo).port;
     expect(port).toBeGreaterThan(0);
     server.close();
+  });
+});
+
+/**
+ * 同步中继的 HTTP 端点（V5-2 任务 2.1 的服务端那一半）。
+ *
+ * 这里**不重测协议语义**（那个在 `engine/sync/relay.test.ts` 里逐条钉着）——
+ * 这里验的是"语义原样过网"：接线没给就 501、四个动作用法与状态码、
+ * 以及**协议层的拒绝走 409**（请求本身没毛病，是状态不允许）。
+ */
+describe("同步中继端点（/v1/streams/*）", () => {
+  it("⭐ 中继没接线：回 501，不假装一条空流", async () => {
+    const { port, token } = await boot();
+    const res = await call(port, "/v1/streams/s-1", { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(501);
+    expect(res.text).toContain("没有接同步中继");
+  });
+
+  it("⭐ 一条流走完四步：建流 → 接管 → 推 → 拉（语义原样过网）", async () => {
+    const relay = createSyncRelay({ now: () => 1_700_000_000_000 });
+    const { port, token } = await boot({ relay });
+    const auth = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    const created = await call(port, "/v1/streams/s-1", { method: "PUT", headers: auth });
+    expect(created.status).toBe(200);
+
+    const claimed = await call(port, "/v1/streams/s-1/claim", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ holder: "手机" }),
+    });
+    expect(claimed.status).toBe(200);
+    const epoch = (JSON.parse(claimed.text) as { epoch: number }).epoch;
+
+    const pushed = await call(port, "/v1/streams/s-1/push", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        producerId: "p-1",
+        epoch,
+        events: [
+          { id: "e-1", seq: 1, type: "text", payload: { type: "text", text: "甲" } },
+          { id: "e-2", seq: 2, type: "text", payload: { type: "text", text: "乙" } },
+        ],
+      }),
+    });
+    expect(pushed.status).toBe(200);
+    expect(JSON.parse(pushed.text)).toMatchObject({ ok: true, accepted: 2, nextOffset: 3 });
+
+    const pulled = await call(port, "/v1/streams/s-1/pull?from=0&limit=10", { headers: auth });
+    expect(pulled.status).toBe(200);
+    const page = JSON.parse(pulled.text) as { events: Array<{ offset: number; id?: string }>; nextOffset: number; hasMore: boolean };
+    expect(page.events.map((e) => [e.offset, e.id])).toEqual([[1, "e-1"], [2, "e-2"]]);
+    expect(page).toMatchObject({ nextOffset: 2, hasMore: false });
+
+    const state = await call(port, "/v1/streams/s-1", { headers: auth });
+    expect(state.status).toBe(200);
+    expect(JSON.parse(state.text).state).toMatchObject({ epoch, holder: "手机", nextOffset: 3 });
+  });
+
+  it("⭐ 协议层的拒绝走 409（fenced / gap 都算状态不允许，请求本身没毛病）", async () => {
+    const relay = createSyncRelay();
+    const { port, token } = await boot({ relay });
+    const auth = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+    await call(port, "/v1/streams/s-2", { method: "PUT", headers: auth });
+    const claimed = await call(port, "/v1/streams/s-2/claim", { method: "POST", headers: auth, body: "{}" });
+    const epoch = (JSON.parse(claimed.text) as { epoch: number }).epoch;
+    await call(port, "/v1/streams/s-2/claim", { method: "POST", headers: auth, body: "{}" }); // 另一端接管
+
+    const stale = await call(port, "/v1/streams/s-2/push", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ producerId: "p", epoch, events: [{ seq: 1, type: "text", payload: {} }] }),
+    });
+    expect(stale.status).toBe(409);
+    expect(JSON.parse(stale.text)).toMatchObject({ ok: false, code: "fenced" });
+
+    const gap = await call(port, "/v1/streams/s-2/push", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ producerId: "p", epoch: epoch + 1, events: [{ seq: 5, type: "text", payload: {} }] }),
+    });
+    expect(gap.status).toBe(409);
+    expect(JSON.parse(gap.text)).toMatchObject({ ok: false, code: "gap", expected: 1 });
+  });
+
+  it("参数不对 / 流不存在 / 方法不对：400 / 404 / 405 各归各的", async () => {
+    const relay = createSyncRelay();
+    const { port, token } = await boot({ relay });
+    const auth = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    /* 路径要 percent 编码（http 客户端不让裸中文上路）—— 服务端那边解码后再判形状 */
+    const badId = await call(port, `/v1/streams/${encodeURIComponent("带 空格")}`, { method: "PUT", headers: auth });
+    expect(badId.status).toBe(400);
+
+    const noStream = await call(port, `/v1/streams/${encodeURIComponent("没这条")}`, { headers: auth });
+    expect(noStream.status).toBe(404);
+
+    await call(port, "/v1/streams/s-3", { method: "PUT", headers: auth });
+    const badBody = await call(port, "/v1/streams/s-3/push", { method: "POST", headers: auth, body: "{不是 json" });
+    expect(badBody.status).toBe(400);
+
+    const wrongMethod = await call(port, "/v1/streams/s-3/push", { headers: auth });
+    expect(wrongMethod.status).toBe(405);
+  });
+
+  it("鉴权照旧：没带 token 的 streams 请求同样是 401（新端点不是后门）", async () => {
+    const relay = createSyncRelay();
+    const { port } = await boot({ relay });
+    const res = await call(port, "/v1/streams/s-1", { method: "PUT" });
+    expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * 坏百分号编码：**400，不是 500**（V5-2 2.1 实测逮到的那条）。
+ *
+ * 起因：本机 curl 把中文 id 按代码页（GBK）编码成 `%CA%D6`，`decodeURIComponent`
+ * 抛 URIError —— 服务端答了"500 内部错误"。请求本身不对就是 400；
+ * 同一形状在 sessions / hooks / streams 三条路上都收进了 `safeDecode`。
+ */
+describe("路径里的坏百分号编码（三条路都要 400）", () => {
+  it("⭐ streams / sessions / hooks：解不开的路径段一律 400（不冒充 500）", async () => {
+    const relay = createSyncRelay();
+    const { port, token } = await boot({ relay, hooks: { demo: "跑一下" }, hooksSecret: "s3cret" });
+    const auth = { Authorization: `Bearer ${token}` };
+
+    /* 三条路各自的方法：streams 建流 PUT / sessions 读 GET / hooks 触发 POST */
+    const cases: Array<[string, string]> = [
+      ["/v1/streams/%CA%D6-A", "PUT"],
+      ["/v1/sessions/%CA%D6", "GET"],
+      ["/v1/hooks/%CA%D6", "POST"],
+    ];
+    for (const [path, method] of cases) {
+      const res = await call(port, path, { method, headers: auth });
+      expect(res.status, `${method} ${path} 答了 ${res.status}`).toBe(400);
+      expect(res.text).toContain("不合法");
+    }
   });
 });
