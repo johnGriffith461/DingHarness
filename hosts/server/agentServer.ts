@@ -650,7 +650,7 @@ async function handle(
       const emptySpace = space ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], sharedRecipes: [], holders: {}, rooms: {} };
       const sessions = identity.owner
         ? (wanted ? all.filter((s) => (s.owner ?? LOCAL_OWNER_ID) === wanted) : all)
-        : all.filter((s) => canReadSession(emptySpace, identity, s.sessionId, s.owner));
+        : all.filter((s) => canReadSession(emptySpace, identity, s.sessionId, { owner: s.owner ?? LOCAL_OWNER_ID }));
       note = `${sessions.length} 段会话${identity.owner && wanted ? `（owner=${wanted}）` : !identity.owner ? `（${identity.id} 的 + 共享的）` : ""}`;
       json(res, 200, { sessions, you: { id: identity.id, owner: identity.owner } });
       return;
@@ -677,6 +677,44 @@ async function handle(
       } finally {
         built.close();
       }
+      return;
+    }
+
+    /*
+     * 共享打开（V5-3 3.2 / U8-2）：把这一段会话的**原始记录**给出去 ——
+     * 成员看共享会话要能读到与主人一致的内容（重放 diff=0 的判据就比这一份）。
+     *
+     * ⚠️ 门在 `canReadSession`（自己的 + 共享的）；不给记录就不是"打开"，是"看过没有"。
+     */
+    const recordsMatch = /^\/v1\/sessions\/([^/]+)\/records$/.exec(path);
+    if (recordsMatch && req.method === "GET") {
+      const id = safeDecode(recordsMatch[1]!);
+      if (id === null || !SESSION_ID_OK.test(id)) {
+        note = "sessionId 形状不对";
+        json(res, 400, { error: "sessionId 形状不对" });
+        return;
+      }
+      if (!opts.listSessions || !opts.loadSession) {
+        note = "读记录未接线";
+        json(res, 501, { error: "这个服务没有接会话库（宿主没给 listSessions/loadSession）" });
+        return;
+      }
+      const owned = (await opts.listSessions()).find((x) => x.sessionId === id);
+      const spaceNow = opts.space ? spaceOf(opts.space) : null;
+      const allowed = canReadSession(
+        spaceNow ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], sharedRecipes: [], holders: {}, rooms: {} },
+        identity,
+        id,
+        owned ? { owner: owned.owner ?? LOCAL_OWNER_ID } : null,
+      );
+      if (!allowed) {
+        note = `成员 ${identity.id} 想读 ${owned?.owner ?? "?"} 的会话（未共享）`;
+        json(res, 403, { error: `这段会话没有共享给你（归 ${owned?.owner ?? LOCAL_OWNER_ID}）` });
+        return;
+      }
+      const got = await opts.loadSession(id);
+      note = `读记录：${id}（${got.records.length} 条）`;
+      json(res, 200, { sessionId: id, records: got.records });
       return;
     }
 

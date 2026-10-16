@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { MAIN_AGENT, type Actor } from "../../engine/core/actor";
 import { humanFailure } from "../../shared/errors";
 import type { RequesterIdentity, ServerOptions } from "./agentServer";
-import { canWriteSession, spaceOf } from "./spaceApi";
+import { canWriteSession, spaceOf, type SessionLookup } from "./spaceApi";
 
 /**
  * **跑一轮的两条入口**（`/v1/run` 与 webhook `/v1/hooks/:name`）+ SSE 推流。
@@ -67,28 +67,40 @@ export async function handleRunRoute(
   const cwd = typeof body.cwd === "string" ? body.cwd : opts.cwd;
   note(`run${sessionId ? ` session=${sessionId}` : ""}`);
   /*
+   * 这段会话在本地库里的归属（C1，三态 `SessionLookup`）—— 两处都要它：
+   *   · 写侧判定（下面那道 403）：`null`（查过、没有）= 这次写入就是它在创建；
+   *   · **这一轮的 `ownerActor`**：已有会话**不换主**（共享/接管/代写都不转移所有权，
+   *     新会话才归请求者）。这一格漏了会出两个静默故障：跨 owner 写入被本地库拒收
+   *     （整轮记录丢失）与"谁发起谁批"的审批穿透（2026-10-17 实测逮到）。
+   */
+  const indexed = sessionId && opts.listSessions ? await opts.listSessions() : undefined;
+  const found = indexed?.find((x) => x.sessionId === sessionId);
+  /* 摘要里没写 owner（老库补列前/契约可选）= `local`：与本地库自己的读法一致 */
+  const lookup: SessionLookup = indexed ? (found ? { owner: found.owner ?? LOCAL_OWNER_ID } : null) : undefined;
+  /*
    * 写侧规则（V5-3 3.2）：主人写任何会话；成员只能写**自己的**、
-   * 或**共享出来且他是当前持有人**的那段（接管语义）。
+   * **自己在建的**、或**共享出来且他是当前持有人**的那段（接管语义）。
    * 先拒比"跑完发现记不进去"诚实 —— 归属冲突在 C1 是硬墙。
    */
   if (!identity.owner && sessionId) {
-    const owned = opts.listSessions ? (await opts.listSessions()).find((x) => x.sessionId === sessionId) : undefined;
     const space = opts.space ? spaceOf(opts.space) : null;
     const allowed = canWriteSession(
       space ?? { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], sharedRecipes: [], holders: {}, rooms: {} },
       identity,
       sessionId,
-      owned?.owner,
+      lookup,
     );
     if (!allowed) {
-      note(`成员 ${identity.id} 想写 ${owned?.owner ?? "?"} 的会话`);
+      note(`成员 ${identity.id} 想写 ${found?.owner ?? "?"} 的会话`);
       json(res, 403, {
-        error: `这段会话归 ${owned?.owner ?? LOCAL_OWNER_ID}，你写不进去（你是 ${identity.id}）—— 要写得先让它共享出去并接管`,
+        error: `这段会话归 ${found?.owner ?? LOCAL_OWNER_ID}，你写不进去（你是 ${identity.id}）—— 要写得先让它共享出去并接管`,
       });
       return true;
     }
   }
-  await runStreaming(res, opts, message, cwd, sessionId, ctx.activeRuns, identity, ctx.runsByActor);
+  await runStreaming(res, opts, message, cwd, sessionId, ctx.activeRuns, identity, ctx.runsByActor, {
+    ...(found ? { sessionOwner: found.owner ?? LOCAL_OWNER_ID } : {}),
+  });
   return true;
 }
 
@@ -173,10 +185,13 @@ export async function runStreaming(
   identity: RequesterIdentity,
   runsByActor: Map<string, Set<AbortController>>,
   /**
-   * 额外塞进 `started` 帧的字段（V5-3 3.6 的渠道：channel / from）——
-   * 默认什么都不加（本机 `/v1/run` 那条与从前一字不差）。
+   * 这一轮的附带信息（都可选，缺省 = 与从前一字不差）：
+   *
+   *  · `extraStarted`：额外塞进 `started` 帧的字段（V5-3 3.6 的渠道：channel / from）；
+   *  · `sessionOwner`：**已有会话**在本地库里的归属（C1）—— 这一轮的 `ownerActor` 用它，
+   *    不是用请求者。两件事都靠这一格（见下面 `ownerActor` 的说明）。
    */
-  extraStarted?: Record<string, unknown>,
+  context?: { extraStarted?: Record<string, unknown>; sessionOwner?: string },
 ): Promise<void> {
   /*
    * V5-2 2.3：**事件流带上 actor 维度**（谁发起的、谁在答）。
@@ -184,6 +199,16 @@ export async function runStreaming(
    * agent 那一侧 = 主循环（`MAIN_AGENT`，与内核记日志用的是同一个常量）。
    */
   const requester: Actor = { id: identity.id, kind: "user" };
+  /*
+   * ⭐ **已有会话不换主**（C1/C3；2026-10-17 实测逮到的缺口，U8-3）：
+   * `ownerActor` 是全轮唯一的归属口径，它同时决定——
+   *   · 记录落进谁的日志：本地库对**跨 owner 写入抛错拒绝**，
+   *     于是原来"接管之后写得进去"只是 403 那道门开了，记录整批静默丢失；
+   *   · 拦下来的待批归谁批（`approvers` 默认 = 会话 owner，见 registry.ts）：
+   *     原来是"谁发起谁批"—— 接管人自批自的工具调用，正是 U8-3 说的"审批穿帮"。
+   * 接管是**一段时间的写权**，不是所有权转移；新会话才归请求者。
+   */
+  const ownerActor: Actor = { id: context?.sessionOwner ?? identity.id, kind: "user" };
 
   /* 建引擎（cwd 不在授权范围会抛 CwdNotAllowedError → 外层翻成 400，且此时还没开头） */
   const built = await opts.makeEngine(cwd);
@@ -224,14 +249,25 @@ export async function runStreaming(
    * 第一帧：**这一轮是谁发起的**（V5-2 2.3；协作场景里"群里谁问的"必须看得见）。
    * 新增一种帧类型是加法：旧客户端认不出就跳过。
    */
-  send("started", { actor: requester, ...(sessionId ? { sessionId } : {}), ...(extraStarted ?? {}) });
+  send("started", { actor: requester, ...(sessionId ? { sessionId } : {}), ...(context?.extraStarted ?? {}) });
 
   try {
     const outcome = await built.engine.run({
       ...(sessionId ? { sessionId } : {}),
-      /* C5/C1 的接线：这一轮的记录归发起人；**新会话也归他**（已有会话的归属不会被改） */
+      /* C5/C1 的接线：记录带发起人；**归属（ownerActor）跟会话走**（见上面那一格） */
       actor: requester,
-      ownerActor: requester,
+      ownerActor,
+      /*
+       * ⭐ **C2 的人轴**（V5-3 3.2 收尾，2026-10-17）：角色是上限，档位是旋钮。
+       * 成员没传这一格的话，判定层把发起人当 owner —— viewer 的写工具**不是直接拒**
+       * 而是"待批"，而待批的审批人默认又是"这段会话的归属"（她自己的新会话就是她自己）
+       * → 只读成员自批自的写操作。传下去之后 viewer 的写 = 当场拒（`deny`），
+       * 与她是不是持有人无关（接管给的是一段时间的写权，两轴各自成立）。
+       *
+       * 主人（本机单口令）**不传**：判定层按 owner 兜底，老路径一字不变。
+       * 静态 `--member` 口令没有角色：按 ADR-007 的保守默认 = `viewer`（宁可少给）。
+       */
+      ...(identity.owner ? {} : { memberRoles: identity.roles?.length ? identity.roles : (["viewer"] as const) }),
       provider: opts.provider,
       ...(opts.model ? { model: opts.model } : {}),
       messages: [{ role: "user", content: message }],

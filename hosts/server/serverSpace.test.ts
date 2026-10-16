@@ -207,7 +207,7 @@ describe("团队空间（V5-3 3.1/3.2/3.5）", () => {
   });
 
   it("⭐ 3.2 接管：共享之后成员接管才写得进去；没接管 → 403（说清先共享再接管）", async () => {
-    const { port, token, dir } = await bootSpace();
+    const { port, token, dir, fake } = await bootSpace();
     const boss = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
     const code = jsonOf(await call(port, "/v1/space/invite", { method: "POST", headers: boss, body: "{}" })).code as string;
     const aliceToken = jsonOf(
@@ -243,6 +243,78 @@ describe("团队空间（V5-3 3.1/3.2/3.5）", () => {
     const frames = parseSse(text).events;
     expect(frames[0]?.event).toBe("started");
     expect((frames[0]!.data as { actor: { id: string } }).actor.id).toBe("alice");
+
+    /*
+     * ⭐ **已有会话不换主**（C1/C3；2026-10-17 实测逮到的缺口）：
+     * `ownerActor` 是全轮唯一的"归属"口径 —— 它同时决定记录落进谁的日志
+     * （本地库跨 owner 写入会**抛错拒绝**，于是这一轮整批记录静默丢失）
+     * 与拦下来的待批归谁批（`approvers` 默认 = 会话 owner）。
+     * 接管是**一段时间的写权**，不是所有权转移：这里必须仍是 `local`（会话主人）。
+     */
+    expect(fake.ownerActors.at(-1), "接管人把自己的归属顶了上去（记录会被本地库拒收、审批也会穿透）").toBe("local");
+
+    /* 主人写进 alice 的会话：归属跟着**会话**走，不跟着请求者走 */
+    await collectSse(port, "/v1/run", JSON.stringify({ message: "主人插一句", sessionId: "task-alice" }), boss);
+    expect(fake.ownerActors.at(-1), "主人写别人的会话时把归属顶成了自己").toBe("alice");
+
+    /* 新会话（没有 sessionId）：归属才是请求者 */
+    await collectSse(port, "/v1/run", JSON.stringify({ message: "alice 开一段新的" }), alice);
+    expect(fake.ownerActors.at(-1), "新会话没有归发起人").toBe("alice");
+
+    /*
+     * ⭐ **C2 的人轴也要传给内核**（角色是上限，档位是旋钮）：
+     * 没有这一格，viewer 的写工具在判定层会被当成 owner（不是直接拒而是"待批"），
+     * 而待批的审批人默认又是她自己的会话归属 —— 于是"只读成员"能自批自的写操作。
+     */
+    expect(fake.memberRoles.at(-1), "成员角色没传进内核（人轴成了摆设）").toEqual(["viewer"]);
+    /* 主人不传这一格：判定层按 owner 兜底（本机单用户那条老路径一字不变） */
+    await collectSse(port, "/v1/run", JSON.stringify({ message: "主人跑一轮" }), boss);
+    expect(fake.memberRoles.at(-1), "主人这一路不该带成员角色").toBeUndefined();
+    cleanupDirs.push(dir);
+  });
+
+  it("⭐ U8-1 成员建自己的新会话：放行（归属就在这一步定下来）", async () => {
+    const { port, token, dir, fake } = await bootSpace();
+    const boss = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const code = jsonOf(await call(port, "/v1/space/invite", { method: "POST", headers: boss, body: "{}" })).code as string;
+    const aliceToken = jsonOf(
+      await call(port, "/v1/space/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, memberId: "alice" }),
+      }),
+    ).token as string;
+    const alice = { Authorization: `Bearer ${aliceToken}`, "content-type": "application/json" };
+
+    /*
+     * 2026-10-17 实测逮到（U8 验收脚本）：本地库里**没有** `task-alice-new` 这一段，
+     * 原来"查不到 → 当 local 的"把成员建自己的会话也一并拒了（403）。
+     * 正确口径：查过了、没有 → **这一次写入就是它在创建**，归属就是发起人（C1）。
+     */
+    const text = await collectSse(port, "/v1/run", JSON.stringify({ message: "alice 开一段新的", sessionId: "task-alice-new" }), alice);
+    expect(parseSse(text).events[0]?.event, "成员建自己的会话被拒了（本该放行）").toBe("started");
+    expect(fake.ownerActors.at(-1), "新会话的归属不是发起人").toBe("alice");
+    cleanupDirs.push(dir);
+  });
+
+  it("⭐ 没接会话库（没有 listSessions）时：成员的写侧一律保守拒（不猜）", async () => {
+    /* 查都没得查的时候，"查不到"什么都不能说明 —— 那种情况下宁可拒，不假设它是新的 */
+    const { port, token, dir } = await bootSpace({ listSessions: undefined });
+    const boss = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const code = jsonOf(await call(port, "/v1/space/invite", { method: "POST", headers: boss, body: "{}" })).code as string;
+    const aliceToken = jsonOf(
+      await call(port, "/v1/space/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, memberId: "alice" }),
+      }),
+    ).token as string;
+    const res = await call(port, "/v1/run", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${aliceToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ message: "开一段新的", sessionId: "task-who-knows" }),
+    });
+    expect(res.status).toBe(403);
     cleanupDirs.push(dir);
   });
 

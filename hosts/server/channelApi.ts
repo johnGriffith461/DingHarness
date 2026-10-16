@@ -126,9 +126,17 @@ async function runChannelTurn(
    */
   await runStreaming(res, opts, input.text, opts.cwd, input.sessionId, ctx.activeRuns, identity, ctx.runsByActor, {
     /* 渠道来源进 SSE 的 started 帧（桥要能确认"这轮回执是发给谁的"） */
-    channel: input.channel,
-    from: input.from,
-    actor: requester,
+    extraStarted: {
+      channel: input.channel,
+      from: input.from,
+      actor: requester,
+    },
+    /*
+     * 渠道会话（`ch-<渠道>-<人>`）的归属跟着**桥的那把口令**走：
+     * 新会话归桥的身份，已有会话由 `handleRunRoute` 那侧查到的真实 owner 决定 ——
+     * 这里不给 `sessionOwner` 时 `runStreaming` 落到"请求者"，与渠道的语义一致
+     * （同一把桥口令 = 同一个归属；跨成员共用一把桥口令的场景不存在）。
+     */
   });
 }
 

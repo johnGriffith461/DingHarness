@@ -29,11 +29,21 @@ export function fakeEngineFactory(behaviour: FakeBehaviour = {}) {
   const opened: string[] = [];
   const messages: string[] = [];
   const sessionIds: (string | undefined)[] = [];
+  /**
+   * 每一轮的 `ownerActor.id`（C1）—— **已有会话不换主**那条断言要看它。
+   *
+   * ⚠️ 记的是 id 字符串不是整个 actor：断言要的是"归谁"，不是"什么种类"。
+   */
+  const ownerActors: (string | undefined)[] = [];
+  /** 每一轮传下来的成员角色（C2 人轴）—— `undefined` = 没传（判定层按 owner 兜底）。 */
+  const memberRoles: (readonly string[] | undefined)[] = [];
   let aborted = 0;
   return {
     opened,
     messages,
     sessionIds,
+    ownerActors,
+    memberRoles,
     get aborted() {
       return aborted;
     },
@@ -42,9 +52,18 @@ export function fakeEngineFactory(behaviour: FakeBehaviour = {}) {
       opened.push(cwd);
       return {
         engine: {
-          async run(request: { messages: { content: string }[]; sessionId?: string; onEvent?: (e: unknown) => void; abortSignal?: AbortSignal }) {
+          async run(request: {
+            messages: { content: string }[];
+            sessionId?: string;
+            ownerActor?: { id: string };
+            memberRoles?: readonly string[];
+            onEvent?: (e: unknown) => void;
+            abortSignal?: AbortSignal;
+          }) {
             messages.push(request.messages[0]!.content);
             sessionIds.push(request.sessionId);
+            ownerActors.push(request.ownerActor?.id);
+            memberRoles.push(request.memberRoles);
             if (behaviour.hang) {
               return await new Promise((resolve) => {
                 const done = () => {
@@ -70,6 +89,8 @@ export function fakeEngineFactory(behaviour: FakeBehaviour = {}) {
     opened: string[];
     messages: string[];
     sessionIds: (string | undefined)[];
+    ownerActors: (string | undefined)[];
+    memberRoles: (readonly string[] | undefined)[];
     readonly aborted: number;
     makeEngine: (cwd: string) => Promise<{ engine: never; close: () => void }>;
   };

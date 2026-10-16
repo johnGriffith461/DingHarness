@@ -412,26 +412,42 @@ export async function handleSpaceRoute(
 }
 
 /**
+ * 本地库里"这段会话归谁"的一次查询结果（**三态**，两个门都要它）：
+ *
+ * · `{ owner }` —— 查到了，归 owner；
+ * · `null` —— **查过了、没有这一段**（写侧：这一次写入就是它在创建，归属是发起人）；
+ * · `undefined` —— **没查**（宿主没接 `listSessions`）：什么都不能假设，按最保守判。
+ *
+ * ⚠️ 三态而不是"owner ?? 'local'"（2026-10-17 实测逮到，U8 验收脚本）：
+ * 两态时"查不到"与"没查"长得一样，于是**成员建自己的新会话**也被当成
+ * "往 local 的会话里写"一并拒掉 —— 成员在服务端根本开不了新会话。
+ */
+export type SessionLookup = { owner: string } | null | undefined;
+
+/**
  * **成员能不能写这段会话**（3.2 的写侧规则；`runStreaming` 之前的检查用它）。
  *
  * 规则（U8-3"接管后审批不穿帮"的地基）：
  *   · 主人（主口令）：任何会话都能写；
- *   · 成员：自己的会话能写；**共享出来且他是当前持有人**的能写；其余 403。
+ *   · 成员：自己的能写；**本地还没有的那段**能写（那是他在建它，归属在这一步定下来）；
+ *     共享出来且他是当前持有人的能写；其余 403。
  *
  * @param space 空间账
  * @param identity 身份
  * @param sessionId 会话
- * @param ownerOfSession 这段会话在本地库里的归属（`listSessions` 查到的那个）
+ * @param lookup 这段会话在本地库里的归属（`SessionLookup` 的三态）
  * @returns 能不能写
  */
 export function canWriteSession(
   space: SpaceFile,
   identity: RequesterIdentity,
   sessionId: string,
-  ownerOfSession: string | undefined,
+  lookup: SessionLookup,
 ): boolean {
   if (identity.owner) return true;
-  if ((ownerOfSession ?? "local") === identity.id) return true;
+  if (lookup && lookup.owner === identity.id) return true;
+  /* 查过了、库里没有：**这是它在创建**（归属 = 发起人）。没查过（undefined）不算数 —— 不猜。 */
+  if (lookup === null) return true;
   return space.shared.includes(sessionId) && space.holders[sessionId] === identity.id;
 }
 
@@ -440,10 +456,15 @@ export function canReadSession(
   space: SpaceFile,
   identity: RequesterIdentity,
   sessionId: string,
-  ownerOfSession: string | undefined,
+  lookup: SessionLookup,
 ): boolean {
   if (identity.owner) return true;
-  if ((ownerOfSession ?? "local") === identity.id) return true;
+  if (lookup && lookup.owner === identity.id) return true;
+  /*
+   * `null`（库里没有）与"别人的"一样：不给自己之外的任何东西开门 ——
+   * 有没有内容由共享清单说了算（没内容可读也不算漏）。
+   * `undefined`（没查）保持老口径：只有共享这一条路。
+   */
   return space.shared.includes(sessionId);
 }
 
