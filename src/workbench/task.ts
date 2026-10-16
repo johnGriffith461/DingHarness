@@ -59,6 +59,16 @@ export type TaskStep = {
   note?: string;
 };
 
+/**
+ * 「上一次关窗口时那一轮被打断了」这句说明（审计 P139 / P211）。
+ *
+ * 它**是给人看的话**，不是判据：判据是下面 `interrupted` 那个真值
+ * （由 `engine/core/recovery.ts` 的 `interruptedFromStage` 判、`taskPersist` 记）。
+ * 写它的地方（`taskPersist.normalizeTask`）与认得它的地方（`continueTargetOf`）
+ * 都从这里取，别各写一份字符串。
+ */
+export const INTERRUPTED_NOTE = "上次关闭时被中断";
+
 /** 澄清提问卡里的一个选项。 */
 export type TaskOption = {
   /** 主文案，例如「拼多多家纺/母婴店」。 */
@@ -140,6 +150,20 @@ export type WorkTask = {
    * 排序时回落到 `createdAt`（不编一个访问时刻出来）。
    */
   openedAt?: number;
+
+  /**
+   * **恢复时那一轮被打断了吗**（审计 P139 / P211）。
+   *
+   * 这是一个**真值**，不是又一句文案：`taskPersist.normalizeTask` 恢复任务时
+   * 用引擎的判据（`engine/core/recovery.ts` 的 `interruptedFromStage`）算出它、
+   * 随任务落盘；「继续」按钮要不要出现就看它。
+   *
+   * ⚠️ 在这之前，桌面端是拿 `activity` 那句说明**做字符串匹配**认这件事的 ——
+   * 于是"连接被中断"这种报错（说的是网络断了）也会长出一颗「继续」按钮。
+   * 新数据一律看这个字段；旧盘（这次修复之前写下的 `tasks.json`）没有它，
+   * 只能按那句说明认一次（见 `continueTargetOf` 的兜底）。
+   */
+  interrupted?: boolean;
 };
 
 /* ============================================================
@@ -603,26 +627,52 @@ export function nextStepId(): string {
 /**
  * 被中断的回合，该"继续"什么（Phase 12.2 的桌面端）。
  *
- * @param task 任务
+ * ## 判据来自引擎，不在这一层再判一次（审计 P139 / P211）
+ *
+ * 「这一轮被打断了吗」只有一条判据（**有请求、没有收尾记录**），它住在
+ * `engine/core/recovery.ts`（`interruptedTurns` / `interruptedFromStage`）。
+ * 桌面端恢复任务时用那个判据算出一个**真值** `task.interrupted` 落盘
+ * （`taskPersist.normalizeTask`），这里只读它。
+ *
+ * 原来这里是 `stage === "failed"` 加 `activity` 里匹配「被中断」三个字 ——
+ * 那是把**给人看的说明**当判据用，代价很具体：provider 报一句「连接被中断」
+ * （说的是网络断了）也会长出一颗「继续」按钮，点下去又花一次钱。
+ *
+ * ## 两条前提（都要，缺一个就不给按钮）
+ *
+ * · **`stage === "failed"`**：跑着/等着/跑完的任务没有"要继续"这回事。
+ * · **必须能找到那句用户原话**：找不到就不给按钮（给一个按下去什么都不会发生的
+ *   按钮，比不给更糟）。历史里一定有 user 步骤，所以找不到基本意味着数据本身有问题。
+ *
+ * @param task 任务（**不可信**：字段可能来自磁盘）
  * @returns 上一次用户说的那句**原话**；没有可继续的 → `null`
- *
- * ## 判据为什么是这两条
- *
- * · **只对"被中断"的任务给按钮**：`activity` 里写着"被中断"才是崩溃恢复那种情形。
- *   用户自己点了停止、或者模型报错 —— 那些已经被明确告知过了，再给一颗"继续"是多余的。
- * · **必须能找到那句用户原话**：找不到就不给按钮（给一个按下去什么都不会发生的按钮，
- *   比不给更糟）。历史里一定有 user 步骤，所以找不到基本意味着数据本身有问题。
  */
 export function continueTargetOf(task: {
   stage: string;
   activity?: string;
+  /** 恢复时记下的真值（新盘都有；旧盘没有这个字段）。 */
+  interrupted?: boolean;
   steps: ReadonlyArray<{ role: string; text: string }>;
 }): string | null {
   if (task.stage !== "failed") return null;
-  if (!(task.activity ?? "").includes("被中断")) return null;
+  if (!wasInterrupted(task)) return null;
   for (let i = task.steps.length - 1; i >= 0; i -= 1) {
     const step = task.steps[i];
     if (step?.role === "user" && step.text.trim()) return step.text;
   }
   return null;
+}
+
+/**
+ * 这个任务里那一轮是不是被打断的。
+ *
+ * 真值优先（`interrupted`）；只有**旧盘**（这次修复之前写下的 `tasks.json`）
+ * 才回落到那句说明 —— 那时它确实是唯一的痕迹，如实认一次，但不扩散到新数据。
+ *
+ * @param task 任务
+ * @returns 是被打断的那种失败吗
+ */
+function wasInterrupted(task: { interrupted?: boolean; activity?: string }): boolean {
+  if (typeof task.interrupted === "boolean") return task.interrupted;
+  return (task.activity ?? "").includes(INTERRUPTED_NOTE);
 }

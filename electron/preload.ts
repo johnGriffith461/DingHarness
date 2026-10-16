@@ -4,6 +4,7 @@ import { AI_CHANNEL } from "./ipc/ai";
 import { CLIPBOARD_CHANNEL } from "./ipc/clipboard";
 import { CODING_CHANNEL } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
+import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { PLUGIN_CHANNEL } from "./ipc/pluginHost";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
@@ -45,8 +46,8 @@ import { IMAGE_CHANNEL } from "./ipc/imageGen";
  * 契约的唯一事实来源是 `ShellBridge`，实现必须与它一致。
  */
 const api = {
-  ping: () => ipcRenderer.invoke("app:ping"),
-  userDataDir: (): Promise<string> => ipcRenderer.invoke("app:userDataDir"),
+  ping: () => ipcRenderer.invoke(APP_CHANNEL.ping),
+  userDataDir: (): Promise<string> => ipcRenderer.invoke(APP_CHANNEL.userDataDir),
 
   /*
    * 窗口控制（自绘标题栏用）。
@@ -259,8 +260,10 @@ const api = {
     clear: (): Promise<unknown> => ipcRenderer.invoke(MEMORY_CHANNEL.clear),
   },
   appSettings: {
-    read: (): Promise<{ pinnedModel: string }> => ipcRenderer.invoke(APP_SETTINGS_CHANNEL.read),
-    write: (next: { pinnedModel: string }): Promise<{ pinnedModel: string }> =>
+    /* 与 `electron/ipc/appSettings.ts` 的 `AppSettings` 对齐（`navCollapsed` = 左栏收起态） */
+    read: (): Promise<{ pinnedModel: string; navCollapsed?: boolean }> =>
+      ipcRenderer.invoke(APP_SETTINGS_CHANNEL.read),
+    write: (next: { pinnedModel: string; navCollapsed?: boolean }): Promise<{ pinnedModel: string; navCollapsed?: boolean }> =>
       ipcRenderer.invoke(APP_SETTINGS_CHANNEL.write, next),
   },
   coding: {

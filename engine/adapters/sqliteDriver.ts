@@ -68,7 +68,60 @@ export function sqliteRuntimeName(): "bun" | "node" {
 }
 
 /**
+ * 一次写事务最多等多久（毫秒）—— `busy_timeout`（审计 P39）。
+ *
+ * 5 秒是个取舍：够覆盖一次真实的写入事务（本项目的写入是**整批一个事务**、
+ * 毫秒级），又不至于让界面在"另一个进程正写着"时卡上半分钟。
+ */
+export const SQLITE_BUSY_TIMEOUT_MS = 5000;
+
+/**
+ * 每一条连接打开后立刻要设的两条 PRAGMA（**审计 P39 的数据库那一半**）。
+ *
+ * ## 缺陷形状
+ *
+ * 整改前这里是**裸连接**：没有 `busy_timeout`、没有 WAL。而同一个库文件真的会被
+ * 多个进程/连接碰到 —— 桌面（`sessions.db`）与 CLI 在开发态指向同一个 `data/`
+ * 目录、`ding` 与 `ding serve` 也会同时开库；单实例锁（`electron/ipc/singleInstance.ts`）
+ * 只覆盖了"桌面开两份"那一种，数据库这一侧不能假设"只有一个写者"。
+ * 裸连接撞在一起的后果很具体：写侧立刻 `SQLITE_BUSY`，上层当作"写盘失败"，
+ * 于是同一份数据出现两个版本（split-brain）。
+ *
+ * ## 两条各自解决什么
+ *
+ * · `busy_timeout`：库被别的连接占着时**等**一会儿，而不是立刻失败。
+ *   它是**每条连接**的设置 —— 所以必须设在唯一的开库入口这里；
+ *   设在某个调用点的话，别的调用点就是裸的。
+ * · `journal_mode = WAL`：读不挡写、写不挡读（我们最需要的正是这一点：一边流式写日志、
+ *   一边读历史）。它是**落在库文件上**的设置（会多出 `-wal` / `-shm` 两个文件），
+ *   设一次之后别的连接打开也是 WAL。
+ *
+ * ## 设不上怎么办（如实降级，不让库打不开）
+ *
+ * 两条都包在 try 里：库在只读介质 / 网络盘上，或那个 SQLite 构建不支持时，
+ * **设不上不等于库坏了** —— 说一句，照旧按原来的 journal 模式用。
+ * `:memory:` 上 WAL 本来就不适用，同理。
+ *
+ * @param db 刚打开的句柄
+ */
+function applyConnectionDefaults(db: SqliteDatabase): void {
+  try {
+    db.prepare(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`).get();
+  } catch (error) {
+    console.error("[sqlite] busy_timeout 没设上（并发写更容易撞 SQLITE_BUSY）：", error);
+  }
+  try {
+    db.prepare("PRAGMA journal_mode = WAL").get();
+  } catch (error) {
+    console.error("[sqlite] 没切到 WAL（读会被写挡住，功能不受影响）：", error);
+  }
+}
+
+/**
  * 打开一个 SQLite 库（同步）。
+ *
+ * ⚠️ **所有连接都从这里出去**，所以 `busy_timeout` / WAL 也在这里设一次
+ * （见 `applyConnectionDefaults` —— 每条连接各设一次，漏一个调用点就是一条裸连接）。
  *
  * @param file 文件路径（`:memory:` 也可以）
  * @returns 统一的数据库句柄
@@ -76,10 +129,10 @@ export function sqliteRuntimeName(): "bun" | "node" {
  */
 export function openSqlite(file: string): SqliteDatabase {
   const runtime = sqliteRuntimeName();
-  if (runtime === "bun") {
-    const mod = req("bun:sqlite") as { Database: new (f: string) => SqliteDatabase };
-    return new mod.Database(file);
-  }
-  const mod = req("node:sqlite") as { DatabaseSync: new (f: string) => SqliteDatabase };
-  return new mod.DatabaseSync(file);
+  const db =
+    runtime === "bun"
+      ? new (req("bun:sqlite") as { Database: new (f: string) => SqliteDatabase }).Database(file)
+      : new (req("node:sqlite") as { DatabaseSync: new (f: string) => SqliteDatabase }).DatabaseSync(file);
+  applyConnectionDefaults(db);
+  return db;
 }

@@ -94,10 +94,19 @@ const isTableRow = (line: string): boolean => /^\s*\|.*\|\s*$/.test(line);
 const isTableSep = (line: string): boolean => /^\s*\|[\s:|-]+\|\s*$/.test(line);
 
 /**
+ * 这一行是不是代码围栏（` ``` `）。
+ *
+ * 提出来是为了让「围栏里的东西不算内容」这个口径**只有一份**：
+ * `parseOutline` 与 `extractCharts` 都按它推进 `inFence` 状态。
+ */
+const isFence = (line: string): boolean => /^\s*```/.test(line);
+
+/**
  * 从文本里抽大纲。
  *
  * 只认 Markdown 的 `#` 标题（本体的文档本来就是 Markdown 口径）。
- * **代码块里的 `#` 不算** —— 那是注释，不是标题（这条容易漏，单测钉了）。
+ * **代码块里的 `#` 不算** —— 那是注释，不是标题（这条容易漏，`shared/reader.test.ts` 钉了它；
+ * 围栏这一步与 `extractCharts` 共用 `isFence`，别让两处口径再分家）。
  *
  * @param text 全文
  * @param per 每页行数
@@ -109,7 +118,7 @@ export function parseOutline(text: string, per = LINES_PER_PAGE): OutlineItem[] 
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? "";
-    if (/^\s*```/.test(line)) {
+    if (isFence(line)) {
       inFence = !inFence;
       continue;
     }
@@ -165,6 +174,12 @@ function cells(line: string): string[] {
 /**
  * 抽图表：Markdown 表格 + 图片计数。
  *
+ * ⚠️ **代码围栏里的不算**（2026-10-16，审计 P243）：围栏里出现 `| a | b |` 的示例、
+ * 或者教人写图片语法的 `![x](y)`，那是**这份内容里的代码**，不是它的表格与图片。
+ * 原先这里没有围栏这一步，于是「图表」页签会报出根本不存在的表与图（数量与页号都进界面）——
+ * 而同文件 `parseOutline` 早就按围栏跳过 `#`，同一份内容里两处口径相反。
+ * 现在两边共用 `isFence`，判据在 `shared/reader.test.ts`（围栏里像图表、围栏外是真图表）。
+ *
  * @param text 全文
  * @param per 每页行数
  * @returns 表格块与图片张数
@@ -173,8 +188,14 @@ export function extractCharts(text: string, per = LINES_PER_PAGE): { tables: Tab
   const lines = text.split("\n");
   const tables: TableBlock[] = [];
   let images = 0;
+  let inFence = false;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? "";
+    if (isFence(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
     // 图片：Markdown 语法 `![alt](url)`
     images += (line.match(/!\[[^\]]*\]\([^)]*\)/g) ?? []).length;
     /*

@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef } from "react";
 import { useStoreApi, type InternalNode, type Node, type XYPosition } from "@xyflow/react";
 import type { NodeLookup } from "@xyflow/system";
 import { clientToFlowPosition, fromTransform } from "./viewport";
-import { boxHitTest, clickHitTest, isMultiSelectKey, smearHitTest, toggleSelection } from "./selection";
+import {
+  boxHitTest,
+  isMultiSelectKey,
+  pickPointTarget,
+  smearHitTest,
+  toggleSelection,
+} from "./selection";
 import type { SelectionMode } from "./selection";
 import { rafThrottle } from "@/utils/raf";
 
@@ -56,6 +62,8 @@ type SweepOptions = {
   getLookup: () => NodeLookup<InternalNode<Node>>;
   /** 取当前已选中的节点 id。 */
   getSelected: () => string[];
+  /** 取文档次序（节点数组的 id 顺序）：多选点选要靠它算"谁在最上面"（P249）。 */
+  getOrder: () => string[];
   /** 选中集落库（整体替换，不是追加）。 */
   onSelect: (ids: string[]) => void;
 };
@@ -70,6 +78,7 @@ export function useCanvasSelection({
   mode,
   getLookup,
   getSelected,
+  getOrder,
   onSelect,
 }: SweepOptions): SweepApi {
   const store = useStoreApi();
@@ -79,8 +88,8 @@ export function useCanvasSelection({
   const baseRef = useRef<string[]>([]);
   const trailRef = useRef<XYPosition[]>([]);
   const sinkRef = useRef<((state: SweepVisual) => void) | null>(null);
-  const paramsRef = useRef({ mode, getLookup, getSelected, onSelect });
-  paramsRef.current = { mode, getLookup, getSelected, onSelect };
+  const paramsRef = useRef({ mode, getLookup, getSelected, getOrder, onSelect });
+  paramsRef.current = { mode, getLookup, getSelected, getOrder, onSelect };
   /** 本次手势是否从输入控件上借来的（借来的话要等指针移动才真正接管）。 */
   const relaxInputRef = useRef(false);
   /** 是否让位给别的工具（标记模式）。 */
@@ -228,11 +237,44 @@ export function useCanvasSelection({
    * 幂等做法：记住上一次真正执行过的命中节点与时间，同一个节点在短窗口内再来一次
    * 就只拦截、不再切换（见 `lastToggleRef`）。
    *
+   * ⚠️ 命中的判据是 `pointTargetAt`（几何层序取最上面**一个**，P249）——
+   * 原来把整份几何命中都切换一遍，点框里的卡片会连同画框与压在下面的卡片一起进选中集，
+   * 与不带修饰键的普通点选（走 DOM）结果不一致。
+   *
    * 注意**不要在 mouseup / pointerup 上清掉这个记录**：实测 `mouseup` 的捕获阶段
    * 早于 `click`，抬手时清掉就等于没有去重，click 又切换一次（选中→立刻取消）。
    * 只靠时间窗口去重即可。
    */
   const lastToggleRef = useRef<{ node: string; at: number } | null>(null);
+
+  /**
+   * 指针下那个**节点元素**的 id（DOM 那条路认的就是它）。
+   *
+   * 用 `elementFromPoint` 而不是 `event.target`：与 `decide` 同理 ——
+   * 用户眼里的"点在哪个节点上"只取决于指针下方的实际元素（画框本体是 `pointer-events: none`，
+   * 所以压在框里的卡片上时，这里给的是卡片；压在画框标题栏上时才是画框）。
+   */
+  const domNodeIdAt = useCallback((x: number, y: number): string | null => {
+    const el = document.elementFromPoint(x, y);
+    const wrap = el?.closest?.(".react-flow__node");
+    return (wrap as HTMLElement | null)?.dataset?.id ?? null;
+  }, []);
+
+  const pointTargetAt = useCallback(
+    (event: { clientX: number; clientY: number }): string | null => {
+      const { getLookup: lookup, getOrder: order } = paramsRef.current;
+      /*
+       * ⚠️ 取**最上面那一个**，并把画框排除在外（P249）——理由写在 `pickPointTarget`：
+       * 原来把整份几何命中都切换一遍，点框里的卡片会连画框一起选中，
+       * 与不带修饰键的普通点选（走 DOM，只选最上面那张卡）口径不一致。
+       */
+      return pickPointTarget(toFlow(event), lookup(), {
+        domId: domNodeIdAt(event.clientX, event.clientY),
+        order: order(),
+      });
+    },
+    [domNodeIdAt, toFlow],
+  );
 
   const multiSelectBefore = useCallback(
     (
@@ -241,23 +283,22 @@ export function useCanvasSelection({
       if (inertRef.current) return false;
       if (paramsRef.current.mode !== "point") return false;
       if (!isMultiSelectKey(event)) return false;
-      const hit = clickHitTest(toFlow(event), paramsRef.current.getLookup(), 3);
-      if (hit.length === 0) return false;
+      const target = pointTargetAt(event);
+      if (!target) return false;
 
       // 拦住下游，别让它替换整份选择
       event.stopPropagation();
       event.preventDefault();
 
-      const key = hit.slice().sort().join(",");
       const last = lastToggleRef.current;
       const now = Date.now();
-      if (last && last.node === key && now - last.at < 800) return true;
+      if (last && last.node === target && now - last.at < 800) return true;
 
-      lastToggleRef.current = { node: key, at: now };
-      paramsRef.current.onSelect(toggleSelection(paramsRef.current.getSelected(), hit));
+      lastToggleRef.current = { node: target, at: now };
+      paramsRef.current.onSelect(toggleSelection(paramsRef.current.getSelected(), [target]));
       return true;
     },
-    [toFlow],
+    [pointTargetAt],
   );
 
   const noop = useCallback(() => undefined, []);

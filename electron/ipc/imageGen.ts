@@ -38,6 +38,25 @@ export type ImageProviderDef = {
   id: string;
   label: string;
   baseURL: string;
+  /**
+   * 覆盖 `baseURL` 的**环境变量名**（省略则不覆盖）。
+   *
+   * ## 为什么图像通道也要有它（2026-10-16，审计 A20）
+   *
+   * 文本那张 provider 表（`engine/runtime/providers.ts`）早就有 `baseURLEnv`，
+   * 于是「把端点指到别的地址」在文本侧是一条被支持的路；图像侧缺这一格，
+   * 后果有两层：
+   *
+   * ① **用户侧**：自建/中转（反代、企业网关、本地推理）的 OpenAI 兼容图像服务
+   *    根本指不进来 —— 表里的 `baseURL` 是写死的远程域名，只能用它；
+   * ② **验收侧**：批跑自带一个**本地假通道**（`scripts/verify-acceptances.mjs` 的
+   *    `startLocalFakeModel`），而零出网那道闸只放行 `127.0.0.1`。表里没有覆盖口，
+   *    假通道就指不进去，于是「图像链」那几条验收永远要真调模型（烧钱、受上游波动）。
+   *
+   * 两处口径与文本表**完全一致**：`进程环境里的非空值 || 表里的默认值`
+   * （空串/只有空白当作没设，否则一个误设的空变量会把请求发到空地址上）。
+   */
+  baseURLEnv?: string;
   /** 凭据引用名（**不是**密钥本体）。 */
   keyRef: string;
   models: string[];
@@ -58,11 +77,28 @@ export const IMAGE_PROVIDERS: ImageProviderDef[] = [
     id: "lunora",
     label: "Lunora 图像",
     baseURL: "https://api.uselunora.com/v1",
+    /* 自建/中转/假通道都从这里指进来（口径见 `ImageProviderDef.baseURLEnv` 的说明） */
+    baseURLEnv: "LUNORA_BASE_URL",
     keyRef: "LUNORA_API_KEY",
     models: ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
     note: "OpenAI 兼容，返回 b64_json；单张约 30 秒",
   },
 ];
+
+/**
+ * 取一条图像通道**实际生效**的 baseURL（环境变量覆盖 || 表里的默认值）。
+ *
+ * ⚠️ **每次发请求都现算**，不要在模块顶层缓存：这一层读的是进程环境，
+ * 而环境是可能变的（宿主切端点、批跑把假通道指进来）。
+ * 文本侧那一份（`engine/runtime/providers.ts` 的 `allProviders`）同一口径。
+ *
+ * @param p 图像通道定义
+ * @returns 去掉尾部斜杠的 baseURL
+ */
+export function imageBaseURL(p: ImageProviderDef): string {
+  const override = (p.baseURLEnv ? process.env[p.baseURLEnv]?.trim() : "") || "";
+  return (override || p.baseURL).replace(/\/+$/, "");
+}
 
 /** 提交前对 size 做一次形态校验：`auto` 或 `WxH`（且是 16 的倍数、在合法范围内）。 */
 function sanitizeSize(input: unknown): string | undefined {
@@ -306,7 +342,7 @@ export function registerImageIpc(): void {
         // 其它情况传规整好的 WxH
         if (size && size !== "auto") body.size = size;
 
-        const res = await fetchRemote(`${provider.baseURL}/images/generations`, "生成图片", {
+        const res = await fetchRemote(`${imageBaseURL(provider)}/images/generations`, "生成图片", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${resolveSecret(provider.keyRef)}`,
@@ -404,7 +440,7 @@ export function registerImageIpc(): void {
       form.append("image", new Blob([new Uint8Array(prepared.buffer)], { type: "image/png" }), "input.png");
       form.append("size", size);
 
-      const res = await fetchRemote(`${provider.baseURL}/images/edits`, "编辑图片", {
+      const res = await fetchRemote(`${imageBaseURL(provider)}/images/edits`, "编辑图片", {
         method: "POST",
         // multipart：**不要**手写 Content-Type，让 fetch 自己带 boundary，否则上游解析不了
         headers: { Authorization: `Bearer ${resolveSecret(provider.keyRef)}` },

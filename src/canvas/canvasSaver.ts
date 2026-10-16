@@ -100,6 +100,41 @@ export type CanvasSnapshotState = {
   revision: number;
 };
 
+/**
+ * 这次 store 变化**值不值得落盘**（2026-10-16 审计 P30）。
+ *
+ * ## 修的是什么
+ *
+ * 订阅侧原来只有一句 `if (state.revision === prev.revision) return;` —— 而**视口不推修订号**
+ * （`setViewport` 只 `set({ viewport })`，见 `runtimeStore.ts`），于是"拖画布看别处"
+ * 这一整类动作**永远不触发保存**：`serializeCanvas` 照旧把 `viewport` 写进文档，
+ * 写的却永远是载入时那一份 —— 重启后视图回到老位置，用户停在的那个角落找不回来。
+ *
+ * ## 为什么不是"给视口也推修订号"
+ *
+ * 修订号是**内容**的版本（撤销栈、`confirmedRevision`、主进程"修订号不能倒退"都按它算）。
+ * 平移一眼屏幕并没有改内容，把它算成新版本会让每次拖动都产生一份"新版本"，
+ * 也会让"修订号"这个数失去它现在的含义。所以判据放在**持久化这一侧**：
+ * 修订号变了**或**视口真的动了 → 该存。
+ *
+ * 视口按**数值**比（不是引用）：手势结束回到原处（`onEnd` 每次都会给一个新对象）不算变化，
+ * 免得白白写一次盘。
+ *
+ * @param next 现在的 store 状态
+ * @param prev 上一次订阅到的那份
+ * @returns true = 安排一次落盘
+ */
+export function isPersistableChange(
+  next: Pick<CanvasSnapshotState, "revision" | "viewport">,
+  prev: Pick<CanvasSnapshotState, "revision" | "viewport">,
+): boolean {
+  if (next.revision !== prev.revision) return true;
+  const a = next.viewport;
+  const b = prev.viewport;
+  if (!a || !b) return false;
+  return a.x !== b.x || a.y !== b.y || a.zoom !== b.zoom;
+}
+
 /** 渲染侧用到的主进程画布能力（`ShellBridge.canvas` 的一个子集）。 */
 export type CanvasSink = {
   save: (doc: CanvasDocument) => Promise<{ ok: boolean; error?: string }>;

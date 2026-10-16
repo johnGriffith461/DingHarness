@@ -7,6 +7,7 @@ import { droppedCount, normalizeCanvasDoc } from "./normalizeDoc";
 import {
   AUTOSAVE_DELAY_MS,
   createCanvasSaver,
+  isPersistableChange,
   shouldApplyLoadedDoc,
   type CanvasSink,
   type SaveState,
@@ -42,7 +43,13 @@ export type PersistenceApi = {
 
 /* ⚠️ 序列化 / 修订号校验 / "载入的文档要不要覆盖" 都搬进了 `canvasSaver.ts`
  *（P16/P17/P29 那三条要能被单测钉住）。这里原样再导出，调用方与既有测试一个字不用改。 */
-export { serializeCanvas, validateRevision, shouldApplyLoadedDoc, AUTOSAVE_DELAY_MS } from "./canvasSaver";
+export {
+  serializeCanvas,
+  validateRevision,
+  shouldApplyLoadedDoc,
+  isPersistableChange,
+  AUTOSAVE_DELAY_MS,
+} from "./canvasSaver";
 /** `SaveState` 一并再导出：`CanvasStatusBar` 按这个名字从本文件取它。 */
 export type { SaveState } from "./canvasSaver";
 
@@ -169,10 +176,15 @@ export function usePersistence(): PersistenceApi {
     })();
   }, [saver]);
 
-  /** 内容变化 → 延迟落盘。 */
+  /** 内容变化（或视口动了）→ 延迟落盘。 */
   useEffect(() => {
     const unsubscribe = useRuntimeStore.subscribe((state, prev) => {
-      if (state.revision === prev.revision) return;
+      /*
+       * ⚠️ 判据是"这次变化值不值得存"，**不是**只比修订号（2026-10-16 审计 P30）：
+       * 视口（平移 / 缩放）不推修订号，只比修订号会让"拖到别处再看"这类动作永不落盘
+       * —— 而 `serializeCanvas` 一直在把 `viewport` 写进文档。理由见 `isPersistableChange`。
+       */
+      if (!isPersistableChange(state, prev)) return;
       setSaveState("dirty");
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {

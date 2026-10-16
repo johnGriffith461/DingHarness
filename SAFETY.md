@@ -17,11 +17,11 @@
 | **闸门**（跑之前要你确认） | ✅ 有。「按需确认」与「每步确认」档下会先问；问过之后按你的意思执行 | `engine/core/policy.ts` 的 `decide` |
 | **命令摘要**（确认时你看得到要跑什么） | ✅ 有（原文，不改写） | `shared/agentTools.ts` 的 `describeToolArgs` |
 | **起点目录必须已授权** | ✅ 有（不在授权目录里直接拒） | `engine/runtime/tools/execTool.ts` 的 `insideDirs` |
-| **资源上限**（内存 / 子进程数） | ⚠️ **仅 Windows**。经 `ding-sandbox` 放进作业对象：内存上限 2GB、子进程数上限 32（都可在 `planSandboxed` 里调） | `sandbox/src/win.rs`，验收 `engine/adapters/sandbox.test.ts` ⑤ |
+| **资源上限**（内存 / 子进程数） | ⚠️ **仅 Windows**。经 `ding-sandbox` 放进作业对象：内存上限 2GB、子进程数上限 32。⚠️ **2026-10-16 更正**：这两个数字**目前是写死的** —— 生产链上没有任何地方往 `planSandboxed` 传 `memoryMb` / `processes`，所以"都可在 `planSandboxed` 里调"当时是不实的（要可变得先有人真去传）。另：`--memory-mb 0` / `--processes 0` 现在按用法错误拒（退出码 2），不再静默落成"不受限照跑" | `sandbox/src/win.rs`，验收 `engine/adapters/sandbox.test.ts` ⑤ |
 | **不留孤儿进程** | ⚠️ **仅 Windows**（同上）：沙箱退出时作业里的进程一起结束 | `sandbox/src/win.rs` 的 `KILL_ON_JOB_CLOSE`，验收同上一格 ⑥ |
 | **沙箱进程本身是独立进程** | ✅ 是（Rust 写的 `ding-sandbox`，与引擎语言解耦） | `sandbox/` |
 | **它就是安全边界** | ❌ **不是**。命令仍以**你的身份**运行：能读你的文件、能联网、能改能删 | 见下"为什么不做成安全边界" |
-| **沙箱一定在起作用** | ❌ 不一定。没编过 `pnpm sandbox:build` 时命令**直通**，而 `ding doctor` 的「命令隔离」会如实报出来 | `engine/adapters/sandbox.ts` 的 `probeSandbox` |
+| **沙箱一定在起作用** | ❌ 不一定。没编过 `pnpm sandbox:build` 时命令**直通**，而 `ding doctor` 的「命令隔离」会如实报出来。⚠️ **2026-10-16 更正**：`--probe` 原来只是回显 `cfg!(windows)`（平台常量），现在改成**真的试着建一次作业对象**（用默认 2048MB / 32），建得起来才答"有界" | `engine/adapters/sandbox.ts` 的 `probeSandbox` |
 
 ⚠️ **Windows 安装包从 2026-10-16 起带着沙箱**：`ding-sandbox.exe` 进了
 `package.json` 的 `build.extraResources`，落在应用的 `resources/` 下 ——
@@ -92,7 +92,7 @@ Phase 14.5（opt-in 高档位）—— **现在没做，这里就写"没做"**�
 
 | 项 | 状态 | 为什么 |
 |---|---|---|
-| macOS `seatbelt` / Linux `seccomp` 的命令隔离 | **未做**。那两个平台上 `ding-sandbox` 只是直通 | 方案排在 14.1 的跨平台部分；本机（Windows）先落地，其余平台**明示"未隔离"** |
+| macOS `seatbelt` / Linux `seccomp` 的命令隔离 | **未做**。那两个平台上 `ding-sandbox` 只是直通。⚠️ **2026-10-16 更正**：在那之前 `mod win;` 是**无条件声明**的，而 `sandbox/src/win.rs` 头部 `use std::os::windows::process::CommandExt;` 只在 Windows 存在 —— 也就是说那两个平台上**整个 crate 连编都编不出来**（"直通"这一支根本到不了，这句自述当时不成立）。现已按 `cfg(target_os = "windows")` 隔开并补上非 Windows 的直通分支；**但本机只有 Windows 工具链，没有非 Windows 机器实测过这条路径** | 方案排在 14.1 的跨平台部分；本机（Windows）先落地，其余平台**明示"未隔离"** |
 | 容器 / micro-VM 隔离档（opt-in） | **未做**（方案 14.5） | 要额外运行时（Docker/Firecracker），与本机版"装完就能用"的定位冲突，所以排在最后且要显式开 |
 | 插件沙箱（wasmtime） | **未做**（方案 18） | 同上，且还没到那一阶段 |
 | 密钥的 CLI 钥匙串集成 | **未做**（见第二节） | 要额外依赖或平台 FFI；现在的做法是"拒绝写明文"而不是假装加密 |

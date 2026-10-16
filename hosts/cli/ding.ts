@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { createEngine, type Engine, type EngineRunRequest } from "../../engine/index";
-import { cliSessionId, splitTurns, type LogRecord } from "../../engine/core/events";
+import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
@@ -18,7 +18,8 @@ import { buildEngine as buildEngineIn } from "./assembly";
 import { cmdEval } from "./cmdEval";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
-import { cmdBackup, cmdRestore } from "./cmdBackup";
+import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
+import { renderRecords } from "./renderRecords";
 import { cmdResume } from "./cmdResume";
 import { cmdAcp, cmdServe } from "./cmdServe";
 import { cmdRecipe } from "./cmdRecipe";
@@ -102,56 +103,19 @@ function dataDir(): string {
 }
 
 /**
- * 桌面应用的数据根（本机存在才返回）。
- *
- * 用来在 `backup` / `restore` 时**提醒**"你桌面的那份不在这里面"——
- * `impact` 正是"用户以为备份覆盖了桌面数据，其实一行都没有"。
+ * 授权目录：默认当前目录，`--dir` 可重复给（与桌面的"工作区授权"是同一个概念）。
  */
-function desktopDataDir(): string | null {
-  const override = process.env.DSH_CANVAS_DATA_DIR?.trim();
-  if (override) return path.resolve(override);
-  const appData = process.env.APPDATA;
-  if (!appData) return null;
-  const guess = path.join(appData, "Ding Harness");
-  return existsSync(guess) ? guess : null;
-}
-
-/** 授权目录：默认当前目录，`--dir` 可重复给（与桌面的"工作区授权"是同一个概念）。 */
 function workspaceDirs(extra: readonly string[]): string[] {
   return (extra.length ? extra : [process.cwd()]).map((d) => path.resolve(d));
 }
 
 /* ────────────────────── 终端输出（走投影） ────────────────────── */
 
-/** 工具留痕缩进（比正文退一格：读起来是"这句话底下发生的事"）。 */
-const INDENT = "  ";
-
-/**
- * 把一段记录画成人看的东西。
- *
- * ⚠️ **不另写一份"怎么显示"**：走的是内核的投影（`splitTurns`），
- * 与桌面上屏用的是同一份逻辑。这里只决定排版。
- *
- * @param records 整段会话的记录
+/*
+ * 渲染**只有一份**（审计 P217 / NEW-N7-26）：`./renderRecords.ts` 的 `renderRecords`。
+ * 这里原来另有一份 `render()`，与 `ding recipe run` 用的那份在 `view.error` /
+ * `trace.pending` 两处都不一样 —— 两份口径必然漂，所以合成一份。
  */
-function render(records: readonly LogRecord[]): void {
-  for (const chunk of splitTurns(records)) {
-    const ask = [...(chunk.request?.messages ?? [])].reverse().find((m) => m.role === "user");
-    if (ask) process.stdout.write(`\n\x1b[2m› ${ask.content.trim()}\x1b[0m\n\n`);
-    const view = chunk.view;
-    if (view.text.trim()) process.stdout.write(`${view.text.trim()}\n`);
-    for (const trace of view.traces) {
-      const mark = trace.pending ? "⏸" : trace.ok ? "✓" : "✗";
-      process.stdout.write(`${INDENT}${mark} ${trace.line}\n`);
-    }
-    if (view.usage) {
-      const u = view.usage;
-      const has = typeof u.inputTokens === "number" || typeof u.outputTokens === "number";
-      process.stdout.write(`${INDENT}\x1b[2m（用量${has ? ` ↑${u.inputTokens ?? "-"} ↓${u.outputTokens ?? "-"}` : ""}）\x1b[0m\n`);
-    }
-    if (view.error) process.stdout.write(`${INDENT}\x1b[31m${view.error}\x1b[0m\n`);
-  }
-}
 
 /** 目录表里关于这个模型的那几行（`ding models --json` 用；未登记就如实说）。 */
 function budgetInfo(modelId: string): Record<string, unknown> {
@@ -189,9 +153,12 @@ async function buildEngine(dirs: readonly string[]): Promise<{ engine: Engine; c
  * 不说的话，这条命令的输出会让人以为"已经备份好了"—— 而桌面那份数据
  * （`stores.db` / `sessions.db` / 画布快照）根本没进这个文件。
  * 给出可照做的下一步（用同一个 `DSH_CANVAS_DATA_DIR` 指过去）。
+ *
+ * ⚠️ 给了 `--data-dir` 时以它为准（那是用户**显式**指定的根，见 `resolveBackupDataDir`）——
+ * 否则这里会比着 CLI 的根去提醒"桌面那份不在里面"，而用户其实已经指过去了。
  */
 function warnDesktopRoot(p: Parsed): string {
-  const root = dataDir();
+  const root = resolveBackupDataDir(p, dataDir());
   const desktop = desktopDataDir();
   if (!p.flags.has("json") && desktop && path.resolve(desktop) !== path.resolve(root)) {
     process.stderr.write(
@@ -322,7 +289,7 @@ async function cmdRun(p: Parsed): Promise<number> {
       ),
     );
   } else {
-    render(outcome.records);
+    process.stdout.write(renderRecords(outcome.records));
   }
   close();
 
@@ -765,7 +732,7 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
         dataDir: dataDir(),
         renderLatest: async () => {
           const snap = await built.engine.record(sessionId);
-          if (snap) render(snap.records);
+          if (snap) process.stdout.write(renderRecords(snap.records));
         },
       },
       config,

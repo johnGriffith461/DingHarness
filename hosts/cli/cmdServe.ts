@@ -2,6 +2,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
+import { firstAvailableProvider } from "../../engine/runtime/providers";
 import { AcpAgent } from "../acp/agent";
 import { authorizeCwd, CwdNotAllowedError } from "../cwd";
 import { startAgentServer } from "../server/agentServer";
@@ -39,13 +40,29 @@ export function resolveServePort(raw: string | undefined): PortDecision {
   return got.ok ? { ok: true, port: got.value } : { ok: false, message: got.message };
 }
 
+/**
+ * 服务态用哪一家 provider（审计 P208 / NEW-N7-14）。
+ *
+ * **与 `ding run` / REPL / `resume` / `recipe` 同一口径**：命令行显式 > config.json >
+ * `firstAvailableProvider()`（第一个有密钥的）。原来这里是 `config.provider ?? ""`，
+ * 于是同一台机器上（只有环境变量 key、config.json 没写 provider —— doctor 与向导
+ * 都允许这种状态）`ding run` 能跑，而 `ding serve` / `ding acp` 直接"先配一个 provider"
+ * 退出 3。同一件事在四个入口给出三种结果，是宿主一致性最容易被漏的一类。
+ *
+ * @param configProvider config.json 里的 provider（没配就是 `undefined`）
+ * @returns provider id；一家都不可用时是空串（调用方据此报错退出）
+ */
+export function serveProvider(configProvider: string | undefined): string {
+  return configProvider ?? firstAvailableProvider()?.id ?? "";
+}
+
 /** 这一段宿主侧共用的装配（两个命令一样）。 */
 function hostDeps(dataDir: string, p: Parsed, protectBefore: number) {
   const { config } = effectiveConfig(dataDir);
   const dirFlags = flagAll(p, "dir");
   const dirs = (dirFlags.length ? dirFlags : (config.dirs ?? [process.cwd()])).map((d) => path.resolve(d));
   return {
-    provider: config.provider ?? "",
+    provider: serveProvider(config.provider),
     ...(config.model ? { model: config.model } : {}),
     /* ⚠️ `flag(p, …)`：这里原来传的是 `new Map()` 拼的空 Parsed → `--mode` 恒 undefined（审计 P209） */
     mode: normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认") as ConfirmMode,

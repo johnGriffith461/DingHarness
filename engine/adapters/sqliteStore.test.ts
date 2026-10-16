@@ -4,8 +4,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createSqliteSessionStore, migrateJsonlSessions, type OpenOptions } from "./sqliteStore";
-import { openSqlite, type SqliteDatabase } from "./sqliteDriver";
+import { SQLITE_BUSY_TIMEOUT_MS, openSqlite, type SqliteDatabase } from "./sqliteDriver";
 import { chatSessionId, logLine, resumeSession, taskSessionId, type LogInput } from "../core/events";
+import { ledgerOf, localDay, rollup } from "../core/ledger";
+import type { LogInputAt } from "../ports/store";
 
 /**
  * SQLite 会话库（Phase 1 D1 的 PoC）。
@@ -201,9 +203,10 @@ describe("SQLite 会话库", () => {
     // 被淘汰的会话连事件一起走（不留孤儿行）
     expect((await store.load(chatSessionId("c1"))).records).toEqual([]);
 
-    // 重开一次：打开时又收一次口，仍然只有 2 个（不会因为重开而漂移）
+    // 重开一次：再收一次口，仍然只有 2 个（不会因为重开而漂移）
     store.close();
     const again = createSqliteSessionStore(dir, "sessions.db", { maxSessions: 2 });
+    await again.prune();
     expect((await again.list()).map((x) => x.conversationId)).toEqual(["c3", "c2"]);
     again.close();
   });
@@ -216,9 +219,10 @@ describe("SQLite 会话库", () => {
     const rows = await store.list();
     const newestBytes = rows.find((r) => r.conversationId === "new")?.bytes ?? 0;
 
-    // 只留得下"新的"那一个 → 打开时收口就会把 old 整会话淘汰
+    // 只留得下"新的"那一个 → 收口一次就会把 old 整会话淘汰
     store.close();
     const tight = createSqliteSessionStore(dir, "sessions.db", { maxBytes: newestBytes + 10 });
+    await tight.prune();
     expect((await tight.list()).map((x) => x.conversationId)).toEqual(["new"]);
     // 事件也一起删了（不是留下孤儿行）
     expect((await tight.load(chatSessionId("old"))).records).toEqual([]);
@@ -230,13 +234,15 @@ describe("SQLite 会话库", () => {
     await store.append(chatSessionId("ancient"), [request("很久以前")]);
     store.close();
     const aggressive = createSqliteSessionStore(dir, "sessions.db", { maxAgeDays: 0 });
+    await aggressive.prune();
     expect(await aggressive.list()).toEqual([]);
     aggressive.close();
   });
 
   it("⭐ 保护线（protectBefore）：外部流量收口不得淘汰用户自有会话", async () => {
     /*
-     * 审计 P173：服务态**每来一个请求就打开一次库**，而打开即收口。
+     * 审计 P173：服务态**每来一个请求就打开一次库**（而"打开即收口"那件事
+     * 已在 P125 里改成显式 `prune()`，所以这里必须自己调它才谈得上收口）。
      * 不带保护线时，能连上服务的人只要不停换 sessionId，就能把用户历史
      * 按"最旧的先删"整段挤掉 —— 不可逆的数据损失。
      */
@@ -262,6 +268,7 @@ describe("SQLite 会话库", () => {
 
     /* 对照：**不带**保护线时同一份数据会被淘汰掉用户的两个 —— 说明拦住它的是保护线本身 */
     const plain = createSqliteSessionStore(dir, "sessions.db", { maxSessions: 2 });
+    await plain.prune();
     const left = (await plain.list()).map((x) => x.conversationId);
     expect(left).not.toContain("mine-1");
     expect(left).not.toContain("mine-2");
@@ -559,5 +566,222 @@ describe('语句生命期：复用 + 释放（审计 P144）', () => {
 
     store.close();
     expect(finalized, '关闭时没有释放长命语句').toBe(openedStatements);
+  });
+});
+
+describe('迁移/写入路径：原始时刻不能被改写成"迁移那一刻"（审计 P14 / P31）', () => {
+  /** 三天（用 `localDay` 自己算期望值，跨时区也稳）。 */
+  const DAY = 86_400_000;
+  const BASE = Date.UTC(2026, 8, 1, 12, 0, 0); // 2026-09-01 12:00 UTC：离本地日界足够远
+
+  /** 造一轮（request + done，`done` 带用量 —— 账本要它才入账）。 */
+  function roundOf(requestId: string, text: string, at: number): Array<{ record: LogInput; at: number }> {
+    return [
+      { at, record: { type: 'request', requestId, provider: 'strata', model: 'm', messages: [{ role: 'user', content: text }], tools: [] } as LogInput },
+      {
+        at,
+        record: { type: 'done', requestId, usage: { inputTokens: 10, outputTokens: 5 } } as LogInput,
+      },
+    ];
+  }
+
+  it('⭐ 迁进来的一整段历史仍分属各自那几天（成本账本按天看得到真日子）', async () => {
+    /*
+     * 这是"迁移丢掉原始时间戳"那条缺陷的**可见后果**：
+     * 一段三个月的会话迁进新库之后，如果每一行都被盖成 `Date.now()`，
+     * 账本按天那一栏就只剩今天一格（`ledger.ts` 的 `localDay(record.at)`）——
+     * "哪天花得多"这个问题从此问不出答案。
+     */
+    const legacy = mkdtempSync(path.join(tmpdir(), 'dh-legacy-at-'));
+    const sid = chatSessionId('old-at');
+    const rounds = [roundOf('r1', '第一天的活', BASE), roundOf('r2', '第二天的活', BASE + DAY), roundOf('r3', '第三天的活', BASE + 2 * DAY)];
+
+    const lines: string[] = [];
+    let seq = 0;
+    for (const r of rounds) {
+      for (const item of r) {
+        seq += 1;
+        /* ⚠️ 这里**必须**用 logLine 写进真实的 seq/at —— 它就是旧 .jsonl 的落盘形态 */
+        lines.push(logLine(item.record, seq, item.at));
+      }
+    }
+    writeFileSync(path.join(legacy, `${sid}.jsonl`), lines.join(''), 'utf8');
+
+    const store = openStore();
+    const got = await migrateJsonlSessions(legacy, store);
+    expect(got).toMatchObject({ files: 1, records: 6, skipped: 0 });
+
+    const { records } = await store.load(sid);
+    expect(
+      records.map((r) => r.at),
+      '迁移把每行的时刻盖成了"迁移那一刻" —— 历史被改写成了同一个瞬间',
+    ).toEqual([BASE, BASE, BASE + DAY, BASE + DAY, BASE + 2 * DAY, BASE + 2 * DAY]);
+
+    /* 账本按天：应当是**原来的三天**，不是今天一格 */
+    const byDay = rollup(ledgerOf(records, sid), 'day').map((row) => row.key).sort();
+    expect(byDay, '账本按天只剩一格（或不是原来那几天）—— 迁移把日的口径抹平了').toEqual(
+      [localDay(BASE), localDay(BASE + DAY), localDay(BASE + 2 * DAY)].sort(),
+    );
+    expect(byDay).not.toContain(localDay(Date.now()));
+
+    rmSync(legacy, { recursive: true, force: true });
+  });
+
+  it('⭐ 记录自带 `at` 时就用它；新记录（没有 `at`）才盖"现在"', async () => {
+    const store = openStore();
+    const sid = chatSessionId('supplied');
+    const old = BASE - 40 * DAY;
+
+    const written = await store.append(sid, [
+      { ...(request('很久以前说过的一句') as Record<string, unknown>), at: old } as LogInputAt,
+    ]);
+    expect(written[0]?.at, 'append 把调用方给的时刻吞了（迁移与恢复都靠它）').toBe(old);
+
+    /* 对照：不带 `at` 的记录照旧盖"现在"（那就是它发生的时刻） */
+    const before = Date.now();
+    const fresh = await store.append(sid, [ev({ type: 'text', text: '刚刚说的' })]);
+    expect(fresh[0]?.at ?? 0).toBeGreaterThanOrEqual(before);
+
+    /* 库里的列与 payload 里的时刻是**同一个**（两处口径不许分叉） */
+    const { records } = await store.load(sid);
+    expect(records.map((r) => r.at)).toEqual([old, fresh[0]?.at]);
+  });
+
+  it('会话行的 `updated_at` 仍是写入时刻（收口的年龄那道按它算，迁移进来的老历史不会一下就被删）', async () => {
+    const store = openStore();
+    const sid = chatSessionId('updated');
+    const old = BASE - 400 * DAY; // 远超 30 天
+    const before = Date.now();
+    await store.append(sid, [{ ...(request('很多年前的记录') as Record<string, unknown>), at: old } as LogInputAt]);
+    const row = (await store.list()).find((x) => x.sessionId === sid);
+    expect(row?.updatedAt ?? 0, 'updated_at 跟着记录走了 —— 刚迁进来的老会话会在下一次打开时被年龄那道删掉').toBeGreaterThanOrEqual(before);
+  });
+
+  it('新库开出来就带着 schema 版本（P101 的"表变更要有版本"那一半，别退回去）', async () => {
+    /* ⚠️ 这条要自己建、自己关（`openStore` 那句会在 afterEach 再关一次 → "database is not open"） */
+    const store = createSqliteSessionStore(dir);
+    await store.append(chatSessionId('v'), [request('随便一句')]);
+    store.close();
+    const db = openSqlite(path.join(dir, 'sessions.db'));
+    const version = Number((db.prepare('PRAGMA user_version').get() as { user_version?: number })?.user_version ?? 0);
+    db.close();
+    expect(version, '版本号没写上：下次表变更就没有"搬过没搬过"这个判据了').toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('容量那道数的是**整行**（审计 P32）', () => {
+  it('⭐ `sessions.bytes` 把 `body` 那一列也算进去（中文正文不会被漏掉一半）', async () => {
+    /*
+     * `body` 是 P101 加的第二份正文（检索用）。容量那道收口（`maxBytes`）原来只数
+     * `payload`，于是同一段文字在库里存了两遍、账却只记一遍 ——
+     * "64MB 上限"实际允许的磁盘占用接近两倍。
+     *
+     * 判据直接问库：这一行两列各占多少字节（`LENGTH(CAST(x AS BLOB))` 才是字节）。
+     */
+    const store = openStore();
+    const sid = chatSessionId('row-bytes');
+    await store.append(sid, [request('这是一段中文正文，用来量它到底占了多少字节')]);
+
+    const row = (await store.list()).find((x) => x.sessionId === sid);
+    expect(row?.bytes ?? 0).toBeGreaterThan(0);
+
+    const db = openSqlite(path.join(dir, 'sessions.db'));
+    const sum = db
+      .prepare(
+        'SELECT SUM(LENGTH(CAST(payload AS BLOB)) + LENGTH(CAST(body AS BLOB))) AS n FROM events WHERE session_id = ?',
+      )
+      .get(sid) as { n?: number } | undefined;
+    db.close();
+
+    expect(
+      row?.bytes ?? 0,
+      '导出的字节数比库里这一行真正占的还少 —— `body` 那一列没算（中文正文会漏掉将近一半）',
+    ).toBeGreaterThanOrEqual(Number(sum?.n ?? 0));
+  });
+
+  it('容量压到"刚好只装得下正文"时：淘汰按**真实占用**算（不是按半份）', async () => {
+    const store = createSqliteSessionStore(dir);
+    await store.append(chatSessionId('c1'), [request('第一段中文正文，用于量容量')]);
+    await new Promise((r) => setTimeout(r, 3));
+    await store.append(chatSessionId('c2'), [request('第二段中文正文，用于量容量')]);
+    const rows = await store.list();
+    const newest = rows.find((r) => r.conversationId === 'c2')?.bytes ?? 0;
+    store.close();
+
+    /* 只留得下新的那一个（余量 10 字节） */
+    const tight = createSqliteSessionStore(dir, 'sessions.db', { maxBytes: newest + 10 });
+    await tight.prune();
+    expect((await tight.list()).map((x) => x.conversationId)).toEqual(['c2']);
+    /* 剩下的那个也真的在预算之内（按同一口径算的，不是"账上一个数、占的是另一个"） */
+    const kept = (await tight.list())[0]?.bytes ?? 0;
+    expect(kept).toBeLessThanOrEqual(newest + 10);
+    tight.close();
+  });
+});
+
+describe('打开库**不删数据**：收口是显式动作（审计 P125）', () => {
+  it('⭐ 一个只想读一眼的命令（`ding resume` / `ding backup` 那种）不会顺手删掉旧会话', async () => {
+    /*
+     * 原来 `createSqliteSessionStore` 在**打开时**无条件跑一次收口（"与 JSONL 那版
+     * 启动时清理同一个时机"）。而"打开库"到处都是：读一段历史、服务态每个请求开一次 ——
+     * 它们都会把用户的旧会话按保留策略删掉。收口是**不可逆**的动作，"打开"不是它的理由。
+     *
+     * 判据：拿一份**超龄**的数据 + 一个把年龄设成 0 的库打开（那等于"只留此刻之后写的"），
+     * 打开之后**数据必须还在**；调一次 `prune()` 才该消失。
+     */
+    const seeded = createSqliteSessionStore(dir);
+    await seeded.append(chatSessionId('old'), [request('很久以前的一段')]);
+    seeded.close();
+
+    const opened = createSqliteSessionStore(dir, 'sessions.db', { maxAgeDays: 0 });
+    expect(
+      (await opened.list()).map((x) => x.conversationId),
+      '打开就把数据删了：一个只想看一眼的命令不该改用户的数据（P125）',
+    ).toEqual(['old']);
+    expect((await opened.load(chatSessionId('old'))).records.length).toBeGreaterThan(0);
+
+    /* 显式收口仍然照常工作（别把"不隐式删"做成了"删不掉"） */
+    const got = await opened.prune();
+    expect(got.deleted).toEqual([chatSessionId('old')]);
+    expect(await opened.list()).toEqual([]);
+    opened.close();
+  });
+
+  it('想保留旧行为就显式传 `pruneOnOpen`（调用点在代码里看得见）', async () => {
+    const seeded = createSqliteSessionStore(dir);
+    await seeded.append(chatSessionId('old'), [request('很久以前的一段')]);
+    seeded.close();
+
+    const eager = createSqliteSessionStore(dir, 'sessions.db', { maxAgeDays: 0 }, { pruneOnOpen: true });
+    expect(await eager.list()).toEqual([]);
+    eager.close();
+  });
+});
+
+describe('连接的默认设置：busy_timeout + WAL（审计 P39）', () => {
+  it('⭐ 每条连接都带 busy_timeout（撞上并发写时**等**，不是当场 SQLITE_BUSY）', () => {
+    /*
+     * `busy_timeout` 是**每条连接**的设置，所以判据就是"随便开一条连接看它有没有" ——
+     * 只要有一条路径忘了设，那条路径撞上并发写就是立刻失败，上层当成"写盘失败"。
+     * 开连接这件事只有一个入口（`openSqlite`），判据钉在这个入口上。
+     */
+    const db = openSqlite(path.join(dir, 'sessions.db'));
+    const got = db.prepare('PRAGMA busy_timeout').get() as { timeout?: number } | undefined;
+    db.close();
+    expect(
+      Number(got?.timeout ?? 0),
+      '没设 busy_timeout：两个进程同时写同一个库时，后来那个当场 SQLITE_BUSY —— 上层回落到"文件"就出现同一份数据两个版本',
+    ).toBe(SQLITE_BUSY_TIMEOUT_MS);
+  });
+
+  it('⭐ 库切到 WAL（读不挡写、写不挡读）—— 桌面与 CLI 同开一个 data/ 才不乱', async () => {
+    const store = createSqliteSessionStore(dir);
+    await store.append(chatSessionId('wal'), [request('写一句')]);
+    /* 另开一条连接看**库文件上**的模式（WAL 是落在文件上的设置，不是每条连接的事） */
+    const db = openSqlite(path.join(dir, 'sessions.db'));
+    const got = db.prepare('PRAGMA journal_mode').get() as { journal_mode?: string } | undefined;
+    db.close();
+    store.close();
+    expect(String(got?.journal_mode ?? '').toLowerCase(), '还停在原来的 journal 模式：一边写一边读会互相挡').toBe('wal');
   });
 });

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { formatDoctor, runDoctor, type Check } from "./doctor";
+import { configIssues, DOCTOR_NOTE, formatDoctor, runDoctor, runtimeVersionProblem, type Check } from "./doctor";
 
 /**
  * `ding doctor` 的验收（Phase 11.4）。
@@ -162,3 +162,76 @@ describe("ding doctor（Phase 11.4）", () => {
     if (parsed.failed > 0) expect(text).toContain("下一步：");
   });
 });
+
+/**
+ * 2026-10-16（审计第 6 单）：doctor 的"报真话"四题。
+ *
+ * 这四条的共性都是**屏幕上说的与实现不一样**：一格恒绿（P201）、指引教人写读不到的格式
+ * （P198）、只查一个键却报"配置合法"（P202）、声称"只报告"却在你目录里建库（P213）。
+ */
+describe("ding doctor · 报真话（审计 P198/P201/P202/P213）", () => {
+  it("P201 运行时格：真判版本，低于下限就红并给出该换到哪一版", () => {
+    expect(runtimeVersionProblem({ node: "20.11.0" })).toContain("22.5.0");
+    expect(runtimeVersionProblem({ node: "22.4.9" })).toContain("22.5.0");
+    expect(runtimeVersionProblem({ node: "22.5.0" })).toBeNull();
+    expect(runtimeVersionProblem({ node: "24.18.0" })).toBeNull();
+    expect(runtimeVersionProblem({ bun: "0.9.9" })).toContain("1.0.0");
+    expect(runtimeVersionProblem({ bun: "1.2.0" })).toBeNull();
+    // 版本号读不出来：不猜（不假装检查过），也不误报
+    expect(runtimeVersionProblem({})).toBeNull();
+
+    /* 这一格**真的**会红：原来它恒 ok:true（一屏绿勾里有一格是装饰） */
+    const old = cleanEnv(() =>
+      runDoctor({
+        dataDir: freshDir(),
+        configPath: "x",
+        rawConfig: {},
+        runtime: "win32 x64 / Node 20.11.0",
+        bunBinary: false,
+        versions: { node: "20.11.0" },
+      }),
+    );
+    const cell = old.find((c) => c.name === "运行时");
+    expect(cell, "没有「运行时」这一格").toBeTruthy();
+    expect(cell!.ok, "版本太低却报通过 —— 这一格又变回装饰了").toBe(false);
+    expect(cell!.next).toContain("22.5.0");
+  });
+
+  it("P202 配置文件合法：按已知键白名单比对**原文**（拼错的键/类型不对都要红）", () => {
+    expect(configIssues({ provder: "deepseek" }).unknownKeys).toEqual(["provder"]);
+    expect(configIssues({ dirs: "C:\\x" }).badTypes).toContain("dirs（要字符串数组）");
+    expect(configIssues({ softLimitUsd: -1 }).badTypes).toContain("softLimitUsd（要正数）");
+    expect(configIssues({ mode: "随便写写" }).badMode).toBe("随便写写");
+    expect(configIssues({ provider: "deepseek", model: "deepseek-chat", dirs: ["C:\\x"] })).toEqual({
+      unknownKeys: [],
+      badTypes: [],
+    });
+
+    const cfg = doctorWith(freshDir(), { provder: "deepseek" }).find((c) => c.name === "配置文件合法");
+    expect(cfg?.ok, "拼错的键被当成'合法'放过去了").toBe(false);
+    expect(cfg!.detail).toContain("provder");
+  });
+
+  it("P198 凭据指引：教用户写**读得到**的 refs 段（不是顶格一行）", () => {
+    const cred = doctorWith(freshDir()).find((c) => c.name === "模型凭据");
+    expect(cred!.ok).toBe(false);
+    /*
+     * 判据是"指引里的形状与读取端一致"：`parseRefs` 只在 `refs:` 段**内、缩进一层**的行上认键。
+     * 退回修复（改回 `把 key 写进 <文件>，比如 \`DEEPSEEK_API_KEY: sk-…\``）→ 立刻红。
+     */
+    expect(cred!.next, "指引没提 refs 段 —— 照它写出来的 key 读不到").toContain("refs:");
+    expect(cred!.next).toContain("DEEPSEEK_API_KEY");
+    // 必须点明"缩进在下面一层"这层要害，而不是只给个 refs: 的影子
+    expect(/下面一层|缩进/.test(cred!.next), "没说清键要缩进在 refs 下面一层").toBe(true);
+  });
+
+  it("P213 只报告不动机器：全新数据目录跑完，里面一个文件都不该多", () => {
+    const dir = freshDir();
+    doctorWith(dir);
+    expect(fs.readdirSync(dir), "doctor 在数据目录里留下了东西（原来会建 sessions.db）").toEqual([]);
+    // 承诺与实现一致：说明里要点出"会话库不存在时不会替你建"
+    expect(DOCTOR_NOTE).toContain("探针文件");
+    expect(DOCTOR_NOTE).toContain("不会");
+  });
+});
+

@@ -14,7 +14,8 @@
  * 别在 store.ts 或别处再声明一份：两份 = 写盘竞态，而且从现象上几乎看不出来。
  */
 import type { ShellBridge } from "@shared/ipc";
-import { normalizeArtifacts, normalizeQuestions, normalizeStep, type WorkTask } from "./task";
+import { interruptedFromStage } from "@engine/core/recovery";
+import { INTERRUPTED_NOTE, normalizeArtifacts, normalizeQuestions, normalizeStep, type WorkTask } from "./task";
 import type { StorePort } from "./store";
 
 /** 恢复时把盘上的数据收窄成合法任务（磁盘内容按不可信处理）。 */
@@ -48,7 +49,7 @@ export function normalizeTask(raw: unknown): WorkTask | null {
 
   const stage = t.stage;
   /*
-   * ⚠️ 只有 `running` 算"中断"（§179）。
+   * ⚠️ 只有 `running` 算"中断"（§179）—— 判据取自引擎（审计 P139 / P211）。
    *
    * `awaiting` **不是**进行中 —— 它等的是**用户回答**，不是某个请求。
    * 原来把两者一起标成 `failed`，后果很具体：
@@ -56,10 +57,14 @@ export function normalizeTask(raw: unknown): WorkTask | null {
    * **重启之后那张卡永远不出现，用户再也回答不了那个问题**，
    * 而那一次对话就卡在那里了（它不是坏了，是在等人）。
    *
+   * ⚠️ 用了 `interruptedFromStage` 而不是在这里手写 `stage === "running"`：
+   * 桌面端那颗「继续」按钮（`task.ts` 的 `continueTargetOf`）看的是这同一件事。
+   * 判据住 `engine/core/recovery.ts`，两处不再各判一次。
+   *
    * 这与本项目"闸门/审批的意义就是用户看得见并决定"是同一条：
    * **在等人的状态不该被系统自己判死。**
    */
-  const wasRunning = stage === "running";
+  const interrupted = interruptedFromStage(stage);
   return {
     id: t.id,
     title: typeof t.title === "string" && t.title ? t.title : "未命名任务",
@@ -70,16 +75,23 @@ export function normalizeTask(raw: unknown): WorkTask | null {
      * 原样留成 running 的话，界面会显示一个**永远转下去**的任务，
      * 而它其实早就没有请求在跑了 —— 那比标成失败更让人困惑。
      */
-    stage: wasRunning ? "failed" : (stage as WorkTask["stage"]),
+    stage: interrupted ? "failed" : (stage as WorkTask["stage"]),
     startedAt: typeof t.startedAt === "number" ? t.startedAt : null,
-    finishedAt: typeof t.finishedAt === "number" ? t.finishedAt : wasRunning ? Date.now() : null,
+    finishedAt: typeof t.finishedAt === "number" ? t.finishedAt : interrupted ? Date.now() : null,
     steps,
     questions,
     questionIndex: typeof t.questionIndex === "number" ? t.questionIndex : 0,
-    activity: wasRunning ? "上次关闭时被中断" : typeof t.activity === "string" ? t.activity : "",
+    /* 说明是给人看的（`INTERRUPTED_NOTE` 一处定义），判据是真值字段 `interrupted` */
+    activity: interrupted ? INTERRUPTED_NOTE : typeof t.activity === "string" ? t.activity : "",
     artifacts,
     /* 最近访问的时刻（P266）：它是真值，恢复时照收（老数据没这个字段就不带） */
     ...(typeof t.openedAt === "number" ? { openedAt: t.openedAt } : {}),
+    /*
+     * 「那一轮被打断了吗」的真值，随任务落盘 —— 界面那颗「继续」按钮只看它
+     * （`task.ts` 的 `continueTargetOf`）。**不写成 `false` 的默认**：
+     * 只有真被打断过才落这个字段，没被恢复过的任务身上不该多一个字段。
+     */
+    ...(interrupted ? { interrupted: true } : {}),
   };
 }
 

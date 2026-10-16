@@ -356,6 +356,14 @@ export const useRuntimeStore = create<RuntimeState>()((set, get) => ({
     }));
   },
 
+  /**
+   * 写回视口（React Flow 在 `onViewportChange(end)` 时调，见 `CanvasRuntime`）。
+   *
+   * ⚠️ **故意不推修订号**（2026-10-16 审计 P30）：修订号是**内容**的版本，平移/缩放没有改内容。
+   * 但这么一来"视口变了"就不能再靠修订号被持久化侧看见 —— 所以判定移到了
+   * `canvasSaver.isPersistableChange`（它同时看修订号与视口的三个数）。
+   * 谁要再加一条"只比 revision"的订阅，就会把视口永久地挡在存档之外。
+   */
   setViewport: (viewport) => set({ viewport }),
 
   addNode: (node) =>

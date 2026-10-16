@@ -164,8 +164,27 @@ pub fn run_bounded(
     }
 }
 
+/// 试建一次作业对象并设上限，成功就答 true（`--probe` 用它，说明在 `main.rs` 的
+/// `bounded_available`）。
+///
+/// ⚠️ 这是**能力探测**，不是「接下来每条命令都进了作业」：探测成功之后，
+/// `run_bounded` 里那次 `AssignProcessToJobObject` 仍可能失败（实测：把活动进程数上限
+/// 设成 0，作业建得起来而关联必然失败，错误码 1816）。探测能挡掉的是「这台机器根本建不出
+/// 作业」那一档，剩下那一档今天只在 stderr 上喊一句。
+pub fn probe_bounded(memory_mb: u64, processes: u32) -> bool {
+    unsafe {
+        match make_job(memory_mb, processes) {
+            Ok(job) => {
+                CloseHandle(job);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
 /// 没有上限地直接跑（兜底路径；调用方负责说清"这条没受限"）。
-fn plain(command: &[String], raw_command: Option<&str>) -> std::io::Result<ExitStatus> {
+pub fn plain(command: &[String], raw_command: Option<&str>) -> std::io::Result<ExitStatus> {
     let mut cmd = Command::new(&command[0]);
     cmd.args(&command[1..]);
     if let Some(raw) = raw_command {
@@ -175,3 +194,25 @@ fn plain(command: &[String], raw_command: Option<&str>) -> std::io::Result<ExitS
 }
 
 use std::os::windows::io::AsRawHandle;
+
+/*
+ * 单元测试（`cargo test` 跑）。
+ *
+ * ⚠️ 只钉**在本机与常见 Windows 上都成立**的那一条：上限值非法时 `SetInformationJobObject`
+ * 必然失败。**不**在这里断言「默认上限一定建得起来」—— 那是环境相关的（受限容器里可能建不出），
+ * 断它等于给守卫埋一条假红；那一半靠真机冒烟（`--probe` 应当答 `"bounded":true`）。
+ */
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P115：`--probe` 的答案必须是**真的建了一次作业对象**得来的，不是平台常量。
+    ///
+    /// 形状：内存上限给 0（本机实测 `SetInformationJobObject` 失败，错误码 87 = 参数无效）
+    /// → `probe_bounded` 答 false。退回「回显 `cfg!(target_os = "windows")`」那种实现时，
+    /// 它在这一档只会答 true —— 这台机器上连作业都建不出来时也不会说。
+    #[test]
+    fn probe_reflects_real_job_creation() {
+        assert!(!probe_bounded(0, 32), "上限非法时建不出作业，probe 必须答 false");
+    }
+}

@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, failOnMarks, openCanvas, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, openCanvas, pickPort, shot, verdict, waitForPort } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
 failOnMarks();
@@ -10,14 +10,21 @@ failOnMarks();
 /**
  * 图片动作端到端验收（阶段 9.3）。
  *
+ * ⭐ 2026-10-16（审计 A20）：**已收进免模型批跑**。它原来卡在"必须真调图像模型"——
+ * 因为图像通道那张表没有 baseURL 覆盖口，批跑的假通道指不进去。这次两半都补上了
+ * （产品侧 `IMAGE_PROVIDERS` 加 `baseURLEnv`、装置侧假通道认 `/images/generations`
+ * 与 `/images/edits` 并按请求的 `size` 现造真 PNG），于是它能在零出网下跑。
+ * 同时补上**真判定** —— 这份脚本原来一条判定都没有（只有报告）。
+ *
  * 断言：
- *   1. 先真生成一张图（有图才能改）
- *   2. 图片节点上出现「改图」入口，菜单里四项：抠图 / 增强 / 扩图 / 编辑
- *   3. **真跑一次「增强」**：拿到新图、节点 src 换成新文件、尺寸沿用原图
+ *   1. 先生成一张图（有图才能改）
+ *   2. 图片节点上出现「改图」入口，菜单里四项：抠图 / 变清晰 / 扩图 / 编辑（+ 自由编辑的「改」）
+ *   3. **真跑一次「变清晰」**：拿到新图、节点 src 换成新文件、尺寸沿用原图
  *   4. **真跑一次「扩图」**：输出尺寸比输入大（扩图按定义要更大的画布）
  *   5. 图片真的能显示（naturalWidth > 0）
  *   6. **Ctrl+Z 能撤回**改图（改之前记了历史）
  *   7. 自由编辑的空指令时「改」按钮置灰
+ *   8. 点了动作**立刻有反馈**（忙碌提示真的出现过）
  */
 const DATA = ".verify/actions-data";
 fs.rmSync(DATA, { recursive: true, force: true });
@@ -88,10 +95,24 @@ report.emptyInstructionDisabled = await page
   .locator(`[data-testid="image-action-edit-go-${nodeId}"]`)
   .isDisabled();
 
-// 3) 增强：沿用原尺寸
+// 3) 增强（产品里的标签是「变清晰」）：沿用原尺寸
+/*
+ * ⚠️ 「点下去有没有反馈」要**盯着 DOM 数**，不能点完等 1.5 秒再采样（2026-10-16）：
+ * 假通道几百毫秒就把图给回来了，等完那 1.5 秒忙碌提示早就撤了 ——
+ * 那会把"有反馈"误判成"点了没反应"（这台装置自己造出来的假红）。
+ * 所以点之前挂一个 MutationObserver，数它**出现过**几次。
+ */
+await page.evaluate((id) => {
+  const seen = { value: 0 };
+  window.__dshBusySeen = seen;
+  const observer = new MutationObserver(() => {
+    if (document.querySelector(`[data-testid="image-action-busy-${id}"]`)) seen.value += 1;
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}, nodeId);
 await page.locator(`[data-testid="image-action-enhance-${nodeId}"]`).click();
-await page.waitForTimeout(1500);
-report.busyShown = await page.locator(`[data-testid="image-action-busy-${nodeId}"]`).count();
+await page.waitForTimeout(400);
+report.busyShown = await page.evaluate(() => window.__dshBusySeen?.value ?? 0);
 await page
   .waitForFunction(
     (src) => {
@@ -140,3 +161,68 @@ report.assets = fs.existsSync(path.join(DATA, "assets"))
 console.log(JSON.stringify(report, null, 2));
 await browser.close();
 child.kill();
+
+/*
+ * ── 判定（2026-10-16，审计 A20 收进批跑时补）──────────────────────────
+ *
+ * ⚠️ 这条原来**只有报告、一条判定都没有**（`failOnMarks()` 兜的是"谁印了 ✗"，
+ * 而它一处 ✗ 都不印）—— 在批跑里等于没测。判据就是脚本头部承诺的那几条：
+ * 有图可改 / 菜单四项齐 / **真改出一版新图**（新文件名，不是把原来那张改名）/
+ * 变清晰沿用原尺寸而扩图**必须更大** / 图能显示 / 图落盘 / Ctrl+Z 能撤回。
+ */
+const bad = [];
+const need = (ok, why) => {
+  if (!ok) bad.push(why);
+};
+need(
+  typeof report.source?.src === "string" && report.source.src.startsWith("dshasset://"),
+  `第一步没生成出可改的图：${JSON.stringify(report.source)}`,
+);
+need((report.source?.w ?? 0) > 0, "生成出来的图 naturalWidth 为 0（破图）");
+
+const actions = report.menuActions ?? [];
+for (const id of ["cutout", "enhance", "expand", "edit"]) {
+  need(actions.includes(id), `改图菜单里缺 ${id}（实际 ${JSON.stringify(actions)}）`);
+}
+need(report.emptyInstructionDisabled === true, "自由编辑的空指令时，「改」按钮没有置灰");
+need((report.busyShown ?? 0) >= 1, "改图期间没有「正在改图」的提示");
+
+/* 变清晰：**换了一张新图**（src 变了），且沿用原尺寸（scale 策略 keep） */
+need(
+  typeof report.afterEnhance?.src === "string" && report.afterEnhance.src !== report.source?.src,
+  `点了「变清晰」没有换出新图：${JSON.stringify(report.afterEnhance)}`,
+);
+need((report.afterEnhance?.w ?? 0) > 0, "变清晰之后图不显示了（dshasset 协议或落盘断了）");
+need(
+  report.afterEnhance?.w === report.source?.w && report.afterEnhance?.h === report.source?.h,
+  `变清晰没有沿用原尺寸：原 ${report.source?.w}×${report.source?.h} → 新 ${report.afterEnhance?.w}×${report.afterEnhance?.h}`,
+);
+need(!report.errorAfterEnhance, `变清晰报了错：${report.errorAfterEnhance}`);
+
+/* 扩图：按定义**输出更大**（factor 2） */
+need(
+  typeof report.afterExpand?.src === "string" && report.afterExpand.src !== report.afterEnhance?.src,
+  `点了「扩图」没有换出新图：${JSON.stringify(report.afterExpand)}`,
+);
+need(
+  (report.afterExpand?.w ?? 0) > (report.afterEnhance?.w ?? 0) &&
+    (report.afterExpand?.h ?? 0) > (report.afterEnhance?.h ?? 0),
+  `扩图之后尺寸没变大：${report.afterEnhance?.w}×${report.afterEnhance?.h} → ${report.afterExpand?.w}×${report.afterExpand?.h}`,
+);
+need(!report.errorAfterExpand, `扩图报了错：${report.errorAfterExpand}`);
+
+/* 三张图（原图 + 变清晰 + 扩图）都在磁盘上，且不是几十字节的占位 */
+need((report.assets ?? []).length >= 3, `磁盘上的生成图不足 3 张：${JSON.stringify((report.assets ?? []).map((a) => a.f))}`);
+need(
+  (report.assets ?? []).filter((a) => a.bytes > 1000).length >= 3,
+  `磁盘上有图但太小（可能只存了空壳）：${JSON.stringify(report.assets)}`,
+);
+
+/* Ctrl+Z 撤回：回到"变清晰"那一版 */
+need(
+  report.afterUndo?.src === report.afterEnhance?.src,
+  `Ctrl+Z 没有撤回改图：撤回后 ${report.afterUndo?.src}，应为 ${report.afterEnhance?.src}`,
+);
+
+await verdict(bad, "图片动作条（有图可改 / 菜单四项 / 变清晰换新图且沿用尺寸 / 扩图更大 / 图能显示且落盘 / Ctrl+Z 撤回）");
+

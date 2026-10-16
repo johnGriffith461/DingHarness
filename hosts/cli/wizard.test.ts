@@ -66,7 +66,7 @@ describe("首次运行向导（Phase 11.3 / 10.4 的首跑路径）", () => {
   it("① 全新机器：一路回车就能配好（每问都有默认值，问题不超过 4 个）", async () => {
     const dataDir = freshDir();
     const io = scriptedIo(["", "sk-test-wizard-key", "", ""]); // 全用默认
-    const result = await runWizard(io, { dataDir, hasUsableProvider: false });
+    const result = await runWizard(io, { dataDir });
 
     expect(result.skipped, `向导不该中断：${result.skipped ?? ""}`).toBeUndefined();
     expect(result.wrote).toBe(true);
@@ -87,7 +87,7 @@ describe("首次运行向导（Phase 11.3 / 10.4 的首跑路径）", () => {
   it("② 默认档位是「按需确认」（安全的那一侧），且告诉用户怎么改", async () => {
     const dataDir = freshDir();
     const io = scriptedIo(["deepseek", "sk-x", "deepseek-chat", ""]);
-    const result = await runWizard(io, { dataDir, hasUsableProvider: false });
+    const result = await runWizard(io, { dataDir });
     expect(result.config.mode).toBe("按需确认");
     const said = io.lines.join("\n");
     expect(said, "没告诉用户怎么放宽").toContain("ding config set mode");
@@ -98,7 +98,7 @@ describe("首次运行向导（Phase 11.3 / 10.4 的首跑路径）", () => {
     const dataDir = freshDir();
     const work = freshDir();
     const io = scriptedIo(["deepseek", "sk-x", "deepseek-chat", work]);
-    await runWizard(io, { dataDir, hasUsableProvider: false });
+    await runWizard(io, { dataDir });
     const cfg = readConfig(dataDir).config;
     expect(cfg.dirs).toEqual([path.resolve(work)]);
   });
@@ -108,7 +108,7 @@ describe("首次运行向导（Phase 11.3 / 10.4 的首跑路径）", () => {
     fs.mkdirSync(path.dirname(credFile), { recursive: true });
     fs.writeFileSync(credFile, "refs:\n  DEEPSEEK_API_KEY: sk-already-there\n", "utf8");
     const io = scriptedIo(["deepseek", "deepseek-chat", ""]); // 少一个答案
-    const result = await runWizard(io, { dataDir, hasUsableProvider: true });
+    const result = await runWizard(io, { dataDir });
     expect(result.providerWithKey).toBe("deepseek");
     expect(io.questions.length, `问了：${JSON.stringify(io.questions)}`).toBeLessThanOrEqual(3);
     // 旧 key 原样还在
@@ -159,3 +159,30 @@ describe("首次运行向导（Phase 11.3 / 10.4 的首跑路径）", () => {
     expect(io.questions.length, "已经配好了还问问题").toBe(0);
   });
 });
+
+/**
+ * ⭐ 守卫：向导的依赖里**不许**再出现那个从没被读过的入参（审计 P221 / NEW-N7-30）。
+ *
+ * `runWizard` 的 deps 上原来声明了 `hasUsableProvider`，而函数体**从没读过**它 ——
+ * `ding init` 传 `false`、`ensureConfigured` 传真值，两条路跑出来一模一样。
+ * 一个"看起来会影响分支"的入参其实什么都不做，比少一个入参危险得多：将来谁照着它
+ * 分支（比如已有 key 就跳过第①步），`ding init` 那条路会先错。
+ *
+ * 处理方式是**删掉**而不是"真用"：向导里决定默认值的是 `suggestProvider()` 与现场
+ * `hasSecret()` —— 它们算的就是这台机器上有没有可用的 provider，再从外面传一个同样的布尔
+ * 进来就是第二份口径。守卫把这件事钉死：谁把它加回来，这里立刻红。
+ */
+describe("守卫：向导不读的入参不许复活（P221 的落点）", () => {
+  it("wizard.ts / cmdSetup.ts 里都没有 hasUsableProvider 了", () => {
+    /* 先剥注释：说明里提到这个名字（解释为什么删掉）不算"代码里又有了它" */
+    const strip = (text: string): string =>
+      text
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+    const wizard = strip(fs.readFileSync(path.resolve(process.cwd(), "hosts/cli/wizard.ts"), "utf8"));
+    const setup = strip(fs.readFileSync(path.resolve(process.cwd(), "hosts/cli/cmdSetup.ts"), "utf8"));
+    expect(wizard, "wizard.ts 里又有 hasUsableProvider 了").not.toContain("hasUsableProvider");
+    expect(setup, "cmdSetup.ts 里又在传 hasUsableProvider 了").not.toContain("hasUsableProvider");
+  });
+});
+

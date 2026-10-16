@@ -1,9 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { serializeCanvas, validateRevision } from "./usePersistence";
+import { isPersistableChange, serializeCanvas, validateRevision } from "./usePersistence";
 import type { CanvasNode } from "./types";
 import { makeMarkdownNode } from "./types";
 
 const node = makeMarkdownNode("n1", { x: 10, y: 20 }, "内容", { width: 300, height: 200 }, "标题");
+
+/**
+ * ⭐ P30：视口（平移 / 缩放）从不被持久化。
+ *
+ * 修前实测：订阅侧只有 `if (state.revision === prev.revision) return;`，而 `setViewport`
+ * 不推修订号 → "拖到别处再看"这一整类动作**永远不落盘**（`serializeCanvas` 却一直在写 `viewport`）。
+ * 这一组把判据钉在纯函数上：**修订号没变、视口变了 → 必须落盘**。
+ */
+describe("isPersistableChange（P30）", () => {
+  const at = (revision: number, x: number, y: number, zoom: number) => ({
+    revision,
+    viewport: { x, y, zoom },
+  });
+
+  it("⭐ 修订号没变但视口动了 → 要落盘（原来这一支被直接 return 掉了）", () => {
+    expect(isPersistableChange(at(3, -120, 40, 1.25), at(3, 0, 0, 1))).toBe(true);
+  });
+
+  it("缩放变了也算（缩放同样只走 setViewport）", () => {
+    expect(isPersistableChange(at(7, 0, 0, 2), at(7, 0, 0, 1))).toBe(true);
+  });
+
+  it("修订号前进 → 要落盘（内容那条路不能被这次改动弄丢）", () => {
+    expect(isPersistableChange(at(4, 0, 0, 1), at(3, 0, 0, 1))).toBe(true);
+  });
+
+  it("什么都没变 → 不落盘（手势结束回到原处不该白写一次）", () => {
+    expect(isPersistableChange(at(3, 12, -8, 1.5), at(3, 12, -8, 1.5))).toBe(false);
+  });
+
+  it("视口缺了也不崩（载入前的半截状态）：判成「不值得单独存」", () => {
+    expect(
+      isPersistableChange(
+        { revision: 3, viewport: undefined as unknown as { x: number; y: number; zoom: number } },
+        at(3, 0, 0, 1),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("validateRevision", () => {
   it("允许等于已落盘修订（重复保存同一版）", () => {

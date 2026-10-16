@@ -52,6 +52,30 @@ function evalBaselinePath(): string {
 }
 
 /**
+ * `--update-baseline` 能不能写（审计 P160 / NEW-N3-21）。
+ *
+ * 基线是"通过率与**用例总数**都不许往下掉"的那个参照（`engine/eval/eval.test.ts` 会拿
+ * `report.total >= baseline.total` 当门）。原来 `ding eval <类别> --update-baseline`
+ * 会把**子集**的报告原样覆盖进同一份 `engine/eval/baseline.json`：
+ * `ding eval 纯对话 --update-baseline` 之后基线变成 `total: 9 / byCategory 只剩一类`，
+ * 于是删掉另外 54 条用例也不会有任何门变红 —— "总数只该涨"的棘轮被削掉。
+ *
+ * 所以只有**全量**（没给类别）时才允许写基线。
+ *
+ * @param only 命令行的类别过滤（`undefined` = 全量）
+ */
+export function baselineUpdateAllowed(only: string | undefined): { ok: true } | { ok: false; message: string } {
+  if (!only) return { ok: true };
+  return {
+    ok: false,
+    message:
+      `--update-baseline 只能在全量跑时用（现在只跑了「${only}」这一类）。\n` +
+      `  子集报告会覆盖整份基线，把"用例总数只该涨"那道棘轮一起削掉。\n` +
+      `  想更新基线：去掉类别，跑 \`ding eval --update-baseline\`。`,
+  };
+}
+
+/**
  * `ding eval [suite] [--json] [--update-baseline]`（Phase 10.2）。
  *
  * ## 它为什么必须离线
@@ -74,6 +98,14 @@ export async function cmdEval(p: Parsed): Promise<number> {
   if (only && !EVAL_CATEGORIES.includes(only as (typeof EVAL_CATEGORIES)[number])) {
     process.stderr.write(`没有这一类评测集：${only}\n可选：${EVAL_CATEGORIES.join(" / ")}\n`);
     return 2;
+  }
+  /* 先验后用（P160）：子集不许写基线 —— 别等跑完十分钟才说 */
+  if (p.flags.has("update-baseline")) {
+    const allowed = baselineUpdateAllowed(only);
+    if (!allowed.ok) {
+      process.stderr.write(`${allowed.message}\n`);
+      return 2;
+    }
   }
   const cases = only ? EVAL_CASES.filter((c) => c.category === only) : EVAL_CASES;
   if (!cases.length) {

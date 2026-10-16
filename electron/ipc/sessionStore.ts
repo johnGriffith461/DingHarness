@@ -154,10 +154,14 @@ async function migrateLegacyJsonl(store: SessionStore): Promise<{ files: number;
     /*
      * 旧编号只用来排序：新库的编号由 store 自己发 ——
      * 让外部决定编号正是"两个写入器撞号"的来源（换代前实测过那个毛病）。
+     *
+     * ⚠️ 但 **`at` 必须留着**（2026-10-16 审计 P14/P31）：store 现在认"记录自带 `at` 就用它"，
+     * 而这里若把 `at` 一并剥掉，桌面这条**真实**迁移路径仍会把全部历史挤成"迁移那一刻"
+     * —— 成本账本的按天口径、以及"这条会话多老"就全错了。（`migrateJsonlSessions` 那条路已改。）
      */
     const ordered = [...parsed.records]
       .sort((a, b) => a.seq - b.seq)
-      .map(({ seq: _seq, at: _at, ...rest }) => rest);
+      .map(({ seq: _seq, ...rest }) => rest);
     await store.append(sessionId, ordered as LogInput[]);
     files += 1;
     records += ordered.length;

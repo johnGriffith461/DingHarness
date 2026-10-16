@@ -1,6 +1,9 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { resolveServePort } from "./cmdServe";
+import { resolveServePort, serveProvider } from "./cmdServe";
 
 /**
  * `ding serve --port` 的取值判定（2026-10-16，审计 P111）。
@@ -35,3 +38,56 @@ describe("resolveServePort", () => {
     expect(resolveServePort("87.87").ok).toBe(false);
   });
 });
+
+/**
+ * provider 回落（2026-10-16，审计 P208 / NEW-N7-14）。
+ *
+ * 原来 `ding serve` / `ding acp` 只认 `config.provider`，没配就"先配一个 provider"退出 3。
+ * 而同一台机器上（只有环境变量 key、config.json 没写 provider —— doctor 与向导都允许
+ * 这种状态）`ding run` / REPL / `resume` / `recipe` 有 `firstAvailableProvider()` 兜底。
+ * 同一件事在四个入口给出三种结果，是宿主一致性最容易被漏的一类。
+ *
+ * 判据是"与别的入口**同一口径**"：没配 → 挑第一个有密钥的；配了 → 听配置的。
+ */
+describe("serveProvider —— 与 ding run / resume / recipe 同一口径（P208）", () => {
+  const saved: Record<string, string | undefined> = {};
+  const names = ["DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "A_API_KEY"];
+
+  function withCleanEnv(fn: () => void): void {
+    for (const n of names) {
+      saved[n] = process.env[n];
+      delete process.env[n];
+    }
+    const prevFile = process.env.DSH_CREDENTIALS_FILE;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dh-serve-"));
+    process.env.DSH_CREDENTIALS_FILE = path.join(tmp, "none.yaml");
+    try {
+      fn();
+    } finally {
+      for (const n of names) if (saved[n] !== undefined) process.env[n] = saved[n]!;
+      if (prevFile === undefined) delete process.env.DSH_CREDENTIALS_FILE;
+      else process.env.DSH_CREDENTIALS_FILE = prevFile;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  it("config.json 写了 provider：听它的", () => {
+    withCleanEnv(() => {
+      expect(serveProvider("anthropic")).toBe("anthropic");
+    });
+  });
+
+  it("⭐ 没配 provider、只有环境变量 key：回落到第一个有密钥的那家（不再直接退出 3）", () => {
+    withCleanEnv(() => {
+      process.env.DEEPSEEK_API_KEY = "sk-test";
+      expect(serveProvider(undefined)).toBe("deepseek");
+    });
+  });
+
+  it("一条 key 都没有：给空串（调用方据此报错退出）", () => {
+    withCleanEnv(() => {
+      expect(serveProvider(undefined)).toBe("");
+    });
+  });
+});
+

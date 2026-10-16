@@ -216,3 +216,120 @@ describe("P67 / K03 / P64：两段死 CSS 已删，不许长回来", () => {
     );
   });
 });
+
+/**
+ * P110：**降级成装饰的控件不许留着"可点"的样子**（2026-10-16 审计 P110）。
+ *
+ * ## 原来错在哪
+ *
+ * 定时任务页底部那条假输入区按工单口径"降级为非交互元素"了 —— 标签确实从
+ * `<button disabled>` 换成了 `<span className="wb-chip">`，整块还挂着 `aria-hidden`
+ * （对读屏是干净的），但 `.wb-chip` 自带 `cursor: pointer` 与 `:hover` 变底色：
+ * 鼠标扫过去，那一排「云电脑 / 项目 / 技能 / 插件 / AUTO · LOW」看起来完全可点，
+ * 点下去毫无反应。借口文案（"本机版没有"）消失了，"看着有其实没用"这个形状留下了。
+ *
+ * ## 现在这一条在守什么
+ *
+ * 那个具体的假输入区**已经被整块删掉**（`96ed255` 云盘整页拆掉那一批：主人说
+ * "多出个云电脑"），所以这条不是"修好了"，而是**防它长回来**：
+ * `aria-hidden` 的装饰元素不许再挂上"可点形状"的类。
+ * 判定用**类名 → CSS** 两段：先从 JSX 里找"既是 `aria-hidden`、又挂着交互类的标签"，
+ * 再确认那个类**真的**带 `cursor: pointer`（否则这条守卫会变成一句空话）。
+ */
+describe("P110：aria-hidden 的装饰不许带「可点」的样子", () => {
+  /** 这些类在样式里都带 `cursor: pointer`（下面那条断言会验一遍，免得名单空转）。 */
+  const INTERACTIVE_CLASSES = ["wb-chip", "wb-icon", "wb-page-btn", "wb-preset"];
+
+  /**
+   * 扫一侧界面源码，找出"**处在 `aria-hidden` 子树里**、却挂着可点样式"的标签。
+   *
+   * ⚠️ 必须看**整棵子树**（P110 的原始形状就是"外层 aria-hidden 的装饰块里放着几个
+   * `wb-chip` 的 span"）：只看"同一个标签上既有 aria-hidden 又有 wb-chip"会漏掉它 ——
+   * 这条守卫第一版就是这么写的，注入变异之后**没红**（记在这里，免得下一个人再抄那版）。
+   * 做法：顺序扫标签并维护一个栈，栈上任何一层带过 `aria-hidden`，后代就算装饰。
+   */
+  function decorativeInteractiveTags(files: string[]): string[] {
+    const out: string[] = [];
+    const voidTags =
+      /^(img|input|br|hr|path|circle|use|rect|line|polyline|polygon|stop|source|meta|link|ellipse)$/;
+    for (const rel of files) {
+      const text = readFileSync(path.join(ROOT, rel), "utf8");
+      const tagRe = /<(\/?)([A-Za-z][\w.]*)((?:"[^"]*"|'[^']*'|[^>])*?)(\/?)>/g;
+      const stack: Array<{ name: string; hidden: boolean }> = [];
+      let m: RegExpExecArray | null;
+      while ((m = tagRe.exec(text)) !== null) {
+        const [, slash, name, attrs, selfClose] = m;
+        if (slash) {
+          /* 闭合标签：把栈上最后一个同名项连同它上面的都弹掉 */
+          for (let i = stack.length - 1; i >= 0; i -= 1) {
+            if (stack[i]?.name === name) {
+              stack.length = i;
+              break;
+            }
+          }
+          continue;
+        }
+        const hidden = stack.some((s) => s.hidden) || /\baria-hidden\b/.test(attrs ?? "");
+        const clickable = INTERACTIVE_CLASSES.some((cls) =>
+          new RegExp(`className="[^"]*\\b${cls}\\b`).test(attrs ?? ""),
+        );
+        if (hidden && clickable) {
+          out.push(`${rel}  <${name} …> ${(attrs ?? "").replace(/\s+/g, " ").trim().slice(0, 70)}`);
+        }
+        if (selfClose !== "/" && !voidTags.test(name ?? "")) {
+          stack.push({ name: name ?? "", hidden });
+        }
+      }
+    }
+    return out;
+  }
+
+  function uiSources(): string[] {
+    const out: string[] = [];
+    for (const dir of ["src/workbench", "src/canvas"]) {
+      for (const f of readdirSync(path.join(ROOT, dir))) {
+        if (f.endsWith(".tsx")) out.push(`${dir}/${f}`);
+      }
+    }
+    return out;
+  }
+
+  it("⭐ 装饰元素（`aria-hidden` 子树）不许挂「看得见却点不动」的那类按钮样式", () => {
+    expect(
+      decorativeInteractiveTags(uiSources()),
+      "这些元素对读屏是隐藏的装饰，却挂着「按钮」的样式（cursor:pointer + hover）—— " +
+        "用户看得见、点得动、什么都不发生（P110 的形状：定时任务页那条假输入区就是它）",
+    ).toEqual([]);
+  });
+
+  it("这条判据不是空转：名单里的类**真的**带 cursor:pointer", () => {
+    const css = allCss()
+      .map(({ text }) => bare(text))
+      .join("\n");
+    for (const cls of INTERACTIVE_CLASSES) {
+      expect(
+        hasPointerCursor(css, cls),
+        `.${cls} 的任何一条规则里都没有 cursor:pointer 了 —— 这条守卫盯的东西变了，名单该跟着改`,
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * 某个类的**任一条**规则里有没有 `cursor: pointer`。
+ *
+ * 同一类可以写在多条规则里（`.wb-chip` 就分别写在 `craft.css` 与 `workbench.css`），
+ * 而"可点"这件事只要有**一条**成立就够了 —— 只取第一条会漏（实测踩过）。
+ */
+function hasPointerCursor(css: string, cls: string): boolean {
+  const needle = `.${cls} {`;
+  let at = css.indexOf(needle);
+  let found = false;
+  while (at >= 0) {
+    const open = css.indexOf("{", at);
+    const close = css.indexOf("}", open);
+    if (open >= 0 && close > open && /cursor:\s*pointer/.test(css.slice(open, close))) found = true;
+    at = css.indexOf(needle, close > open ? close : at + needle.length);
+  }
+  return found;
+}

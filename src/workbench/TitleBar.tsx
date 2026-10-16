@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ShellBridge } from "@shared/ipc";
 
 /**
@@ -22,6 +22,25 @@ import type { ShellBridge } from "@shared/ipc";
 
 const bridge = (): ShellBridge | undefined => (globalThis as unknown as { shell?: ShellBridge }).shell;
 
+/**
+ * 写入序号的两件小事（2026-10-16 审计 P194）。
+ *
+ * 抽成模块级纯函数是为了让"谁后到谁赢"这条约定只有一份实现 —— 组件里三处写入
+ * （初始查询、点击回包、主进程推送）都走它。盒子由调用方给（组件里是 `useRef`），
+ * 所以这两个函数自己不持状态，可以单测。
+ */
+
+/** 领一个新序号（发起一次异步写入前调）。 */
+export function claimSeq(box: { next: number }): number {
+  box.next += 1;
+  return box.next;
+}
+
+/** 这次写入还作数吗（期间有更新的写入 → 作废，不许落地）。 */
+export function isStale(box: { next: number }, seq: number): boolean {
+  return box.next !== seq;
+}
+
 /** 字形统一 10×10 细线，与系统 caption 按钮同一观感。 */
 function Glyph({ children }: { children: React.ReactNode }) {
   return (
@@ -38,14 +57,33 @@ export default function TitleBar() {
    */
   const [maximized, setMaximized] = useState(false);
 
+  /**
+   * ⚠️ 这个状态有**两个**写入者，顺序不保证（2026-10-16 审计 P194）。
+   *
+   * 主进程 `toggleMaximize()` 是"先 `win.maximize()`、再 `return win.isMaximized()`"，
+   * 而 `attachWindowEvents` **同时**独立推一条 `maximizedChanged` ——
+   * 于是"回包"与"推送"谁先到是不定的；连点两下时，**旧回包可能后到**，
+   * 把图标按回反状态（表现就是图标停在反的那一面）。
+   *
+   * 约定（与 P194 的修法一致）：
+   *   · `onMaximizedChange` 推来的才是**真源**，每次到达都领一个新序号 ——
+   *     任何在飞的查询/回包就此作废；
+   *   · IPC 的回值只用于**乐观更新**，落地前必须比一次序号（`isStale`）。
+   *
+   * 序号盒子放在 `useRef` 里：它只是"谁最新"的记号，不该触发重渲染。
+   */
+  const seqRef = useRef({ next: 0 });
+
   useEffect(() => {
     const win = bridge()?.win;
     if (!win) return;
     let alive = true;
+    /* 初始查询也是一次"异步写入"：领一个序号，推送先到就作废 */
+    const seq = claimSeq(seqRef.current);
     void win
       .isMaximized()
       .then((v) => {
-        if (alive) setMaximized(v);
+        if (alive && !isStale(seqRef.current, seq)) setMaximized(v);
       })
       .catch(() => {
         /* 拿不到就按"没最大化"画：图标错一次，不该把标题栏整个弄崩 */
@@ -54,12 +92,28 @@ export default function TitleBar() {
      * 订阅而不是只在点击时更新：用户还会**双击标题栏 / Win+↑ / 拖到屏幕边缘 Snap**
      * ——那些都不经过我们的按钮，不订阅的话图标会一直停在旧状态。
      */
-    const off = win.onMaximizedChange(setMaximized);
+    const off = win.onMaximizedChange((v) => {
+      claimSeq(seqRef.current);
+      setMaximized(v);
+    });
     return () => {
       alive = false;
       off();
     };
   }, []);
+
+  /** 点那颗「最大化/还原」：回包只当乐观更新，比过序号才落地。 */
+  const toggleMaximized = () => {
+    const seq = claimSeq(seqRef.current);
+    void bridge()
+      ?.win?.toggleMaximize()
+      .then((v) => {
+        if (!isStale(seqRef.current, seq)) setMaximized(v);
+      })
+      .catch(() => {
+        /* 主进程没答就保持原状，别猜 */
+      });
+  };
 
   return (
     /* 双击标题栏 = 最大化 ⇄ 还原（Windows 惯例；拖动区里的双击系统也会自己处理一次） */
@@ -98,14 +152,7 @@ export default function TitleBar() {
           title={maximized ? "向下还原" : "最大化"}
           data-testid="wb-win-max"
           data-maximized={maximized ? "true" : "false"}
-          onClick={() => {
-            void bridge()
-              ?.win?.toggleMaximize()
-              .then(setMaximized)
-              .catch(() => {
-                /* 主进程没答就保持原状，别猜 */
-              });
-          }}
+          onClick={toggleMaximized}
         >
           {maximized ? (
             <Glyph>

@@ -426,10 +426,25 @@ export type ShellBridge = {
    * 本机版应用设置（§183）。
    *
    * 走主进程的原子写（不走 localStorage —— §156 的教训：硬杀进程就没了）。
+   *
+   * ## 字段
+   *
+   * · `pinnedModel`：钉住的默认通道（空串 = 记忆上次）；
+   * · `navCollapsed`：左侧导航栏收起来了没有（2026-10-16，审计 P187 / P191）。
+   *   它原来只活在渲染层的内存里（`workbench/store.ts` 的 `navCollapsed`），
+   *   所以**重启就忘** —— 用户每开一次都要再收一次。它是"用户设过一次的东西"，
+   *   与 `pinnedModel` 同一类，所以走同一条落盘。
+   *
+   * ⚠️ `navCollapsed` 是**可选**的：磁盘上现存的 `settings.json` 里没有这一项
+   * （它是这次才加的），缺了就按 `false`（展开）——
+   * 让"老文件读出来就报缺字段"变成一次迁移事故是本末倒置。
    */
   appSettings: {
-    read: () => Promise<{ pinnedModel: string }>;
-    write: (next: { pinnedModel: string }) => Promise<{ pinnedModel: string }>;
+    read: () => Promise<{ pinnedModel: string; navCollapsed?: boolean }>;
+    write: (next: { pinnedModel: string; navCollapsed?: boolean }) => Promise<{
+      pinnedModel: string;
+      navCollapsed?: boolean;
+    }>;
   };
   /** 创作广场的「喜欢」（§180）：只存名字，不编点赞数。 */
   coding: {

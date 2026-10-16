@@ -51,8 +51,12 @@ export async function loadSearchHistory(): Promise<SearchHistory> {
  * ⚠️ 磁盘上是**更新的版本**时**拒绝覆盖**（`foreign`）：那是降级运行，
  * 硬写回去等于把用户的历史降级销毁 —— 同 §178.6 / §179.6 / §181.6 的取舍。
  *
+ * ⚠️ **审计 P223**：写盘真失败时**抛错**，不再"打个日志、照样返回成功值"。
+ * 原来写失败仍 `return history`，`ipcMain.handle` 正常 resolve，渲染层收不到失败信号。
+ *
  * @param next 任意值（会被规整）
  * @returns 规整之后真正落盘的内容
+ * @throws 落盘失败（重试过仍失败）时抛，让那次 IPC 明确 reject
  */
 export async function saveSearchHistory(next: unknown): Promise<SearchHistory> {
   const history = normalizeHistory(next);
@@ -67,6 +71,7 @@ export async function saveSearchHistory(next: unknown): Promise<SearchHistory> {
   if (!res.ok) {
     // 原来写失败是一条日志都没有的，用户只会发现"搜过的词又没了"
     console.error("[search] 落盘失败（重试过）：", res.error);
+    throw new Error(`搜索历史落盘失败：${res.error}`);
   }
   return history;
 }

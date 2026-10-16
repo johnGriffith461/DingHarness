@@ -151,14 +151,17 @@ export function writeSecret(refName: string, value: string): { ok: boolean; file
 /**
  * 跑一遍向导。
  *
+ * ⚠️ 依赖里**只有 `dataDir`**（审计 P221 / NEW-N7-30）：原来还有一个
+ * `hasUsableProvider` 入参，但它**从没被读过** —— `ding init` 传 `false`、
+ * `ensureConfigured` 传真值，两条路跑出来一样。删掉它而不是"真用"：
+ * 向导该按 `suggestProvider()` + 现场 `hasSecret()` 判断（那就是这台机器的真实情况），
+ * 从外面再传一个同样的布尔只是第二份会漂的口径。
+ *
  * @param io 问答通道
- * @param deps 依赖（数据目录等；测试里指到临时目录）
+ * @param deps 依赖（数据目录；测试里指到临时目录）
  * @returns 结局
  */
-export async function runWizard(
-  io: WizardIo,
-  deps: { dataDir: string; hasUsableProvider: boolean },
-): Promise<WizardResult> {
+export async function runWizard(io: WizardIo, deps: { dataDir: string }): Promise<WizardResult> {
   io.say("看起来你还没配好模型。三件事，两分钟就能跑起来。");
   io.say("");
 
@@ -278,7 +281,7 @@ export async function ensureConfigured(
     };
   }
 
-  const wizard = await runWizard(io, { dataDir: deps.dataDir, hasUsableProvider: hasAny });
+  const wizard = await runWizard(io, { dataDir: deps.dataDir });
   if (wizard.skipped) return { ok: false, reason: wizard.skipped, wizard };
   const after = readConfig(deps.dataDir).config;
   const ok = Boolean(after.provider && providers.some((p) => p.id === after.provider && hasSecret(p.keyRef)));

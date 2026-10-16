@@ -11,6 +11,7 @@ import {
   planFor,
   planSandboxed,
   probeSandbox,
+  resetSandboxProbeCache,
   type SandboxInfo,
 } from "./sandbox";
 
@@ -42,6 +43,8 @@ const foundInfo: SandboxInfo = {
   bounded: true,
   binary: "ding-sandbox",
   platform: process.platform,
+  memoryMb: SANDBOX_MEMORY_MB,
+  processes: SANDBOX_PROCESSES,
   note: "命令在作业对象里跑：有内存与子进程数上限，且随沙箱一起结束（不留孤儿）",
 };
 /** 「没找到沙箱」的能力 —— 没编过 `pnpm sandbox:build` 的机器、CI、装出来的版本都是它。 */
@@ -50,8 +53,31 @@ const missingInfo: SandboxInfo = {
   bounded: false,
   binary: "",
   platform: process.platform,
+  memoryMb: SANDBOX_MEMORY_MB,
+  processes: SANDBOX_PROCESSES,
   note: "没有 ding-sandbox（编它：pnpm sandbox:build）；命令将不受限地跑",
 };
+
+/**
+ * 一条命令"真的被上限拦住 / 没跑成"的判据（审计 P41 顺手钉住的假判据，2026-10-16）。
+ *
+ * ⚠️ **不能写成 `status !== 0` 一句**：进程被异常终止时 Node 给的 `status` 是 `null`，
+ * 而 `null !== 0` 也成立 —— 于是"二进制没找到 / 进程压根没起来"也算"通过"。
+ * 本机实测（`--memory-mb 128` 跑 1GB 的分配）：`status: 1`、`signal: null`、
+ * stderr 里是 Node 自己的 `RangeError: Array buffer allocation failed`；
+ * 作业对象直接把进程杀掉那一档给的是 `signal` 非空（或至少是个具体的退出码）。
+ *
+ * 两种都算"没跑成"，**但必须是它们之一**：`status === null && signal === null`
+ * （外加 spawn 失败那种连 `error` 都带着的）一律**不算**。
+ *
+ * @param got `spawnSync` 的结果
+ * @returns 被上限拦住 / 没跑成吗
+ */
+function stoppedByLimit(got: { status: number | null; signal: string | null; error?: Error }): boolean {
+  if (got.error) return false; // 连进程都没起来（ENOENT 之类）—— 那不是"上限生效"
+  if (got.signal !== null) return true; // 被信号带走
+  return typeof got.status === "number" && got.status !== 0;
+}
 
 describe("沙箱接线（Phase 14.1）", () => {
   it("①a 打包态：resources/ 下那份找得到（2026-10-16 主人逮到的那条）", () => {
@@ -144,6 +170,59 @@ describe("沙箱接线（Phase 14.1）", () => {
     expect(plan.args).toContain("2");
   });
 
+  it("⭐ 默认上限取自**沙箱自己报的**（P122）：宿主侧那份只是老二进制的回落值", () => {
+    /*
+     * `--probe` 会带上 `defaultMemoryMb` / `defaultProcesses`，而宿主侧原来另外硬写了
+     * 一份常量 —— 同一个默认值两处各写一遍，改一边就漂。现在以沙箱报的为准：
+     * 这里喂一份「和常量不一样」的能力，计划里就该出现它报的数（而不是常量）。
+     * 退回「用常量」的实现时这条会红 —— 那正是漂移发生的方式。
+     */
+    const plan = planFor("echo x", { ...foundInfo, memoryMb: 1234, processes: 7 });
+    expect(plan.args, "计划里用的不是沙箱报的默认内存上限").toContain("1234");
+    expect(plan.args, "计划里用的不是沙箱报的默认进程上限").toContain("7");
+    expect(plan.args).not.toContain(String(SANDBOX_MEMORY_MB));
+
+    /* 显式传值仍然压得住沙箱报的那份 */
+    const forced = planFor("echo x", { ...foundInfo, memoryMb: 1234, processes: 7 }, { memoryMb: 64 });
+    expect(forced.args).toContain("64");
+  });
+
+  it("⭐ 0 / 负数这类无效上限**绝不送出去**（P122）：回落到默认，不指望对面拦", () => {
+    /*
+     * Rust 侧实测：作业对象那两个字段带上限标志时，**0 让约束整个失效**
+     * （内存 0 → 上限设不上；进程 0 → 命令进不了作业，两条都变成不受限地跑）。
+     * 新版沙箱把 0 当用法错误拒掉（退出码 2），但**不能假设对面是新的** ——
+     * 老二进制会静默放行。所以这一层自己就不送 0：宁可宽，不可「无」。
+     */
+    const plan = planFor("echo x", { ...foundInfo, memoryMb: 0, processes: 0 });
+    expect(plan.args.join(" "), "把 0 送出去了 —— 老沙箱上那是「没有上限」").not.toMatch(/--memory-mb 0|--processes 0/);
+    expect(plan.args).toContain(String(SANDBOX_MEMORY_MB));
+    expect(plan.args).toContain(String(SANDBOX_PROCESSES));
+
+    const negative = planFor("echo x", foundInfo, { memoryMb: -1, processes: Number.NaN });
+    expect(negative.args).toContain(String(SANDBOX_MEMORY_MB));
+    expect(negative.args).toContain(String(SANDBOX_PROCESSES));
+  });
+
+  it.runIf(hasBinary)("⭐ probe 报的两个默认值与回落常量现在一致（漂了就看一眼）", () => {
+    /*
+     * 常量只是「沙箱没报时」的回落值，未必永远等于 Rust 的默认 —— 但**现在**一致，
+     * 一旦不一致就值得看一眼：要么忘了跟 Rust 的默认，要么那一版沙箱根本不报这两个字段。
+     * 这是 P122 那条「同一个默认值两处各写一遍必漂」的在线对账。
+     */
+    resetSandboxProbeCache();
+    const info = probeSandbox({ refresh: true });
+    expect(info.memoryMb).toBeGreaterThan(0);
+    expect(info.processes).toBeGreaterThan(0);
+    expect(
+      SANDBOX_MEMORY_MB,
+      `回落常量 ${SANDBOX_MEMORY_MB} 与沙箱报的 ${info.memoryMb} 不一致 —— 是忘了跟，还是它没报？`,
+    ).toBe(info.memoryMb);
+    expect(SANDBOX_PROCESSES, `回落常量与沙箱报的 ${info.processes} 不一致`).toBe(info.processes);
+    /* 计划里用的就是它报的那份（这一条把「读到了却没用」也盖住） */
+    expect(planFor("echo x", info).args).toContain(String(info.memoryMb));
+  });
+
   it.runIf(hasBinary)("④ 真的能跑：命令经沙箱执行，输出一字不差", () => {
     const plan = planSandboxed("echo sandbox-roundtrip");
     const got = spawnSync(plan.file, plan.args, {
@@ -172,13 +251,44 @@ describe("沙箱接线（Phase 14.1）", () => {
         timeout: 120_000,
       });
       /*
-       * 判据是"**没成功分配完**"：Node 在作业的内存上限处抛分配失败（退出码非 0）。
-       * 不断言具体错误文案 —— 那是 Node 的措辞，不是我们的契约。
+       * 判据分两步（2026-10-16 修过一版假判据）：
+       *
+       * ① **真的没跑完**，而且**是"被拦住"那种没跑完** —— `stoppedByLimit` 要求
+       *    要么有具体退出码、要么被信号带走。原来这里写的是 `status !== 0`，
+       *    而**进程异常终止时 `status` 是 `null`**，`null !== 0` 也成立：
+       *    二进制没找到、进程压根没起来，这条都会"通过"。
+       * ② **看得出是内存那件事**：Node 自己在分配失败时会把原因写在 stderr
+       *    （`Array buffer allocation failed` / `heap out of memory`）；
+       *    作业对象直接杀进程那种没有 stderr，那就看**信号**。
+       *    不断言具体文案 —— 那是 Node 的措辞，不是我们的契约；这里只要求"二者之一"。
        */
-      expect(got.status, "128MB 上限下竟然跑完了 1GB 的分配").not.toBe(0);
+      const stderr = got.stderr ?? "";
+      expect(
+        stoppedByLimit(got),
+        `128MB 上限下没跑成，但也不是"被拦住"：status=${String(got.status)} signal=${String(got.signal)} error=${String(got.error?.message)}（status=null 不算 —— 那不是上限生效，是异常终止）`,
+      ).toBe(true);
+      expect(
+        got.signal !== null || /allocation failed|out of memory/i.test(stderr),
+        `没跑成，但看不出是内存上限造成的（stderr：${stderr.slice(0, 120) || "（空）"}）`,
+      ).toBe(true);
     },
     150_000,
   );
+
+  it("⭐ 判据自证：`status === null`（进程异常终止）**不算**被上限拦住", () => {
+    /*
+     * 这条不用沙箱二进制（哪台机器都能跑）：它验的是**判据本身**。
+     *
+     * 拿一个根本不存在的可执行文件 spawn 一次 —— Node 给的正是
+     * `status: null` + `error: ENOENT`，也就是「异常终止」那一档。
+     * 老判据（`status !== 0`）在这里会**通过**，而它想说的明明是「内存上限生效了」。
+     */
+    const bogus = spawnSync("dh-no-such-binary-9f3a", [], { encoding: "utf8", shell: false });
+    expect(bogus.status, "这条自证要靠 status===null 才有意义").toBeNull();
+    expect(bogus.error, "起不来时 Node 会带上 error").toBeTruthy();
+    expect(bogus.status !== 0, "老判据在这里就已经通过了 —— 这就是那条假判据").toBe(true);
+    expect(stoppedByLimit(bogus), "新判据必须把「起不来」与「被上限拦住」分开").toBe(false);
+  });
 
   it.runIf(hasBinary)(
     "⑥ 子进程数上限 + 不留孤儿：命令起的那堆子进程随沙箱一起收掉",

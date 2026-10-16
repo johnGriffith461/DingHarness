@@ -3,6 +3,7 @@ import { History, RotateCcw, X } from "lucide-react";
 import type { CanvasDocument, ShellBridge } from "@shared/ipc";
 import { useRuntimeStore } from "./runtimeStore";
 import { droppedCount, normalizeCanvasDoc } from "./normalizeDoc";
+import { uiError } from "./uiError";
 
 /**
  * 版本历史面板（对标原版 `canvas_versions_*`）。
@@ -45,7 +46,8 @@ export default function VersionHistoryPanel({
     try {
       setItems(await shell.canvas.revisions());
     } catch (error) {
-      setNote(error instanceof Error ? error.message : "读取版本列表失败");
+      /* 上游那句话不许原样贴出来（P190）：`uiError` 压成一句人话，认不出来就说「没料到的问题」 */
+      setNote(`读取版本列表失败：${uiError(error)}`);
     }
   }, []);
 
@@ -103,7 +105,8 @@ export default function VersionHistoryPanel({
             (dropped > 0 ? `；有 ${dropped} 个元素读不进来（版本不对或数据不完整），已跳过` : ""),
         );
       } catch (error) {
-        setNote(error instanceof Error ? error.message : "恢复失败");
+        /* 同上：恢复失败也可能是上游（主进程 / 文件系统）抛的，同样过一遍人话 */
+        setNote(`恢复失败：${uiError(error)}`);
       } finally {
         setBusy(false);
       }

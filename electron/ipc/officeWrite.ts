@@ -251,23 +251,32 @@ export async function markdownToXlsx(markdown: string, title: string): Promise<B
   sheet.getRow(1).font = { bold: true };
   sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEF1F8" } };
 
+  /*
+   * 列宽（**审计 P227**）：**一趟累计**每列当前最大显示宽（中文按 2 个字符宽算）。
+   *
+   * 原来是 `header.forEach((_, col) => sheet.eachRow(...))` —— 对**每一列**重扫整张表，
+   * 行数×列数是乘法（千行 20 列 = 两万多次取格与转串），主进程单线程全卡住。
+   * 现在在插入每一行时就顺手量一遍，复杂度回到 O(总格数)。
+   */
+  const maxWidth: number[] = header.map(() => 8);
+  const bump = (col: number, value: unknown): void => {
+    if (col >= maxWidth.length) return;
+    const text = value === null || value === undefined ? "" : String(value);
+    const width = [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 0x2e80 ? 2 : 1), 0);
+    maxWidth[col] = Math.max(maxWidth[col]!, Math.min(width + 2, 60));
+  };
+  header.forEach((title: string, index: number) => bump(index, title));
+
   for (const row of rows) {
     // 行长度不齐时补齐，避免 Excel 里列错位
     const padded = [...row];
     while (padded.length < header.length) padded.push("");
+    padded.forEach((cell, index) => bump(index, cell));
     sheet.addRow(padded);
   }
 
-  // 按内容估个列宽（中文按 2 个字符宽算）
-  header.forEach((_title: string, index: number) => {
-    let widest = 8;
-    sheet.eachRow((row) => {
-      const cell = row.getCell(index + 1).value;
-      const text = cell === null || cell === undefined ? "" : String(cell);
-      const width = [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 0x2e80 ? 2 : 1), 0);
-      widest = Math.max(widest, Math.min(width + 2, 60));
-    });
-    sheet.getColumn(index + 1).width = widest;
+  maxWidth.forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
   });
 
   const out = await wb.xlsx.writeBuffer();

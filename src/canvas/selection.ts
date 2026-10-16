@@ -90,6 +90,9 @@ export function pointHitTest(
  *
  * 直接把点交给 `pointHitTest` 时，落在节点边框外一点点就会"点空"；
  * 这里用带容差的矩形相交，既保证点得到，又不会误命中远处的节点。
+ *
+ * ⚠️ 它返回的是**候选**（`nodeLookup` 的遍历顺序，**与 z 序无关**）——
+ * "到底该切哪一个"要再过一遍 `pickPointTarget`（P249）。
  */
 export function clickHitTest(
   point: XYPosition,
@@ -112,9 +115,75 @@ export function clickHitTest(
 }
 
 /**
+ * 点选（多选那一支）**到底切哪一个节点** —— 几何命中之后取最上面的**一个**（2026-10-16 审计 P249）。
+ *
+ * ## 修的是什么
+ *
+ * 原来 `multiSelectBefore` 直接拿 `clickHitTest` 的整份结果去 `toggleSelection`，
+ * 于是一次 Ctrl+点选会把**命中的每一个都切换一遍**：
+ *   · 画框的矩形罩着整块区域，点框里的卡片 → 命中 {卡片, 画框} 两个，两个一起进选中集；
+ *   · z 序重叠的两张卡片同样被一起切换。
+ * 而不带修饰键的普通点选走 React Flow 的 DOM 命中，只会选中压在**最上面**的那一个 ——
+ * 同一个动作两条路给两种结果。
+ *
+ * ## 判据：按"绘制层序"取最上面那一个
+ *
+ * 与 `NodeRenderer` 渲染进 DOM 的顺序同一口径（它给每个节点壳写 `style.zIndex = internals.z`）：
+ *   · 主键 `internals.z` —— 画框建时 `zIndex: -1`、子节点是"父的 z + 1"、选中态另有抬升，
+ *     三者都算在里面，所以算出来的层序就是屏幕上看到的层序；
+ *   · 同 z 时按**文档次序**（`order`，节点数组下标）—— 后渲染的盖住先渲染的。
+ *
+ * ## 为什么画框要排除
+ *
+ * 画框本体是 `pointer-events: none`（否则它罩住的内容点不到，见 `FrameNode`），
+ * 所以 **DOM 点选根本点不到画框的本体**：在框里点空白，命中的是 pane（谁都不选）。
+ * 只有指针真的压在画框自己的元素上（标题栏 / 四角手柄）时，DOM 交出来的才是它 ——
+ * 那时 `domId` 就是画框自己，按它放行。
+ *
+ * @param point 世界坐标下的点
+ * @param lookup React Flow 的内部节点表
+ * @param options.pad 命中容差（与 `clickHitTest` 同一个，默认 3）
+ * @param options.order 文档次序（节点数组的 id 顺序）；不给就按"全都是 0"退化成只比 z
+ * @param options.domId 指针下那个节点元素的 id（`elementFromPoint` 拿到的那个节点）；没有给 null
+ * @returns 要切换的节点 id；没命中返回 null（**不抢这次事件**，交给 DOM 那条路）
+ */
+export function pickPointTarget(
+  point: XYPosition,
+  lookup: NodeLookup<InternalNode<Node>>,
+  options: { pad?: number; order?: readonly string[]; domId?: string | null } = {},
+): string | null {
+  const { pad = 3, order, domId = null } = options;
+  const rank = order ? new Map(order.map((id, index) => [id, index])) : null;
+  let best: { id: string; z: number; order: number } | null = null;
+
+  for (const id of clickHitTest(point, lookup, pad)) {
+    const node = lookup.get(id) as (InternalNode<Node> & { zIndex?: number }) | undefined;
+    if (!node) continue;
+    if (node.type === "frame" && id !== domId) continue;
+    const entry = { id, z: drawZ(node), order: rank?.get(id) ?? 0 };
+    if (!best || entry.z > best.z || (entry.z === best.z && entry.order > best.order)) best = entry;
+  }
+
+  return best?.id ?? null;
+}
+
+/**
+ * 一个节点在屏幕上的绘制层序。
+ *
+ * 优先取 React Flow 算好的 `internals.z`（含画框下沉 / 子节点相对父 +1 / 选中抬升），
+ * 拿不到（裸节点夹具、尚未测量）时退到节点自己的 `zIndex`。
+ */
+export function drawZ(node: { zIndex?: number; internals?: { z?: number } }): number {
+  const z = node.internals?.z;
+  if (typeof z === "number") return z;
+  return typeof node.zIndex === "number" ? node.zIndex : 0;
+}
+
+/**
  * 一次多选点击之后的新选中集。
  * @param current 当前选中
- * @param hit 命中节点（从下层到上层）
+ * @param hit 这一次要切换的节点 id（`pickPointTarget` 只会给**一个**；
+ *            仍然收数组是因为"切换一批"的语义本身成立，将来若有别的命中源也用得上）
  * @returns 新的选中集
  */
 export function toggleSelection(current: string[], hit: string[]): string[] {

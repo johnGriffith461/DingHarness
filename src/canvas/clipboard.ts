@@ -41,10 +41,17 @@ export function serializeClipboard(nodes: CanvasNode[], edges: Edge[]): string {
     if (typeof text !== "string") throw new Error("序列化没有产出文本");
     return text;
   } catch (error) {
-    // 这条错误会被界面原样显示给用户（对标原版那条提示）
-    throw new Error(
-      `画布内容无法序列化，已取消复制：${error instanceof Error ? error.message : String(error)}`,
-    );
+    /*
+     * 这条错误会被界面原样显示给用户（对标原版那条提示）。
+     *
+     * ⚠️ **不把 JSON 引擎的原话拼进来**（2026-10-16 审计 P190）：
+     * 原来这里写的是 `${error.message}`，于是界面上会出现
+     * 「画布内容无法序列化，已取消复制：Converting circular structure to JSON」
+     * —— 半句人话接半句引擎报错。用户需要知道的是"复制没成功、原因是他自己塞进去了
+     * 不能写进文本的东西"，引擎那句话留给日志（排查时够用）。
+     */
+    console.error("[clipboard] 序列化失败：", error);
+    throw new Error("画布内容无法序列化，已取消复制（内容里有不能写进文本的东西）");
   }
 }
 

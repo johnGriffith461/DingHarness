@@ -224,7 +224,11 @@ export function countByKind(entries: DriveEntry[]): Record<string, number> {
  * ⚠️ 值与 `engine/runtime/tools/readTool.ts` 的 `READ_MAX_BYTES` **必须一样**
  * （审计 P56：那边 200_000、这边原来是 200 * 1024 = 204800，两份值不同，
  * 而 readTool 的注释自称"与 `drive:read` 一致"）。同值由
- * `src/sharedContract.test.ts ②` 直接读两处源码对账；收成一处要 engine 那侧 import 这里
- * （不在本轮范围，如实记）。
+ * `src/sharedContract.test.ts ②` 直接读两处源码对账。
+ *
+ * ⚠️ 2026-10-16（审计 P234）：这一份现在**被 `shared/agentTools.ts` 取用了** ——
+ * 写文件的上限（`WRITE_FILE_MODEL_BYTES`）就是从这儿拿的，于是"写 / 读 / 改"三道闸
+ * 共用一个字节预算，而不是三处各写一个 200_000（那段注释原来写着"收成一处要
+ * engine 那侧 import 这里（不在本轮范围）"；这一轮做的就是它）。
  */
 export const READ_MAX_BYTES = 200_000;

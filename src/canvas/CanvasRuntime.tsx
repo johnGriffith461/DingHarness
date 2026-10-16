@@ -139,11 +139,14 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
         .map(([id]) => id),
     [storeApi],
   );
+  /** 文档次序（节点数组顺序）：多选点选靠它判"同 z 时谁盖住谁"（P249，见 `pickPointTarget`）。 */
+  const getOrder = useMemo(() => () => storeApi.getState().nodes.map((n) => n.id), [storeApi]);
   const onSelectionChange = useCallback((ids: string[]) => selectNodes(ids), [selectNodes]);
   const selection = useCanvasSelection({
     mode,
     getLookup,
     getSelected,
+    getOrder,
     onSelect: onSelectionChange,
   });
   useBlankClickClear(mode, selectNodes);

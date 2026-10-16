@@ -134,8 +134,13 @@
 /* 面板头上的「收起」：**必须带字**。
    第一版是一枚没字的右向箭头，主人当场问"打开了然后怎么关呢"——
    因为它太像"往右导航"。浮标按设计在面板打开时隐藏（原型同款），
-   所以关的入口只能在面板自己头上，而且得一眼看得出来。 */
-.wb-summary-collapse {
+   所以关的入口只能在面板自己头上，而且得一眼看得出来。
+
+   ⚠️ 左栏那颗开关（`.wb-nav-collapse`）走**同一条规则**（2026-10-16 审计 P192）：
+   它原来只有一枚 15px 图标，而同一个仓里右栏这颗已经被判过"没字等于没人认得出"。
+   更重要的是：左栏收起之后那颗按钮是**唯一的回程**，两处形态再漂一次就又得重新学。 */
+.wb-summary-collapse,
+.wb-nav-collapse {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -147,17 +152,22 @@
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
+  /* 页头（`.wb-page-head`）是 flex 行：不许被标题挤压成一条缝 */
+  flex: 0 0 auto;
+  white-space: nowrap;
   transition:
     color var(--dur-quick) var(--ease-out),
     background-color var(--dur-quick) var(--ease-out);
 }
 
-.wb-summary-collapse:hover {
+.wb-summary-collapse:hover,
+.wb-nav-collapse:hover {
   color: var(--accent);
   background: var(--surface-hover);
 }
 
-.wb-summary-collapse:active {
+.wb-summary-collapse:active,
+.wb-nav-collapse:active {
   transform: scale(0.96);
 }
 

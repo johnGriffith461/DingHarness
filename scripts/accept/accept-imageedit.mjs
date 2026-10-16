@@ -6,25 +6,27 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
 /**
  * 验收：**图片动作条真的能改图**（§167，对应 `aiCreation_canvas_imageAction_*`）。
  *
- * ## 为什么必须真调模型
+ * ## 为什么必须真跑一遍
  *
  * 动作定义（标签 / 提示词 / 尺寸策略）有 20 条单测，但"**点一下真的改出一版新图**"
  * 只能真跑一次。这条走完完整一条链：
  *
  * ```
  * 生成一张图（图片生成页） → 动作条点「变清晰」 → 新图落进 assets/
- *                        → 云盘里能看到它（§166 那个来源）
+ *                        → 生成图片页的「最近生成」里两张都在（§166 那个来源）
  * ```
+ *
+ * ⚠️ 2026-10-16（审计 A20）：**不再需要真模型** —— 批跑自带本地假通道，
+ * 图像那两条端点（`/images/generations` / `/images/edits`）它也认，
+ * 产品侧新增的 `LUNORA_BASE_URL` 覆盖口把图像通道指到它上面。
  *
  * ## 断言
  *
- * ① 生成成功后，"最近生成"里出现了这一张，且**动作条上有证据里那几个词**
+ * ① 生成成功后，图片页里出现了这一张，且**动作条上有证据里那几个词**
  *    （抠图 / 变清晰 / 扩图 / 编辑 / 消除）
  * ② 点「变清晰」→ 出现**第二张**（新文件名，不是原来那张）
  * ③ ⭐ 新图**真的落在 `assets/` 里**（磁盘上多了一个文件）
- * ④ ⭐ 云盘里能看到**两张**（来源=素材）
- *
- * ⚠️ 会真调图像模型（生成 1 次 + 变清晰 1 次，约 1 分钟）。
+ * ④ ⭐ 「最近生成」里能看到**两张**（就是 §166 那条来源）
  */
 const DATA = ".verify/imageedit-data";
 if (!(await freshDir(DATA))) {
@@ -107,8 +109,17 @@ try {
         云盘整页拆了 —— 改看留下的那个入口，判据不变：还是"两张都在"） ── */
   await page.locator('[data-testid="wb-nav-image"]').click().catch(() => undefined);
   await page.waitForTimeout(2000);
-  out.imagePageRecent = await page.evaluate(
-    () => Array.from(document.querySelectorAll('[data-testid^="wb-imagegen-recent-"]')).map((e) => e.getAttribute("data-testid")),
+  /*
+   * ⚠️ 2026-10-16（审计 A20 收进批跑时逮到）：这里原来读的是 `wb-imagegen-recent-*`，
+   * 而卡片真正的 testid 是 **`wb-imagegen-item-<名字>`**（`wb-imagegen-recent` 是外层容器、
+   * 没有带后缀的子节点）—— 于是这一格**永远是空数组**，判定却还在拿一个从未赋值的
+   * `out.driveRows` 去比（云盘那页早就拆了）→ 只要第一张出得来，这条脚本就必红，
+   * 而且红的原因看着像"云盘里没有图"。改成读对 testid，判据不变。
+   */
+  out.imagePageRecent = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="wb-imagegen-item-"]')).map((e) =>
+      (e.getAttribute("data-testid") ?? "").replace("wb-imagegen-item-", ""),
+    ),
   );
   out.shot = await shot(page, "imageedit.png");
 
@@ -140,11 +151,11 @@ try {
     }
     if (out.itemCount2 !== 2) bad.push(`"最近生成"应有 2 条，实际 ${out.itemCount2}`);
 
-    /* ④ 云盘里两张都在 */
-    const rows = out.driveRows ?? [];
-    if (rows.length !== 2) bad.push(`云盘里应有 2 张，实际 ${JSON.stringify(rows)}`);
+    /* ④ 生成图片页的「最近生成」里**两张都在**（与原"云盘里两张都在"同义） */
+    const rows = out.imagePageRecent ?? [];
+    if (rows.length !== 2) bad.push(`「最近生成」里应有 2 张，实际 ${JSON.stringify(rows)}`);
     for (const name of out.afterSecond ?? []) {
-      if (!rows.includes(name)) bad.push(`云盘里没有 ${name}`);
+      if (!rows.includes(name)) bad.push(`「最近生成」里没有 ${name}`);
     }
   }
 
@@ -152,6 +163,6 @@ try {
     console.error("✗ " + bad.join("；"));
     process.exitCode = 1;
   } else {
-    console.log("✓ 图片动作条成立：点「变清晰」真的改出一版新图、落进 assets、云盘里两张都在");
+    console.log("✓ 图片动作条成立：点「变清晰」真的改出一版新图、落进 assets、「最近生成」里两张都在");
   }
 }

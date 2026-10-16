@@ -41,8 +41,15 @@ export function appSettingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
 }
 
-/** 本机版设置的形状。 */
-export type AppSettings = { pinnedModel: string };
+/**
+ * 本机版设置的形状。
+ *
+ * ⚠️ `navCollapsed`（左栏收起态，2026-10-16 审计 P187/P191）：**它必须在这里也认下来**。
+ * 渲染层把收起态写进设置之后，主进程这一层若不多收一个字段，`normalizeAppSettings` 的收窄
+ * 会在**没写进去或读回来**时把它丢掉 —— 表现是"界面以为记住了、重启仍然忘"，
+ * 而且假桥（单测）不经过主进程，测试**查不出来**。所以收窄与类型两处一起加。
+ */
+export type AppSettings = { pinnedModel: string; navCollapsed?: boolean };
 
 /**
  * 把落盘的（不可信）值收窄。
@@ -53,7 +60,11 @@ export type AppSettings = { pinnedModel: string };
 export function normalizeAppSettings(raw: unknown): AppSettings {
   const s = (raw ?? {}) as Record<string, unknown>;
   /* 收窄那半放在 `shared/settings.ts`（那里能单测，这里只负责读写文件） */
-  return { pinnedModel: normalizePinnedModel(s.pinnedModel) };
+  return {
+    pinnedModel: normalizePinnedModel(s.pinnedModel),
+    /* 只认真正的 `true`（落盘的不可信：字符串 "false" 之类一律当"没收起"） */
+    navCollapsed: s.navCollapsed === true,
+  };
 }
 
 /** 落盘器（C1：原子写 + 重试 + 信封版本，全部在 `./jsonStore` 里一份）。 */
@@ -81,8 +92,15 @@ export async function loadAppSettings(): Promise<AppSettings> {
  * ⚠️ 磁盘上是**更新的版本**时**拒绝覆盖**（`foreign`）：那是降级运行，
  * 硬写回去等于把用户的设置降级销毁 —— 同 §178.6 / §179.6 / §181.6 的取舍。
  *
+ * ⚠️ **审计 P223**：写盘真失败时**抛错**，不再"打个日志、照样返回成功值"。
+ * 原来 `if (!res.ok) console.error(...)` 之后仍 `return clean` —— `ipcMain.handle`
+ * 正常 resolve，渲染层永远收不到失败信号，界面显示已保存、重启回到旧值。
+ * 同仓 `codingStore`/`libraryStore`/`scheduleStore`/`taskStore` 都如实回 `res.ok`，
+ * 只有 settings/history 这两条不一致（与文件头「同一条保证不该按模块换强度」相反）。
+ *
  * @param next 要写的值（不可信，先收窄）
  * @returns 收窄之后真正写进去的值
+ * @throws 落盘失败（重试过仍失败）时抛，让那次 IPC 明确 reject
  */
 export async function saveAppSettings(next: unknown): Promise<AppSettings> {
   const clean = normalizeAppSettings(next);
@@ -97,6 +115,7 @@ export async function saveAppSettings(next: unknown): Promise<AppSettings> {
   if (!res.ok) {
     // 原来这里 catch 了什么都不说，表现是"设了、重启又复位"
     console.error("[settings] 落盘失败（重试过）：", res.error);
+    throw new Error(`设置落盘失败：${res.error}`);
   }
   return clean;
 }

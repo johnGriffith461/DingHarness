@@ -52,6 +52,24 @@ function windowOf(event: IpcMainInvokeEvent, fallback: GetWindow): BrowserWindow
 }
 
 /**
+ * 拿窗口；拿不到就**明确失败**，不静默空操作（**审计 P194**）。
+ *
+ * 原来 `windowOf(...)?.minimize()` / `?.close()` 在拿不到窗口时什么都不做、也不报：
+ * 渲染层那颗按钮看着点了、其实毫无反应，而 invoke 正常 resolve —— 界面无从知道。
+ * 改成抛错后 `ipcMain.handle` 会让渲染层那次 invoke reject，按钮代码里的 `.catch`
+ * 有机会给出可见反馈（见 `src/workbench/TitleBar.tsx`）。
+ *
+ * @param event 发起 invok 的事件
+ * @param fallback 单例兜底
+ * @param action 动作名（进错误文案）
+ */
+function requireWindow(event: IpcMainInvokeEvent, fallback: GetWindow, action: string): BrowserWindow {
+  const win = windowOf(event, fallback);
+  if (!win) throw new Error(`没有可控制的窗口（${action} 未生效：窗口已关闭或尚未创建）`);
+  return win;
+}
+
+/**
  * 把「最大化状态变了」推给渲染进程。
  *
  * 为什么不能只在点击时回一个值：用户还有**别的**路径改变最大化状态 ——
@@ -77,12 +95,11 @@ export function attachWindowEvents(win: BrowserWindow): void {
  */
 export function registerWindowIpc(ipcMainInstance: IpcMain, getWindow: GetWindow): void {
   ipcMainInstance.handle(WINDOW_CHANNEL.minimize, (event) => {
-    windowOf(event, getWindow)?.minimize();
+    requireWindow(event, getWindow, "最小化").minimize();
   });
 
   ipcMainInstance.handle(WINDOW_CHANNEL.toggleMaximize, (event) => {
-    const win = windowOf(event, getWindow);
-    if (!win) return false;
+    const win = requireWindow(event, getWindow, "最大化/还原");
     if (win.isMaximized()) win.unmaximize();
     else win.maximize();
     /*
@@ -93,7 +110,7 @@ export function registerWindowIpc(ipcMainInstance: IpcMain, getWindow: GetWindow
   });
 
   ipcMainInstance.handle(WINDOW_CHANNEL.close, (event) => {
-    windowOf(event, getWindow)?.close();
+    requireWindow(event, getWindow, "关闭").close();
   });
 
   ipcMainInstance.handle(WINDOW_CHANNEL.isMaximized, (event) => {

@@ -30,11 +30,13 @@ export type SandboxInfo = {
   /**
    * 本平台**声明**支持隔离（`found` 且 `--probe` 这么答）。
    *
-   * ⚠️ 口径要说清（2026-10-16，审计 P115）：这是**平台级声明**，不是"这一条命令
-   * 真的被限制住了"的执行事实。`--probe` 现在只答 `cfg!(windows)`（Rust 侧），
-   * 而作业创建失败 / `AssignProcessToJobObject` 失败时命令**不受限照跑**，
-   * 上层却仍会拿到 `bounded: true` → 结果里写成 `sandboxed: true`。
-   * 要变成执行事实得让 Rust 侧**逐次上报**（P115 的 Rust 那一半，不在这份工单里）。
+   * ⚠️ 口径要说清（2026-10-16，审计 P115）：这是**平台级**说法，不是"这一条命令
+   * 真的被限制住了"的执行事实。Rust 侧不再只回显 `cfg!(windows)`，而是**真的试着
+   * 建一次作业对象 + 把上限设上去**（`win::probe_bounded(DEFAULT_MEMORY_MB,
+   * DEFAULT_PROCESSES)`），建得起来才答 true —— 受限容器 / 被策略拦下的会话里
+   * 它会如实答 false。可**每一次执行**到底有没有进作业，沙箱只在 stderr 上喊一句，
+   * 仍**没有给宿主侧的结构化出口**：`run_bounded` 之后那条命令是不受限的直通、
+   * 上层这里也还是 `true`。那一半（逐条上报）不在这份工单里。
    * 所以调用方转述时不要把 `bounded` 说成"这条命令受限了"。
    */
   bounded: boolean;
@@ -42,6 +44,18 @@ export type SandboxInfo = {
   binary: string;
   /** 本平台的名字（写进 doctor / 日志）。 */
   platform: string;
+  /**
+   * 沙箱**自己报的**默认内存上限（MB）、默认子进程数上限。
+   *
+   * ⚠️ 这两个数**以沙箱为准**（2026-10-16，审计 P122）：`--probe` 从某一版起会带上
+   * `defaultMemoryMb` / `defaultProcesses`，而宿主侧原来另外硬写了一份
+   * （`SANDBOX_MEMORY_MB` / `SANDBOX_PROCESSES`）—— 同一个默认值两处各写一遍，
+   * 改一边就漂。现在：**沙箱报了就用它报的**，没报（更老的二进制 / 答不出能力）
+   * 才回落到下面那两个常量。所以这两个字段在老二进制上是常量值，不是"缺省"。
+   */
+  memoryMb: number;
+  /** 子进程数上限（口径同上）。 */
+  processes: number;
   /** 找不到的原因（给用户看的一句话）。 */
   note: string;
 };
@@ -168,19 +182,29 @@ function probeSandboxNow(): SandboxInfo {
       bounded: false,
       binary: "",
       platform: process.platform,
+      memoryMb: SANDBOX_MEMORY_MB,
+      processes: SANDBOX_PROCESSES,
       note: `没有 ding-sandbox（编它：pnpm sandbox:build）；命令将不受限地跑${misconfigured}`,
     };
   }
   const got = spawnSync(binary, ["--probe"], { encoding: "utf8", timeout: 10_000 });
   const out = (got.stdout ?? "").trim();
   try {
-    const parsed = JSON.parse(out) as { bounded?: boolean; platform?: string };
+    const parsed = JSON.parse(out) as {
+      bounded?: boolean;
+      platform?: string;
+      defaultMemoryMb?: number;
+      defaultProcesses?: number;
+    };
     const bounded = parsed.bounded === true;
     return {
       found: true,
       bounded,
       binary,
       platform: parsed.platform ?? process.platform,
+      /* 沙箱报的就用它报的；更老的二进制没有这两个字段 → 回落到宿主侧那份常量 */
+      memoryMb: positiveOrDefault(parsed.defaultMemoryMb, SANDBOX_MEMORY_MB),
+      processes: positiveOrDefault(parsed.defaultProcesses, SANDBOX_PROCESSES),
       note: bounded
         ? "命令在作业对象里跑：有内存与子进程数上限，且随沙箱一起结束（不留孤儿）"
         : `本平台（${parsed.platform ?? process.platform}）还没有隔离实现，命令只是直通`,
@@ -191,6 +215,8 @@ function probeSandboxNow(): SandboxInfo {
       bounded: false,
       binary,
       platform: process.platform,
+      memoryMb: SANDBOX_MEMORY_MB,
+      processes: SANDBOX_PROCESSES,
       note: `ding-sandbox 答不出能力（输出：${out.slice(0, 60) || "（空）"}）`,
     };
   }
@@ -228,9 +254,38 @@ export type SandboxPlan = {
   note: string;
 };
 
-/** 默认上限（与 Rust 那边的默认一致；这里显式给出，因为 `run_command` 的输入里没这两项）。 */
+/**
+ * **回落**上限（沙箱没报或者报了个不可用的值时才用）。
+ *
+ * ⚠️ 这两个数**不是**"Rust 那边那一份的复制"了（2026-10-16，审计 P122）：
+ * `--probe` 会带上 `defaultMemoryMb` / `defaultProcesses`，计划里的默认值
+ * **以沙箱报的为准**（`SandboxInfo.memoryMb` / `.processes`）。这里留着是因为：
+ *   · 更老的二进制不报这两个字段；
+ *   · 沙箱答不出能力时（`--probe` 输出解析不了）也得有个数，
+ *     否则 `run_command` 会因为"问不到上限"而整个用不了。
+ * 数量级与 Rust 侧的 `DEFAULT_MEMORY_MB` / `DEFAULT_PROCESSES` 一致（2048 / 32）。
+ */
 export const SANDBOX_MEMORY_MB = 2048;
 export const SANDBOX_PROCESSES = 32;
+
+/**
+ * 上限值的收窄：**只认正整数**，别的（0 / 负数 / 小数 / NaN / 字符串）一律回落。
+ *
+ * ## 为什么 0 不能放行（审计 P122）
+ *
+ * Rust 侧实测过：作业对象那两个字段带上限标志时，**0 不是"没有上限"而是让约束整个失效** ——
+ * `--memory-mb 0` 让 `SetInformationJobObject` 当场失败、`--processes 0` 让命令进不了作业，
+ * 两条路都变成"命令照跑、不受限"，而调用方以为自己设了个上限。
+ * 新版沙箱把 0 按用法错误拒掉（退出码 2），但**不能假设对面是新的** ——
+ * 老二进制会静默放行。所以这一层自己就不送 0：落到默认上限，宁可"宽"也不"无"。
+ *
+ * @param value 想要的值（不可信）
+ * @param fallback 回落值
+ * @returns 一个 ≥1 的整数
+ */
+function positiveOrDefault(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback;
+}
 
 /**
  * 给一条命令编排"怎么跑它"。**纯函数**：能力由调用方传进来（`planSandboxed` 负责去问）。
@@ -240,8 +295,9 @@ export const SANDBOX_PROCESSES = 32;
  * 另一条要等 CI 或用户机器上才第一次执行（那正是直通路的引号缺陷躲过整轮开发的原因）。
  *
  * @param command 用户/模型给的那条命令行
- * @param info 沙箱能力（`probeSandbox()` 的结果）
- * @param opts.memoryMb / processes 上限（省略用默认；测试要压小才快）
+ * @param info 沙箱能力（`probeSandbox()` 的结果）—— **默认上限也取自它**（审计 P122）
+ * @param opts.memoryMb / processes 上限（省略用 `info` 报的；`info` 没报才用常量；
+ *   给了 0 / 负数这种无效值时同样回落到默认 —— 见 `positiveOrDefault`）
  * @returns 计划（`file` + `args`），调用方直接 spawn 它
  */
 export function planFor(
@@ -302,9 +358,9 @@ export function planFor(
     file: info.binary,
     args: [
       "--memory-mb",
-      String(opts.memoryMb ?? SANDBOX_MEMORY_MB),
+      String(positiveOrDefault(opts.memoryMb ?? info.memoryMb, SANDBOX_MEMORY_MB)),
       "--processes",
-      String(opts.processes ?? SANDBOX_PROCESSES),
+      String(positiveOrDefault(opts.processes ?? info.processes, SANDBOX_PROCESSES)),
       "--from-env",
       "--",
       comSpec,

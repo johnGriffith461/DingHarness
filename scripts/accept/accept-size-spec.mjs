@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, failOnMarks, openCanvas, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, openCanvas, pickPort, shot, verdict, waitForPort } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
 failOnMarks();
@@ -129,3 +129,52 @@ for (const x of flat.filter((v) => !v.ok)) console.log("  ✗", x.r, x.tier, "�
 
 await browser.close();
 child.kill();
+
+/*
+ * ── 判定（2026-10-16，审计 A20 收进批跑时补）──────────────────────────
+ *
+ * ⚠️ 这条原来**没有退出码判定**（靠 `failOnMarks` 兜"谁印了 ✗"，而"真按选定尺寸出图"
+ * 那一步只打了报告）—— 在批跑里它是最危险的那类：报告漂亮、其实没断。
+ * 前 5 段是纯计算（读界面算出来的尺寸对不对规格表），第 6 段才是**真的出图**。
+ */
+const bad = [];
+const need = (ok, why) => {
+  if (!ok) bad.push(why);
+};
+
+need(
+  JSON.stringify(report.modes) === JSON.stringify(["gen-size-mode-auto", "gen-size-mode-ratio", "gen-size-mode-resolution"]),
+  `三档模式不对：${JSON.stringify(report.modes)}`,
+);
+for (const x of flat) {
+  need(x.ok, `比例表对不上：${x.r} ${x.tier} 得到 ${x.got}，应为 ${x.want}`);
+}
+need(/由模型决定|auto/.test(report.autoText ?? ""), `自动模式没有说清"由模型决定"：${report.autoText}`);
+
+/* 自定义宽高：1920×1080 不是合法尺寸（高不是 16 的倍数）→ 必须带「已规整」提示 */
+need(/已规整/.test(report.customText ?? ""), `1920×1080 没有被规整提示：${report.customText}`);
+
+/* 极端比例（3840×400）：要么明确说无效，要么给出规整后的合法尺寸 —— 不许原样受理 */
+{
+  const shown = /将使用\s*(\d+x\d+)/.exec(report.longText ?? "")?.[1];
+  const hasDefiniteWord = /尺寸无效|已规整/.test(report.longText ?? "");
+  need(hasDefiniteWord, `3840×400 既没说无效也没说已规整：${report.longText}`);
+  need(shown !== "3840x400", `3840×400 被原样受理了（比例超 3:1）：${report.longText}`);
+  if (shown) {
+    const [w, h] = shown.split("x").map(Number);
+    need(
+      w % 16 === 0 && h % 16 === 0 && w <= 3840 && h <= 3840 && Math.max(w / h, h / w) <= 3,
+      `规整后的尺寸仍不合规：${shown}`,
+    );
+  }
+}
+
+/* ⭐ 第 6 段：真出的那张图**就是选定的 1280×720**（16:9 / 1K），不是模型随手给的 */
+need(/将使用\s*1280x720/.test(report.beforeRun ?? ""), `生成前显示的尺寸不是 1280x720：${report.beforeRun}`);
+need(
+  report.generatedSize?.w === 1280 && report.generatedSize?.h === 720,
+  `出的图尺寸与选定规格不符：${JSON.stringify(report.generatedSize)}（应为 1280×720）`,
+);
+
+await verdict(bad, "图像尺寸规格（三档模式齐 / 比例表逐格对上 / 自动与规整的提示 / 极端比例不被原样受理 / 真按 16:9 1K 出 1280×720）");
+

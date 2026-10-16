@@ -17,7 +17,14 @@ import { insideDirs } from "./drivePaths";
  * 而分叉的方向通常是**其中一边变松**（那才是危险的那边）。
  */
 
-/** 一次读取的字节上限：与 `drive:read` 一致（超过就不读，别把几兆塞进内存）。 */
+/**
+ * 一次读取的字节上限：与 `drive:read` 一致（超过就不读，别把几兆塞进内存）。
+ *
+ * ⚠️ 它同时是**写入与改动的上限**（审计 P234）：`writeTool.WRITE_MAX_BYTES` 与
+ * `editTool.EDIT_MAX_BYTES` 都直接取这个数，所以"写得进去的东西一定读得回来、
+ * 改得动"是一条能证明的不变量，而不是三个数碰巧一样大。
+ * 与 `shared/drive.ts` 那个同值由 `src/sharedContract.test.ts ②` 对账。
+ */
 export const READ_MAX_BYTES = 200_000;
 
 /** 给模型的正文上限（超出截断，并注明原文长度）。 */

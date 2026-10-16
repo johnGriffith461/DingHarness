@@ -6,6 +6,7 @@ import { firstAvailableProvider } from "../../engine/runtime/providers";
 import { normalizeConfirmMode } from "../../shared/ipc";
 import { flag, flagAll, type Parsed } from "./args";
 import { buildEngine } from "./assembly";
+import { resolveJsonOutputPath } from "./cmdBackup";
 import { effectiveConfig } from "./config";
 import { renderRecords } from "./renderRecords";
 
@@ -188,9 +189,21 @@ export async function cmdRecipe(p: Parsed, dataDir: string): Promise<number> {
     }
 
     if (sub === "export") {
-      const out = flag(p, "out") ?? path.resolve(`${recipe.id}.recipe.json`);
-      fs.writeFileSync(out, recipeToJson(recipe), "utf8");
-      process.stdout.write(`已导出：${out}\n（它是个 JSON，可以贴进聊天或 gist 分享）\n`);
+      /*
+       * ⚠️ 输出路径要与 `ding backup --out` 守**同一条规矩**（审计 P124 / P214）：
+       * 这里原来也是"`flag(p,"out")` 之后原样 `writeFileSync`"——`recipe export --out
+       * ~/.ding/config.json` 会用模板 JSON 盖掉用户配置。共用 `resolveJsonOutputPath`。
+       */
+      const target = resolveJsonOutputPath(flag(p, "out"), dataDir, {
+        defaultName: `${recipe.id}.recipe.json`,
+        force: p.flags.has("force"),
+      });
+      if (!target.ok) {
+        process.stderr.write(`${target.message}\n`);
+        return 2;
+      }
+      fs.writeFileSync(target.file, recipeToJson(recipe), "utf8");
+      process.stdout.write(`已导出：${target.file}\n（它是个 JSON，可以贴进聊天或 gist 分享）\n`);
       return 0;
     }
 

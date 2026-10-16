@@ -1,7 +1,14 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, screen, session, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { APP_CHANNEL } from "./ipc/appChannel";
+import { isAllowedExternalUrl, isAllowedNavigation, withFrameAncestors } from "./ipc/navigationGuard";
+import { probeViteDevServer } from "./ipc/devServerProbe";
+import { ensureSingleInstance } from "./ipc/singleInstance";
+import { safeRegister } from "./ipc/registerGuard";
+import { clampToWorkArea } from "./ipc/windowBounds";
 import { registerAiIpc } from "./ipc/ai";
 import { loadPluginsAtStartup, registerPluginIpc } from "./ipc/pluginHost";
 import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
@@ -49,17 +56,16 @@ const DEV_SERVER = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
  * 判定不能只看 `app.isPackaged`：从源码直接 `electron .` 时它同样是 false，
  * 但那时只构建了 dist/、并没有在跑 dev server，照旧去连 5173 会在 devtools 里
  * 报 `ERR_CONNECTION_REFUSED` 并留一个白窗口。所以再探一次本机端口。
+ *
+ * ⚠️ **审计 P12**：原来探的是 `HEAD` 且判 `res.ok || res.status === 404` —— 404 也算通过。
+ * 于是 5173 上任何一个别的服务（哪怕只会回 404）都会让应用去 `loadURL` 并注入整套 preload，
+ * 得到白窗口。现在真取一次页面、且必须看到 Vite 客户端标记才算（见 `./ipc/devServerProbe`）。
  */
 async function shouldUseDevServer(): Promise<boolean> {
   if (app.isPackaged) return false;
   if (!fs.existsSync(rendererIndex())) return true;
   if (process.env.VITE_DEV_SERVER_URL) return true;
-  try {
-    const res = await fetch(DEV_SERVER, { method: "HEAD" });
-    return res.ok || res.status === 404;
-  } catch {
-    return false;
-  }
+  return probeViteDevServer(DEV_SERVER);
 }
 
 /**
@@ -220,12 +226,43 @@ configureDataDir();
 
 let win: BrowserWindow | null = null;
 
+/*
+ * 单实例锁（**审计 P39**）。
+ *
+ * 必须在数据目录切好（`configureDataDir()`）之后抢锁：Electron 的单实例锁落在
+ * **userData 目录**上，所以两份不同 `DSH_CANVAS_DATA_DIR` 的数据各起一个实例是允许的
+ * （验收脚本就是这么并行跑的），而同一份数据起第二个实例会被挡住 —— 正是我们要的：
+ * 两个进程并发写同一份 `stores.db` / `sessions.db` / 一批 JSON 才会出 split-brain。
+ *
+ * 没抢到锁就**尽快退出**，别去建窗口、别去注册 IPC（否则两个实例都活着，
+ * 用户看到两个界面、两边互相覆盖数据）。第二个实例被拉起时，把已有窗口亮出来。
+ */
+const isPrimaryInstance = ensureSingleInstance(app, () => {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
+if (!isPrimaryInstance) {
+  bootLog("检测到已有实例在运行，本进程退出（P39 单实例锁）");
+  app.quit();
+}
+
 async function createWindow(): Promise<void> {
-  win = new BrowserWindow({
+  /*
+   * 窗口尺寸按屏幕可用区钳制（**审计 P63**）：小屏 / 高 DPI 上写死 1440×900、
+   * 最小 1024×640 会让窗口比屏幕大、底部输入区掉到屏外，还不许用户缩小。
+   */
+  const bounds = clampToWorkArea(screen.getPrimaryDisplay().workArea, {
     width: 1440,
     height: 900,
     minWidth: 1024,
     minHeight: 640,
+  });
+  win = new BrowserWindow({
+    width: bounds.width,
+    height: bounds.height,
+    minWidth: bounds.minWidth,
+    minHeight: bounds.minHeight,
     show: false,
     backgroundColor: "#0f1115",
     /**
@@ -275,6 +312,20 @@ async function createWindow(): Promise<void> {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      /*
+       * ⚠️ `sandbox: false` 是**有意的取舍**（审计 P06 要求写明理由）。
+       *
+       * 沙箱化 preload 只提供**极有限的** `require`（electron / events / timers / url），
+       * 而我们这份 preload 是 tsc 直编的 CJS、里面有一串**相对路径 require**
+       * （`require("./ipc/windowControls")` 这些通道常量表，见 electron/preload.ts）。
+       * 打开 sandbox 会直接让 preload 加载失败 → `window.shell` 一个方法都没有 →
+       * 整个渲染层失联。要真上沙箱，得先把 preload 用 bundler 打成单文件
+       * （把那串相对 require 内联掉），那是另一件事。
+       *
+       * 当前这道边界靠 `contextIsolation: true` + `nodeIntegration: false`：
+       * 渲染进程拿不到 Node，能力只能经 preload 暴露的具名窄接口。
+       * 回归守卫：`src/electronGuards.test.ts`（钉住这条取舍与 preload 的相对依赖）。
+       */
       sandbox: false,
     },
   });
@@ -286,10 +337,32 @@ async function createWindow(): Promise<void> {
   // 最大化状态变了要推给自绘标题栏（双击 / Win+↑ / Snap 都要跟上）
   attachWindowEvents(win);
 
-  // 外部链接交给系统浏览器，不在应用内打开
+  /*
+   * 新窗口一律不开在应用内；只有**白名单协议**才交给系统浏览器（**审计 P06**）。
+   *
+   * 原来是 `void shell.openExternal(url)` 不看协议 —— 页面里一个 `file:///…`
+   * 或 `javascript:` 链接都会被原样递给系统去打开。
+   */
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (isAllowedExternalUrl(url)) void shell.openExternal(url);
+    else console.warn(`[shell] 已拒绝打开非白名单协议的链接：${url}`);
     return { action: "deny" };
+  });
+
+  /*
+   * **审计 P06**：页面自己 `location.href = …` 不经过 `setWindowOpenHandler` ——
+   * 不接 `will-navigate` 的话，应用窗口能被导航去任意站点（连 preload 都在那条页面上继续挂着）。
+   * 只放行应用自身文档与开发态 dev server 的同源页面；外链转交系统浏览器。
+   */
+  win.webContents.on("will-navigate", (event, url) => {
+    const allowed = isAllowedNavigation(url, {
+      fileUrl: pathToFileURL(rendererIndex()).toString(),
+      devServerUrl: DEV_SERVER,
+    });
+    if (allowed) return;
+    event.preventDefault();
+    if (isAllowedExternalUrl(url)) void shell.openExternal(url);
+    else console.warn(`[shell] 已拦下应用内导航（非白名单）：${url}`);
   });
 
   if (await shouldUseDevServer()) {
@@ -302,7 +375,16 @@ async function createWindow(): Promise<void> {
 
 /* ---------- IPC ---------- */
 
-ipcMain.handle("app:ping", () => ({
+/*
+ * 注册留话：打包态没有控制台，唯一拿得到的现场是 `boot.log`。
+ * 失败同时进 console 与 boot.log（**审计 P45**：原来只有一行 console.error）。
+ */
+function logRegisterFailure(message: string): void {
+  console.error(message);
+  bootLog(message);
+}
+
+ipcMain.handle(APP_CHANNEL.ping, () => ({
   ok: true,
   platform: process.platform,
   versions: {
@@ -312,56 +394,58 @@ ipcMain.handle("app:ping", () => ({
   },
 }));
 
-ipcMain.handle("app:userDataDir", () => app.getPath("userData"));
+ipcMain.handle(APP_CHANNEL.userDataDir, () => app.getPath("userData"));
 
-try {
-  registerAiIpc();
-  registerPluginIpc(ipcMain, () => win);
-  // 插件装载**不 await**：它是"用户后来装的东西"，慢了或坏了都不该挡应用起来
-  void loadPluginsAtStartup();
-  registerSessionIpc(ipcMain);
-} catch (error) {
-  // AI 通道起不来不该拖垮整个应用：日志里说清楚，窗口照常开
-  console.error("[ai] 注册失败：", error instanceof Error ? error.message : error);
-}
+/*
+ * **审计 P45**：一个模块一层 try。
+ *
+ * 原来是三个大 try 把二十来个注册包在一起 —— 大块内**任一**个抛错，
+ * 它后面那一串注册全部被跳过（打包态表现成"某个页面整个失联"）。
+ * 现在坏的那个只丢它自己，其余照常注册；失败同时进 boot.log。
+ */
+safeRegister("ai", () => registerAiIpc(), logRegisterFailure);
+safeRegister("plugin", () => registerPluginIpc(ipcMain, () => win), logRegisterFailure);
+/* 插件装载**不 await**：它是"用户后来装的东西"，慢了或坏了都不该挡应用起来 */
+safeRegister("plugin-load", () => void loadPluginsAtStartup(), logRegisterFailure);
+safeRegister("session", () => registerSessionIpc(ipcMain), logRegisterFailure);
 
-try {
-  registerCanvasIpc();
-registerCanvasExportIpc();
-} catch (error) {
-  console.error("[canvas] 注册失败：", error instanceof Error ? error.message : error);
-}
+safeRegister("canvas", () => registerCanvasIpc(), logRegisterFailure);
+safeRegister("canvas-export", () => registerCanvasExportIpc(), logRegisterFailure);
 
-// 图像生成：IPC + 自定义资源协议（协议必须在 app ready 之前登记）
-try {
-  registerAssetScheme();
-  registerImageIpc();
-  registerArtifactIpc(ipcMain);
-  registerDriveIpc(ipcMain, () => win);
-  registerMemoryIpc();
-  registerScheduleIpc(ipcMain);
-  registerDocIpc();
-  registerReaderIpc();
-  registerAgentIpc();
-  registerSearchHistoryIpc();
-  registerWorkspaceIpc(() => win);
-  registerMcpIpc();
-  registerLibraryIpc(ipcMain);
-  registerTaskIpc(ipcMain);
-  registerVideoIpc(ipcMain);
-  registerRemoteIpc(ipcMain);
-registerClipboardIpc(ipcMain);
-registerCodingIpc(ipcMain);
+/* 图像生成：IPC + 自定义资源协议（协议必须在 app ready 之前登记） */
+safeRegister("asset-scheme", () => registerAssetScheme(), logRegisterFailure);
+safeRegister("image", () => registerImageIpc(), logRegisterFailure);
+safeRegister("artifact", () => registerArtifactIpc(ipcMain), logRegisterFailure);
+safeRegister("drive", () => registerDriveIpc(ipcMain, () => win), logRegisterFailure);
+safeRegister("memory", () => registerMemoryIpc(), logRegisterFailure);
+safeRegister("schedule", () => registerScheduleIpc(ipcMain), logRegisterFailure);
+safeRegister("doc", () => registerDocIpc(), logRegisterFailure);
+safeRegister("reader", () => registerReaderIpc(), logRegisterFailure);
+safeRegister("agent", () => registerAgentIpc(), logRegisterFailure);
+safeRegister("search-history", () => registerSearchHistoryIpc(), logRegisterFailure);
+safeRegister("workspace", () => registerWorkspaceIpc(() => win), logRegisterFailure);
+safeRegister("mcp", () => registerMcpIpc(), logRegisterFailure);
+safeRegister("library", () => registerLibraryIpc(ipcMain), logRegisterFailure);
+safeRegister("task", () => registerTaskIpc(ipcMain), logRegisterFailure);
+safeRegister("video", () => registerVideoIpc(ipcMain), logRegisterFailure);
+safeRegister("remote", () => registerRemoteIpc(ipcMain), logRegisterFailure);
+safeRegister("clipboard", () => registerClipboardIpc(ipcMain), logRegisterFailure);
+safeRegister("coding", () => registerCodingIpc(ipcMain), logRegisterFailure);
 /* 窗口控制（自绘标题栏的按钮：最小化 / 最大化·还原 / 关闭） */
-registerWindowIpc(ipcMain, () => win);
+safeRegister("window", () => registerWindowIpc(ipcMain, () => win), logRegisterFailure);
 /* 本机版设置（§183）：新对话默认模型 */
-ipcMain.handle(APP_SETTINGS_CHANNEL.read, () => loadAppSettings());
-ipcMain.handle(APP_SETTINGS_CHANNEL.write, (_e, next: unknown) => saveAppSettings(next));
-} catch (error) {
-  console.error("[image] 注册失败：", error instanceof Error ? error.message : error);
-}
+safeRegister(
+  "app-settings",
+  () => {
+    ipcMain.handle(APP_SETTINGS_CHANNEL.read, () => loadAppSettings());
+    ipcMain.handle(APP_SETTINGS_CHANNEL.write, (_e, next: unknown) => saveAppSettings(next));
+  },
+  logRegisterFailure,
+);
 
 app.whenReady().then(() => {
+  /* 没抢到单实例锁的进程已经在退出路上，别再建窗口 / 注册（P39） */
+  if (!isPrimaryInstance) return;
   /*
    * 注册系统密钥保护（Phase 14.2）——safeStorage 要 app ready 之后才可用。
    * 注册之后 `engine/adapters/secretStore` 才知道"这台机器上能不能加密地存 key"。
@@ -369,6 +453,14 @@ app.whenReady().then(() => {
   registerDesktopSecretCipher();
   /* 设置里填 key 的那两个通道（见 electron/ipc/secretStore.ts） */
   registerSecretsIpc(ipcMain);
+  /*
+   * **审计 P06**：`frame-ancestors` 在 `<meta>` 形式的 CSP 里**不生效**，
+   * 只能由响应头补 —— 应用文档那条 CSP 就是 meta 形式，所以"禁止被别人 iframe 嵌套"
+   * 这一条落在这里。已有 CSP 响应头时追加、不替换（`withFrameAncestors`）。
+   */
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({ responseHeaders: withFrameAncestors(details.responseHeaders) });
+  });
   // 资源协议要在 ready 之后接上处理器
   try {
     serveAssets();

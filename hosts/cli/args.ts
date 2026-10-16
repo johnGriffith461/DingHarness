@@ -62,6 +62,13 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "bind",
   "port",
   "cwd",
+  /*
+   * `--data-dir`（2026-10-16，审计 P129）：让 `ding backup` / `ding restore` 能显式
+   * 指定"备份哪一个数据根"。桌面的数据在 `app.getPath("userData")`，CLI 默认在
+   * `~/.ding` —— 没有这个旗标时，用户只能靠环境变量猜，而备份命令**不会报错**，
+   * 于是很容易产出一份"会话 0 段 / store 0 项"的空备份还以为备份好了。
+   */
+  "data-dir",
 ]);
 
 /**
@@ -83,6 +90,12 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "cost",
   "sessions",
   "keep-provenance",
+  /*
+   * `--force`（2026-10-16，审计 P214）：备份的输出路径**已存在**时，只有显式给
+   * 它才允许覆盖 —— 不给就报错退出。备份是"最后一份能救回数据的东西"，
+   * 悄悄覆盖它比不写还糟。
+   */
+  "force",
   "h",
   "help",
 ]);

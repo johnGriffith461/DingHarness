@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, unlinkSync, writ
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { deflateSync } from "node:zlib";
 import { killLeftovers } from "./accept/harness.mjs";
 
 /**
@@ -128,19 +129,17 @@ const RECORDS_DIR = ".verify";
  *   · `fossil`        化石：早就与产品脱节（打 dev server / 硬编码本机路径），要么重写、要么删
  */
 const NOT_IN_BATCH = {
-  /* ── 真调模型（烧钱）── */
-  "accept-image-actions.mjs": { kind: "needs-model", why: "先真生成一张图，再验图片动作条（真调图像模型）。⚠️ 2026-10-16 判过：**只改脚本 + 给假通道加一条假图像通道做不到** —— 图像通道那张表（electron/ipc/imageGen.ts 的 IMAGE_PROVIDERS）没有 baseURL 的环境变量覆盖口（文本通道都有 baseURLEnv），假服务指不进去，零出网闸又不放行远程地址。要收进批跑得产品侧给一个 baseURL 覆盖口" },
-  "accept-imageedit.mjs": { kind: "needs-model", why: "§167：真生成一张 → 点「变清晰」→ 新图落进 assets（真调图像模型 2 次）。⚠️ 同上：图像通道没有 baseURL 覆盖口，假通道指不进去（见 accept-image-actions 那条的说明）" },
-  "accept-imagegen.mjs": { kind: "needs-model", why: "图片生成端到端：必须真出一张图，否则一条都断不了 —— 假通道指不进去，图像通道那张表（electron/ipc/imageGen.ts 的 IMAGE_PROVIDERS）没有 baseURL 的环境变量覆盖口，零出网闸也不放行远程地址。要收进批跑得产品侧给一个 baseURL 覆盖口（见汇报 A20 那段）。⚠️ 2026-10-16 补：这条脚本原来**只打报告、一处判定都没有**（跑通等于没测），现已补上真判定（出图 / 能显示 / 文档只存文件名 / 文件名不含大写 T / 重启还在），并**真调图像模型跑过一次绿**、也做过变异实证（改坏一条断言即 ✗ 退 1）。所以它现在是「能红的报告」，只是仍要真模型、不进免模型批跑" },
   /*
-   * ⚠️ 2026-10-16（A22）：`accept-providers` **已按现界面重写并收进 CASES**（见上面的登记），
-   * `accept-p5-prompt` 与 `accept-theme` **两条墓碑已删**（判据分别由
-   * `src/canvas/markers.test.ts` 与 `accept-accountmenu.mjs` 接住，git 里留着历史）。
-   * 于是这一类的棘轮（`src/acceptRegistry.test.ts` 的 MAX_RETIRED）也跟着清零。
-   */
-  /*
-   * ⚠️ 这一条的 `why` 是**单行**的 —— `src/acceptRegistry.test.ts` 按单行的正则解析名单
-   * （写成多行它就"看不见"，于是这条脚本会被记成"两头都不在"的孤儿，实测撞过一次）。
+   * ⚠️ 2026-10-16（A20 收尾）：图像那四条（`accept-imagegen` / `accept-image-actions` /
+   * `accept-imageedit` / `accept-size-spec`）**已从这张名单里划掉、收进 CASES**。
+   *
+   * 堵住它们的那一格里有两半，这次补齐了：
+   *   ① 产品侧：`IMAGE_PROVIDERS` 补了 `baseURLEnv`（与文本那张表同一口径），
+   *      `lunora` 那条规定 `LUNORA_BASE_URL` —— 图像通道终于能指向自建/中转/假服务；
+   *   ② 装置侧：批跑的本地假通道认了 `/images/generations` 与 `/images/edits`，
+   *      按请求里的 `size` 现造一张真 PNG（b64_json），于是"出图 / 能显示 / 尺寸对得上"
+   *      全都能在**零出网**下验。
+   * 顺带把三条**只打报告、没有判定**的脚本补上了真判定（那是它们在批跑里的唯一入场券）。
    */
 
   /* ── 要先有打包 / 安装产物 ── */
@@ -149,11 +148,7 @@ const NOT_IN_BATCH = {
    * （见上面那三条与它们的说明）。只剩这一条留在名单里，理由是它**另有两处硬依赖** ——
    * 不是"要产物"这么简单，见 why。
    */
-  "accept-packaged-run.mjs": { kind: "needs-model", why: "打包版端到端。它**不能**进批跑，两处硬依赖：① 第 4 项要求打包版**真的生成一张图**（`img[src^=dshasset://]` + naturalWidth）—— 而图像通道那张表（electron/ipc/imageGen.ts 的 IMAGE_PROVIDERS）**没有 baseURL 的环境变量覆盖口**，假通道指不进去（见汇报里 A20 那段），所以必须真调图像模型；② 它整条**没有任何判定**（只有 console.log(report)）—— 现在收进批跑只会多一条 envRed/no-judge。要收得先补判定 + 给图像通道加一个 baseURL 覆盖口" },
-
-
-  "accept-size-spec.mjs": { kind: "needs-model", why: "图像尺寸规格：三档模式与规格表对不上就得真出图来验（它原来在 CASES 里被注释掉，理由写着「其实会出图」）。它前 5 段是纯计算、**只有第 6 段**要真图（等 `img[src^=dshasset://]`）—— 与上面三条同一个图像通道依赖，缺 baseURL 覆盖口（见 accept-image-actions 那条）。要收进批跑可以把第 6 段摘成独立一条、前 5 段单独跑" },
-
+  "accept-packaged-run.mjs": { kind: "needs-model", why: "打包版端到端。它**不能**进批跑，两处硬依赖：① 第 4 项要求打包版**真的生成一张图**（`img[src^=dshasset://]` + naturalWidth）—— 图像通道的 baseURL 覆盖口 2026-10-16 已补（见 A20），所以这一处不再是拦路的了；② 但整条**没有任何判定**（只有 console.log(report)）—— 收进批跑只会多一条 no-judge（= 没测）。要收得先补判定（它验的是打包产物，本身也该进 needs-package 那一类）" },
 };
 
 const CASES = [
@@ -238,16 +233,13 @@ const CASES = [
   ["accept-phone.mjs", "手机遥控（远端许可 / 活动状态 / 跨重启）"],
   ["accept-proto.mjs", "产物协议字段（预置数据，不调模型）"],
   /*
-   * ⚠️ `accept-size-spec.mjs` **摘掉了**（原来在批跑里，标签写着"纯计算"）。
+   * ⚠️ `accept-size-spec.mjs` 曾在 2026-10-14 被**摘掉**（那时它真出图、受上游波动影响）。
    *
-   * §109 实测它**偶发红**（之前一直绿、这次红）。回看脚本内容里有 `gen-run` ——
-   * 也就是说它**会真出图**，并不是纯计算。所以它的红绿受模型响应影响，
-   * 不适合放在"不依赖模型"的批跑里。
-   *
-   * **这条的教训**：标签是我自己写的，写错了就没人在意它是不是真的无模型。
-   * 判据应该是**读脚本有没有真调模型的调用**，不是"看起来像不像功能测试"。
+   * ⭐ 2026-10-16（A20）：它**回来了**，而且比原来更硬 —— 假通道现在按请求里的 `size`
+   * 现造图，于是第 6 段那句「选 16:9 / 1K 就得到 1280×720」不再是"看上游心情"，
+   * 而是**可判**的；前 5 段（纯计算）也照旧钉着。
+   * 教训仍然成立：**判据是读脚本有没有真调模型的调用**，不是标签写着"不调模型"。
    */
-  // ["accept-size-spec.mjs", "图片尺寸规格（其实会出图，见上）"],
   /*
    * ⚠️ 同样**不进**这里的还有下面这几条 —— 它们**真调模型**（不属于"不依赖模型"这一类），
    * 单独跑即可：
@@ -261,7 +253,7 @@ const CASES = [
  * - `accept-agent-persona.mjs`（§156）AI 智能体人设：用带暗号的智能体提问，断言回复**真的带上了暗号**。
  * - `accept-toolfeed.mjs`（§163）工具输出进历史：两轮验证 —— 第 1 轮只说条数，**第 2 轮却能说出只存在于上一步工具输出里的内容**。
  * - `accept-memoryinject.mjs`（§164）记忆注入：**不许调工具**，问只存在于记忆库里的称呼，断言它答得出来（且这一轮没有工具留痕）。
- * - `accept-imageedit.mjs`（§167）图片动作条：真生成一张 → 点「变清晰」→ 新图落进 assets → 云盘两张都在（**会真调图像模型 2 次**）。
+ * - `accept-imageedit.mjs`（§167）图片动作条：⭐ **2026-10-16（A20）已收进 CASES**（见上面那四条登记）。
  * - `accept-doctone.mjs`（§168）调整语气：口语化的原文点「更学术」→ 断言**真的被重写**、历史记着由来、磁盘跟上。
  * - `accept-toolargs.mjs`（§175）工具参数进留痕：让模型记一件事，断言那一行里出现**只有参数里才有**的内容（会真调模型 1 次）。
  * - `accept-material.mjs`（@ 添加资料）与 `accept-mcp.mjs`（连接器）：断言的是
@@ -456,6 +448,25 @@ const CASES = [
   ["accept-phrases.mjs", "@ 常用语（唤出 / 筛选 / 替换 / 邮箱不误触发 / Esc / Enter 选不发）"],
   ["accept-searchhistory.mjs", "搜索历史（记录 / 去重 / 两处不串 / 落盘 + 清空也落盘）"],
   ["accept-imagepage.mjs", "生成图片独立页（入口 / 占位逐字 / 尺寸真的在算 / 诚实状态）"],
+  /*
+   * ── 2026-10-16（A20 收尾）：**图像那四条收进批跑** ──
+   *
+   * 它们原来都在 `NOT_IN_BATCH` 的 `needs-model` 里，理由是同一条硬依赖：
+   * 图像通道那张表没有 baseURL 覆盖口，批跑的假通道指不进去，而零出网闸又不放行远程地址。
+   * 这次两半一起补：产品侧加了 `baseURLEnv`（`imageGen.ts`），装置侧让假通道
+   * 认 `/images/generations` 与 `/images/edits` 并按请求的 `size` 现造真 PNG。
+   *
+   * ⚠️ 收每一条时都做了变异实证（改坏一条断言即红），并且**逐条实跑过**（见各脚本头部）。
+   * 另一件顺带的事：其中三条原来**只打报告、没有判定**（`accept-image-actions` 一处判定都没有、
+   * `accept-size-spec` 只靠 `failOnMarks` 兜"谁印了 ✗"）—— 在批跑里那等于没测，所以一并补上，
+   * 判据就是它们各自头部承诺的那几条。`accept-imageedit` 还逮到一处**陈旧断言**
+   * （读 `wb-imagegen-recent-*` 这个不存在的 testid、再拿一个从未赋值的 `driveRows` 去比），
+   * 修好之后它才谈得上"能红的验收"。
+   */
+  ["accept-imagegen.mjs", "图片生成端到端（真出一张图 / 能显示 / 文档只存文件名 / 文件名不含大写 T / 重启还在）"],
+  ["accept-image-actions.mjs", "图片动作条（有图可改 / 菜单四项 / 变清晰换新图且沿用尺寸 / 扩图更大 / 图能显示且落盘 / Ctrl+Z 撤回）"],
+  ["accept-imageedit.mjs", "图片动作条·生成图片页（动作条五个词逐字 / 点变清晰多出一张 / 落进 assets / 最近生成两张都在）"],
+  ["accept-size-spec.mjs", "图像尺寸规格（三档模式 / 比例表逐格对上 / 自动与规整提示 / 极端比例不被原样受理 / 真按 16:9 1K 出 1280×720）"],
   ["accept-docformat.mjs", "文档调整语气/格式（九档文案逐字 / 设为小标题真加 ## / 设为正文真去掉 / 留痕）"],
   ["accept-createdoc.mjs", "创建文档（种一条消息 → 跳文档面板 / 正文一字不差 / 标题取第一行 / 那句话逐字 / 留痕）"],
   ["accept-docbar.mjs", "文档粘贴+插入附件（逐字 / 替换选区且留痕 / 附件列云盘文件且链接对得上 / 空剪贴板有话直说）"],
@@ -561,18 +572,130 @@ const CASES = [
  * 变成真模型 —— 只是那些脚本若依赖真实回复内容，会以断言红的形式暴露出来
  * （那是"该移出免模型清单"的信号，不是"白花钱"）。
  */
+/**
+ * ── 假通道的「图像」那一半：造一张**真的 PNG**（2026-10-16，审计 A20）──
+ *
+ * ## 为什么需要它
+ *
+ * 图像那几条验收（`accept-imagegen` / `accept-image-actions` / `accept-imageedit` /
+ * `accept-size-spec`）要的是「生成出一张图、落盘、**能显示**（`naturalWidth > 0`）、
+ * 尺寸对得上」—— 而零出网那道闸只放行本机地址，真图像通道（远程域名）永远被拦下。
+ * 所以这里自己造图：**必须是真 PNG 字节**，否则 Electron 的 `nativeImage.createFromBuffer`
+ * 解不开（图生图那条会在"输入图解不开"处红）、渲染侧的 `<img>` 也不会 `naturalWidth > 0`。
+ *
+ * ## 尺寸是**照请求来的**
+ *
+ * `accept-size-spec` 第 6 段要断「选 16:9 / 1K 生成出来的图就是 1280×720」——
+ * 假通道如果固定吐一个尺寸，那条断言就永远立不起来（红得看不出是装置的问题）。
+ * 所以 `size` 字段（JSON 或 multipart 里的）会被**照抄**；没有（`auto` 模式）时给 1024×1024。
+ *
+ * ## 一张图为什么还要垫一段文字块
+ *
+ * `accept-imagegen` 断言「磁盘上有一张**像样的**图（`bytes > 1000`）」——
+ * 纯色小图压出来只有几十字节，会被那条判成"没落盘"。垫一个 `tEXt` 块是**正当**的
+ * PNG 结构（真图里满是元数据块），既不改变像素，也让"这是假通道的占位图"写在文件里。
+ */
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c;
+  }
+  return table;
+})();
+
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/** 一个 PNG 块：长度 + 类型 + 数据 + CRC。 */
+function pngChunk(type, data) {
+  const out = Buffer.alloc(8 + data.length + 4);
+  out.writeUInt32BE(data.length, 0);
+  out.write(type, 4, "ascii");
+  data.copy(out, 8);
+  out.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type, "ascii"), data])), 8 + data.length);
+  return out;
+}
+
+/** 造一张 `w×h` 的 PNG（8 位 RGBA，逐行渐变 —— 解出来是一张正常的图，不是空白）。 */
+function makeFakePng(w, h) {
+  const width = Math.max(1, Math.min(3840, Math.round(w)));
+  const height = Math.max(1, Math.min(3840, Math.round(h)));
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (1 + width * 4);
+    raw[row] = 0; // 过滤器 0（None）
+    for (let x = 0; x < width; x += 1) {
+      const at = row + 1 + x * 4;
+      raw[at] = Math.round((x * 255) / width);
+      raw[at + 1] = Math.round((y * 255) / height);
+      raw[at + 2] = 128;
+      raw[at + 3] = 255;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // 位深
+  ihdr[9] = 6; // 颜色类型：RGBA
+  const note = "本地假通道占位图：像素是按请求尺寸现造的，只用来验链路与尺寸，不是真的生成结果".repeat(20);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("tEXt", Buffer.concat([Buffer.from("Comment", "latin1"), Buffer.from([0]), Buffer.from(note, "utf8")])),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** 从请求体里抠出 `WxH` 尺寸（生成那条是 JSON、编辑那条是 multipart；`auto` 一律当没给）。 */
+function sizeFromRequest(jsonBody, latin1Body) {
+  let size = "";
+  try {
+    const parsed = JSON.parse(jsonBody);
+    if (typeof parsed?.size === "string") size = parsed.size;
+  } catch {
+    /* 不是 JSON 就是 multipart，走下面那条 */
+  }
+  if (!size) {
+    /* multipart 的表单字段：`name="size"` 之后隔一行就是值 */
+    const m = /name="size"\s*\r?\n\r?\n([^\r\n]+)/.exec(latin1Body ?? "");
+    if (m) size = m[1];
+  }
+  const m = /^(\d{2,4})x(\d{2,4})$/.exec(String(size ?? "").trim());
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : { w: 1024, h: 1024 };
+}
+
 function startLocalFakeModel() {
   const server = createServer((req, res) => {
-    let raw = "";
-    req.on("data", (d) => (raw += d));
+    const chunks = [];
+    req.on("data", (d) => chunks.push(d));
     req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      const raw = body.toString("utf8");
       /*
-       * 认两个端点：`/chat/completions`（文本轮）与 `/models`（列模型/探测）。
+       * 认四个端点：`/chat/completions`（文本轮）、`/models`（列模型/探测），
+       * 以及**图像那两条** —— `POST /images/generations`（文生图）与
+       * `POST /images/edits`（图生图，multipart）。路径照 `electron/ipc/imageGen.ts`
+       * 实际发的来（它请求的是 `${base}/images/generations` / `${base}/images/edits`）。
+       *
+       * 图像两条都回 `{ data: [{ b64_json }] }` —— 与真上游同形（imageGen 只认这个形状）。
        * 文本轮的行为见下面：默认分片流式；消息里点了名要工具就先回一个工具调用。
        */
       if (req.url?.includes("/models")) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ data: [{ id: "deepseek-flash" }, { id: "accept-fake" }] }));
+        return;
+      }
+      if (req.url?.includes("/images/generations") || req.url?.includes("/images/edits")) {
+        const { w, h } = sizeFromRequest(raw, body.toString("latin1"));
+        const png = makeFakePng(w, h);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ created: Math.floor(Date.now() / 1000), data: [{ b64_json: png.toString("base64") }] }));
         return;
       }
       /*
@@ -865,20 +988,28 @@ const localModel = await startLocalFakeModel();
 console.log(`批跑自带假通道：${localModel.url}（配 DSH_NO_REAL_MODEL=1 —— 零出网是结构上成立的）`);
 
 /*
- * ⭐ **只留假通道那一把键**（2026-10-16）。
+ * ⭐ **只留假通道那两把键**（2026-10-16，图像那一半由 A20 补上）。
  *
  * 桌面侧挑通道的顺序是"用户存过的 → **第一个可用的**"。而"可用"= 有密钥，
  * 本机 shell 里就躺着 `ANXIN_API_KEY` 之类的真 key、`~/.dsh/.credentials.yaml` 里还有几把 ——
  * 于是脚本里的应用会挑到**真远程**，被 `DSH_NO_REAL_MODEL` 一拦，
  * 表现成"这一轮出错了"（红得莫名其妙，而根因其实是环境里那几把真 key）。
  *
- * 现在：把凭据文件指向一份**只有 `STRATA_API_KEY`** 的临时文件，
- * 并在子进程环境里把其它 `*_API_KEY` 摘掉 —— 于是"第一个可用通道"只能是
- * 我们那个指向 127.0.0.1 的假通道。"零出网"从"闸拦着"变成"根本没别的可挑"。
+ * 现在：把凭据文件写成**只有假通道那两把**（文本的 `STRATA_API_KEY` + 图像的
+ * `LUNORA_API_KEY`，值都是占位串），并在子进程环境里把其它 `*_API_KEY` 摘掉 ——
+ * 于是"第一个可用通道"只能是那两个指向 127.0.0.1 的假通道。
+ * "零出网"从"闸拦着"变成"根本没别的可挑"。
+ *
+ * ⚠️ 图像那把是**必须的**：`IMAGE_PROVIDERS` 只认 `LUNORA_API_KEY`，
+ * 没有它图像那几条脚本连面板都进不去（界面会说"没有可用的图像通道"）。
  */
 const CRED_FILE = join(RECORDS_DIR, "batch-credentials.yaml");
 try {
-  writeFileSync(CRED_FILE, "refs:\n  STRATA_API_KEY: accept-local-fake\n", "utf8");
+  writeFileSync(
+    CRED_FILE,
+    "refs:\n  STRATA_API_KEY: accept-local-fake\n  LUNORA_API_KEY: accept-local-fake\n",
+    "utf8",
+  );
 } catch {
   /* 写不进去就退回"只靠闸"（下面的环境清理照做） */
 }
@@ -933,10 +1064,17 @@ function run(file) {
     env.DSH_NO_REAL_MODEL = "1";
     env.STRATA_BASE_URL = localModel.url;
     env.STRATA_API_KEY = "accept-local-fake";
+    /*
+     * ⭐ **图像通道也指到同一个假服务**（2026-10-16，审计 A20）。
+     * 靠的是产品侧那个新增的覆盖口（`electron/ipc/imageGen.ts` 的 `baseURLEnv`）——
+     * 没有它，图像那几条只能真调远程模型（`IMAGE_PROVIDERS` 里写死的是远程域名）。
+     */
+    env.LUNORA_BASE_URL = localModel.url;
+    env.LUNORA_API_KEY = "accept-local-fake";
     env.DSH_CREDENTIALS_FILE = CRED_FILE;
-    /* 把别的 provider 的键摘掉（见上面那段说明）——只留我们这一把 */
+    /* 把别的 provider 的键摘掉（见上面那段说明）——只留假通道那两把 */
     for (const name of Object.keys(env)) {
-      if (/_API_KEY$/i.test(name) && name !== "STRATA_API_KEY") delete env[name];
+      if (/_API_KEY$/i.test(name) && name !== "STRATA_API_KEY" && name !== "LUNORA_API_KEY") delete env[name];
     }
     /*
      * ⭐ **批跑强制一个隔离数据目录**（2026-10-16，审计 G01 的兜底）。

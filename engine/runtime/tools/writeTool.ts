@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { insideDirs } from "./drivePaths";
-import { WRITE_FILE_MODEL_CHARS } from "../../../shared/agentTools";
+import { WRITE_FILE_MODEL_BYTES, WRITE_FILE_MODEL_CHARS } from "../../../shared/agentTools";
 
 /**
  * 「写文件」工具的执行体（2026-10-14）。
@@ -19,15 +19,29 @@ import { WRITE_FILE_MODEL_CHARS } from "../../../shared/agentTools";
  */
 
 /**
- * 一次写入的字符上限 —— **就是给模型看的那个数**（`shared/agentTools.ts`）。
+ * 一次写入的**字节**上限 —— 与读回上限、改动上限**同一个数**（审计 P234）。
  *
- * 为什么要从那边 import 而不是在这里再写一个 200_000：
+ * 为什么要从 shared import 而不是在这里再写一个 200_000：
  * 这个数同时出现在"工具说明（给模型看）"和"执行体（真拦）"两处，
  * 各写一份的话，"说明里 200000、执行体里 20000"这种漂移没人会立刻发现 ——
  * 模型照着说明写、被拒，然后开始瞎猜。**一个数只有一份来源。**
  *
- * 取 20 万的理由不是"跟 read 一样整齐"：写进去的东西**下一轮就要被读回来**，
- * 能写不能读的文件等于给用户留了个死档（`READ_MAX_BYTES` 也是 200_000 量级）。
+ * 为什么是**字节**而不是字符（这就是 P234 修的那条）：
+ * 写进去的东西**下一轮就要被读回来**（`readTool.READ_MAX_BYTES`）**并且要能被改**
+ * （`editTool` 量的是同一个 `stat.size`），那两处天生是字节口径（`stat.size`）。
+ * 按字符算的时候：中文正文 20 万字 = 落盘 600KB，写得进去、读不出来 ——
+ * 用户手上多了一个自己打不开的死档。现在写侧也按字节算（同一个数），
+ * 于是"写进去的一定读得回来、改得动"是**一条能证明的不变量**（见
+ * `writeCaps.test.ts` 的往返用例）。
+ */
+export const WRITE_MAX_BYTES = WRITE_FILE_MODEL_BYTES;
+
+/**
+ * 说明里那个"最多多少字"（UTF-8 最坏 3 字节/码元折算）。
+ *
+ * ⚠️ **不是第二道闸**（闸只有上面那条字节上限）：它只用于把上限说成人话，
+ * 由 `writeCaps.test.ts` 钉住"它没超过字节预算"。留着这个名字是因为
+ * 调用方（测试与说明）原来就按"字"理解这个上限。
  */
 export const WRITE_MAX_CHARS = WRITE_FILE_MODEL_CHARS;
 
@@ -111,10 +125,16 @@ export async function writeFileForModel(
   if (typeof content !== "string") {
     return { ok: false, error: "正文不是文本" };
   }
-  if (content.length > WRITE_MAX_CHARS) {
+  /*
+   * ⚠️ 判据是**字节**（审计 P234）：落盘大小就是字节，读回（`READ_MAX_BYTES`）与改动
+   * （`editTool`）量的也是字节。按字符判时"中文 20 万字"能写进去、600KB 落盘，
+   * 下一轮读不回来 —— 那是把限制放错了单位。
+   */
+  const bytes = Buffer.byteLength(content, "utf8");
+  if (bytes > WRITE_MAX_BYTES) {
     return {
       ok: false,
-      error: `正文太长（${content.length} 字，上限 ${WRITE_MAX_CHARS} 字）—— 拆成几个文件写`,
+      error: `正文太长（${bytes} 字节，上限 ${WRITE_MAX_BYTES} 字节，约 ${WRITE_MAX_CHARS} 个汉字）—— 拆成几个文件写`,
     };
   }
 

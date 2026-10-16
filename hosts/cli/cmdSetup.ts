@@ -7,7 +7,6 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 
 import { credentialsPath } from "../../engine/runtime/credentials";
-import { firstAvailableProvider } from "../../engine/runtime/providers";
 import { configPaths, readConfig } from "./config";
 import { formatDoctor, runDoctor } from "./doctor";
 import { runWizard, type WizardIo } from "./wizard";
@@ -120,7 +119,14 @@ export async function cmdInit(p: Parsed, dataDir: string): Promise<number> {
         "ding init 需要一个交互式终端（现在不是）。",
         "",
         "非交互环境里这样配：",
-        `  · 把 key 写进 ${credentialsPath()}，例如 \`DEEPSEEK_API_KEY: sk-…\``,
+        /*
+         * ⚠️ 这两行的写法必须与**读取端**一致（审计 P198 / NEW-N7-4）：
+         * `parseRefs` 只在 `refs:` 段里、缩进一层 的行上认键 —— 原来这里教的是顶格一行，
+         * 照它写完下次跑仍然"一条都读不到"（与 doctor 那句是同一个错）。
+         */
+        `  · 往 ${credentialsPath()} 里加一段（键要缩进在 \`refs:\` **下面一层**）：`,
+        "        refs:",
+        "          DEEPSEEK_API_KEY: sk-…",
         "  · 或者设环境变量：DEEPSEEK_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY …",
         `  · 默认 provider / 模型 / 档位 / 目录写进 ${path.join(dataDir, "config.json")}`,
         "",
@@ -144,14 +150,18 @@ export async function cmdInit(p: Parsed, dataDir: string): Promise<number> {
   };
   try {
     /*
-     * ⚠️ `hasUsableProvider` 现在**传的是真值**（2026-10-16，审计 P221）。
+     * ⚠️ `runWizard` 的依赖里**没有** `hasUsableProvider` 了（2026-10-16，审计 P221 / NEW-N7-30）。
      *
-     * 原来硬塞 `false`：一个"看起来会影响分支"的入参，实际传什么都一样。
-     * ⚠️ 但要如实说：`hosts/cli/wizard.ts` 的 `runWizard` **目前仍然不读它**
-     * （只用了 `dataDir`）—— 那半边不属这份工单的文件范围。
-     * 这里先把"说假话"这一半去掉：调用方给的是本机真实情况。
+     * 原来 deps 上声明了它，而 `runWizard` 的函数体**从没读过**（只用了 `dataDir`）——
+     * `ding init` 传 `false`、`ensureConfigured` 传真值，两条路跑出来一模一样。
+     * 一个"看起来会影响分支"的入参其实什么都不做，比"少一个入参"危险得多
+     * （将来谁照着它分支，`ding init` 那条路会先错）。
+     *
+     * 为什么是**删掉**而不是"真用"：向导里真正决定默认值的是 `suggestProvider()`
+     * 与逐个 `hasSecret()` 的现场判断 —— 它们算的就是"这台机器上有没有可用的 provider"，
+     * 再从外面传一个同样的布尔进来就是第二份口径。少一份口径，少一处会漂的地方。
      */
-    const result = await runWizard(io, { dataDir: dataDir, hasUsableProvider: firstAvailableProvider() !== undefined });
+    const result = await runWizard(io, { dataDir: dataDir });
     if (result.skipped) {
       process.stderr.write(`向导中断：${result.skipped}\n`);
       return 3;

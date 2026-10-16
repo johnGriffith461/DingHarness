@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isMcpTool, parseMcpToolName } from "./mcp";
 import { MEMORY_TEXT_LIMIT } from "./memory";
 import { MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_VALUES } from "./schedule";
+import { READ_MAX_BYTES } from "./drive";
 
 /**
  * **工具协议**的规格层（§141）。
@@ -36,13 +37,14 @@ export type AgentToolSpec = {
  */
 export const READ_FILE_MODEL_CHARS = 8000;
 /**
- * 「写文件」的正文上限（与 `writeTool.WRITE_MAX_CHARS` 同一个数）。
- *
- * 为什么放在 shared 里：这个数要**同时**出现在工具说明（给模型看）与执行体（真拦）里。
- * 两处各写一份的话，"说明里 200000、执行体 20000"这种错没人会立刻发现 ——
- * 模型照着说明写、被拒绝，然后开始瞎猜。
+ * 「写文件」的正文上限：**字节**，**就是读回来那个上限**（审计 P234）—— 写侧当年按
+ * 字符算（200000 字），中文 20 万字写得进去、落盘 600KB、下一轮读不回来（死档）。
+ * 取同一个数修的就是它；`engine/runtime/tools/writeCaps.test.ts` 的往返用例钉着。
  */
-export const WRITE_FILE_MODEL_CHARS = 200_000;
+export const WRITE_FILE_MODEL_BYTES = READ_MAX_BYTES;
+
+/** 给模型看的「最多多少字」：按 UTF-8 最坏 3 字节/码元折算。**不是第二道闸**，只是把上限说成人话。 */
+export const WRITE_FILE_MODEL_CHARS = Math.floor(WRITE_FILE_MODEL_BYTES / 3);
 
 export const MEMORY_SAVE_TOOL = "memory_save";
 export const MEMORY_LIST_TOOL = "memory_list";
@@ -225,7 +227,7 @@ export const WRITE_FILE_DESC = [
   "适合：把整理好的内容落成一份文件（纪要 / 清单 / 报告 / 代码片段）留给他以后打开。",
   "**默认不覆盖**：已经存在同名文件时会返回失败；确实要覆盖就再调一次并把 overwrite 设成 true。",
   "只写文本：图片、压缩包、音视频这类二进制格式会被拒绝（那些要用生成或上传）。",
-  `单次正文上限 ${WRITE_FILE_MODEL_CHARS} 字，超了先拆成几个文件。`,
+  `单次正文上限 ${WRITE_FILE_MODEL_BYTES} 字节（UTF-8；约 ${WRITE_FILE_MODEL_CHARS} 个汉字，一串英文能写到同样的字节数），超了先拆成几个文件。`,
   "目录之外的路径写不了；写不进去会把原因说清楚，别换个相近的路径反复试。",
 ].join("");
 

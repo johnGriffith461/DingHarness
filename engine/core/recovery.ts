@@ -40,6 +40,58 @@ export type InterruptedTurn = {
   lastText: string;
 };
 
+/**
+ * **收尾记录**的两类：`done`（正常收尾）与 `error`（报错收尾，**包括"已中止"那条**）。
+ *
+ * 词表只此一份：`interruptedTurns` 判"有没有收尾"用它，别处再写一遍
+ * `type === "done" || type === "error"` 就是第二个口径 —— 加第三种收尾记录时
+ * 只会改到手边那一处。
+ */
+export const TERMINAL_RECORD_TYPES = ["done", "error"] as const;
+
+/**
+ * 这一条记录算不算**这一轮的收尾**。
+ *
+ * @param record 一条记录（只用到 `type`；坏数据也照样答 false，不抛）
+ * @returns 是收尾记录吗
+ */
+export function isTerminalRecord(record: { type?: unknown }): boolean {
+  return TERMINAL_RECORD_TYPES.includes(record.type as (typeof TERMINAL_RECORD_TYPES)[number]);
+}
+
+/**
+ * 桌面**任务模型**里，那一轮是不是**该重发**的那种（审计 P139 / P211）。
+ *
+ * ## 为什么这个判据住在引擎里，而不是 `src/workbench/task.ts`
+ *
+ * 「被打断」只有一条判据：**这一轮有请求、但没有收尾记录**。两侧材料不同，问的是同一件事：
+ *
+ * | 材料 | 还没收尾 | 收尾了 |
+ * |---|---|---|
+ * | 日志（引擎） | 请求之后没有 `done`/`error`（`interruptedTurns`） | 有 `done`/`error` |
+ * | 任务模型（桌面） | 落盘的 `stage` 是 `running` 或 `awaiting` | `done` / `failed` |
+ *
+ * ⚠️ 「还没收尾」在这一格上有**两种**人话，别混成一种：
+ *
+ * · `running`：进程被杀 / 断电 —— **没有人可问**，该做的是把那一轮重发（桌面那颗「继续」
+ *   按钮、CLI 的 `--continue`）。**这个函数的答案就是它**；
+ * · `awaiting`：停在闸门 / 澄清卡上 —— 有东西在**等人决定**（引擎侧那栏叫 `pending`，
+ *   见 `pendingGates`）。此时重发一轮是**错的**：用户该做的是回答那张卡。
+ *   `taskPersist.normalizeTask` 早先正是把两者一起判死，导致重启后澄清卡再也不出现
+ *   （§179），所以这一格必须排除掉。
+ *
+ * 因此两侧真正共享的是**这条排除规则**（"在等人的不算"）：桌面端拿它算真值落盘，
+ * 「继续」按钮只认真值；引擎侧同一格由 `pending` 表达。判据只写在这里一处 ——
+ * 两边各写一遍时漂移的代价很具体：provider 报一句「连接被中断」（说的是网络断了）
+ * 也会长出一颗「继续」按钮，点下去又花一次钱。
+ *
+ * @param stage 落盘的任务阶段（不可信：认不出来的值一律当「没被打断」）
+ * @returns 这一轮该当成"被打断、可以重发"吗
+ */
+export function interruptedFromStage(stage: unknown): boolean {
+  return stage === "running";
+}
+
 /** 一段会话的恢复视图。 */
 export type RecoveryView = {
   interrupted: InterruptedTurn[];
@@ -97,7 +149,8 @@ export function interruptedTurns(records: readonly LogRecord[]): InterruptedTurn
      * 这不是"另算一份步数"：这里只是给用户看"它当时做到哪了"，不是权威数字。
      */
     else if (r.type === "tool-call") slot.steps += 1;
-    else if (r.type === "done" || r.type === "error") closed.add(r.requestId);
+    /* 收尾那两类走 `isTerminalRecord`（词表只有一份，见它的说明） */
+    else if (isTerminalRecord(r) && typeof r.requestId === "string") closed.add(r.requestId);
   }
 
   const out: InterruptedTurn[] = [];

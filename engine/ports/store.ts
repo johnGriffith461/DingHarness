@@ -29,6 +29,14 @@ import type { SessionSummary } from "../../shared/ipc";
  * 返回入参（没有 `seq`）会让调用方只能猜编号，而猜编号这件事本项目已经踩过：
  * 两个写入器各从 1 数起，"批准"就跑到了它对应的那一轮**前面**，重启后那条留痕永远是"等确认"。
  */
+/**
+ * 待落盘的记录，**可以**自带原始时刻（迁移 / 恢复那条路用）。
+ *
+ * 新发生的事件没有 `at`（存储自己盖"现在"）；从旧日志迁进来、或从备份恢复进来的
+ * 记录有 —— 那个时刻是数据的一部分，存储不许覆盖它（理由见 `append` 的说明）。
+ */
+export type LogInputAt = LogInput & { at?: number };
+
 export type SessionStore = {
   /**
    * 追加记录。
@@ -36,11 +44,24 @@ export type SessionStore = {
    * ⚠️ **一次调用的这一批要么都进、要么都不进**（实现负责）：日志的价值在顺序，
    * 半批写入会让"请求记录在、它的工具事件不在"这种形状成为可能。
    *
+   * ## `at`：新记录没有，**迁移/恢复进来的记录有**（2026-10-16，审计 P14 / P31）
+   *
+   * `LogInput` 是"还没分配 `seq`/`at`"的记录，所以新发生的事件由实现盖"现在"。
+   * 但从旧 `.jsonl` 迁进来、或从备份恢复进来的记录**本来就带着时刻** ——
+   * 那是数据的一部分，不是存储编的编号：
+   *
+   * · 盖成"现在"会让整段历史挤进今天，**成本账本按天的口径当场就散了**
+   *   （`engine/core/ledger.ts` 的 `localDay(entry.at)` 读的就是记录里的 `at`）；
+   * · 会话里"什么时候说的这句话"是用户记得住的事实（"三个月前聊过这个"），
+   *   它不该因为换了个存储就变成"刚才"。
+   *
+   * 所以：**记录自带 `at` 时用它**（见 `LogInputAt`），没有才盖现在。
+   *
    * @param sessionId 会话 id（宿主负责收窄；实现仍应自证一次）
-   * @param records 还没分配 `seq`/`at` 的记录
+   * @param records 还没分配 `seq` 的记录；**可以**自带原始 `at`（`LogInputAt`）
    * @returns 落盘形态（带 `seq`/`at`），顺序与入参一致
    */
-  append(sessionId: string, records: readonly LogInput[]): Promise<LogRecord[]>;
+  append(sessionId: string, records: readonly LogInputAt[]): Promise<LogRecord[]>;
 
   /**
    * 读回一段会话。

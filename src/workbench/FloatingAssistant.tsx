@@ -5,6 +5,7 @@ import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import type { ShellBridge } from "@shared/ipc";
 import { extractFilePaths, fileContextBlock } from "./fileContext";
 import type { PathRead } from "./fileContextTypes";
+import { uiError } from "@/canvas/uiError";
 
 /**
  * 悬浮助手窗（对标实机：任务顶栏第 3 个图标弹出的浮动面板）。
@@ -39,15 +40,51 @@ type Bubble = { id: string; role: "user" | "assistant"; text: string };
  * 为什么要有这条下界（2026-10-15）：标题栏是窗口的拖动区，而且它压在最上面
  * （z-index 90）—— 浮窗钻进那一条就会**被它盖住**，连浮窗自己的标题栏
  * （拖动手柄 + 最小化/关闭）都一起没了。默认位置原来就是 `y: 30`，正好落在里面。
+ *
+ * ⚠️ 这个数**从 CSS 变量读**，不许在 TS 里再抄一遍字面量（2026-10-16 审计 P188）。
+ * 原来这里是 `const FLOAT_MIN_Y = 36`，与 `shell.css` 的变量是"两处各写一遍同一个数"：
+ * 把变量改成 40 / 32 之后（那是标题栏的唯一定义处），浮窗又能钻进拖动区那一条 ——
+ * 正是这段注释要防的事，而守卫只读 CSS、看不见 TS 里那一份。
  */
-const FLOAT_MIN_Y = 36;
 
-/** 面板默认位置与尺寸（照实机量出来的比例）。`y` 落在标题栏之下，见 `FLOAT_MIN_Y`。 */
-const DEFAULT_POS = { x: 610, y: FLOAT_MIN_Y + 12 };
+/** 读不到变量时的兜底值（与 `shell.css` 里 `--win-titlebar-h` 的默认值一致）。 */
+const FLOAT_MIN_Y_FALLBACK = 36;
+
+/**
+ * 取当前标题栏高度（px）。
+ *
+ * 三种"读不到"都要落到兜底值上，**绝不能返回 NaN** —— 那样
+ * `Math.min/Math.max` 全变 NaN，浮窗会直接拖不动：
+ * `document` 不存在（单测的 node 环境）、变量没定义（`getPropertyValue` 回空串）、
+ * 变量值不是 CSS 里那个 `36px` 形状（`calc(...)` / `2.5rem` 这类 ——
+ * 那时宁可退回兜底值，也不要拿"12rem 解析出来的 12"当上界：那是**悄悄算错**）。
+ *
+ * @returns 标题栏高度（正整数像素）
+ */
+export function titlebarHeight(): number {
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function") {
+    return FLOAT_MIN_Y_FALLBACK;
+  }
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--win-titlebar-h");
+  const px = /^\s*(\d+(?:\.\d+)?)px\s*$/.exec(raw);
+  if (!px) return FLOAT_MIN_Y_FALLBACK;
+  const parsed = Number.parseFloat(px[1] as string);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : FLOAT_MIN_Y_FALLBACK;
+}
+
+/** 面板默认位置（照实机量出来的比例）。`y` 落在标题栏之下，见 `titlebarHeight`。 */
+const DEFAULT_X = 610;
 const SIZE = { width: 400, height: 600 };
 
 export default function FloatingAssistant({ onClose, seed }: { onClose: () => void; seed?: string }) {
-  const [pos, setPos] = useState(DEFAULT_POS);
+  /*
+   * 标题栏高度（= 拖拽上界）在**挂载时读一次**：它是给 `onDragMove`（每次 pointermove 都跑）
+   * 用的，不能每帧去 `getComputedStyle`（那是同步的样式计算）。默认位置也由它算出来。
+   * 取值与兜底见 `titlebarHeight`。
+   */
+  const [minY] = useState(titlebarHeight);
+  const defaultPos = useCallback(() => ({ x: DEFAULT_X, y: minY + 12 }), [minY]);
+  const [pos, setPos] = useState(defaultPos);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [text, setText] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -96,21 +133,24 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
     [pos.x, pos.y],
   );
 
-  const onDragMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    /*
-     * 夹在窗口内：不夹的话面板能被拖到屏幕外，用户再也找不回来 ——
-     * 一个拖不回来的浮窗比不能拖更糟。至少留 80px 在窗口里。
-     * 上边另有一条下界（见 `FLOAT_MIN_Y`）：不许钻进标题栏那一条。
-     */
-    const maxX = window.innerWidth - 80;
-    const maxY = Math.max(FLOAT_MIN_Y, window.innerHeight - 40);
-    setPos({
-      x: Math.min(Math.max(0, event.clientX - drag.dx), maxX),
-      y: Math.min(Math.max(FLOAT_MIN_Y, event.clientY - drag.dy), maxY),
-    });
-  }, []);
+  const onDragMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      /*
+       * 夹在窗口内：不夹的话面板能被拖到屏幕外，用户再也找不回来 ——
+       * 一个拖不回来的浮窗比不能拖更糟。至少留 80px 在窗口里。
+       * 上边另有一条下界（见 `titlebarHeight`）：不许钻进标题栏那一条。
+       */
+      const maxX = window.innerWidth - 80;
+      const maxY = Math.max(minY, window.innerHeight - 40);
+      setPos({
+        x: Math.min(Math.max(0, event.clientX - drag.dx), maxX),
+        y: Math.min(Math.max(minY, event.clientY - drag.dy), maxY),
+      });
+    },
+    [minY],
+  );
 
   const onDragEnd = useCallback(() => {
     dragRef.current = null;
@@ -203,7 +243,12 @@ ${block}` : value;
           turn = applyEvent(turn, event);
           if (event.type !== "text" && event.type !== "error") return;
           const view = finishTurn(turn);
-          const shown = view.error ? `（出错了）${view.error}` : view.text;
+          /*
+           * ⚠️ 上游那句错误**不许原样贴上来**（2026-10-16 审计 P190）：
+           * 走 `humanFailure` 的口径压成一句人话（"连不上 provider（检查网络…）"这种），
+           * 认不出来的一律不把堆栈糊在气泡里 —— 见 `uiError`。
+           */
+          const shown = view.error ? `（出错了）${uiError(view.error)}` : view.text;
           setBubbles((prev) => prev.map((b) => (b.id === replyId ? { ...b, text: shown } : b)));
         },
       );
@@ -211,7 +256,8 @@ ${block}` : value;
       handleRef.current = handle;
       await handle.done;
     } catch (error) {
-      const message = `（出错了）${error instanceof Error ? error.message : String(error)}`;
+      /* 同上一处：抛出来的（SDK / 桥 / 系统）也走同一套人话，不贴 `error.message` */
+      const message = `（出错了）${uiError(error)}`;
       setBubbles((prev) => prev.map((b) => (b.id === replyId ? { ...b, text: message } : b)));
     } finally {
       handleRef.current = null;
@@ -233,7 +279,7 @@ ${block}` : value;
         <button className="wb-icon" aria-label="最小化" title="最小化" onClick={() => setMinimized((v) => !v)}>
           <Minus size={14} />
         </button>
-        <button className="wb-icon" title="回到默认位置" onClick={() => setPos(DEFAULT_POS)}>
+        <button className="wb-icon" title="回到默认位置" onClick={() => setPos(defaultPos())}>
           ⟳
         </button>
         <span className="wb-spacer" />

@@ -4,12 +4,18 @@ import type { ShellBridge } from "@shared/ipc";
 /**
  * 本机版设置（§183）。
  *
- * 只有一项：**新对话默认模型**（`settings_defaultNewChatModel`）。
- * 空串 = 「记忆上次」（`settings_modelSelection_useLast`）。
+ * 两项：
+ *   · **新对话默认模型**（`settings_defaultNewChatModel`）——
+ *     空串 = 「记忆上次」（`settings_modelSelection_useLast`）；
+ *   · **左栏收起态**（2026-10-16，审计 P187 / P191）——
+ *     它原来只活在 `store.ts` 的内存里，**重启就忘**（用户每开一次都要再收一次）。
  *
  * ⚠️ 走主进程落盘（不走 localStorage）：§156 那次"硬杀进程就没了"的教训。
  * 另外**读一次缓存在内存里** —— `resolveChatRoute()` 是同步被调的，
  * 不能每次都 await 一趟 IPC。
+ *
+ * ⚠️ 写的是**整份设置**（两个字段一起）：`appSettings:write` 收到的是一整个对象，
+ * 只送自己那一项会把另一项从盘上抹掉（用户会看到"钉住的模型重启后没了"）。
  */
 
 const bridge = (): ShellBridge | undefined => (globalThis as unknown as { shell?: ShellBridge }).shell;
@@ -17,15 +23,35 @@ const bridge = (): ShellBridge | undefined => (globalThis as unknown as { shell?
 type State = {
   /** 钉住的默认通道（`provider/model`）；空串 = 记忆上次。 */
   pinnedModel: string;
+  /** 左侧导航栏收起来了没有。 */
+  navCollapsed: boolean;
   loaded: boolean;
   /** 上一次写盘的说明（成功为空串；失败时给一句人话，界面据此如实提示）。 */
   note: string;
   load: () => Promise<void>;
   setPinned: (value: string) => Promise<void>;
+  /** 收起 / 展开左栏（持久化：重启之后还是收起的样子）。 */
+  setNavCollapsed: (value: boolean) => Promise<void>;
 };
+
+/** 磁盘上那份（不可信）→ 干净的设置对象。 */
+function readSettings(raw: { pinnedModel?: unknown; navCollapsed?: unknown } | undefined): {
+  pinnedModel: string;
+  navCollapsed: boolean;
+} {
+  return {
+    pinnedModel: typeof raw?.pinnedModel === "string" ? raw.pinnedModel : "",
+    /*
+     * 只认布尔：缺字段（这次修复之前的 `settings.json`）与坏值（写着 `"yes"`）
+     * 一律回落到"展开"—— 左栏莫名其妙收起来，用户找不到导航。
+     */
+    navCollapsed: raw?.navCollapsed === true,
+  };
+}
 
 export const useAppSettings = create<State>()((set, get) => ({
   pinnedModel: "",
+  navCollapsed: false,
   loaded: false,
   note: "",
 
@@ -37,7 +63,8 @@ export const useAppSettings = create<State>()((set, get) => ({
     }
     try {
       const got = await shell.appSettings.read();
-      set({ pinnedModel: typeof got?.pinnedModel === "string" ? got.pinnedModel : "", loaded: true });
+      const clean = readSettings(got);
+      set({ pinnedModel: clean.pinnedModel, navCollapsed: clean.navCollapsed, loaded: true });
     } catch {
       set({ loaded: true });
     }
@@ -56,11 +83,25 @@ export const useAppSettings = create<State>()((set, get) => ({
      * 取舍与 `codingLikes.ts` 的 `toggle` 一致：失败就回到改动前那个值，并如实说一句。
      */
     try {
-      await bridge()?.appSettings?.write({ pinnedModel: value });
+      await bridge()?.appSettings?.write({ pinnedModel: value, navCollapsed: get().navCollapsed });
     } catch (error) {
       set({
         pinnedModel: before,
         note: `没能存下这个默认模型：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  },
+
+  setNavCollapsed: async (value) => {
+    const before = get().navCollapsed;
+    set({ navCollapsed: value, note: "" });
+    /* 同 `setPinned` 的取舍：失败回滚 + 如实说一句（不回滚的话界面收起、盘上没记，重启自己弹回来） */
+    try {
+      await bridge()?.appSettings?.write({ pinnedModel: get().pinnedModel, navCollapsed: value });
+    } catch (error) {
+      set({
+        navCollapsed: before,
+        note: `没能记住左栏的收起态：${error instanceof Error ? error.message : String(error)}`,
       });
     }
   },
@@ -69,4 +110,78 @@ export const useAppSettings = create<State>()((set, get) => ({
 /** 同步读一眼（给 `resolveChatRoute` 用）。 */
 export function pinnedModelNow(): string {
   return useAppSettings.getState().pinnedModel;
+}
+
+/** 同步读一眼左栏收起态（给"接盘"的那一刻用，见 `NavSidebar.tsx`）。 */
+export function navCollapsedNow(): boolean {
+  return useAppSettings.getState().navCollapsed;
+}
+
+/**
+ * 把「左栏收起态」这条状态接起来（2026-10-16，审计 P187 / P191）。
+ *
+ * ## 为什么是一条接线，而不是把字段搬个家
+ *
+ * 它有两个家，缺一不可：**界面要用它**（`store.ts` 的 `navCollapsed`，`NavSidebar`
+ * 从那里读、那颗按钮从那里切），而**"记住它"是设置**（走 `appSettings` 落盘，
+ * 重启读回来）。两个家各存一份必然漂 —— 所以这里只做**搬运**：
+ * 载入完成之后把盘上的值灌进界面状态一次，之后界面状态一变就写回盘上。
+ *
+ * ## 三种时序，逐条交代
+ *
+ * · **灌进去的那一次不回写**（`applying`）：否则每次启动都白写一次盘；
+ * · **载入还没回来时用户先按了**（`userPressed`）：以他按的为准 ——
+ *   谁也不愿意自己刚按完，界面又"啪"地弹回去。此时盘上那份**放弃**（下一次改动会覆盖它）；
+ * · **载入完成之后**：界面状态是权威，每一次变化都落盘。
+ *
+ * 端口由调用方注入（与 `taskPersist` 的 `StorePort` 同一个取舍）：
+ * 这一层于是**不认识 `store.ts`**，也就能在单测里被驱动到上面每一种时序。
+ *
+ * @param port `read` 读盘上那份（同步缓存）；`apply` 把值写进界面状态；
+ *   `subscribe` 订阅界面状态里这一项的变化
+ * @returns 停止函数（组件卸载时调）
+ */
+export function startNavCollapsedSync(port: {
+  read: () => boolean;
+  apply: (saved: boolean) => void;
+  subscribe: (onChange: (value: boolean) => void) => () => void;
+}): () => void {
+  let ready = false;
+  /** 正在把盘上的值灌进界面状态（那一次不该回写）。 */
+  let applying = false;
+  /** 载入完成之前用户按过没有。 */
+  let userPressed = false;
+
+  const applyFromDisk = (): void => {
+    ready = true;
+    if (userPressed) return;
+    const saved = port.read();
+    applying = true;
+    try {
+      port.apply(saved);
+    } finally {
+      applying = false;
+    }
+  };
+
+  const unsubscribeStore = port.subscribe((value) => {
+    if (!ready) {
+      /* 载入还没回来时界面变了 = 用户自己按的 */
+      userPressed = true;
+      return;
+    }
+    if (applying) return;
+    void useAppSettings.getState().setNavCollapsed(value);
+  });
+
+  const unsubscribeSettings = useAppSettings.subscribe((state) => {
+    if (state.loaded && !ready) applyFromDisk();
+  });
+  /* 调用方也可能在载入**完成之后**才接上（重挂载）：那就不必等订阅回调 */
+  if (useAppSettings.getState().loaded && !ready) applyFromDisk();
+
+  return () => {
+    unsubscribeStore();
+    unsubscribeSettings();
+  };
 }

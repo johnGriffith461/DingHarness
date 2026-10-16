@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { useWorkbenchStore, type WorkbenchView } from "./store";
+import { navCollapsedNow, startNavCollapsedSync } from "./appSettings";
 import { type WorkTask } from "./task";
 import { useLibraryStore } from "./libraryStore";
 import { startTheme } from "./theme";
@@ -83,6 +84,30 @@ export function NavSidebar() {
   }, []);
   /** 左栏收起（工单 3）：状态在 store 里，六个页面的那颗按钮共用一个开关。 */
   const navCollapsed = useWorkbenchStore((s) => s.navCollapsed);
+  /*
+   * ⭐ 收起态要**跨重启记住**（2026-10-16，审计 P187 / P191）。
+   *
+   * 界面状态在 `store.ts`（上面那一行读它、`NavCollapseButton` 切它），
+   * 「记住它」在应用设置里（走主进程落盘）—— 这里只把两边接起来。
+   * 为什么不是把字段整个搬到设置里、或者让 store 自己去写盘：
+   * 三个理由（两种家、灌盘的时机、失败回滚）都写在 `appSettings.ts` 的
+   * `startNavCollapsedSync` 上，一处说清，这里不重述。
+   *
+   * ⚠️ `read` 拿的是 `useAppSettings` 里那份**内存缓存**（`load()` 已经填好），
+   * 所以这里不需要 await 一趟 IPC —— 灌盘发生在 `loaded` 那一刻。
+   */
+  useEffect(
+    () =>
+      startNavCollapsedSync({
+        read: navCollapsedNow,
+        apply: (saved) => useWorkbenchStore.setState({ navCollapsed: saved }),
+        subscribe: (onChange) =>
+          useWorkbenchStore.subscribe((state, prev) => {
+            if (state.navCollapsed !== prev.navCollapsed) onChange(state.navCollapsed);
+          }),
+      }),
+    [],
+  );
   /*
    * 账号头像点开的是**下拉菜单**（不是直接开设置弹窗）——
    * 本体就是这样：菜单里有 设置 / 外观设置 / 收藏夹 / 官网 / 检查更新 /

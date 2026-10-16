@@ -248,6 +248,19 @@ export function bestSectionLevel(blocks: MdBlock[], maxLevel = 3): number {
  * 优先用文档里的**表格块**；一个都没有时，把「要点」行按 `冒号` 拆成两列，
  * 让导出的表格至少是有结构的，而不是一列长文本。
  *
+ * ⚠️ **多张表怎么放**（2026-10-16，审计 P242）：返回值只有一个 `header` 加一批 `rows`，
+ * 所以原先的做法是「所有表都塞进第一张的表头」。列名或列数不一样时，第二张表的数据就顶在
+ * 别人的列名下面 —— 在 Excel 里看起来是一张正常的表，实际已经串列。
+ *
+ * 现在只压住「静默串列」这一件事：**表头（列名与列数）与第一张完全一致时才合并**
+ * （这种合并本来就对得上列），不一致的**另起一组** —— 组前面留一整行空行，
+ * 组内第一行是**它自己的表头**。
+ *
+ * 这是保守口径，**不是最终产品口径**：多张表到底该
+ * ①进同一个 sheet（就是现在这样，用空行与组内表头分组）、②各进一个 sheet、
+ * 还是 ③表头不一致时退回单列长文本 —— 要由主人定；三种都能落在这份输出上
+ * （②还要换 `electron/ipc/officeWrite.ts` 那边的消费方式），本函数先按①的形状给出分组。
+ *
  * @param blocks 块数组
  * @returns `{ header, rows }`；header 可能为空
  */
@@ -256,7 +269,18 @@ export function toTableRows(blocks: MdBlock[]): { header: string[]; rows: string
   if (tables.length > 0) {
     const first = tables[0];
     const rows = [...first.rows];
-    for (const extra of tables.slice(1)) rows.push(...extra.rows);
+    for (const extra of tables.slice(1)) {
+      const sameHeader =
+        extra.header.length === first.header.length && extra.header.every((c, i) => c === first.header[i]);
+      if (sameHeader) {
+        rows.push(...extra.rows);
+        continue;
+      }
+      // 空行 + 这一组自己的表头：一张表的数据永远不顶在别人的列名下面
+      rows.push([]);
+      rows.push([...extra.header]);
+      rows.push(...extra.rows);
+    }
     return { header: first.header, rows };
   }
 

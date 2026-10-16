@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { insideDirs } from "./drivePaths";
 import { planFor, planSandboxed, type SandboxPlan } from "../../adapters/sandbox";
+import { SANDBOX_MEMORY_MB, SANDBOX_PROCESSES } from "../../adapters/sandbox";
 
 /**
  * 「跑命令」工具的执行体（2026-10-14）。
@@ -110,9 +111,12 @@ export type RunCommandResult =
        * "以为有隔离"比"知道没有"更危险（后者至少会让人谨慎）。
        *
        * ⚠️ 但它的**强度**要说清（2026-10-16，审计 P115）：这个值来自
-       * `planSandboxed()` 的 `bounded`，而那是 `--probe` 的**平台级声明** ——
-       * 沙箱进程起来了、作业对象却建失败时，命令不受限、这里仍是 `true`。
-       * 逐条命令的执行事实要等 Rust 侧上报（那一半不在本工单）。
+       * `planSandboxed()` 的 `bounded`，也就是 `--probe` 的**平台级**说法。
+       * Rust 侧现在不是只回显 `cfg!(windows)` 了 —— 它真的试建一次作业对象、
+       * 把默认上限设上去（建不起来就答 false，受限容器里会如实说没有）；
+       * 但那仍是**一次探测的结论**，不是"这一条命令到底进没进作业"：
+       * 作业建不起来时后面的命令是不受限的直通、只在 stderr 上喊一句，
+       * 上层这里拿到的还是 `true`。逐条命令的执行事实要等 Rust 侧上报（那一半不在本工单）。
        */
       sandboxed: boolean;
       /**
@@ -205,6 +209,9 @@ export async function runCommandForModel(
     bounded: false,
     binary: "",
     platform: process.platform,
+    /* 直通那条用不到这两个上限（`planFor` 只在 `found` 时拼它们）—— 填默认值只为形状完整 */
+    memoryMb: SANDBOX_MEMORY_MB,
+    processes: SANDBOX_PROCESSES,
     note: "没有沙箱（命令不受限）",
   });
   const second = await runPlan(direct, { command, cwd, timeout, input, spawnImpl });

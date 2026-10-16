@@ -7,10 +7,10 @@ import {
   isChatSessionId,
   parseLogLine,
   SESSION_PREFIX,
-  type LogInput,
   type LogRecord,
 } from "../core/events";
-import type { SearchHit, SessionKind, SessionStore } from "../ports/store";
+import type { LogInputAt, SearchHit, SessionKind, SessionStore } from "../ports/store";
+import { excerptOf, prepareSearchIndex, searchBodyOf } from "./sqliteSearch";
 import type { SessionSummary } from "../../shared/ipc";
 
 /**
@@ -89,51 +89,6 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
 `;
 
-/**
- * 全文索引（Phase 12.4；审计 P136 把索引的列从 `payload` 改成 `body`）。
- *
- * 为什么用 FTS5、为什么要 external-content、中文为什么不按词搜 —— 见 `search()` 那段说明
- * （同一个理由不在两处各写一遍）。
- *
- * ⚠️ external-content 的代价有两条，都得自己收拾：**增删同步**（下面三条触发器）
- * 与**既有行不会自动进索引**（要 `'rebuild'`，见 `prepareSearchIndex`）。
- */
-const FTS_SCHEMA = `
-CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(body, content='events', content_rowid='rowid');
-
-CREATE TRIGGER IF NOT EXISTS events_fts_ai AFTER INSERT ON events BEGIN
-  INSERT INTO events_fts(rowid, body) VALUES (new.rowid, new.body);
-END;
-CREATE TRIGGER IF NOT EXISTS events_fts_ad AFTER DELETE ON events BEGIN
-  INSERT INTO events_fts(events_fts, rowid, body) VALUES ('delete', old.rowid, old.body);
-END;
-CREATE TRIGGER IF NOT EXISTS events_fts_au AFTER UPDATE ON events BEGIN
-  INSERT INTO events_fts(events_fts, rowid, body) VALUES ('delete', old.rowid, old.body);
-  INSERT INTO events_fts(rowid, body) VALUES (new.rowid, new.body);
-END;
-`;
-
-/** 撤掉全文索引那一套（触发器先走：表被删掉之后它们会变成会报错的孤儿）。 */
-const FTS_DROP = `
-DROP TRIGGER IF EXISTS events_fts_ai;
-DROP TRIGGER IF EXISTS events_fts_ad;
-DROP TRIGGER IF EXISTS events_fts_au;
-DROP TABLE IF EXISTS events_fts;
-`;
-
-/** 只撤触发器（没有 FTS5 时用：虚拟表可能连 DROP 都打不开）。 */
-const FTS_TRIGGERS_DROP = `
-DROP TRIGGER IF EXISTS events_fts_ai;
-DROP TRIGGER IF EXISTS events_fts_ad;
-DROP TRIGGER IF EXISTS events_fts_au;
-`;
-
-/** 让 FTS5 按 `events` 当前内容**重建**整个索引（external-content 表的唯一回填手段）。 */
-const FTS_REBUILD = "INSERT INTO events_fts(events_fts) VALUES('rebuild')";
-
-/** 现存 FTS 表是不是"按正文索引"那一版（认不出来就重建）。 */
-const FTS_BODY_MARK = /fts5\s*\(\s*body\b/i;
-
 /** 会话种类 → 前缀。写成表而不是 `if`：加第三种会话时只改这里。 */
 const KIND_PREFIX: Record<SessionKind, string> = {
   chat: SESSION_PREFIX.chat,
@@ -175,208 +130,32 @@ export type RetentionPolicy = {
   maxBytes?: number;
 };
 
-/** 一次写入里 `sessions.bytes` 的增量口径（与 .jsonl 的行字节数同义）。 */
-function lineBytes(payload: string): number {
-  return Buffer.byteLength(payload, "utf8") + 1;
+/**
+ * 一行在库里占的字节：`payload`（整行 JSON）+ `body`（检索那一列）+ 1。
+ *
+ * ## 为什么 `body` 必须算进去（审计 P32）
+ *
+ * `body` 是 P101 加的第二份正文（`searchBodyOf` 算好、专给检索用），
+ * 而容量那道收口（`maxBytes`）原来只数 `payload` —— 中文正文的库里同一段文字
+ * 被存了两遍，于是"64MB 上限"实际允许的磁盘占用接近**两倍**。
+ * 这不是"精确到页"（SQLite 的页分配另有开销），是**别漏一列**。
+ *
+ * @param payload 整行 JSON（与 .jsonl 的一行同形）
+ * @param body 检索用的正文那一列
+ * @returns 字节数（UTF-8）
+ */
+function rowBytes(payload: string, body: string): number {
+  return Buffer.byteLength(payload, "utf8") + Buffer.byteLength(body, "utf8") + 1;
 }
 
 /**
- * 把值里的**字符串叶子**收进数组（**不含字段名**）。
+ * 读一条待落盘记录**自带**的时刻（没有 / 不是有限数 → `undefined`）。
  *
- * ⚠️ 只收值、不收键是刻意的（审计 P136）：工具参数 `{"path":"a.md"}` 里
- * `path` 是**契约的一部分**，不是"用户说过的话"；把它也当正文，搜 `path`
- * 就会命中一大片。深度封顶是防病态嵌套，不是性能优化。
+ * 迁移与恢复那条路要把记录原来的时刻带进来（审计 P14 / P31）；新发生的事件没有它。
  */
-function collectStrings(value: unknown, out: string[], depth = 0): void {
-  if (depth > 6 || value === null || value === undefined) return;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed) out.push(trimmed);
-    return;
-  }
-  if (typeof value === "number" || typeof value === "boolean") return;
-  if (Array.isArray(value)) {
-    for (const item of value) collectStrings(item, out, depth + 1);
-    return;
-  }
-  if (typeof value === "object") {
-    for (const item of Object.values(value as Record<string, unknown>)) collectStrings(item, out, depth + 1);
-  }
-}
-
-/**
- * 一条记录**该被搜到的正文**（写的时候算好，存进 `events.body`）。
- *
- * ## 为什么要有这个函数（审计 P136）
- *
- * 原来检索把**整行 JSON**（`JSON.stringify({seq,at,...record})`）当正文匹配，
- * 于是搜 `request`、`text`、`seq`、`provider`、`按需确认`、`strata` 这类
- * 出现在**字段名或策略值**里的词会假命中；摘要也会摘出一段 JSON 噪声
- * （"为什么这条被搜出来"答非所问）。
- *
- * ## 取哪些
- *
- * - `request`：**只有消息正文** —— 用户说过的话在这里。provider / model /
- *   toolPolicy / tools / system 都是元数据（搜 `deepseek` 不该把整段会话捞出来）。
- * - 其余事件：正文、错误、工具名与**工具参数/结果里的字符串**、委派的任务与结论、
- *   决策记录那一行。都是"用户看得见的内容"。
- *
- * @param record 一条记录（含 `seq`/`at` 也没关系：它们不在取值名单里）
- * @returns 拼好的正文（可能是空串 —— 那就搜不到它，这是对的）
- */
-function searchBodyOf(record: Record<string, unknown>): string {
-  const out: string[] = [];
-  if (record.type === "request") {
-    const messages = Array.isArray(record.messages) ? record.messages : [];
-    for (const message of messages) {
-      const content = (message as { content?: unknown } | null | undefined)?.content;
-      if (typeof content === "string") {
-        if (content.trim()) out.push(content);
-      } else {
-        collectStrings(content, out);
-      }
-    }
-    return out.join("\n");
-  }
-  collectStrings(record.text, out);
-  collectStrings(record.message, out); // error 那一句
-  collectStrings(record.toolName, out);
-  collectStrings(record.name, out);
-  collectStrings(record.line, out); // approval 那一行（用户看得见）
-  collectStrings(record.agent, out); // delegation
-  collectStrings(record.task, out);
-  collectStrings(record.summary, out);
-  collectStrings(record.error, out);
-  collectStrings(record.input, out); // 工具参数（只取字符串叶子）
-  collectStrings(record.output, out); // 工具结果（含工具留痕里的正文）
-  return out.join("\n");
-}
-
-/** 一次性的 `all` 查询：**用完就释放**（审计 P144 的口径：别只 prepare 不释放）。 */
-function queryAll(db: SqliteDatabase, sql: string, ...params: unknown[]): unknown[] {
-  const statement = db.prepare(sql);
-  try {
-    return statement.all(...params);
-  } finally {
-    statement.finalize?.();
-  }
-}
-
-/** 一次性的 `get` 查询（同上）。 */
-function queryGet(db: SqliteDatabase, sql: string, ...params: unknown[]): unknown {
-  const statement = db.prepare(sql);
-  try {
-    return statement.get(...params);
-  } finally {
-    statement.finalize?.();
-  }
-}
-
-/** 建表之后、用之前要做的迁移与探测（P101 回填 / P136 列 / P140 降级）。 */
-function tableSql(db: SqliteDatabase, name: string): string | null {
-  const row = queryGet(db, "SELECT sql FROM sqlite_master WHERE name = ?", name) as
-    | { sql?: string | null }
-    | undefined;
-  return typeof row?.sql === "string" ? row.sql : null;
-}
-
-/** 老库（12.4 之前）没有 `body` 列：补上。@returns 这次是不是真加了 */
-function ensureBodyColumn(db: SqliteDatabase): boolean {
-  const cols = queryAll(db, "PRAGMA table_info(events)") as { name?: string }[];
-  if (cols.some((c) => c.name === "body")) return false;
-  db.exec("ALTER TABLE events ADD COLUMN body TEXT NOT NULL DEFAULT ''");
-  return true;
-}
-
-/** 当前库的 schema 版本（`PRAGMA user_version` 是本库私有的）。 */
-function userVersion(db: SqliteDatabase): number {
-  const row = queryGet(db, "PRAGMA user_version") as { user_version?: number } | undefined;
-  return Number(row?.user_version ?? 0);
-}
-
-/**
- * 这个 SQLite 构建**有没有 FTS5**（审计 P140）。
- *
- * 用 `temp.` 里的一次探测，而不是"看 `CREATE VIRTUAL TABLE` 成不成功"：
- * 探针表建在 temp schema 里，失败也不会在库里留下半张表。
- */
-function fts5Available(db: SqliteDatabase): boolean {
-  try {
-    db.exec("CREATE VIRTUAL TABLE temp.__fts_probe USING fts5(x)");
-    db.exec("DROP TABLE temp.__fts_probe");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** 老库的 `body` 空白行回填（**只补空串**，反复跑无副作用）。@returns 回填了几行 */
-function backfillBodies(db: SqliteDatabase): number {
-  const rows = queryAll(db, "SELECT rowid AS rid, payload FROM events WHERE body = ''") as {
-    rid: number | bigint;
-    payload: string;
-  }[];
-  if (!rows.length) return 0;
-  const update = db.prepare("UPDATE events SET body = ? WHERE rowid = ?");
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    for (const row of rows) {
-      let record: Record<string, unknown> | null = null;
-      try {
-        record = JSON.parse(row.payload) as Record<string, unknown>;
-      } catch {
-        record = null; // 坏行：正文留空（它本来就解析不出来）
-      }
-      update.run(record ? searchBodyOf(record) : "", row.rid);
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  update.finalize?.(); // 局部语句用完就放（Bun 有 finalize，node:sqlite 靠 GC）
-  return rows.length;
-}
-
-/**
- * 把"检索那一套"准备好，并如实返回**能不能走 FTS**。
- *
- * 三件事，顺序有意义（审计 P101 · P136 · P140）：
- *   ① 老库补 `body` 列并**回填**（不补的话那些行在新索引里永远不存在 ——
- *      external-content 表不会自动索引既有行）；
- *   ② 探测 FTS5 能力：**没有就降级**（撤掉触发器、只走 LIKE），
- *      而不是让整个会话库打不开；
- *   ③ 现存索引若不是"按正文索引"那一版（老库是 `fts5(payload)`，或索引丢了），
- *      重建 + `'rebuild'` 回填 —— 版本迁移与"索引被删掉"两种情况一起兜住。
- */
-function prepareSearchIndex(db: SqliteDatabase): boolean {
-  const addedBody = ensureBodyColumn(db);
-  if (addedBody || userVersion(db) < SCHEMA_VERSION) {
-    backfillBodies(db);
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-  }
-
-  if (!fts5Available(db)) {
-    /*
-     * 没有 FTS5：触发器必须撤掉。留着它们的话，每次 append 都要去写那张表 ——
-     * 轻则写进一张没人读的表（索引永远不同步），重则直接报 "no such module: fts5"。
-     * ⚠️ 虚拟表**不**在这里 DROP：模块都不在，DROP 可能自己就报错。
-     */
-    try {
-      db.exec(FTS_TRIGGERS_DROP);
-    } catch {
-      /* 触发器都不存在时也算成功 */
-    }
-    return false;
-  }
-
-  const existing = tableSql(db, "events_fts");
-  if (!existing || !FTS_BODY_MARK.test(existing)) {
-    db.exec(FTS_DROP);
-    db.exec(FTS_SCHEMA);
-    db.exec(FTS_REBUILD);
-  }
-  return true;
+function originalAtOf(record: LogInputAt): number | undefined {
+  const at = (record as { at?: unknown }).at;
+  return typeof at === "number" && Number.isFinite(at) ? at : undefined;
 }
 
 /** 打开时的额外选项。 */
@@ -409,6 +188,16 @@ export type OpenOptions = {
    * 测试包一层真驱动，就能构造出这些环境（生产永远不传，走 `openSqlite`）。
    */
   driver?: (file: string) => SqliteDatabase;
+
+  /**
+   * **打开即收口**（旧行为，默认关；审计 P125）。
+   *
+   * 默认 `false`：收口是不可逆的，而"打开"到处都是（读一段历史、每个请求开一次库），
+   * 打开就删数据的代价太大 —— 想删就显式调 `prune()`（见 `createSqliteSessionStore`
+   * 里那段说明）。只有"确实希望每次打开都收一遍"的宿主才传 `true`，
+   * 而且它在代码里看得见。
+   */
+  pruneOnOpen?: boolean;
 };
 
 /**
@@ -416,7 +205,8 @@ export type OpenOptions = {
  *
  * @param dir 数据目录（不存在就建）
  * @param file 库文件名（默认 `sessions.db`；测试要并行时各给各的）
- * @param retention 保留策略（默认 `SQLITE_RETENTION`）；打开时就收口一次
+ * @param retention 保留策略（默认 `SQLITE_RETENTION`）；**收口不在打开时发生**，
+ *   由宿主显式调 `prune()`（想恢复旧行为传 `open.pruneOnOpen`，见它那里的说明）
  * @param open 打开选项（`protectBefore` 见其说明）
  * @returns 满足 `SessionStore` 的实现
  */
@@ -438,7 +228,7 @@ export function createSqliteSessionStore(
    * 检索那一套（老库回填 / 索引列 / FTS5 能力）由它负责，并**如实回报**能不能走 FTS：
    * 不能就只走 LIKE（审计 P140 要的"降级而不是打不开"）。
    */
-  const ftsReady = prepareSearchIndex(db);
+  const ftsReady = prepareSearchIndex(db, SCHEMA_VERSION);
 
   /*
    * 所有语句都从这里出去并记下来：`close()` 时逐个 `finalize()`（审计 P144 ——
@@ -612,8 +402,21 @@ export function createSqliteSessionStore(
     return { deleted, kept };
   };
 
-  // 打开时收口一次（与 JSONL 那版"启动时清理"同一个时机）
-  pruneStore();
+  /*
+   * ⚠️ **打开时不再无条件收口**（2026-10-16，审计 P125）。
+   *
+   * 原来这里是一句 `pruneStore()`（"与 JSONL 那版启动时清理同一个时机"），
+   * 而打开库这件事**到处都是**：CLI 的 `ding resume` / `ding backup` 只是要读一段历史、
+   * 服务态每个请求打开一次库 —— 它们都会**顺手删掉用户的旧会话**。
+   * 收口是**不可逆**的动作，"打开"不是它的理由：一个只想看一眼的命令不该改数据。
+   *
+   * 现在的口径：**收口是显式动作**（`store.prune()`，端口上就写着它），
+   * 由**拥有数据的宿主**在合适的时机调（桌面在 `ready()` 里调一次；
+   * CLI 要不要调、什么时候调，是 CLI 的产品决定）。
+   * 想保留"打开即收口"的旧行为，就在 `open` 里显式传 `{ pruneOnOpen: true }`
+   * —— 那样至少调用点在代码里看得见，而不是隐式发生。
+   */
+  if (open.pruneOnOpen) pruneStore();
 
   /** 会话种类（按前缀判；`SESSION_PREFIX` 是唯一那份口径）。 */
   function kindOf(sessionId: string): SessionKind {
@@ -622,7 +425,7 @@ export function createSqliteSessionStore(
   }
 
   return {
-    async append(sessionId: string, records: readonly LogInput[]): Promise<LogRecord[]> {
+    async append(sessionId: string, records: readonly LogInputAt[]): Promise<LogRecord[]> {
       if (!records.length) return [];
       const kind = kindOf(sessionId);
       const stored: LogRecord[] = [];
@@ -630,6 +433,12 @@ export function createSqliteSessionStore(
       /*
        * ⚠️ 整批一个事务：半批写入会让"请求记录在、它的工具事件不在"这种形状成为可能，
        * 而日志的价值恰恰在顺序与完整。
+       *
+       * ⚠️ `BEGIN IMMEDIATE`（不是裸 `BEGIN`）的理由（审计 P39 那条的 db 侧）：
+       * 裸 `BEGIN` 是**延迟**取锁的 —— 先读后写的那种事务会在写那一刻才升级锁，
+       * 两个这样的连接撞在一起就是"谁也升不上去"（SQLITE_BUSY，而且没有重试的机会）。
+       * IMMEDIATE 一上来就取写锁，配合 `sqliteDriver.ts` 里那条 `busy_timeout`，
+       * 撞上时是**排队等**，不是当场失败。
        */
       db.exec("BEGIN IMMEDIATE");
       try {
@@ -640,16 +449,39 @@ export function createSqliteSessionStore(
 
         for (const record of records) {
           seq += 1;
-          const at = Date.now();
-          // 落盘形态与 .jsonl 的一行**同形**（读回时喂同一个 parseLogLine）
-          const payload = JSON.stringify({ seq, at, ...record });
+          /*
+           * ⚠️ 记录**自带时刻**时用它（迁移 / 恢复那条路，审计 P14 / P31）。
+           *
+           * 原来这里一律 `at = Date.now()`：从旧 `.jsonl` 迁进来的一整段历史于是
+           * 全挤进"迁移那一刻"—— 成本账本按天的口径（`ledger.ts` 的 `localDay`）
+           * 当场散掉，会话里"什么时候说的这句话"也被改写了。
+           * 新发生的事件没有 `at`，照旧盖现在（那就是它发生的时刻）。
+           */
+          const at = originalAtOf(record) ?? Date.now();
+          /*
+           * 落盘形态与 .jsonl 的一行**同形**（读回时喂同一个 parseLogLine）：
+           * `seq`/`at` 写在最前、由存储给出。记录自带的那一份先剥掉 ——
+           * 它已经取进 `at` 了，留着只会在键序上与别处对不上（也不许它冒充权威）。
+           */
+          const { seq: _frozenSeq, at: _frozenAt, ...rest } = record as Record<string, unknown>;
+          const payload = JSON.stringify({ seq, at, ...rest });
           // 检索用的正文**写的时候算好**（只算一次，读的时候不再解析 —— 审计 P136）
-          insertEvent.run(sessionId, seq, at, record.type, payload, searchBodyOf(record as Record<string, unknown>));
-          bytes += lineBytes(payload);
-          if (!title && record.type === "request") title = conversationTitle([{ seq, at, ...record } as LogRecord]);
+          const body = searchBodyOf(record as Record<string, unknown>);
+          insertEvent.run(sessionId, seq, at, record.type, payload, body);
+          bytes += rowBytes(payload, body);
+          if (!title && record.type === "request") title = conversationTitle([{ seq, at, ...rest } as LogRecord]);
           stored.push(JSON.parse(payload) as LogRecord);
         }
 
+        /*
+         * 会话行上的 `updated_at` 仍是**写入这一刻**（不是记录里的时刻），刻意的：
+         *
+         * · 它是"这一行最近一次进库"的时刻，收口里的**年龄那道**按它算
+         *   —— 迁进来/恢复回来的老历史因此还能再留满一个 `maxAgeDays`，
+         *   而不是刚搬进来就在下一次打开时被删掉（那才是数据损失）；
+         * · 账本按天看的是**记录自己的 `at`**（上面那个 `at`），与这一格无关 ——
+         *   两个口径各管各的，谁也不许拿它冒充另一个。
+         */
         const at = Date.now();
         upsertSession.run(sessionId, kind, title, at, bytes, at, bytes);
       } catch (error) {
@@ -849,30 +681,20 @@ export async function migrateJsonlSessions(
     if (!parsed.length) continue;
     /*
      * 已经是"落盘形态"（带 seq/at）的那批：整批原样写进去。
-     * 旧文件的 seq 与库里的 seq 由 append 自己重新编号 —— 旧编号只用于排序，
-     * 保序就够了（新库不让外部决定编号，那是"两个写入器撞号"的来源）。
+     *
+     * ⚠️ **只丢掉 `seq`，`at` 原样带上**（审计 P14 / P31）：
+     *
+     * · `seq` 由存储自己重新编号是对的 —— 旧编号只用于排序，保序就够了；
+     * · `at` **不能丢**：它是"这句话是什么时候说的"。原来这里写的是
+     *   `.map(({ seq, at, ...rest }) => rest)`，于是接手的 `append` 把每一行都盖成
+     *   "迁移那一刻"—— 一段三年的历史全挤进今天，成本账本按天的口径当场散掉
+     *   （`ledger.ts` 按 `record.at` 分天）。迁移是**搬运**，不是重新发生。
      */
-    const ordered = [...parsed].sort((a, b) => a.seq - b.seq).map(({ seq: _seq, at: _at, ...rest }) => rest);
-    await store.append(sessionId, ordered as LogInput[]);
+    const ordered = [...parsed].sort((a, b) => a.seq - b.seq).map(({ seq: _seq, ...rest }) => rest);
+    await store.append(sessionId, ordered as LogInputAt[]);
     files += 1;
     records += ordered.length;
   }
   return { files, records, skipped };
 }
 
-/**
- * 从一段**正文**里摘一小段命中上下文（前后各留一点）。
- *
- * ⚠️ 摘的是**原文**，不生成任何字 —— 生成的东西没法保证与原文一致，
- * 而用户点开之前就是靠这一小段判断这条是不是我要找的。
- *
- * ⚠️ 参数是 `events.body`（`searchBodyOf` 算好的正文），不是整行 JSON
- * （审计 P136：原来摘到的是 `{"seq":3,"requestId":…}` 这种噪声，"答非所问的摘要"）。
- */
-function excerptOf(text: string, query: string): string {
-  const at = text.toLowerCase().indexOf(query.toLowerCase());
-  if (at < 0) return text.slice(0, 120);
-  const from = Math.max(0, at - 40);
-  const to = Math.min(text.length, at + query.length + 60);
-  return (from > 0 ? "…" : "") + text.slice(from, to) + (to < text.length ? "…" : "");
-}

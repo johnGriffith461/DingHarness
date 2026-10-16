@@ -16,6 +16,7 @@ import {
   type Project,
 } from "@shared/library";
 import { CATALOG_IDS, findItem } from "./catalog";
+import { uiError } from "@/canvas/uiError";
 
 /**
  * 本机库（阶段 11.7 / 11.8）：装过的插件、项目、置顶、收藏。
@@ -128,7 +129,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try {
       raw = await shell.library.load();
     } catch (error) {
-      set({ loaded: true, note: `本机库没读出来：${error instanceof Error ? error.message : String(error)}` });
+      set({ loaded: true, note: `本机库没读出来：${uiError(error)}` });
       return;
     }
     /*

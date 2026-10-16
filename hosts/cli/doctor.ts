@@ -30,13 +30,13 @@ import { normalizeConfig } from "./config";
  *
  * | 检查 | 挡的是哪一类"跑不起来" |
  * |---|---|
- * | 运行时 | Bun/Node 版本太低（`node:sqlite`/`bun:sqlite` 都没有） |
+ * | 运行时 | Bun/Node 版本太低（`node:sqlite`/`bun:sqlite` 都没有）—— 真判版本号（P201） |
  * | 数据目录可写 | 装到了只读目录 / 权限不足 —— 建库会失败，但报错在很深的地方 |
  * | 会话库可开 | 旧库损坏 / 磁盘满 —— 这是"以前能用现在不能用"最常见的一种 |
  * | 凭据 | 一条 key 都没有 → 任何 provider 都用不了（**首次使用最常见的一格**） |
  * | provider 可用性 | 配了 provider 名但那条没有 key（"我明明配了啊"） |
  * | 模型 | 钉的模型不在目录表里 / 目录表数据过期超 90 天 |
- * | 配置合法性 | 配置文件里写了个不认识的档位（写错了但不报错，行为悄悄变） |
+ * | 配置合法性 | 写了不认识的键或档位（被静默丢掉却不报错，行为悄悄变）—— 按已知键白名单比对原文（P202） |
  * | 工作目录 | 配的目录不存在（工具会一律报"不在可写范围内"） |
  * | 沙箱 | **如实说"没有隔离"**（Phase 14 之前就是这样，不装） |
  */
@@ -67,7 +67,101 @@ export type DoctorInput = {
   runtime: string;
   /** 是不是 Bun 单二进制那条路。 */
   bunBinary: boolean;
+  /**
+   * 运行时版本（只有测试会传；生产走 `process.versions`）。
+   *
+   * 为什么要有这个口子：`runtime` 那只是**给人看的一句话**，而"版本够不够"必须按
+   * **真的版本号**判 —— 拿那句展示文本去解析会让判据跟着文案变（审计 P201 正是
+   * "这一格恒 ok:true、承诺的版本检查没有代码"）。
+   */
+  versions?: { node?: string; bun?: string };
 };
+
+/**
+ * 跑起本程序**至少**要什么版本（按它会用的 SQLite 驱动算）。
+ *
+ * · Node：`node:sqlite` 从 **22.5.0** 起才有（见 `engine/adapters/sqliteDriver.ts`）——
+ *   低于它连库都打不开，CLI 每条命令都崩。
+ * · Bun：`bun:sqlite` 从 **1.0.0** 起（同一个文件里的另一条驱动）。
+ */
+export const RUNTIME_FLOOR = {
+  node: { major: 22, minor: 5, label: "22.5.0（node:sqlite 从那版起才有）" },
+  bun: { major: 1, minor: 0, label: "1.0.0（bun:sqlite 从那版起才有）" },
+} as const;
+
+/** 把 `24.18.0` 这类版本串切成数字（拿不到就返回 `null`，**不猜**）。 */
+function versionParts(text: string | undefined): { major: number; minor: number } | null {
+  if (!text) return null;
+  const match = /^(\d+)\.(\d+)/.exec(text.trim());
+  if (!match) return null;
+  return { major: Number(match[1]), minor: Number(match[2]) };
+}
+
+/**
+ * 运行时版本够不够（审计 P201 / NEW-N7-7）。
+ *
+ * @returns 不够时给一句"差在哪、怎么升"；够（或拿不到版本号）时 `null`
+ */
+export function runtimeVersionProblem(versions: { node?: string; bun?: string }): string | null {
+  const bun = versions.bun;
+  const floor = bun ? RUNTIME_FLOOR.bun : RUNTIME_FLOOR.node;
+  const got = versionParts(bun ?? versions.node);
+  if (!got) return null; // 版本号拿不到：不假装检查过（那一格会如实说"没读出版本"）
+  const low = got.major < floor.major || (got.major === floor.major && got.minor < floor.minor);
+  if (!low) return null;
+  return `${bun ? "Bun" : "Node"} ${bun ?? versions.node} 低于下限 ${floor.label} —— SQLite 驱动不存在，库打不开。`;
+}
+
+/**
+ * 配置文件里**允许**出现的键（与 `./config.ts` 的 `CliConfig` 一一对应）。
+ *
+ * ⚠️ 这张表是"按**原文**比对"用的（审计 P202 / NEW-N7-8）：`normalizeConfig` 会把
+ * 不认识的键与类型不符的值**静默丢掉**，于是 doctor 只看收窄后的值就永远报"合法"——
+ * 而用户看到的表现是"我明明配了啊"。
+ */
+export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd"] as const;
+
+/** 配置原文里的问题（全是"收窄会被丢掉、但 doctor 该告诉你"的那类）。 */
+export type ConfigIssues = {
+  /** 不认识的键（拼错 / 改名 / 已删掉的项）。 */
+  unknownKeys: string[];
+  /** 值类型不对的键。 */
+  badTypes: string[];
+  /** `mode` 写了个陌生的档位（原文，原样报给用户看）。 */
+  badMode?: unknown;
+};
+
+/**
+ * 按已知键白名单看一遍配置**原文**（审计 P202 / NEW-N7-8）。
+ *
+ * 判据一律落在**原文**上，不用收窄后的值 —— 收窄过的值永远"合法"。
+ */
+export function configIssues(raw: unknown): ConfigIssues {
+  const out: ConfigIssues = { unknownKeys: [], badTypes: [] };
+  if (raw === undefined || raw === null) return out;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    out.badTypes.push("整个文件（不是对象）");
+    return out;
+  }
+  const o = raw as Record<string, unknown>;
+  for (const key of Object.keys(o)) {
+    if (!(CONFIG_KEYS as readonly string[]).includes(key)) out.unknownKeys.push(key);
+  }
+  const isText = (v: unknown) => typeof v === "string" && v.trim() !== "";
+  if (o.provider !== undefined && !isText(o.provider)) out.badTypes.push("provider（要非空字符串）");
+  if (o.model !== undefined && !isText(o.model)) out.badTypes.push("model（要非空字符串）");
+  if (o.mode !== undefined && !CONFIRM_MODES.includes(o.mode as ConfirmMode)) out.badMode = o.mode;
+  if (o.dirs !== undefined && !(Array.isArray(o.dirs) && o.dirs.every(isText))) {
+    out.badTypes.push("dirs（要字符串数组）");
+  }
+  if (
+    o.softLimitUsd !== undefined &&
+    !(typeof o.softLimitUsd === "number" && Number.isFinite(o.softLimitUsd) && o.softLimitUsd > 0)
+  ) {
+    out.badTypes.push("softLimitUsd（要正数）");
+  }
+  return out;
+}
 
 /** 跑完整套自检。**不抛异常**：谁的机器都不该因为自检本身崩掉。 */
 export function runDoctor(input: DoctorInput): Check[] {
@@ -79,15 +173,26 @@ export function runDoctor(input: DoctorInput): Check[] {
     const gaps: string[] = [];
     if (!box.bounded) gaps.push("命令的资源上限（Windows 才有作业对象实现）");
     if (!secretsEncrypted()) gaps.push("密钥的加密存储（CLI 侧没有系统钥匙串入口）");
+    const versions = input.versions ?? { node: process.versions.node, bun: (process.versions as { bun?: string }).bun };
+    const tooOld = runtimeVersionProblem(versions);
+    const gotVersion = versions.bun ? `Bun ${versions.bun}` : `Node ${versions.node}`;
     out.push({
       name: "运行时",
-      ok: true,
+      /*
+       * ⚠️ 这一格原来**恒 ok:true**（审计 P201 / NEW-N7-7）：文件头的表写着它挡
+       * "Bun/Node 版本太低（node:sqlite/bun:sqlite 都没有）"，实现却只看沙箱与密钥，
+       * 从不看版本 —— 一屏绿勾里有一格是纯装饰。现在真判版本。
+       */
+      ok: !tooOld,
       detail:
         `${input.runtime}，SQLite 驱动走 \`${sqliteRuntimeName()}:sqlite\`` +
+        (versions.node || versions.bun ? `（${gotVersion}）` : "（读不出版本号）") +
         (gaps.length ? `；本平台**没有**：${gaps.join("、")}` : ""),
-      next: gaps.length
-        ? "这些是已知的平台差异（README 的「平台覆盖」一节列了全表）—— 别把它们当成已具备的保护"
-        : "无需处理（这一格只在你看到 migrate/upgrade 提示时才需要动）",
+      next: tooOld
+        ? `换到 ${versions.bun ? "Bun 1.0.0" : "Node 22.5.0"} 或更新的版本：低于它时 \`node:sqlite\`/\`bun:sqlite\` 不存在，建库那一步会直接抛`
+        : gaps.length
+          ? "这些是已知的平台差异（README 的「平台覆盖」一节列了全表）—— 别把它们当成已具备的保护"
+          : "无需处理（这一格只在你看到 migrate/upgrade 提示时才需要动）",
     });
   }
 
@@ -121,14 +226,24 @@ export function runDoctor(input: DoctorInput): Check[] {
     const existed = fs.existsSync(dbFile);
     let ok = false;
     let detail = "";
-    try {
-      const store = createSqliteSessionStore(input.dataDir);
-      void store.list();
-      store.close();
+    if (!existed) {
+      /*
+       * ⚠️ 库**不存在**时不去 open（审计 P213 / NEW-N7-19）：`createSqliteSessionStore`
+       * 一打开就建库，于是"只报告、不动机器"的自检会在用户的数据目录里多留一个
+       * `sessions.db`（可能还有 -wal / -shm）。不存在就说"还没有"，报的是现状。
+       */
       ok = true;
-      detail = existed ? `已存在，能打开：${dbFile}` : `还没有会话库（第一次跑会自动建）：${dbFile}`;
-    } catch (error) {
-      detail = `${dbFile}：${(error as Error)?.message?.slice(0, 100) ?? "打不开"}`;
+      detail = `还没有会话库（第一次跑会自动建）：${dbFile}`;
+    } else {
+      try {
+        const store = createSqliteSessionStore(input.dataDir);
+        void store.list();
+        store.close();
+        ok = true;
+        detail = `已存在，能打开：${dbFile}`;
+      } catch (error) {
+        detail = `${dbFile}：${(error as Error)?.message?.slice(0, 100) ?? "打不开"}`;
+      }
     }
     out.push({
       name: "会话库可打开",
@@ -154,9 +269,17 @@ export function runDoctor(input: DoctorInput): Check[] {
       detail: ok
         ? `${withKey.length} 家可用：${withKey.map((p) => p.id).join(" / ")}（key 来自环境变量或 ${file}）`
         : `一条都读不到（找过环境变量与 ${file}）`,
+      /*
+       * ⚠️ 这段指引原来教的是**读不到的写法**（审计 P198 / NEW-N7-4）：
+       * 它让人往凭据文件里写顶格的一行 `DEEPSEEK_API_KEY: sk-…`，而读取端
+       * （`engine/runtime/credentials.ts` 的 `parseRefs`）**只在 `refs:` 段内、且缩进一层**的
+       * 行里认键 —— 照那句话写完，下次跑仍然"一条都读不到"，这一格每次照旧红。
+       * 这正是向导里那个"写成扁平格式"的真 bug 在指引里的复活。
+       */
       next: ok
         ? "无需处理"
-        : `跑一次 \`ding init\` 会带你配好；或手动：把 key 写进 ${file}，比如 \`DEEPSEEK_API_KEY: sk-…\``,
+        : `跑一次 \`ding init\` 会带你配好；或手动往 ${file} 里加一段（键要缩进在 \`refs:\` **下面一层**，顶格那行读不到）：\n` +
+          `       refs:\n         DEEPSEEK_API_KEY: sk-…`,
     });
   }
 
@@ -222,21 +345,20 @@ export function runDoctor(input: DoctorInput): Check[] {
 
   /* ⑦ 配置合法性：写错的值不该悄悄改变行为 */
   {
-    const raw = input.rawConfig;
-    const rawMode = raw && typeof raw === "object" ? (raw as Record<string, unknown>).mode : undefined;
-    /*
-     * ⚠️ 判据是"**原文**在不在可选值里"，不是"收窄后有没有值" ——
-     * 收窄（`normalizeConfirmMode`）会把不认识的**回落**成默认档，所以收窄后永远有值。
-     * 第一版按收窄后的值判，于是写错了档位也报"合法"（那一格形同虚设）。
-     */
-    const modeBad = rawMode !== undefined && !CONFIRM_MODES.includes(rawMode as ConfirmMode);
+    const issues = configIssues(input.rawConfig);
+    const ok = !issues.unknownKeys.length && !issues.badTypes.length && issues.badMode === undefined;
+    const problems: string[] = [];
+    if (issues.badMode !== undefined) problems.push(`mode 写的是 ${JSON.stringify(issues.badMode)}，不认识`);
+    if (issues.unknownKeys.length) problems.push(`不认识的配置项：${issues.unknownKeys.join(" / ")}`);
+    if (issues.badTypes.length) problems.push(`类型不对：${issues.badTypes.join(" / ")}`);
     out.push({
       name: "配置文件合法",
-      ok: !modeBad,
-      detail: modeBad ? `mode 写的是 ${JSON.stringify(rawMode)}，不认识` : input.configPath,
-      next: modeBad
-        ? "档位只能写：全部允许 / 按需确认 / 每步确认（写错会被忽略并回落到默认档）"
-        : "无需处理",
+      ok,
+      detail: ok ? input.configPath : problems.join("；"),
+      next: ok
+        ? "无需处理"
+        : `档位只能写：${CONFIRM_MODES.join(" / ")}；可写的键只有：${CONFIG_KEYS.join(" / ")}` +
+          `（拼错或写错类型的项会被**静默丢掉**，表现就是"我明明配了啊"）。改不掉就删掉它：ding config unset <键>`,
     });
   }
 
@@ -326,5 +448,13 @@ export function doctorSummary(checks: readonly Check[]): string {
   return failed.length ? `${failed.length} 项待处理：${failed.map((c) => c.name).join(" / ")}` : "自检全通过";
 }
 
-/** 保留给将来的"跑一次就自动修"（现在只报告，不改用户的机器）。 */
-export const DOCTOR_NOTE = `doctor 只报告，不动你的机器（除了一次探针写入，写完就删）。`;
+/**
+ * 保留给将来的"跑一次就自动修"（现在只报告，不改用户的机器）。
+ *
+ * ⚠️ 这句话必须与实现一致（审计 P213 / NEW-N7-19）。这一格原来写的是
+ * "只报告，不动你的机器（除了一次探针写入，写完就删）"，而实现还会：
+ * `mkdirSync` 数据目录（不存在时）、以及**打开会话库**——而打开即建库，
+ * 于是它会在数据目录里留下一个 `sessions.db`。现在会话库那条改成"不存在就不 open"
+ * （见 ③ 的注释），写下来的是**真的**剩下这两件事。
+ */
+export const DOCTOR_NOTE = `doctor 只报告、不改你的设置：它至多做两件"碰一下机器"的事 —— 数据目录不存在时建它、往里面写一个探针文件（写完就删）。会话库不存在时它**不会**替你建（只在已有库时试打开）。`;

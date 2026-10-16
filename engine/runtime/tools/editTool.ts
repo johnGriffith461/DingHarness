@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { WRITE_MAX_CHARS, resolveWriteTarget } from "./writeTool";
+import { WRITE_MAX_BYTES, resolveWriteTarget } from "./writeTool";
 
 /**
  * 「改文件」工具的执行体（2026-10-14）。
@@ -29,8 +29,15 @@ import { WRITE_MAX_CHARS, resolveWriteTarget } from "./writeTool";
  *    （不隐瞒：让读的人知道这次不是逐字匹配）。
  */
 
-/** 一次编辑的上限（与写文件同量级：改不比写更大）。 */
-export const EDIT_MAX_CHARS = WRITE_MAX_CHARS;
+/**
+ * 一次编辑的上限：**字节**，与写文件、读回同一个数（审计 P234）。
+ *
+ * ⚠️ 它原来是 `EDIT_MAX_CHARS = WRITE_MAX_CHARS` 而拿去比 `stat.size` ——
+ * **名字说字符、量的却是字节**：写侧当年按字符（中文能写出 600KB 的文件），
+ * 这里按字节，于是"刚让模型写好的中文长文立刻改不动"。三处（写 / 读 / 改）
+ * 现在统一在同一个字节预算上：改文件不会比写文件更宽，也不会更窄。
+ */
+export const EDIT_MAX_BYTES = WRITE_MAX_BYTES;
 
 /** 结果。 */
 export type EditFileResult =
@@ -90,7 +97,7 @@ export async function editFileForModel(
   try {
     const stat = await fs.stat(target);
     if (stat.isDirectory()) return { ok: false, error: "这是一个目录，不是文件" };
-    if (stat.size > EDIT_MAX_CHARS) {
+    if (stat.size > EDIT_MAX_BYTES) {
       return { ok: false, error: `文件太大（${Math.round(stat.size / 1024)}KB），不适合整篇读进来改` };
     }
     raw = await fs.readFile(target, "utf8");

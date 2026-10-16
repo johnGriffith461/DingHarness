@@ -1,4 +1,5 @@
-import type { LogInput, LogRecord } from "./events";
+import type { LogRecord } from "./events";
+import type { LogInputAt } from "../ports/store";
 import type { SessionSummary } from "../../shared/ipc";
 
 /**
@@ -178,7 +179,7 @@ export type RestorePorts = {
   /** 读某个会话**已有**的记录（用来判重，见下面"只追加"）。 */
   loadSession: (sessionId: string) => Promise<{ records: LogRecord[] }>;
   /** 追加一批记录（返回落盘形态）。 */
-  appendSession: (sessionId: string, records: readonly LogInput[]) => Promise<LogRecord[]>;
+  appendSession: (sessionId: string, records: readonly LogInputAt[]) => Promise<LogRecord[]>;
   /**
    * 读一条配置型 store 现在有没有。`null`/`undefined` = 没有；`UNMAPPABLE_STORE_KEY` = 这台机器上这条键用不了。
    *
@@ -234,6 +235,22 @@ function stableStringify(value: unknown): string {
  *     `seq` 上与本地撞车，于是备份的**前几轮被静默当"已存在"丢掉**（P210）。
  *   · 配置型 store：`readStore` 说"本机已有"就跳过（不动用户现在的设置），只补缺失的键。
  *
+ * ## ⚠️ 原子性的**边界**（2026-10-16，审计 P130 如实记）
+ *
+ * 它是**逐会话原子**的，不是整体原子的：
+ *
+ * · 每个会话**只调一次** `appendSession`，而端口对那一次调用的承诺是
+ *   "这一批要么都进、要么都不进"（`engine/ports/store.ts` 的 `append` 注释，
+ *   SQLite 版就是整批一个事务）—— 所以不会出现"某个会话只恢复了一半"；
+ * · 但**多个会话之间**没有共同的事务：第 3 个会话写失败时，前 2 个已经在库里了。
+ *   这是**追加语义**下最合理的粒度：回滚要做的是"把已经追加的再删掉"，
+ *   而它与"只补不覆盖"直接冲突 —— 删错了就是**拿回滚把一个好备份变成数据损失**。
+ *
+ * 所以恢复中途失败时：错误**照实抛出去**（调用方能告诉用户"恢复到哪一步停的"），
+ * 而那之前已经落库的会话是**有效的部分恢复**，不是坏数据（它们的判重关系没被破坏，
+ * 下一次恢复会把剩下的补齐）。想要"要么全有要么一点没有"，要的是恢复**之前**的快照，
+ * 那是宿主的活（CLI 侧已经落一份 `pre-restore-<ts>.json`）。
+ *
  * @param payload 已通过 `validateBackup` 的备份
  * @param ports 写入口
  * @returns 恢复报告
@@ -263,10 +280,18 @@ export async function applyBackup(payload: BackupPayload, ports: RestorePorts): 
       missing.push(r);
     }
     if (!missing.length) continue;
-    /* 走 `LogInput`（去掉 seq/at 让存储自己重新编号 —— 存储的编号才是权威） */
-    const toWrite: LogInput[] = missing.map((r) => {
-      const { seq: _seq, at: _at, ...rest } = r as LogRecord & { seq: number; at: number };
-      return rest as LogInput;
+    /*
+     * 走 `LogInputAt`：**去掉 `seq` 让存储自己重新编号**（存储的编号才是权威 ——
+     * 备份里的编号是那台机器的），但 **`at` 要原样带上**（审计 P14 / P31）。
+     *
+     * 恢复是**搬运**，不是"这些东西现在才发生"：三段不同月份的历史恢复进来之后
+     * 还该分属那三个月份（成本账本按天的口径读的就是记录里的 `at`）。
+     * 指纹判重那一层（`recordSignature`）另外把 `seq`/`at` 都剔掉 —— 那是"内容是否同一"
+     * 的判据，与本条无关，两处口径各管各的。
+     */
+    const toWrite: LogInputAt[] = missing.map((r) => {
+      const { seq: _seq, ...rest } = r as LogRecord & { seq: number };
+      return rest as LogInputAt;
     });
     const written = await ports.appendSession(session.sessionId, toWrite);
     recordsAdded += written.length;
