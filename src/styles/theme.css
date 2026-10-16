@@ -950,3 +950,41 @@
   outline-offset: 2px;
   border-radius: 6px;
 }
+
+/* ---------- 模型选择器（2026-10-16 第二版：搜索 + 分组 + 就地拉取） ---------- */
+.wb-model-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 2px 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--fg-dim);
+}
+.wb-model-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+/* 组名占满一行，右边的「拉取」贴边 —— 与列表项左对齐 */
+.wb-model-group-name { flex: 1; display: inline-flex; align-items: center; gap: 5px; }
+.wb-model-pull {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.wb-model-pull:hover { color: var(--fg); border-color: var(--line-strong); }
+/* 拉取中/失败那句话：贴在那一组下面，别让它看起来像一条模型 */
+.wb-model-note { padding: 2px 8px 4px; font-size: 11px; color: var(--fg-dim); }

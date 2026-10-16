@@ -107,7 +107,6 @@ try {
   report.canvasWidth = await page.evaluate(
     () => Math.round(document.querySelector(".react-flow")?.getBoundingClientRect().width ?? -1),
   );
-  if (!(report.canvasWidth > 200)) bad.push(`画布宽度不对：${report.canvasWidth}px`);
   await shot(page, path.join(shots, "wb-24-canvas-open.png"));
 
   await closeCanvas(page);
@@ -132,6 +131,7 @@ try {
    * 「为什么你还有个聊天」），判据换成上面那段量的"画布开着时宽度正常"。
    * 判据没放宽 --- 是那件事不存在了。
    */
+  if (!(report.canvasWidth > 200)) bad.push(`画布宽度不对：${report.canvasWidth}px`);
   verdict(bad, "画布打开成立：真加节点并选中 / 开关能收 / 画布宽度正常");
 
   await browser.close().catch(() => undefined);
