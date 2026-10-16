@@ -51,7 +51,7 @@ import { NODE_KIND_META } from "./types";
 import { useRuntimeStore } from "./runtimeStore";
 import type { CanvasNode, NodeKind } from "./types";
 import { generateNodeFromSelection, type GenerateIntent } from "./canvasGenerate";
-import { useChatStore } from "@/ai/chatStore";
+import { listProviders } from "@/ai/aiClient";
 import { bump } from "./renderProbe";
 
 /**
@@ -402,9 +402,9 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
       }
 
       // 没有可用 provider 时不要静默失败，直接把原因摆到界面上
-      const chat = useChatStore.getState();
-      if (chat.providers.length === 0) await chat.loadProviders();
-      const usable = useChatStore.getState().providers.some((p) => p.available);
+      /* 2026-10-16：原来借 chatStore 查这事儿；聊天那套拆掉之后直接问 aiClient。 */
+      const providers = await listProviders();
+      const usable = providers.some((p) => p.available);
       if (!usable) {
         setGenerateState(
           "idle",

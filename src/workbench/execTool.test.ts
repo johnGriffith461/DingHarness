@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import {
   COMMAND_DEFAULT_TIMEOUT_MS,
+  COMMAND_MAX_OUTPUT_BYTES,
   COMMAND_MAX_OUTPUT_LINES,
+  COMMAND_STREAM_KEEP_BYTES,
+  TailBuffer,
   describeRunResult,
   runCommandForModel,
 } from "@engine/runtime/tools/execTool";
@@ -116,6 +119,51 @@ describe("超时与截断", () => {
     expect(r.output).not.toContain("line-1\n");
     expect(r.output.split("\n").length).toBeLessThanOrEqual(COMMAND_MAX_OUTPUT_LINES + 2);
   }, 30000);
+});
+
+/**
+ * ⭐ 边跑边收的**尾部缓冲**（2026-10-16，审计 P43）。
+ *
+ * 原来是 `out += chunk` 一路累加、结束时才裁 —— 一条狂打日志的命令能在"裁剪"
+ * 发生之前把主进程内存吃到一个 GB。这几条钉住：只留尾部、丢了多少如实记账、
+ * 从字节中间开头不吐乱码。把 `push` 里的丢弃逻辑改坏（比如不再丢头），这里会红。
+ */
+describe("输出缓冲 · 边收边丢（审计 P43）", () => {
+  it("⭐ 超过上限只留尾部，并如实记账丢了多少", () => {
+    const buf = new TailBuffer(1000);
+    for (let i = 0; i < 100; i += 1) buf.push(Buffer.from(`块${i}-`.repeat(30), "utf8")); // 每块约 200 字节
+    expect(buf.total).toBeGreaterThan(1000);
+    expect(buf.dropped, "超上限后必须真的丢掉前面的字节").toBeGreaterThan(0);
+    expect(Buffer.byteLength(buf.text(), "utf8")).toBeLessThanOrEqual(1200);
+    expect(buf.text()).toContain("块99-"); // 尾部在
+    expect(buf.text()).not.toContain("块0-"); // 头部没了
+  });
+
+  it("没超上限时一个字节都不丢（小输出原样）", () => {
+    const buf = new TailBuffer(1000);
+    buf.push(Buffer.from("甲", "utf8"));
+    buf.push(Buffer.from("乙", "utf8"));
+    expect(buf.dropped).toBe(0);
+    expect(buf.text()).toBe("甲乙");
+  });
+
+  it("从多字节字符中间开头不吐乱码（与 clampOutput 同一个处理）", () => {
+    /*
+     * 真实形状：Node 的流按"块"给数据，一个 3 字节的汉字**可以跨两块**。
+     * 丢掉第一块（保留上限到了）之后，第二块的开头正好是半个汉字 ——
+     * 直接 toString 会吐 U+FFFD，这里要求把它抹掉。
+     */
+    const bytes = Buffer.from("汉", "utf8");
+    const buf = new TailBuffer(2);
+    buf.push(bytes.subarray(0, 1)); // 前半截
+    buf.push(bytes.subarray(1)); // 后半截（拼起来才是完整的）
+    expect(buf.text()).toBe(""); // 半个字符 → 丢掉，不变成 U+FFFD
+  });
+
+  it("上限常量是个有限的合理值（不是 0、也不是无限）", () => {
+    expect(COMMAND_STREAM_KEEP_BYTES).toBeGreaterThan(COMMAND_MAX_OUTPUT_BYTES);
+    expect(COMMAND_STREAM_KEEP_BYTES).toBeLessThan(16 * 1024 * 1024);
+  });
 });
 
 describe("拒绝的每一条都要有理由", () => {

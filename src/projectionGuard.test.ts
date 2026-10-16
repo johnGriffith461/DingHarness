@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
  * ## 为什么这条必须存在
  *
  * "主进程发事件 → 渲染层解析成正文/留痕/用量"这段逻辑原来被写了**四遍**
- * （工作台 `store.ts`、聊天 `chatStore.ts`、悬浮助手 `FloatingAssistant.tsx`、
+ * （工作台 `store.ts`、悬浮助手 `FloatingAssistant.tsx`、
  * 主进程构造事件那一处），而且**已经漂移过**：工作台漏接 `usage`（`done` 分支都没有）、
  * 聊天不展开子智能体上交的调用、两处各有一个 `Map` 自己配对工具参数。
  *
@@ -36,7 +36,6 @@ const ROOT = path.resolve(__dirname, "..");
 /** 允许调用 `applyEvent` 的文件（相对仓库根，正斜杠）。 */
 const FOLD_CALL_SITES = new Set([
   "engine/core/events.ts", // 定义 + fold/projectTurn 内部折叠
-  "src/ai/chatStore.ts",
   "src/workbench/taskRuntime.ts", // C6-4：工作台那处折叠随运行时搬去了 taskRuntime.ts
   "src/workbench/FloatingAssistant.tsx",
   // 子智能体：它 fold 出**自己的报告**（正文/调过哪些工具/哪些被拦下）。

@@ -165,9 +165,63 @@ describe("看目录", () => {
   });
 });
 
+/**
+ * ⭐ 正则安检与中止（2026-10-16，审计 P44）。
+ *
+ * `pattern` 是**模型写的**，而搜索跑在**主进程**：一个 `(a+)+` 撞上长行就会
+ * 指数回溯把界面冻住，用户点停也插不进去。这几条钉住三道防线：
+ * 拒「量词套量词」、超长行只看前 N 字符（并如实计数）、中止信号真的被检查。
+ */
+describe("找文件 · 正则安检与中止（审计 P44）", () => {
+  it("⭐ 拒绝「量词套量词」（(a+)+ 这种会指数爆炸的形状）", async () => {
+    const r = await searchFilesForModel({ pattern: "(a+)+$" }, dirs());
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain("量词套量词");
+    /* 顺带给出路：字面量 */
+    expect(r.error).toContain("literal");
+  });
+
+  it("正常正则不被误伤（锚点 / 通配 / 字符类里的 +* 都是字面量）", async () => {
+    for (const pattern of ["^const", "星辰.*", "[+*]x", "(ab)+c"]) {
+      const r = await searchFilesForModel({ pattern }, dirs());
+      expect(r.ok, `pattern=${pattern} 被误拒`).toBe(true);
+    }
+  });
+
+  it("literal: true 绕过正则安检（同一串字符当文本搜是安全的）", async () => {
+    const r = await searchFilesForModel({ pattern: "(a+)+$", literal: true }, dirs());
+    expect(r.ok).toBe(true);
+  });
+
+  it("⭐ 超长行只匹配前 N 字符，并如实报「有多少行被截」", async () => {
+    const long = `${"x".repeat(2500)}NEEDLE`;
+    fs.writeFileSync(path.join(work(), "long-line.txt"), `短行 NEEDLE 在这里\n${long}\n`, "utf8");
+    const r = await searchFilesForModel({ pattern: "NEEDLE" }, dirs());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const all = r.matches.join("\n");
+    expect(all).toContain("long-line.txt:1:"); // 短行照常命中
+    expect(all, "第 2 行的命中在 2000 字符之外，不该被匹配到").not.toContain("long-line.txt:2:");
+    expect(r.trimmedLines, "被截的行要如实计数").toBeGreaterThan(0);
+    expect(describeSearchResult(r, "NEEDLE")).toContain("只看了每行前");
+    fs.rmSync(path.join(work(), "long-line.txt"), { force: true });
+  });
+
+  it("⭐ 已经中止的信号：直接返回中止，不扫完剩下的文件", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const r = await searchFilesForModel({ pattern: "星辰" }, dirs(), controller.signal);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("中止");
+  });
+});
+
 describe("两句话（留痕与回给模型共用）", () => {
   it("找文件说清命中几条、看了几个文件", () => {
-    expect(describeSearchResult({ ok: true, matches: ["a:1: x"], scanned: 3, skippedDirs: 1, truncated: false }, "星辰")).toContain("命中 1 条");
+    expect(
+      describeSearchResult({ ok: true, matches: ["a:1: x"], scanned: 3, skippedDirs: 1, truncated: false, trimmedLines: 0 }, "星辰"),
+    ).toContain("命中 1 条");
   });
 
   it("列目录说清几条，截断了要标出来", () => {

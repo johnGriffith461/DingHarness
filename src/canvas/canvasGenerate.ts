@@ -1,5 +1,5 @@
 import { completeOnce } from "@/ai/aiClient";
-import { currentChatSettings } from "@/ai/chatStore";
+import { resolveChatRoute } from "@/ai/route";
 import { useRuntimeStore } from "./runtimeStore";
 import { appendVersion, readMeta, seedGeneration } from "./generation";
 import type { GenerationMeta, GenerationNode } from "./generation";
@@ -106,7 +106,12 @@ export async function generateContent(
   instruction: string,
   context: string,
 ): Promise<{ text: string; error?: string }> {
-  const { provider, model } = currentChatSettings();
+  /*
+   * ⚠️ 2026-10-16：这里原来读 chatStore 的 provider/model（画布那条聊天侧栏的尾巴）。
+   * 侧栏拆掉之后，画布生成跟工作台/聊天走**同一条路由**（`resolveChatRoute`）——
+   * 一致的那一份真理只有一处，别的地方照它读。
+   */
+  const { provider, model } = await resolveChatRoute();
   if (!provider) {
     return { text: "", error: "还没有可用的 AI 通道（在 Electron 里启动，并确保至少一个 provider 有密钥）" };
   }
@@ -211,7 +216,8 @@ export async function generateNodeFromSelection(
 
   const latest = useRuntimeStore.getState();
   const node = nodeFromContent(intent, text, at, latest.nodes) as unknown as GenerationNode & CanvasNode;
-  const { provider, model } = currentChatSettings();
+  /* 同一条路由（见上面那处说明）：这里只为把"谁生成的"记进节点元数据 */
+  const { provider, model } = await resolveChatRoute();
   const withMeta = {
     ...node,
     data: {
@@ -326,7 +332,7 @@ export async function regenerateNode(nodeId: string, instruction?: string): Prom
   // 3) 追加版本并置为当前版
   const after = useRuntimeStore.getState().nodes.find((n) => n.id === nodeId);
   if (after) {
-    const { provider, model } = currentChatSettings();
+    const { provider, model } = await resolveChatRoute();
     const meta = appendVersion(after as unknown as GenerationNode, model || provider || "unknown");
     useRuntimeStore.getState().patchNodeData(nodeId, { generation: { ...meta, prompt } });
   }
