@@ -143,10 +143,10 @@ ding plugins remove word-count         # 卸掉（台账 + 拷进来的那份内
 
 ```bash
 # ① 生成一把发布者钥匙（Ed25519）—— 私钥留在你手里，别外传
-pnpm plugin:sign keygen --out ./acme-key
+pnpm plugin-sign keygen --out ./acme-key
 
 # ② 签名：把 publisher + signature 写进 ding-plugin.json
-pnpm plugin:sign sign --dir ./my-plugin --publisher acme --name "ACME 工作室" --key ./acme-key.pem
+pnpm plugin-sign sign --dir ./my-plugin --publisher acme --name "ACME 工作室" --key ./acme-key.pem
 ```
 
 ⚠️ 签完**再改任何文件、或改清单里任何字段**（哪怕只是改个 description）都要**重新签**。

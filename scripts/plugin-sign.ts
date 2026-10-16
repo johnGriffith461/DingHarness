@@ -5,10 +5,10 @@
  *
  * ```bash
  * # ① 生成一把发布者钥匙（Ed25519）—— 私钥留在你手里，公钥写进清单
- * node scripts/plugin-sign.mjs keygen --out ./my-publisher-key
+ * pnpm plugin-sign keygen --out ./my-publisher-key
  *
  * # ② 签名（把 publisher + signature 写进 ding-plugin.json）
- * node scripts/plugin-sign.mjs sign --dir ./my-plugin --publisher my-publisher \
+ * pnpm plugin-sign sign --dir ./my-plugin --publisher my-publisher \
  *      --name "我的工作室" --key ./my-publisher-key.pem
  * ```
  *
@@ -36,7 +36,7 @@ const flag = (name: string, fallback = ""): string => {
 };
 const command = argv[0];
 
-const USAGE = "用法：pnpm plugin:sign keygen --out <前缀> | sign --dir <插件目录> --publisher <id> --key <私钥.pem> [--name 显示名]";
+const USAGE = "用法：pnpm plugin-sign keygen --out <前缀> | sign --dir <插件目录> --publisher <id> --key <私钥.pem> [--name 显示名]";
 
 if (command === "keygen") {
   const out = flag("out", "ding-publisher-key");

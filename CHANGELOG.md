@@ -25,7 +25,7 @@
 - **信任表**（`plugins/trusted-publishers.json`，TOFU 口径）：第一次见 `id+key` 记 `unverified`、
   再见记 `trusted`；同一个 id 带**另一把**钥匙 → 拒装（轮换要走显式操作，不能被"装个插件"顺手接受）。
   ⚠️ `trusted` 只说"同一把钥匙"，**不说"它安全"** —— 这句话同时写在 PLUGIN.md 里。
-- 给作者的工装：`pnpm plugin:sign keygen | sign`（`.ts` 用 tsx 跑 —— 摘要算法与验签
+- 给作者的工装：`pnpm plugin-sign keygen | sign`（`.ts` 用 tsx 跑 —— 摘要算法与验签
   **同一份实现**，复制一份到脚本里迟早漂）。PLUGIN.md 补了"签名"一节（怎么签、
   签什么、装的时候五种情形分别发生什么）。
 

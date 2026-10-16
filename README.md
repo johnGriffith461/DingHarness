@@ -114,7 +114,11 @@ engine/                       内核（不 import electron —— 有守卫盯�
 
 hosts/
 ├─ cli/ding.ts     命令行宿主：run / sessions / record / replay / models
-└─ （桌面宿主在 electron/：窗口与各 store；跑一轮也走 createEngine）
+├─ server/         HTTP 宿主（`ding serve`）：会话/空间/中继/渠道
+└─ mcp/            画布 MCP server：把画布工具族交给**外部 MCP 客户端**（见 hosts/mcp/README.md）
+
+packages/          SDK：engine-core（事件 + 主循环，无 IO）/ engine（完整能力面）
+examples/sdk-turn/ 10 分钟跑通一轮的两个示例（完整面 / 最小面）
 
 electron/      桌面宿主：窗口、IPC、各 store（JSON 落盘）、MCP 连接器
                ├─ 会话事件 → engine 的 SQLite 库（userData/sessions.db）
@@ -169,6 +173,20 @@ pnpm ding config [show|set <键> <值>|unset <键>] # 默认 provider / 模型 /
 `--json` 给脚本/CI 用；`--dev` 会多出两个**工程模式**命令（`record` / `replay`，验收驱动器）。
 
 装成全局命令：`node scripts/install-cli.mjs`（默认只构建并打印怎么装；加 `--link` 才真装）。
+
+## 当 SDK 用（把引擎嵌进你自己的程序）
+
+```bash
+npm i @ding/engine        # 完整能力面（SQLite + 工具 + 凭据 + 插件）
+npm i @ding/engine-core   # 最小嵌入面（只有事件 + 主循环，不碰 IO）
+```
+
+十分钟那条路在 [`examples/sdk-turn/README.md`](examples/sdk-turn/README.md)；
+它有两个**真能跑**的示例（完整面走 SQLite、最小面走内存 store），CI 里每次 push 都会
+把两个包打成 tarball、装进干净工程、原样跑一遍（`pnpm verify:sdk`）。
+
+公开面冻结在 `packages/api.frozen.json`（加名字要补清单、删或改签名要 ADR + major），
+版本与发布口径见 [`RELEASE.md`](RELEASE.md)。
 
 ## 开发与验收
 

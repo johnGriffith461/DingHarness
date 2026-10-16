@@ -39,7 +39,7 @@
     "package:linux": "node scripts/stage-app.mjs && electron-builder --linux AppImage deb",
     "verify:remote": "tsx scripts/verify-remote.ts",
     "verify:team": "tsx scripts/verify-team.ts",
-    "plugin:sign": "tsx scripts/plugin-sign.ts",
+    "plugin-sign": "tsx scripts/plugin-sign.ts",
     "sdk:build": "node scripts/build-sdk.mjs",
     "verify:sdk": "node scripts/verify-sdk.mjs",
     "verify:canvas-mcp": "node scripts/verify-canvas-mcp.mjs",
