@@ -1,6 +1,8 @@
 import { appendFileSync, existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { join } from "node:path";
+import { killLeftovers } from "./accept/harness.mjs";
 
 /**
  * 批跑**不依赖模型**的验收脚本。
@@ -143,7 +145,19 @@ const CASES = [
    */
   ["accept-brand.mjs", "视觉系统（三族字体 / 纸白·暖墨 / 无冷色 / 区块标题衬线）"],
   ["accept-chips.mjs", "输入区 chip（项目 / 按需确认点了要有反应）"],
+  /*
+   * ⭐ 2026-10-16：**三条曾经因"要模型"被排除的脚本收回来了**（审计 G46/G47 的正面结果）。
+   *
+   * 它们要的是"发一轮、有回复"，而批跑现在自带**本地假通道** + `DSH_NO_REAL_MODEL=1`
+   * （见本文件上面的 `startLocalFakeModel`）—— 于是这一类脚本重新变得"免费且确定"。
+   * 同时它们也是 G08/G09/G10 的主场：三条脚本原来**永远红**（读废弃的 .jsonl 通道 /
+   * 断言从未赋值的变量），本次一并修好，回收是为了让修复真的被定期跑到。
+   */
+  ["accept-material.mjs", "资料（@ 添加资料：真进请求 / 标记在正文里 / 工具清单有落痕）"],
+  ["accept-sessionlog.mjs", "会话日志（走 IPC：request 带用户内容 / 工具成对 / done 收尾 / 正文对得上界面）"],
+  ["accept-abort.mjs", "停止与流式（正文实时在长 / 停止键 / 点了真收 / 步骤说已中止 / 日志有终止记录）"],
   ["accept-modelchip.mjs", "输入区的「模型 · 思考」chip（真列模型 / 真落盘 / 默认不发字段）"],
+  ["accept-settings-models.mjs", "设置·模型页（左列 provider / 状态是真的 / 拉取要么出清单要么给人话 / 勾选与默认落盘）"],
   /*
    * ⚠️ `accept-theme.mjs` **2026-10-14 退役**（从这份清单摘掉，脚本本体留在原地并加了墓碑说明）：
    * 它点的是设置弹窗里的「外观」行，而**外观早就挪到账号菜单的子菜单**（`wb-acct-appearance`）——
@@ -378,10 +392,74 @@ const CASES = [
 ];
 
 /**
+ * **批跑自带的本地假 provider**（2026-10-16，审计 G46/G47 的正面修法）。
+ *
+ * ## 为什么批跑必须有它
+ *
+ * 审计实测：这套号称"不依赖模型"的批跑里**混着真调模型的用例** ——
+ * `accept-schedule` 的判定必须等真模型往返才可能绿，而且用的是
+ * `.credentials.yaml` 里那把**机器级真 key**（出网记账为证）。
+ * 也就是说：**批跑绿过一次，用的是真额度**。
+ *
+ * 现在批跑自己起一个 OpenAI 兼容的本地假服务，并把环境指过去：
+ *   · `STRATA_BASE_URL` → 这个假服务（`strata` 是那个本来就指本机的 provider）；
+ *   · `DSH_NO_REAL_MODEL=1` → 内核那道闸（图像/视频/探测也管，见 P53）。
+ * 于是"零出网"是**结构上**成立的：假服务在 127.0.0.1 上，闸只放行本机地址。
+ *
+ * ⚠️ 边界如实记：桌面侧如果走的是"自己存着的通道"而不是 `strata`，
+ * 这次回答仍然来自假服务（因为我们把 `strata` 指向了它），但它**不会**因此
+ * 变成真模型 —— 只是那些脚本若依赖真实回复内容，会以断言红的形式暴露出来
+ * （那是"该移出免模型清单"的信号，不是"白花钱"）。
+ */
+function startLocalFakeModel() {
+  const server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (d) => (raw += d));
+    req.on("end", () => {
+      /*
+       * 认两个端点：`/chat/completions`（文本轮）与 `/models`（列模型/探测）。
+       * 一律回最短的合法形状 —— 不编工具调用（脚本要工具就自己会暴露出来）。
+       */
+      if (req.url?.includes("/models")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data: [{ id: "deepseek-flash" }, { id: "accept-fake" }] }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+      const frame = (delta, finish) =>
+        `data: ${JSON.stringify({ id: "accept", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish ?? null }] })}\n\n`;
+      res.write(frame({ role: "assistant", content: "（本地假通道）收到。" }));
+      res.write(frame({}, "stop"));
+      res.write(`data: ${JSON.stringify({ id: "accept", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 } })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = server.address().port;
+      resolve({ url: `http://127.0.0.1:${port}/v1`, close: () => new Promise((r) => server.close(() => r())) });
+    });
+  });
+}
+
+const localModel = await startLocalFakeModel();
+console.log(`批跑自带假通道：${localModel.url}（配 DSH_NO_REAL_MODEL=1 —— 零出网是结构上成立的）`);
+
+/**
+ * 一条验收的硬超时（2026-10-16，待补收尾方案 §三.1）。
+ *
+ * 实测依据：76 条串行跑里 **29 条（38%）卡到 260 秒被硬杀** —— 而"跑不完"这件事
+ * 以前**没有兜底**（不设超时，卡住就永远是它）。所以：一条用例最多跑这么久，
+ * 到点连子进程一起收拾掉，并**按"超时"这个类别单独记**（不是"产品断言失败"）。
+ */
+const CASE_TIMEOUT_MS = Number(process.env.DSH_ACCEPT_TIMEOUT_MS ?? 260_000);
+
+/**
  * 跑一条验收并抓它的退出码。
  *
  * @param {string} file 脚本名（相对 scripts/accept）
- * @returns {Promise<{ code: number, tail: string }>}
+ * @returns {Promise<{ code: number, tail: string, out: string, timeout: boolean }>}
  */
 function run(file) {
   return new Promise((resolve) => {
@@ -414,69 +492,93 @@ function run(file) {
      * 那时这个 pin 就可以撤掉。
      */
     env.DSH_STORE_BACKEND = "file";
+    /* 本地假通道 + 零出网闸（审计 G46/G47）；`strata` 是那个本来就指本机的 provider */
+    env.DSH_NO_REAL_MODEL = "1";
+    env.STRATA_BASE_URL = localModel.url;
+    env.STRATA_API_KEY = "accept-local-fake";
+    /*
+     * ⭐ **批跑强制一个隔离数据目录**（2026-10-16，审计 G01 的兜底）。
+     *
+     * 开发态应用的数据目录默认是**仓库里那个 `data/`**（`main.ts` 的 `configureDataDir`）。
+     * 脚本自己没设 `DSH_CANVAS_DATA_DIR` 的话，这一跑就会去写（甚至删）真实数据。
+     * 这一层先给一个 `.verify/` 下的目录兜住；脚本自己设的那个会覆盖它
+     * （所以还有下面那道"源码级拒绝"）。
+     */
+    env.DSH_CANVAS_DATA_DIR = env.DSH_CANVAS_DATA_DIR || join(RECORDS_DIR, "batch-data", file.replace(/\.mjs$/, ""));
     const child = spawn(process.execPath, [join(ACCEPT_DIR, file)], {
       stdio: ["ignore", "pipe", "pipe"],
       env,
     });
     let out = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      /*
+       * 超时了就**连子进程一起收拾**（脚本自己可能起了应用；它没机会收尾了）。
+       * 用 /T 杀整棵树 —— 只杀脚本进程的话，它起的应用会变成孤儿。
+       */
+      try {
+        spawnSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });
+      } catch {
+        /* 已经死了就算了 */
+      }
+    }, CASE_TIMEOUT_MS);
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
-    child.on("close", (code) => resolve({ code: code ?? 1, out, tail: out.trim().split("\n").slice(-3).join(" | ") }));
+    child.on("close", (code) =>
+      resolve({
+        code: timedOut ? 124 : (code ?? 1),
+        out,
+        tail: out.trim().split("\n").slice(-3).join(" | "),
+        timeout: timedOut,
+      }),
+    );
   });
 }
 
 /**
- * 清掉上一条验收留下的应用进程，并**等端口真正释放**。
+ * 这一条脚本**能不能进批跑**（2026-10-16，审计 G01 的源码级守卫）。
  *
- * 用 `taskkill /T` 连子进程一起清 —— Electron 会起主进程 + GPU + 渲染器多个，
- * 只杀主进程会留下占着单实例锁的残骸。
- *
- * ⚠️ 等待时间是 4 秒，不是 1.5 秒。原因（§119/§120）：批跑里 **18 条只有 5 条
- * 自己设了 `DSH_DEBUG_PORT`**，其余 13 条都用**同一个默认端口**。
- * 进程被 kill 之后端口不会瞬间释放，下一条就可能连到**残留实例**或分配失败 ——
- * 表现正是"某两条偶发红、单独跑却是绿的"。
- *
- * @returns {Promise<void>} 清完（或本来就没有）即 resolve
+ * 判据：不许把应用的数据目录钉成仓库里那个真实的 `data/` ——
+ * 那意味着这一跑会**动用户真实的数据**（其中 9 条还带 `rmSync`）。
+ * 命中就**拒跑**（并当场说清为什么），而不是"默默还是跑了"。
  */
-function killLeftovers() {
-  return new Promise((resolve) => {
-    const deadline = Date.now() + 12000;
-    const tick = () => {
-      const first = spawn("taskkill", ["/F", "/IM", "Ding Harness.exe", "/T"], { stdio: "ignore" });
-      first.on("close", () => {
-        const second = spawn("taskkill", ["/F", "/IM", "electron.exe", "/T"], { stdio: "ignore" });
-        second.on("close", () => {
-          setTimeout(() => {
-            /*
-             * ⭐ 等到**真的没有残留进程**，不是睡固定秒数（§137）。
-             *
-             * 原来这里是"睡 4 秒就往下走"。而 `taskkill /F` 发出后进程不会瞬间消失，
-             * **强杀期间新的实例起不来** —— 于是某几条报出 `ECONNREFUSED` 或
-             * `ws disconnected code=1006`，看起来像产品坏了。
-             * 判据应当是"还剩几个进程"，不是"过了几秒"。
-             */
-            if (countLeftovers() === 0 || Date.now() > deadline) return resolve();
-            tick();
-          }, 500);
-        });
-        second.on("error", () => resolve());
-      });
-      first.on("error", () => resolve());
-    };
-    tick();
-  });
+function isolationProblem(file) {
+  try {
+    const text = readFileSync(join(ACCEPT_DIR, file), "utf8");
+    if (/const\s+\w*DATA\w*\s*=\s*"data"\s*;/.test(text)) {
+      return '脚本把数据目录钉成了仓库里真实的 "data" —— 会动真实数据；改成 ".verify/data-<名字>" 再进批跑';
+    }
+    return null;
+  } catch {
+    return "脚本读不出来（路径不对？）";
+  }
 }
 
-/** 现在还活着的 electron / 工作台 进程数。 */
-function countLeftovers() {
-  const n = (name) => {
-    const r = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${name}`, "/NH"], { encoding: "utf8" });
-    const s = r.stdout ?? "";
-    if (/no tasks|没有运行|信息: 没有/i.test(s)) return 0;
-    return (s.match(new RegExp(name.replace(".", "\\."), "gi")) ?? []).length;
-  };
-  return n("electron.exe") + n("Ding Harness.exe");
+/**
+ * 把一次结果**分类**（2026-10-16，待补收尾方案 §三.1 的判据）。
+ *
+ * 三类要能一眼分开，因为它们指向完全不同的下一步：
+ *   · `assert` —— 产品/脚本的断言真失败了（要修的是它们）；
+ *   · `environment` —— 应用根本没起来 / CDP 连不上 / 端口坏（修环境或换装置）；
+ *   · `timeout` —— 到硬超时被收拾（要么产品挂住，要么脚本等不到条件）；
+ *   · `no-judge` —— 跑完了、退 0，但源码里**没有任何判定**（等于没测）。
+ */
+function classify(result, source) {
+  if (result.timeout) return "timeout";
+  if (result.code !== 0) {
+    const envRed = /ECONNREFUSED|connectOverCDP|connect ETIMEDOUT|code=1006|换了三个端口都起不来|一个页面都没建|ports? .*不通|EPERM|EBUSY|EISDIR/i;
+    return envRed.test(result.out ?? "") ? "environment" : "assert";
+  }
+  const hasJudge = /process\.exitCode\s*=\s*1|verdict\(|bad\.push|failures\.push|failed\s*\+=\s*1|process\.exit\(1\)|throw new Error/.test(source ?? "");
+  return hasJudge ? "pass" : "no-judge";
 }
+
+/*
+ * 清残留**只有一份实现**（2026-10-16，审计 G03）：
+ * 从 `./accept/harness.mjs` 里 import —— 那边按"我们自己起的应用的命令行开关"认领
+ * （审计 G43 的修法），不再按程序名全机强杀，也不再有第二份会各自漂的实现。
+ */
 
 /*
  * 开跑前清掉上一次的失败日志（2026-10-14）。
@@ -490,10 +592,28 @@ try {
   /* 目录还不存在就算了 */
 }
 
+/*
+ * `DSH_ACCEPT_ONLY=a.mjs,b.mjs`：只跑清单里的这几条（2026-10-16）。
+ * 用途：逐条复查（先修超时那一组、再修快速非零那一组 —— 待补收尾方案 §三.3），
+ * 以及给运行器自己留一个"小样本"回归口。
+ */
+const only = (process.env.DSH_ACCEPT_ONLY ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const SELECTED = only.length ? CASES.filter(([f]) => only.includes(f)) : CASES;
+
 const results = [];
-for (const [file, what] of CASES) {
+for (const [file, what] of SELECTED) {
   if (!existsSync(join(ACCEPT_DIR, file))) {
-    results.push({ file, what, ok: false, note: "脚本不存在 —— 名字改了就该更新这里的清单" });
+    results.push({ file, what, ok: false, verdict: "blocked", note: "脚本不存在 —— 名字改了就该更新这里的清单" });
+    continue;
+  }
+  /*
+   * ⭐ **源码级隔离守卫**（审计 G01）：把数据目录钉成仓库里真实 `data/` 的脚本
+   * **拒绝跑**（其中有的还带 rmSync）——“批跑不许碰真实数据”这条规矩不能靠记得。
+   */
+  const isolation = isolationProblem(file);
+  if (isolation) {
+    console.log(`  ⛔ ${file.padEnd(22)} 拒绝跑：${isolation}`);
+    results.push({ file, what, ok: false, verdict: "blocked", note: isolation });
     continue;
   }
 
@@ -508,8 +628,22 @@ for (const [file, what] of CASES) {
    */
   await killLeftovers();
 
-  let { code, tail, out } = await run(file);
+  let result = await run(file);
+  let { code, tail, out } = result;
   let retried = false;
+  let timedOut = result.timeout;
+  /* 第一次红了就先留证据（哪怕重试会过）—— 偶发的形态全在这份日志里 */
+  if (code !== 0 && out.trim()) {
+    try {
+      writeFileSync(
+        join(RECORDS_DIR, `accept-fail-${file.replace(/\.mjs$/, "")}.log`),
+        `# ${file}（${what}）第一次失败于 ${new Date().toISOString()}${timedOut ? "（超时）" : ""}\n\n${out}`,
+        "utf8",
+      );
+    } catch {
+      /* 写不进去不影响判定 */
+    }
+  }
 
   /*
    * 失败后重试一次。
@@ -527,10 +661,21 @@ for (const [file, what] of CASES) {
     const second = await run(file);
     if (second.code === 0) {
       code = 0;
+      timedOut = false;
     } else {
       tail = second.tail;
       /* ⚠️ 重试失败时**换成第二次的输出**（第一次那份已经没有诊断价值了） */
       out = second.out;
+      timedOut = second.timeout;
+      try {
+        writeFileSync(
+          join(RECORDS_DIR, `accept-fail-${file.replace(/\.mjs$/, "")}.log`),
+          `# ${file}（${what}）两次都失败于 ${new Date().toISOString()}${timedOut ? "（第二次超时）" : ""}\n\n${out}`,
+          "utf8",
+        );
+      } catch {
+        /* 写不进去不影响判定 */
+      }
     }
   }
 
@@ -554,12 +699,20 @@ for (const [file, what] of CASES) {
     }
   }
 
+  let source = "";
+  try {
+    source = readFileSync(join(ACCEPT_DIR, file), "utf8");
+  } catch {
+    /* 读不出来就按"有判定"处理（隔离守卫那一步已经会拦读不出来的） */
+  }
+  const verdictClass = classify({ code, out, timeout: timedOut }, source);
   results.push({
     file,
     what,
-    ok: code === 0,
+    ok: verdictClass === "pass",
     retried,
-    note: code === 0 ? "" : tail.slice(0, 160),
+    verdict: verdictClass,
+    note: code === 0 ? (verdictClass === "no-judge" ? "跑通但**没有任何判定** —— 它在批跑里等于没测" : "") : tail.slice(0, 160),
     ...(code === 0 ? {} : { out }),
   });
 }
@@ -655,12 +808,35 @@ for (const r of results) {
   if (!r.ok) console.log(`      ${r.note}`);
 }
 const failed = results.filter((r) => !r.ok);
+const byVerdict = (kind) => results.filter((r) => r.verdict === kind).length;
 console.log("");
 const flaked = results.filter((r) => r.retried && r.ok).length;
+/*
+ * ⚠️ 自述数字**实时算**（审计 G12：注释里那句"共 99 条、收 58 条"早就过期了，
+ * 而它正是读的人判断"这批覆盖率"的唯一依据）。
+ */
+const scriptFiles = (() => {
+  try {
+    return readdirSync(ACCEPT_DIR).filter((f) => f.startsWith("accept-") && f.endsWith(".mjs")).length;
+  } catch {
+    return 0;
+  }
+})();
 console.log(
-  `共 ${results.length} 条，通过 ${results.length - failed.length}，失败 ${failed.length}` +
+  `脚本目录共 ${scriptFiles} 条 accept-*.mjs，本清单收 ${CASES.length} 条${only.length ? `，本次只跑指定的 ${SELECTED.length} 条` : ""}`,
+);
+console.log(
+  `共 ${results.length} 条：通过 ${byVerdict("pass")}` +
+    `，断言红 ${byVerdict("assert")}` +
+    `，环境红 ${byVerdict("environment")}` +
+    `，超时 ${byVerdict("timeout")}` +
+    `，拒跑 ${byVerdict("blocked")}` +
+    `，**无判定 ${byVerdict("no-judge")}**` +
     (flaked ? `　（其中 ${flaked} 条是重试才过的 —— 偶发，还没有根治）` : ""),
 );
+if (byVerdict("no-judge")) {
+  console.log("⚠️ 上面这些「无判定」的脚本跑通了却什么都没断 —— 在批跑里等于没测（要补判据或标废）");
+}
 console.log(`记录已写入 ${HISTORY}（今天 ${today}）`);
 
 if (stales.length) {
@@ -674,7 +850,17 @@ if (failed.length) {
   /* 把"完整输出在哪"直接说出来 —— 少了这一行，没人会想到 .verify 里有日志。 */
   console.error("失败脚本的完整输出（红了先看这些文件，别急着重跑）：");
   for (const f of failed) console.error(`  · ${f.file} → .verify/accept-fail-${f.file.replace(/\.mjs$/, "")}.log`);
+  const envRed = byVerdict("environment");
+  const timeouts = byVerdict("timeout");
+  if (envRed || timeouts) {
+    console.error(
+      `⚠️ 其中环境红 ${envRed} 条、超时 ${timeouts} 条 —— ` +
+        "这两类先改装置/环境（应用没起来、等不到条件），别当成产品坏了。",
+    );
+  }
   console.error("✗ 有验收没过 —— 先查它是产品坏了还是脚本过期了（§56 撞过后者）");
+  await localModel.close();
   process.exit(1);
 }
+await localModel.close();
 console.log("✓ 全部通过");
