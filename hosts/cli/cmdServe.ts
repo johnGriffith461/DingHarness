@@ -161,6 +161,15 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
           store.close();
         }
       },
+      /* 逐段读（审计 V5-3 3.3 用；与上面同一个库，但它要扫很多段，所以不建引擎） */
+      loadSession: async (sessionId: string) => {
+        const store = createSqliteSessionStore(dataDir, "sessions.db", {}, { protectBefore: startedAt });
+        try {
+          return await store.load(sessionId);
+        } finally {
+          store.close();
+        }
+      },
       /*
        * 同步中继（V5-2 2.1）：serve **hosts** 它（中继=事件总线+协调器，
        * 本地 SQLite 仍是数据权威 —— 见 `engine/sync/relay.ts` 的文件头）。

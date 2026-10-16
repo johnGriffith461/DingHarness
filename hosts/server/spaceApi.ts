@@ -11,6 +11,7 @@ import {
   type SpaceMember,
 } from "../../engine/core/space";
 import { emptySpaceFile, issueToken, type SpaceFile, type SpaceStore } from "../../engine/adapters/spaceStore";
+import { auditOf, auditQuery, auditSummary, type AuditEntry } from "../../engine/core/audit";
 import type { RequesterIdentity } from "./agentServer";
 
 /**
@@ -31,6 +32,9 @@ import type { RequesterIdentity } from "./agentServer";
 /** 身份 + 空间账（`agentServer` 每一请求现算 —— 3.5 的"即时生效"就靠这个）。 */
 export type SpaceCtx = {
   store: SpaceStore;
+  /** 会话清单 + 逐段读取（审计查询要扫日志）—— 宿主注入（没有就是 501）。 */
+  listSessions?: () => Promise<Array<{ sessionId: string; owner?: string }>>;
+  loadSession?: (sessionId: string) => Promise<{ records: unknown[] }>;
   /** 当前身份（已由主鉴权认出来）。 */
   identity: RequesterIdentity & { roles?: readonly MemberRole[] };
   /** 在跑的那条连接的中止句柄（撤销成员时要把他的通道关掉 —— U8-5）。 */
@@ -140,6 +144,45 @@ export async function handleSpaceRoute(
   res: ServerResponse,
   ctx: SpaceCtx,
 ): Promise<boolean> {
+  /* 审计查询（V5-3 3.3）也归这一族：它查的是"空间里谁做过什么" */
+  if (path === "/v1/audit" && req.method === "GET") {
+    const space0 = spaceOf(ctx.store);
+    const roles0 = spaceRolesOf(space0, ctx.identity);
+    if (!ctx.identity.owner && !roles0) {
+      ctx.note(`非成员查审计：${ctx.identity.id}`);
+      json(res, 403, { error: `${ctx.identity.id} 不在这个空间里` });
+      return true;
+    }
+    if (!ctx.identity.owner && !canManage(roles0)) {
+      ctx.note(`审计被拒（${ctx.identity.id} 不是 owner/admin）`);
+      json(res, 403, { error: "审计只有所有者/管理员能查" });
+      return true;
+    }
+    if (!ctx.listSessions || !ctx.loadSession) {
+      ctx.note("审计未接线");
+      json(res, 501, { error: "这个服务没有接审计需要的会话库（宿主没给 listSessions/loadSession）" });
+      return true;
+    }
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const member = (url.searchParams.get("member") ?? "").trim();
+    const sinceRaw = url.searchParams.get("since");
+    const limitRaw = url.searchParams.get("limit");
+    const sessions = await ctx.listSessions();
+    const entries: AuditEntry[] = [];
+    for (const s of sessions) {
+      const got = await ctx.loadSession(s.sessionId);
+      entries.push(...auditOf(s.sessionId, got.records as never[]));
+    }
+    const hits = auditQuery(entries, {
+      ...(member ? { member } : {}),
+      ...(sinceRaw === null ? {} : { since: Number(sinceRaw) }),
+      ...(limitRaw === null ? {} : { limit: Number(limitRaw) }),
+    });
+    ctx.note(`审计：${hits.length} 条（共 ${entries.length} 条在册）`);
+    json(res, 200, { entries: hits, summary: auditSummary(entries) });
+    return true;
+  }
+
   if (!path.startsWith("/v1/space")) return false;
   const space = spaceOf(ctx.store);
   const roles = spaceRolesOf(space, ctx.identity);

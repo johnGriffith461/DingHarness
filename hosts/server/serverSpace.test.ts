@@ -280,6 +280,61 @@ describe("团队空间（V5-3 3.1/3.2/3.5）", () => {
     cleanupDirs.push(dir);
   });
 
+
+  it("⭐ 3.3 审计端点：owner/admin 查得到（按人过滤）；viewer 与非成员 403；没接线 501", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "dh-audit-"));
+    const store = createSpaceStore(dir);
+    const records = [
+      { seq: 1, at: 10, requestId: "r", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "alice 问的" }], actor: { id: "alice", kind: "user" } },
+      { seq: 2, at: 20, requestId: "r", type: "text", text: "答", actor: { id: "main", kind: "agent" } },
+      { seq: 3, at: 30, requestId: "r2", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "主人的话" }], actor: { id: "local", kind: "user" } },
+    ];
+    const { port, token } = await boot({
+      space: store,
+      listSessions: async () => [
+        { sessionId: "task-1", conversationId: "task-1", title: "t", updatedAt: 1, bytes: 1, owner: "local" },
+      ],
+      loadSession: async () => ({ records }),
+    });
+    const boss = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    const all = await call(port, "/v1/audit", { headers: boss });
+    expect(all.status).toBe(200);
+    const body = JSON.parse(all.text) as { entries: Array<{ actor: { id: string }; action: string }>; summary: unknown[] };
+    expect(body.entries.map((e) => e.actor.id).sort()).toEqual(["alice", "local"]);
+    expect(body.summary).toHaveLength(2);
+
+    const onlyAlice = JSON.parse((await call(port, "/v1/audit?member=alice", { headers: boss })).text) as {
+      entries: Array<{ actor: { id: string } }>;
+    };
+    expect(onlyAlice.entries.map((e) => e.actor.id)).toEqual(["alice"]);
+
+    /* alice 是 viewer → 403（审计只有 owner/admin 能查）；非成员也 403 */
+    const code = JSON.parse(
+      (await call(port, "/v1/space/invite", { method: "POST", headers: boss, body: "{}" })).text,
+    ).code as string;
+    const aliceToken = JSON.parse(
+      (
+        await call(port, "/v1/space/join", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code, memberId: "alice" }),
+        })
+      ).text,
+    ).token as string;
+    expect((await call(port, "/v1/audit", { headers: { Authorization: `Bearer ${aliceToken}` } })).status).toBe(403);
+
+    cleanupDirs.push(dir);
+  });
+
+  it("审计没接会话库：501（不假装「没有记录」）", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "dh-audit2-"));
+    const { port, token } = await boot({ space: createSpaceStore(dir) });
+    const res = await call(port, "/v1/audit", { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(501);
+    cleanupDirs.push(dir);
+  });
+
   it("空间没接线：/v1/space/* 回 501（join 也一样 —— 不假装能入团）", async () => {
     const { port, token } = await boot();
     const boss = { Authorization: `Bearer ${token}` };

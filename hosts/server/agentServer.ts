@@ -96,6 +96,14 @@ export type ServerOptions = {
   /** 会话列表（宿主注入的真实实现）。不给 = `/v1/sessions` 回 501。 */
   listSessions?: () => Promise<SessionSummary[]>;
   /**
+   * 逐段读会话记录（审计查询用；V5-3 3.3）。
+   *
+   * ⚠️ 与 `/v1/sessions/:id` 那条**不是同一条路**：那条要建一次引擎（`engine.resume`），
+   * 而审计要**扫很多段** —— 每段建一次引擎是荒唐的。所以单给这一格。
+   * 不给 = 审计端点回 501（不假装"没有记录"）。
+   */
+  loadSession?: (sessionId: string) => Promise<{ records: unknown[] }>;
+  /**
    * **同步中继**（V5-2 任务 2.1）。
    *
    * 给了它，`/v1/streams/*` 那组端点才开门（create / claim / push / pull / 状态）——
@@ -573,8 +581,8 @@ async function handle(
       return;
     }
 
-    /* ── 团队空间（V5-3 3.1/3.2/3.5）：整族路由在 `./spaceApi.ts` ── */
-    if (path.startsWith("/v1/space")) {
+    /* ── 团队空间与审计（V5-3 3.1/3.2/3.3/3.5）：整族路由在 `./spaceApi.ts` ── */
+    if (path.startsWith("/v1/space") || path === "/v1/audit") {
       if (!opts.space) {
         note = "space 未接线";
         json(res, 501, { error: "这个服务没有接团队空间（宿主没把 space 账本交给它）" });
@@ -582,6 +590,9 @@ async function handle(
       }
       const handled = await handleSpaceRoute(path, req, res, {
         store: opts.space,
+        /* 审计（3.3）扫会话要这两个 —— 与 `/v1/sessions` 同一个来源 */
+        ...(opts.listSessions ? { listSessions: opts.listSessions } : {}),
+        ...(opts.loadSession ? { loadSession: opts.loadSession } : {}),
         identity,
         note: (t) => (note = t),
         abortRunsOf: (memberId) => {
