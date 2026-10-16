@@ -26,7 +26,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 
 const PACKAGES = {
-  "engine-core": { dir: "packages/engine-core", entry: "dist/engine/index.js" },
+  "engine-core": { dir: "packages/engine-core", entry: "dist/packages/engine-core/src/index.js" },
   engine: { dir: "packages/engine", entry: "dist/packages/engine/src/index.js" },
 };
 

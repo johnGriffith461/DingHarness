@@ -12,5 +12,5 @@
     "baseUrl": "../..",
     "paths": {}
   },
-  "include": ["../../engine/index.ts"]
+  "include": ["src/index.ts"]
 }

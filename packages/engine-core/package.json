@@ -4,11 +4,11 @@
   "description": "Ding Harness 的最小嵌入面：事件模型 + 主循环（无 IO —— 不需要文件系统就能跑一轮）",
   "license": "Apache-2.0",
   "type": "commonjs",
-  "main": "./dist/engine/index.js",
-  "types": "./dist/engine/index.d.ts",
+  "main": "./dist/packages/engine-core/src/index.js",
+  "types": "./dist/packages/engine-core/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/engine/index.d.ts",
+      "types": "./dist/packages/engine-core/src/index.d.ts",
       "default": "./dist/engine/index.js"
     }
   },

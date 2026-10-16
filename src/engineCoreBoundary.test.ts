@@ -21,7 +21,9 @@ import { describe, expect, it } from "vitest";
  *
  * ## 口径
  *
- * · 闭包 = 本地相对 import 的传递闭包（`import`/`export from`/动态 `import()`）；
+ * · 闭包 = 本地相对 import 的传递闭包（`import`/`export from`/动态 `import()`），
+ *   **从包自己的公开面**（`packages/engine-core/src/index.ts`）出发；
+
  * · 外部依赖里**只禁 IO 与宿主**（`node:*`、`bun:*`、`electron`）：`ai` / `@ai-sdk/*` /
  *   `zod` 这些是同构的纯库，留在最小面里是对的（主循环就要用它们发请求）；
  * · 闭包只许落在 `engine/core`、`engine/runtime`、`engine/ports`、`shared` 与入口文件里 ——
@@ -29,8 +31,8 @@ import { describe, expect, it } from "vitest";
  */
 
 const ROOT = path.resolve(__dirname, "..");
-/** 最小面的入口（`createEngine`）。 */
-const ENTRY = "engine/index.ts";
+/** 最小面的入口（包自己的公开面文件 —— 冻结清单与它同一份）。 */
+const ENTRY = "packages/engine-core/src/index.ts";
 
 /** 闭包里**不许**出现的外部模块。 */
 const FORBIDDEN: ReadonlyArray<{ pattern: RegExp; why: string }> = [
@@ -41,7 +43,7 @@ const FORBIDDEN: ReadonlyArray<{ pattern: RegExp; why: string }> = [
 ];
 
 /** 闭包只许在这些目录里（加目录 = 有意识地扩大最小面，改动要能解释）。 */
-const ALLOWED_PREFIXES = ["engine/index.ts", "engine/core/", "engine/runtime/", "engine/ports/", "shared/"];
+const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engine/core/", "engine/runtime/", "engine/ports/", "shared/"];
 
 /** 闭包规模预算 —— 涨了要有人解释"这一层为什么也得进来"。 */
 const CLOSURE_BUDGET = 45;
