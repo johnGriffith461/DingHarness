@@ -5,6 +5,7 @@ import { networkInterfaces } from "node:os";
 
 import type { Engine } from "../../engine/index";
 import type { SyncRelay } from "../../engine/sync/relay";
+import { MAIN_AGENT, type Actor } from "../../engine/core/actor";
 import { humanFailure } from "../../shared/errors";
 import type { ConfirmMode, SessionSummary } from "../../shared/ipc";
 import { PRODUCT_NAME, PRODUCT_VERSION } from "../../shared/product";
@@ -680,7 +681,16 @@ async function handle(
       }
       const cwd = typeof body.cwd === "string" ? body.cwd : opts.cwd;
       note = `run${sessionId ? ` session=${sessionId}` : ""}`;
-      await runStreaming(res, opts, message, cwd, sessionId, activeRuns);
+      /* 成员往别人的会话里写：**先拒**（比"跑完发现记不进去"诚实 —— 归属冲突在 C1 是硬墙） */
+      if (!identity.owner && sessionId && opts.listSessions) {
+        const mine = (await opts.listSessions()).find((x) => x.sessionId === sessionId);
+        if (mine && (mine.owner ?? LOCAL_OWNER_ID) !== identity.id) {
+          note = `成员 ${identity.id} 想写 ${mine.owner} 的会话`;
+          json(res, 403, { error: `这段会话归 ${mine.owner ?? LOCAL_OWNER_ID}，你写不进去（你是 ${identity.id}）` });
+          return;
+        }
+      }
+      await runStreaming(res, opts, message, cwd, sessionId, activeRuns, identity);
       return;
     }
 
@@ -721,7 +731,7 @@ async function handle(
         return;
       }
       note = `hook=${name}`;
-      await runStreaming(res, opts, opts.hooks[name]!, opts.cwd, undefined, activeRuns);
+      await runStreaming(res, opts, opts.hooks[name]!, opts.cwd, undefined, activeRuns, identity);
       return;
     }
 
@@ -765,7 +775,16 @@ async function runStreaming(
   cwd: string,
   sessionId: string | undefined,
   activeRuns: Set<AbortController>,
+  identity: RequesterIdentity,
 ): Promise<void> {
+  /*
+   * V5-2 2.3：**事件流带上 actor 维度**（谁发起的、谁在答）。
+   *
+   * 与日志同一条口径（C5）：人那一侧 = 请求者身份（2.2 认出来的）、
+   * agent 那一侧 = 主循环（`MAIN_AGENT`，与内核记日志用的是同一个常量）。
+   * 这里做的是**透传**：SSE 每一帧多一个 `actor` 字段，事件本体一个字不改。
+   */
+  const requester: Actor = { id: identity.id, kind: "user" };
   /* 建引擎（cwd 不在授权范围会抛 CwdNotAllowedError → 外层翻成 400，且此时还没开头） */
   const built = await opts.makeEngine(cwd);
 
@@ -793,9 +812,19 @@ async function runStreaming(
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
+  /*
+   * 第一帧：**这一轮是谁发起的**（V5-2 2.3；协作场景里"群里谁问的"必须看得见）。
+   * 新增一种帧类型是加法：旧客户端认不出就跳过（`ding connect` 按 `event:` 名收，
+   * 未知帧不炸 —— 测试里钉着）。
+   */
+  send("started", { actor: requester, ...(sessionId ? { sessionId } : {}) });
+
   try {
     const outcome = await built.engine.run({
       ...(sessionId ? { sessionId } : {}),
+      /* C5/C1 的接线：这一轮的记录归发起人；**新会话也归他**（已有会话的归属不会被改） */
+      actor: requester,
+      ownerActor: requester,
       provider: opts.provider,
       ...(opts.model ? { model: opts.model } : {}),
       messages: [{ role: "user", content: message }],
@@ -803,11 +832,12 @@ async function runStreaming(
       useTools: true,
       maxSteps: 8,
       abortSignal: controller.signal,
-      onEvent: (event) => send("event", event),
+      onEvent: (event) => send("event", { ...event, actor: MAIN_AGENT }),
     });
     send("done", {
       ok: outcome.ok,
       aborted: outcome.aborted,
+      actor: MAIN_AGENT,
       cwd, // 生效的工作目录（审计 P181：不回显的话，客户端看不出目录被换过）
       ...(outcome.error ? { error: humanFailure(outcome.error) } : {}),
     });
@@ -815,6 +845,7 @@ async function runStreaming(
     send("done", {
       ok: false,
       aborted: controller.signal.aborted,
+      actor: MAIN_AGENT,
       cwd,
       error: humanFailure(String((error as Error)?.message ?? error)),
     });

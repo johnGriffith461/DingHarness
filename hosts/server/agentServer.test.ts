@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CwdNotAllowedError } from "../cwd";
 import { startAgentServer, type ServerOptions } from "./agentServer";
 import { createSyncRelay } from "../../engine/sync/relay";
+import { parseSse } from "../cli/cmdConnect";
 
 /**
  * Agent Server（Phase 17；2026-10-16 按审计第 1 单收紧）。
@@ -796,5 +797,87 @@ describe("成员 token 与 owner 过滤（V5-2 2.2）", () => {
     await expect(boot({ members: [{ id: "  ", token: "x" }] })).rejects.toThrow(/缺 id/);
     await expect(boot({ members: [{ id: "a", token: "   " }] })).rejects.toThrow(/口令是空的/);
     await expect(boot({ token: "same-token", members: [{ id: "a", token: "same-token" }] })).rejects.toThrow(/与主口令相同/);
+  });
+});
+
+/**
+ * SSE 事件流的 actor 维度（V5-2 任务 2.3）。
+ *
+ * 判据三条：① 第一帧 `started` 说明"谁发起的"（成员身份）；
+ * ② 事件帧与 `done` 帧都带 agent 那一侧的 actor（与内核记日志同一个常量）；
+ * ③ 成员往**别人的会话**里写：先拒（403）—— 归属在 C1 是硬墙，
+ *    而"跑完发现记不进去"那种静默是这一层要避免的。
+ */
+describe("SSE 事件流带上 actor（V5-2 2.3）", () => {
+  /** 收一整段 SSE（`/v1/run` 那种真流）。 */
+  function collectSse(port: number, path: string, body: string, headers: Record<string, string>): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest({ host: "127.0.0.1", port, path, method: "POST", headers }, (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => (text += chunk));
+        res.on("end", () => resolve(text));
+      });
+      req.on("error", reject);
+      req.end(body);
+    });
+  }
+
+  it("⭐ 第一帧说明谁发起的；事件帧与 done 帧带 agent 的 actor", async () => {
+    const members = [{ id: "alice", token: "sk-alice-123" }];
+    const { port } = await boot({ members });
+    const text = await collectSse(
+      port,
+      "/v1/run",
+      JSON.stringify({ message: "你好" }),
+      { Authorization: "Bearer sk-alice-123", "content-type": "application/json" },
+    );
+    const frames = parseSse(text).events;
+    const names = frames.map((f) => f.event);
+    expect(names[0], "第一帧不是 started").toBe("started");
+    expect((frames[0]!.data as { actor: { id: string; kind: string } }).actor).toEqual({ id: "alice", kind: "user" });
+
+    const eventFrames = frames.filter((f) => f.event === "event");
+    expect(eventFrames.length, "一条事件帧都没有？").toBeGreaterThan(0);
+    for (const frame of eventFrames) {
+      expect((frame.data as { actor?: { id: string } }).actor, `事件帧没带 actor：${JSON.stringify(frame.data)}`).toEqual({
+        id: "main",
+        kind: "agent",
+      });
+    }
+    const done = frames.find((f) => f.event === "done");
+    expect((done?.data as { actor?: { id: string } }).actor).toEqual({ id: "main", kind: "agent" });
+  });
+
+  it("⭐ 成员往别人的会话里写：403（不是「跑完发现记不进去」）", async () => {
+    const members = [{ id: "alice", token: "sk-alice-123" }];
+    const { port } = await boot({
+      members,
+      listSessions: async () => [
+        { sessionId: "task-1", conversationId: "task-1", title: "本机主人的", updatedAt: 1, bytes: 1, owner: "local" },
+      ],
+    });
+    const res = await call(port, "/v1/run", {
+      method: "POST",
+      headers: { Authorization: "Bearer sk-alice-123", "content-type": "application/json" },
+      body: JSON.stringify({ message: "插一句", sessionId: "task-1" }),
+    });
+    expect(res.status).toBe(403);
+    expect(res.text).toContain("归 local");
+  });
+
+  it("主人往任何会话里写：照旧（老口径不回归）", async () => {
+    const { port, token } = await boot({
+      listSessions: async () => [
+        { sessionId: "task-1", conversationId: "task-1", title: "谁的都行", updatedAt: 1, bytes: 1, owner: "alice" },
+      ],
+    });
+    const text = await collectSse(
+      port,
+      "/v1/run",
+      JSON.stringify({ message: "你好", sessionId: "task-1" }),
+      { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+    );
+    expect(parseSse(text).events.some((f) => f.event === "started")).toBe(true);
   });
 });

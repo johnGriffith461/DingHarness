@@ -229,6 +229,16 @@ export async function cmdConnect(parsed: Parsed): Promise<number> {
         console.log(JSON.stringify({ event: ev.event, ...data }));
         continue;
       }
+      /*
+       * V5-2 2.3：`started` 帧带"这一轮谁发起的"（成员身份，2.2 认出来的）。
+       * ⚠️ **本机主人（id=local）不啰嗦** —— 单机单人用的输出与从前逐字相同；
+       * 只有别人（成员）发起时才多这一行，那正是协作场景里需要看见的。
+       */
+      if (ev.event === "started") {
+        const who = (data.actor as { id?: unknown } | undefined)?.id;
+        if (typeof who === "string" && who && who !== "local") console.log(`  ▸ 这一轮由 ${who} 发起`);
+        continue;
+      }
       if (ev.event === "done") continue;
       /* 事件形状与内核一致（`TurnEvent`）：只显示"用户看得见的那些" */
       const type = typeof data.type === "string" ? data.type : "";
