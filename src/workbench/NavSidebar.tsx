@@ -6,7 +6,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  Blocks,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -49,7 +48,6 @@ import { SettingsDialog } from "./SettingsDialog";
 export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListTodo; shortcut?: string }> = [
   { view: "home", label: "新工作任务", icon: ListTodo, shortcut: shortcutFor("home") },
   { view: "scheduled", label: "定时任务", icon: Clock, shortcut: shortcutFor("scheduled") },
-  { view: "plugins", label: "插件·技能·伙伴", icon: Blocks, shortcut: shortcutFor("plugins") },
   { view: "phone", label: "手机遥控电脑", icon: Smartphone },
 ];
 

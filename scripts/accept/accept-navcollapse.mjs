@@ -51,7 +51,6 @@ const clickToggle = async () => {
 // 几个页面（首页的头部没有这颗；插件/定时任务/手机遥控/任务视图 + 任务中心）
 // ⚠️ 2026-10-16：「云盘」整页拆掉了，所以这一格少一个页面。
 const pages = [
-  ["plugins", "插件·技能·伙伴"],
   ["scheduled", "定时任务"],
   ["phone", "手机遥控电脑"],
 ];
@@ -110,7 +109,7 @@ if ((await threadsEntry.count()) > 0) {
 
 /* ---------- 3) 反复开合 10 次 ---------- */
 
-await page.locator('[data-testid="wb-nav-plugins"]').click();
+await page.locator('[data-testid="wb-nav-scheduled"]').click();
 await sleep(600);
 let rounds = 0;
 for (let i = 0; i < 10; i += 1) {

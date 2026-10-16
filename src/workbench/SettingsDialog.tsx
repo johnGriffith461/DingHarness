@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Sparkles, Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
+import { Blocks, Sparkles, Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -111,6 +111,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       本体路由里有 `chat/memory/list|clear|delete`，它就是个真实功能，
       内容存本地一样成立。现在 value 显示**真实条数**，点开就是记忆面板。
     */
+    { group: 0, icon: <Blocks size={13} />, label: "插件·技能·伙伴", value: "" },
     { group: 1, icon: <Sparkles size={13} />, label: "模型", value: "provider / 模型 / 拉取" },
     { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
   ];
@@ -165,6 +166,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     title={r.todo ?? ""}
                     disabled={Boolean(r.todo)}
                     onClick={() => {
+                      if (r.label === "插件·技能·伙伴") {
+                        setSubPage("plugins");
+                        return;
+                      }
                       if (r.label === "模型") {
                         setSubPage("models");
                         return;

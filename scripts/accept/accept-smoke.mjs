@@ -77,7 +77,7 @@ await step("窗口：自绘标题栏 + 三个按钮 + 是拖动区", async () =>
 
 /* ③ 左栏：收起 → 展开（在插件页做 —— 那颗按钮在页面头部，几个页面都有） */
 await step("左栏：能收起能展开", async () => {
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  await page.locator('[data-testid="wb-nav-scheduled"]').click();
   await sleep(700);
   const width = () =>
     page.evaluate(() => {
