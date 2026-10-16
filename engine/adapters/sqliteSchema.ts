@@ -42,7 +42,7 @@ import { adoptSearchBody } from "./sqliteSearch";
  */
 
 /** 会话库的**表结构版本**（最后一步迁移的版本号）。 */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /** 一步迁移。 */
 export type MigrationStep = {
@@ -132,6 +132,21 @@ export const MIGRATIONS: readonly MigrationStep[] = [
       const cols = queryAll(db, "PRAGMA table_info(sessions)") as { name?: string }[];
       if (!cols.some((c) => c.name === "owner")) {
         db.exec("ALTER TABLE sessions ADD COLUMN owner TEXT NOT NULL DEFAULT 'local'");
+      }
+    },
+  },
+  {
+    version: 5,
+    name: "会话分叉来源（C6/V5-2 2.5）",
+    apply: (db) => {
+      /*
+       * `forked_from`：这段会话是从哪段分叉出来的（**可空** —— 绝大多数会话没有来源）。
+       * 不给默认值：`NULL` 就是"不是分叉出来的"，比编一个空串更诚实
+       * （空串会被读的人当成"从某个空 id 分出来的"）。
+       */
+      const cols = queryAll(db, "PRAGMA table_info(sessions)") as { name?: string }[];
+      if (!cols.some((c) => c.name === "forked_from")) {
+        db.exec("ALTER TABLE sessions ADD COLUMN forked_from TEXT");
       }
     },
   },

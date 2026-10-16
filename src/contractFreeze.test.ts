@@ -32,6 +32,8 @@ import { CANVAS_EVENT_TYPES, CANVAS_SURFACE } from "@engine/core/canvasContract"
 
 const ROOT = path.resolve(__dirname, "..");
 const FROZEN = path.join(ROOT, "engine/core/contracts.frozen.json");
+const EVENTS_SRC = path.join(ROOT, "engine/core/events.ts");
+const IPC_SRC = path.join(ROOT, "shared/ipc.ts");
 const ADR_DIR = path.join(ROOT, "ADR");
 
 /** 现在代码里的契约面（能被计算的那些；每项是**值**，不是描述）。 */
@@ -69,11 +71,45 @@ function currentSurface(): Record<string, string> {
     "canvas.surface": Object.entries(CANVAS_SURFACE)
       .map(([op, verdict]) => `${op}:${verdict}`)
       .join(","),
+    /*
+     * 记录**类型表**：`parseLogLine` 认的那些（源码形状，见下）。
+     * 加一种记录类型 = 改契约（要 ADR + 更新清单）—— 这条面补的是"新类型从门底下溜过去"。
+     */
+    "record.types": recordTypesFromSource(),
+    /* 会话摘要的字段集（`SessionSummary` 加一格也是改契约） */
+    "session.summary.fields": summaryFieldsFromSource(),
   };
 }
 
+/** 从 `events.ts` 源码里抽 `parseLogLine` 认的记录类型（专用分支 + `known` 列表）。 */
+function recordTypesFromSource(): string {
+  const src = readFileSync(EVENTS_SRC, "utf8");
+  const special = [...src.matchAll(/if \(o\.type === "([a-z-]+)"\)/g)].map((m) => m[1]!);
+  const knownMatch = /const known = \[([^\]]*)\]/.exec(src);
+  const known = knownMatch ? [...knownMatch[1]!.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]!) : [];
+  return [...new Set([...special, ...known])].sort().join(",");
+}
+
+/** 从 `shared/ipc.ts` 源码里抽 `SessionSummary` 的字段名。 */
+function summaryFieldsFromSource(): string {
+  const src = readFileSync(IPC_SRC, "utf8");
+  const start = src.indexOf("export type SessionSummary = {");
+  expect(start, "shared/ipc.ts 里找不到 SessionSummary（被搬走了？）").toBeGreaterThan(-1);
+  /* 类型块以**单独一行的 `};`** 收尾（按行找，不会切到别的块） */
+  const lines = src.slice(start).split("\n");
+  const body: string[] = [];
+  for (const line of lines.slice(1)) {
+    if (line === "};") break;
+    body.push(line);
+  }
+  const fields = [...body.join("\n").matchAll(/^\s{2}([A-Za-z_][A-Za-z0-9_]*)\??:/gm)].map((m) => m[1]!);
+  return fields.sort().join(",");
+}
+
 describe("契约 diff 门（3.10b）：改契约必须留名（ADR + 清单一起动）", () => {
-  const frozen = JSON.parse(readFileSync(FROZEN, "utf8")) as { entries: Record<string, { adr?: string }> };
+  const frozen = JSON.parse(readFileSync(FROZEN, "utf8")) as {
+    entries: Record<string, { value?: string; adr?: string }>;
+  };
   const current = currentSurface();
 
   it("① 清单里的每一项都对应代码里的一个契约面（新面没进清单 = 有人偷偷改了契约）", () => {
@@ -91,6 +127,31 @@ describe("契约 diff 门（3.10b）：改契约必须留名（ADR + 清单一�
   it("② 清单里没有已经消失的项（门自己也要诚实，别当化石）", () => {
     const stale = Object.keys(frozen.entries).filter((key) => !(key in current));
     expect(stale, `这些项已经不在代码里了，从清单里删掉：${stale.join(", ")}`).toEqual([]);
+  });
+
+  it("⭐ 每项的值都要与清单**逐字相同**（改了一个字也得走 ADR + 更新清单）", () => {
+    /*
+     * ⚠️ 这条是门真正在看东西的地方（2026-10-17 补：第一版只比**键**，
+     * 结果"给 SessionSummary 加一格"这种改法**一点都不红** —— 变异实证当场逮住）。
+     * 判词里把新旧值都打出来，省得改的人去猜。
+     */
+    const changed: string[] = [];
+    for (const [key, value] of Object.entries(current)) {
+      const entry = frozen.entries[key];
+      if (!entry) continue; // ① 已经报过
+      if (entry.value !== value) {
+        changed.push(`  ${key}:\n    清单：${String(entry.value)}\n    现在：${value}`);
+      }
+    }
+    expect(
+      changed,
+      [
+        "这些契约面的**值**变了 —— 改契约要留名：",
+        ...changed,
+        "正确做法：① 先在 ADR/ 加一份 ADR（或修订既有的那一份）说明为什么改、谁受影响；",
+        "② 再把新值抄进 engine/core/contracts.frozen.json（连同那份 ADR 文件名）。",
+      ].join("\n"),
+    ).toEqual([]);
   });
 
   it("⭐ 每一项都带着来历的 ADR，且那份 ADR 真的在 ADR/ 里", () => {

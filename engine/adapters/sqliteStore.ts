@@ -270,7 +270,7 @@ export function createSqliteSessionStore(
   );
   const maxSeq = prep("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?");
   const upsertSession = prep(
-    `INSERT INTO sessions(id, kind, title, updated_at, bytes, owner) VALUES(?, ?, ?, ?, ?, ?)
+    `INSERT INTO sessions(id, kind, title, updated_at, bytes, owner, forked_from) VALUES(?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET updated_at = ?, bytes = bytes + ?,
        title = CASE WHEN sessions.title = '' THEN excluded.title ELSE sessions.title END`,
   );
@@ -319,7 +319,7 @@ export function createSqliteSessionStore(
   );
   const sessionById = prep("SELECT id, title, updated_at, bytes, owner FROM sessions WHERE id = ?");
   const selectSessions = prep(
-    "SELECT id, title, updated_at, bytes, owner FROM sessions ORDER BY updated_at DESC",
+    "SELECT id, title, updated_at, bytes, owner, forked_from FROM sessions ORDER BY updated_at DESC",
   );
   const countSessions = prep("SELECT COUNT(*) AS n FROM sessions");
   const totalBytes = prep("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions");
@@ -532,7 +532,7 @@ export function createSqliteSessionStore(
          */
         const at = Date.now();
         /* owner 只在**新建**那一刻写进去（ON CONFLICT 那支不碰它 —— 首次写入者定归属） */
-        upsertSession.run(sessionId, kind, title, at, bytes, opts?.owner ?? "local", at, bytes);
+        upsertSession.run(sessionId, kind, title, at, bytes, opts?.owner ?? "local", opts?.forkedFrom ?? null, at, bytes);
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
@@ -685,7 +685,14 @@ export function createSqliteSessionStore(
     },
 
     async list(opts?: { kind?: SessionKind }): Promise<SessionSummary[]> {
-      const rows = selectSessions.all() as { id: string; title: string; updated_at: number; bytes: number; owner?: string }[];
+      const rows = selectSessions.all() as {
+        id: string;
+        title: string;
+        updated_at: number;
+        bytes: number;
+        owner?: string;
+        forked_from?: string | null;
+      }[];
       const out: SessionSummary[] = [];
       for (const row of rows) {
         const kind = kindOf(row.id);
@@ -699,6 +706,8 @@ export function createSqliteSessionStore(
           bytes: Number(row.bytes),
           /* C1：归属跟着摘要一起给（老库补列后一律 'local'） */
           owner: row.owner ?? "local",
+          /* V5-2 2.5：分叉来源（没有就是没有 —— 不给空串） */
+          ...(row.forked_from ? { forkedFrom: row.forked_from } : {}),
         });
       }
       return out;

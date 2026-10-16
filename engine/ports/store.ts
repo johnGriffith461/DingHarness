@@ -156,7 +156,15 @@ export type SessionKind = "chat" | "task" | "cli";
  * 对**已有**会话：owner 不同 → **拒绝**（抛错，消息里说清是归属冲突）；
  * 不传 owner = 老行为（本机单用户；实现用默认 `local` 建库）。
  */
-export type AppendOptions = { owner?: string };
+export type AppendOptions = {
+  owner?: string;
+  /**
+   * 这段会话是从哪段**分叉**出来的（V5-2 2.5；只在新建那一刻生效）。
+   *
+   * 副本与源此后的变化互不影响；这一格只记"从哪来"（审计与界面上那句警示用）。
+   */
+  forkedFrom?: string;
+};
 
 /** `load` 的选项（C1）：给了 `owner` 就做归属校验（陌生 owner 不返回内容）。 */
 export type LoadOptions = { owner?: string };

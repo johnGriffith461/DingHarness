@@ -159,6 +159,11 @@ export type SessionSummary = {
    * 才会出现别的值。
    */
   owner?: string;
+  /**
+   * 从哪段会话**分叉**出来的（V5-2 2.5）。绝大多数会话没有这一格
+   * （`undefined` = 不是分叉来的，不是"从空 id 分出来的"）。
+   */
+  forkedFrom?: string;
 };
 
 /**

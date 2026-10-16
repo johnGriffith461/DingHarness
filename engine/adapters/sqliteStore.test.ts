@@ -840,3 +840,31 @@ describe("C1：会话归属（owner）", () => {
     expect(await store.load("没这段", { owner: "bob" })).toEqual({ records: [], skipped: 0 });
   });
 });
+
+/**
+ * fork 的存储侧（V5-2 2.5）：`forked_from` 只在新建那一刻写、之后不再改。
+ */
+describe("C6/2.5：分叉来源（forked_from）", () => {
+  it("⭐ 副本会话带着来源；普通会话没有这一格（undefined，不是空串）", async () => {
+    const store = openStore();
+    const sid = chatSessionId("src");
+    await store.append(sid, [request("原话")]);
+    const forkId = chatSessionId("copy");
+    await store.append(forkId, [request("原话")] as never, { forkedFrom: sid });
+
+    const rows = new Map((await store.list()).map((x) => [x.sessionId, x]));
+    expect(rows.get(forkId)?.forkedFrom).toBe(sid);
+    expect(rows.get(sid)?.forkedFrom).toBeUndefined();
+
+    /* 之后再写不改来源（归属/来源都是创建时的事实） */
+    await store.append(forkId, [ev({ type: "text", text: "副本里接着说" })], { forkedFrom: "别的会话" });
+    expect(new Map((await store.list()).map((x) => [x.sessionId, x])).get(forkId)?.forkedFrom).toBe(sid);
+  });
+
+  it("旧库（没有 forked_from 列）：补列之后读不出来源（不是「分叉自空会话」）", async () => {
+    const store = openStore();
+    await store.append(chatSessionId("old"), [request("老会话")]);
+    const row = (await store.list()).find((x) => x.sessionId === chatSessionId("old"));
+    expect(row?.forkedFrom).toBeUndefined();
+  });
+});
