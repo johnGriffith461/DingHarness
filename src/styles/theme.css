@@ -989,3 +989,42 @@
 .wb-model-pull:hover { color: var(--fg); border-color: var(--line-strong); }
 /* 拉取中/失败那句话：贴在那一组下面，别让它看起来像一条模型 */
 .wb-model-note { padding: 2px 8px 4px; font-size: 11px; color: var(--fg-dim); }
+
+/* ---------- 设置 →「模型」页（2026-10-16，照开源项目的 provider 页布局） ---------- */
+.wb-modelset { display: flex; gap: 12px; min-height: 260px; }
+.wb-modelset-list { width: 190px; flex: 0 0 190px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.wb-modelset-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 9px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--fg); font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.wb-modelset-row:hover { background: var(--bg-2); }
+.wb-modelset-row.is-on { background: var(--bg-2); border-color: var(--line-strong); }
+.wb-modelset-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-modelset-row em { font-size: 11px; font-style: normal; color: var(--fg-dim); white-space: nowrap; }
+.wb-modelset-row em.is-ok { color: var(--ok); }
+.wb-modelset-row em.is-warn { color: var(--warn); }
+.wb-modelset-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.wb-modelset-head { display: flex; flex-direction: column; gap: 2px; }
+.wb-modelset-head em { font-size: 11.5px; font-style: normal; color: var(--fg-dim); }
+.wb-modelset-actions { display: flex; align-items: center; gap: 8px; }
+.wb-modelset-hint { font-size: 11.5px; color: var(--fg-dim); }
+.wb-modelset-note { font-size: 11.5px; color: var(--fg-dim); }
+.wb-modelset-models {
+  max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+}
+.wb-modelset-model { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; }
+.wb-modelset-model:hover { background: var(--bg-2); }
+.wb-modelset-check {
+  width: 16px; height: 16px; flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--surface); cursor: pointer;
+}
+.wb-modelset-check.is-on { background: var(--accent, var(--fg)); color: var(--surface); }
+.wb-modelset-modelname { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-modelset-star {
+  border: none; background: transparent; color: var(--fg-dim); font-size: 11.5px; cursor: pointer; white-space: nowrap;
+}
+.wb-modelset-star:hover { color: var(--fg); }
+.wb-modelset-star.is-on { color: var(--warn); }
+.wb-modelset-foot { font-size: 11.5px; color: var(--fg-dim); }

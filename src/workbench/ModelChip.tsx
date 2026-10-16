@@ -3,6 +3,7 @@ import { Check, ChevronDown, Sparkles } from "lucide-react";
 
 import { listProviders } from "@/ai/aiClient";
 import { readSavedRoute } from "@/ai/route";
+import { modelsForProvider } from "./ModelSettingsPage";
 
 
 /**
@@ -46,7 +47,8 @@ export function ModelChip({
           list.map((p) => ({
             id: p.id,
             label: p.label,
-            models: p.models,
+            /* 设置页勾过的优先（没动过设置时 = 表里那份，行为与以前一样） */
+            models: modelsForProvider(p.id, p.models).models,
             available: p.available,
             ...(p.note ? { note: p.note } : {}),
           })),

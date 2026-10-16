@@ -1,5 +1,6 @@
 import { ChevronLeft } from "lucide-react";
 import { SETTINGS_LABELS, aboutTitle, memoryStateLabel, settingsSections } from "@shared/settings";
+import { ModelSettingsPage } from "./ModelSettingsPage";
 import { useMemoryStore } from "./memoryStore";
 import { useAppSettings } from "./appSettings";
 import { spacing } from "../utils/spacing";
@@ -15,7 +16,7 @@ import { spacing } from "../utils/spacing";
  * 而不是画一个点了没反应的按钮。
  */
 
-export type SettingsSubPage = "profile" | "account" | "general" | "about";
+export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models";
 
 export type SettingsPagesProps = {
   /** 显示哪一页。 */
@@ -32,6 +33,7 @@ export type SettingsPagesProps = {
 
 /** 两页各自的标题与说明。 */
 const META: Record<SettingsSubPage, { title: string; note: string }> = {
+  models: { title: "模型", note: "配哪些 provider、拉它们的模型清单、选默认模型" },
   profile: {
     title: "个人资料",
     note: "本机版没有账号服务端：昵称与头像是本地显示用的，不会同步到任何服务器。",
@@ -65,6 +67,19 @@ export default function SettingsPages({
   const meta = META[page];
   /** 记忆开关当前状态（从库里读真实值，不是本地 state）。 */
   const memoryOn = useMemoryStore((s) => s.lib.enabled !== false);
+
+  /* 模型子页是独立一块（见 ModelSettingsPage 的说明）：整页交给它 */
+  if (page === "models") {
+    return (
+      <div className="wb-setpage" data-testid="wb-setpage-models">
+        <header className="wb-setpage-head">
+          <button className="wb-icon" data-testid="wb-setpage-back" onClick={onBack} aria-label="返回">‹</button>
+          <b>模型</b>
+        </header>
+        <ModelSettingsPage />
+      </div>
+    );
+  }
 
   return (
     <div className="wb-setpage" data-testid={`wb-setpage-${page}`}>
