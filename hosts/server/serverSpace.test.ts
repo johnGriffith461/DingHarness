@@ -372,6 +372,52 @@ describe("团队空间（V5-3 3.1/3.2/3.5）", () => {
     cleanupDirs.push(dir);
   });
 
+  it("⭐ 3.6 多渠道触发：外面一条消息 → 事件入流 → 回执（done 帧的 reply）", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "dh-ch-"));
+    const { port, token, fake } = await boot({ space: createSpaceStore(dir) });
+    const bridge = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    const text = await collectSse(
+      port,
+      "/v1/channels/telegram",
+      JSON.stringify({ from: "zhangsan", text: "帮我看看这个" }),
+      bridge,
+    );
+    const frames = parseSse(text).events;
+    const started = frames.find((f) => f.event === "started")!.data as {
+      actor: { id: string };
+      channel?: string;
+      from?: string;
+      sessionId?: string;
+    };
+    /* 三层身份在这条路上的落点：user = 桥（主口令身份）；end_user = 外面那个人 */
+    expect(started.actor.id).toBe("local");
+    expect(started.channel).toBe("telegram");
+    expect(started.from).toBe("zhangsan");
+    expect(started.sessionId).toBe("ch-telegram-zhangsan");
+
+    /* 事件进了流（模型那侧的动作在 event 帧里）；回执在 done 帧的 reply 里 */
+    expect(frames.some((f) => f.event === "event")).toBe(true);
+    const done = frames.find((f) => f.event === "done")!.data as { ok: boolean; reply?: string };
+    expect(done.ok).toBe(true);
+    expect(done.reply, "回执是空的 —— 桥没法把话发回群里").toBe("你好");
+
+    /* 假引擎收到了那条消息与渠道会话 id（"事件入流"的落点） */
+    expect(fake.messages).toEqual(["帮我看看这个"]);
+    expect(fake.sessionIds).toEqual(["ch-telegram-zhangsan"]);
+    cleanupDirs.push(dir);
+  });
+
+  it("渠道消息缺 from/text → 400；渠道名形状不对 → 400", async () => {
+    const { port, token } = await boot();
+    const bridge = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+    expect((await call(port, "/v1/channels/telegram", { method: "POST", headers: bridge, body: JSON.stringify({ text: "x" }) })).status).toBe(400);
+    expect(
+      (await call(port, `/v1/channels/${encodeURIComponent("带 空格")}`, { method: "POST", headers: bridge, body: JSON.stringify({ from: "a", text: "x" }) }))
+        .status,
+    ).toBe(400);
+  });
+
   it("空间没接线：/v1/space/* 回 501（join 也一样 —— 不假装能入团）", async () => {
     const { port, token } = await boot();
     const boss = { Authorization: `Bearer ${token}` };

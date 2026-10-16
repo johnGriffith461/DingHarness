@@ -154,6 +154,15 @@ export async function handleHookRoute(
  * ⚠️ 客户端断开（`res` close）→ `abort()`：这一轮**真的停下**。
  * 原来没有取消通道 —— 断开之后回合继续跑完，孤儿回合持续烧钱且杀不掉（审计 P171）。
  */
+/** 从这一轮的事件里取"回执正文"（把 text 片段拼起来 —— 与界面看到的是同一份内容）。 */
+export function replyTextOf(events: ReadonlyArray<{ type?: string; text?: unknown }>): string {
+  return events
+    .filter((e) => e.type === "text" && typeof e.text === "string")
+    .map((e) => String(e.text))
+    .join("")
+    .trim();
+}
+
 export async function runStreaming(
   res: ServerResponse,
   opts: ServerOptions,
@@ -163,6 +172,11 @@ export async function runStreaming(
   activeRuns: Set<AbortController>,
   identity: RequesterIdentity,
   runsByActor: Map<string, Set<AbortController>>,
+  /**
+   * 额外塞进 `started` 帧的字段（V5-3 3.6 的渠道：channel / from）——
+   * 默认什么都不加（本机 `/v1/run` 那条与从前一字不差）。
+   */
+  extraStarted?: Record<string, unknown>,
 ): Promise<void> {
   /*
    * V5-2 2.3：**事件流带上 actor 维度**（谁发起的、谁在答）。
@@ -199,6 +213,8 @@ export async function runStreaming(
     "cache-control": "no-cache",
     connection: "keep-alive",
   });
+  /** 这一轮说出来的正文（从事件流里攒 —— 与界面看到的同一份；`done.reply` 用它）。 */
+  let spoken = "";
   const send = (event: string, data: unknown) => {
     if (res.writableEnded || res.destroyed) return;
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -208,7 +224,7 @@ export async function runStreaming(
    * 第一帧：**这一轮是谁发起的**（V5-2 2.3；协作场景里"群里谁问的"必须看得见）。
    * 新增一种帧类型是加法：旧客户端认不出就跳过。
    */
-  send("started", { actor: requester, ...(sessionId ? { sessionId } : {}) });
+  send("started", { actor: requester, ...(sessionId ? { sessionId } : {}), ...(extraStarted ?? {}) });
 
   try {
     const outcome = await built.engine.run({
@@ -223,13 +239,24 @@ export async function runStreaming(
       useTools: true,
       maxSteps: 8,
       abortSignal: controller.signal,
-      onEvent: (event) => send("event", { ...event, actor: MAIN_AGENT }),
+      onEvent: (event) => {
+        if (event.type === "text" && typeof (event as { text?: unknown }).text === "string") {
+          spoken += (event as { text: string }).text;
+        }
+        send("event", { ...event, actor: MAIN_AGENT });
+      },
     });
     send("done", {
       ok: outcome.ok,
       aborted: outcome.aborted,
       actor: MAIN_AGENT,
       cwd, // 生效的工作目录（审计 P181：不回显的话，客户端看不出目录被换过）
+      /*
+       * 回执正文（渠道那侧把它发回群里；本机那侧当"这一轮说了什么"的手边副本）。
+       * 从**流里攒**而不是只读 `outcome.events`：两者对真引擎一样，
+       * 但流是"发出去的那一份"（装置也走它）—— 攒它就不用假设宿主回填了 events。
+       */
+      reply: (spoken || replyTextOf(outcome.events)).trim(),
       ...(outcome.error ? { error: humanFailure(outcome.error) } : {}),
     });
   } catch (error) {

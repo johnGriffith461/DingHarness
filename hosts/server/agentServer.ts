@@ -10,6 +10,7 @@ import type { MemberRole } from "../../engine/core/members";
 import { canReadSession, handleJoin, handleSpaceRoute, spaceOf } from "./spaceApi";
 import { handleRunRoute, handleHookRoute } from "./runApi";
 import { handleStreamRoute } from "./streamApi";
+import { handleChannelRoute } from "./channelApi";
 import { humanFailure } from "../../shared/errors";
 import type { ConfirmMode, SessionSummary } from "../../shared/ipc";
 import { PRODUCT_NAME, PRODUCT_VERSION } from "../../shared/product";
@@ -693,6 +694,8 @@ async function handle(
     };
     if (await handleRunRoute(path, req, res, runCtx)) return;
     if (await handleHookRoute(path, req, res, runCtx)) return;
+    /* 多渠道触发（V5-3 3.6）：外面的一条消息 → 事件入流 → 回执（done 帧的 reply） */
+    if (await handleChannelRoute(path, req, res, runCtx)) return;
 
     note = "没有这个路径";
     json(res, 404, { error: `没有这个路径：${req.method} ${path}` });
