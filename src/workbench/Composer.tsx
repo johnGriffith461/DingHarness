@@ -25,6 +25,7 @@ import SkillPanel from "./SkillPanel";
 import { CONFIRM_MODES } from "./uiUtil";
 import { UsagePopover } from "./UsagePopover";
 import { ModelChip } from "./ModelChip";
+import { EffortChip } from "./EffortChip";
 import { sumUsage } from "@shared/cost";
 
 /**
@@ -130,7 +131,9 @@ export function Composer({
    * 换成单值之后，"最多只有一个开着"是**结构上保证的**，不靠每处记得去关别人。
    * 以后再加 chip 也不会重犯这个问题。
    */
-  const [openPop, setOpenPop] = useState<null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model">(null);
+  const [openPop, setOpenPop] = useState<
+    null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"
+  >(null);
   /*
    * 工作区（2026-10-14）：用户授权给 agent 干活的目录。
    * 列表在**菜单打开时**才拉（它是主进程的磁盘状态，没必要一直挂着）。
@@ -165,7 +168,7 @@ export function Composer({
    *
    * @param which 要切换的下拉
    */
-  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model"): void =>
+  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"): void =>
     setOpenPop((cur) => (cur === which ? null : which));
 
   const installed = useLibraryStore((s) => s.lib.installed);
@@ -734,6 +737,8 @@ export function Composer({
         <span className="wb-spacer" />
         {/* 模型 · 思考：真选择器（组件在 ModelChip.tsx） */}
         <ModelChip open={openPop === "model"} onToggle={() => togglePop("model")} onClose={() => setOpenPop(null)} />
+        {/* 思考强度是**另一颗**（主人的口径：模型一颗、档位一颗） */}
+        <EffortChip open={openPop === "effort"} onToggle={() => togglePop("effort")} onClose={() => setOpenPop(null)} />
 
         {/*
           ⚠️ 这里原来有一颗 `disabled` 的「模型档位」chip，写死显示 `AUTO · LOW`。

@@ -972,7 +972,8 @@
   outline: none;
 }
 /* 组名占满一行，右边的「拉取」贴边 —— 与列表项左对齐 */
-.wb-model-group-name { flex: 1; display: inline-flex; align-items: center; gap: 5px; }
+/* 组名 + 无密钥徽标 + 拉取按钮**挤在一行**里（徽标换行会把组头撑成两行） */
+.wb-model-group-name { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-model-pull {
   display: inline-flex;
   align-items: center;

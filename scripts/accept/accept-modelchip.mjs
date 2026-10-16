@@ -1,25 +1,24 @@
-// 输入区的「模型 · 思考」chip（2026-10-16，主人：「这是个假按钮吧，没法选择模型、
-// 也没法选择思考强度，这按钮是必须的呀」）—— 常驻回归。
+// 主页那两颗控件（2026-10-16 第三版，主人的口径）—— 常驻回归。
 //
-// 判据（都是"点了要有真后果"）：
-//   · chip 在、**带字且不是写死的**：还没选过时写「默认通道」，不编一个模型名；
-//   · 打开下拉：列出真 provider 的模型（不只一个）+ 四个档位（默认 / 低 / 中 / 高）；
-//   · 选一个模型 → 写进 `dsh-canvas.chat-settings`（`resolveChatRoute` 读的就是它）
-//     且 chip 上的字跟着变 —— 这条是"它真是选择器，不是装饰"的关键；
-//   · 选一档强度 → 写进 `dsh-canvas.reasoning-effort`；选「默认」要把键**删掉**
-//     （默认 = 一个字段都不发，而不是存一个 auto）。
+//   「用户配置模型 他应该在设置页面里边去配置好这个模型 然后在主页的这个选择器里边 点击这个
+//     选择器 能够选择模型 然后另一个按钮 它可以选择思考强度」—— 所以这里是**两颗**：
+//     · 「默认通道 / provider/model」= 选模型（**没有**搜索、**没有**拉取 —— 那些归设置页）
+//     · 「思考默认 / 思考X」= 选档位（与画布那处同一份状态）
+//
+// 判据都是"点了要有真后果"：两类 chip 都在 → 模型列表真列出来 → 选一条真落盘（`resolveChatRoute`
+// 读的就是那个键）→ chip 文案跟着变 → 档位选真落盘、选回「默认」要把键**删掉**（默认 = 一个字段都不发）。
 import { chromium } from "playwright";
 import { killLeftovers, openApp, pickPort, sleep, verdict } from "./harness.mjs";
 
 const bad = [];
 const note = (m) => console.log("   " + m);
 
-const port = await pickPort([9897]);
+const port = await pickPort([9911]);
 await killLeftovers();
 const { browser, page } = await openApp(chromium, { port, dataDir: ".verify/accept-modelchip-data", cwd: "." });
-await sleep(1800);
+await sleep(2000);
 
-const chipText = () => page.locator('[data-testid="wb-model"]').textContent().then((t) => (t ?? "").trim());
+const chipText = (id) => page.locator(`[data-testid="${id}"]`).textContent().then((t) => (t ?? "").trim());
 const saved = () =>
   page.evaluate(() => ({
     route: localStorage.getItem("dsh-canvas.chat-settings"),
@@ -27,57 +26,66 @@ const saved = () =>
   }));
 
 try {
-  // ① chip 在，且没选过时不是编出来的模型名
-  const before = await chipText();
-  if (!before) bad.push("输入区没有「模型 · 思考」chip（wb-model）");
-  else if (!/默认通道|·/.test(before)) bad.push(`chip 文案可疑：${before}`);
-  note(`chip：${before}`);
+  /* ① 两颗 chip 都在，文案不是编的 */
+  const model0 = await chipText("wb-model");
+  const effort0 = await chipText("wb-effort");
+  if (!model0) bad.push("输入区没有模型 chip（wb-model）");
+  if (!effort0) bad.push("输入区没有思考强度 chip（wb-effort）");
+  note(`两颗 chip：${model0} ／ ${effort0}`);
 
-  // ② 打开下拉：模型与档位都要有
+  /* ② 模型弹层：真列模型；**不许**有搜索框与拉取按钮（那是设置页的事） */
   await page.locator('[data-testid="wb-model"]').click();
   await sleep(800);
-  const modelOptions = await page.locator('[data-testid^="wb-model-option-"]').count();
-  const auto = await page.locator('[data-testid="wb-effort-auto"]').count();
-  const levels = await page.locator('[data-testid^="wb-effort-"]:not([data-testid="wb-effort-auto"])').count();
-  if (modelOptions < 1) bad.push("下拉里一个模型都没有（那不是选择器）");
-  if (auto !== 1) bad.push("下拉里没有「默认」那一档");
-  if (levels !== 3) bad.push(`档位应当有 3 档（低/中/高），实际 ${levels}`);
-  note(`下拉：${modelOptions} 个模型 / 默认 + ${levels} 档`);
+  const options = await page.locator('[data-testid^="wb-model-option-"]').count();
+  if (options < 1) bad.push("模型弹层里一个模型都没有");
+  const searchBoxes = await page.locator('[data-testid="wb-model-search"]').count();
+  const pullButtons = await page.locator('[data-testid^="wb-model-pull-"]').count();
+  if (searchBoxes || pullButtons) {
+    bad.push(`主页的模型弹层里不该有搜索(${searchBoxes}) / 拉取(${pullButtons}) —— 那是设置页的事`);
+  }
+  note(`模型：${options} 个 / 搜索 ${searchBoxes} · 拉取 ${pullButtons}（都该是 0）`);
 
-  // ③ 选一个模型 → 落盘 + 文案跟着变
+  /* ③ 选一条 → 真落盘 + 文案跟着走 */
   const first = page.locator('[data-testid^="wb-model-option-"]').first();
-  const firstId = (await first.getAttribute("data-testid")) ?? "";
-  const picked = firstId.replace("wb-model-option-", "");
+  const picked = ((await first.getAttribute("data-testid")) ?? "").replace("wb-model-option-", "");
   await first.click();
   await sleep(500);
   const route = JSON.parse((await saved()).route ?? "{}");
   if (!picked.startsWith(`${route.provider}-`) || !picked.endsWith(`-${route.model}`)) {
     bad.push(`选了模型没落盘：点的是 ${picked}，盘上是 ${JSON.stringify(route)}`);
   }
-  const afterPick = await chipText();
-  if (!afterPick.includes(route.model ?? "?")) bad.push(`选了模型但 chip 没跟着变：${afterPick}`);
-  note(`选模型 → 盘上 ${JSON.stringify(route)}，chip：${afterPick}`);
+  const model1 = await chipText("wb-model");
+  if (!model1.includes(route.model ?? "?")) bad.push(`选了模型但 chip 没跟着变：${model1}`);
+  note(`选模型 → 盘上 ${JSON.stringify(route)}，chip：${model1}`);
 
-  // ④ 选一档强度 → 落盘；选回「默认」→ 键被删掉
-  await page.locator('[data-testid="wb-model"]').click();
-  await sleep(500);
+  /* ④ 档位：另一颗 chip，选高 → 落盘；选回默认 → 键删掉 */
+  await page.locator('[data-testid="wb-effort"]').click();
+  await sleep(600);
+  const levels =
+    (await page.locator('[data-testid="wb-effort-low"]').count()) +
+    (await page.locator('[data-testid="wb-effort-medium"]').count()) +
+    (await page.locator('[data-testid="wb-effort-high"]').count());
+  const auto = await page.locator('[data-testid="wb-effort-auto"]').count();
+  if (auto !== 1) bad.push("档位里没有「默认」那一项");
+  if (levels !== 3) bad.push(`档位应当有 3 档，实际 ${levels}`);
   await page.locator('[data-testid="wb-effort-high"]').click();
   await sleep(400);
   if ((await saved()).effort !== "high") bad.push("选了「思考高」没落盘");
-  if (!(await chipText()).includes("思考高")) bad.push(`选了档位但 chip 没跟着变：${await chipText()}`);
+  if (!(await chipText("wb-effort")).includes("思考高")) {
+    bad.push(`选了档位但 chip 没变：${await chipText("wb-effort")}`);
+  }
 
-  await page.locator('[data-testid="wb-model"]').click();
+  await page.locator('[data-testid="wb-effort"]').click();
   await sleep(500);
   await page.locator('[data-testid="wb-effort-auto"]').click();
   await sleep(400);
   if ((await saved()).effort !== null) bad.push("选「默认」应当把键删掉（默认 = 一个字段都不发）");
-  note(`档位：思考高 → 落盘 ✓；选回默认 → 键已删 ✓`);
+  note(`档位：默认 + ${levels} 档 / 选高落盘 ✓ / 选回默认删键 ✓`);
 } catch (e) {
   bad.push("异常: " + String(e).slice(0, 200));
 } finally {
-  console.log("   " + JSON.stringify(await saved().catch(() => ({}))));
   await browser.close().catch(() => undefined);
   await killLeftovers();
 }
 
-verdict(bad, "模型 · 思考 chip 成立：真列模型 / 真落盘 / 文案跟着走 / 默认就是不发那股字段");
+verdict(bad, "模型与思考强度两颗控件成立：真列模型 / 真落盘 / 文案跟着走 / 主页弹层里没有搜索与拉取");
