@@ -80,7 +80,14 @@ export const IMAGE_ACTIONS: ImageActionDef[] = [
     prompt: (ctx) => {
       const instruction = String(ctx.instruction ?? "").trim();
       // 把"保持主体"写进提示词：不加这句，上游经常顺手把主体也换了
-      return `在原图基础上按以下要求修改，保持主体与整体构图不变：${instruction}`;
+      /*
+       * ⚠️ 2026-10-16（审计 G53.p）：原来无条件拼 `：${instruction}` —— 指令为空时
+       * 产出的是一句**以冒号结尾的半截话**（"……保持不变："），而那条测试还把这个
+       * 缺陷形态钉成了期望值。现在空指令只留完整的基础句（界面本来也会禁用这个动作，
+       * 但真跑到这里也不该给上游半截提示词）。
+       */
+      const base = "在原图基础上按以下要求修改，保持主体与整体构图不变";
+      return instruction ? `${base}：${instruction}` : `${base}。`;
     },
     sizeStrategy: () => ({ kind: "keep" }),
   },
@@ -98,6 +105,8 @@ export const IMAGE_ACTIONS: ImageActionDef[] = [
     needsInstruction: true,
     prompt: (ctx) => {
       const instruction = String(ctx.instruction ?? "").trim();
+      /* 同上：空指令不产出「（空的引号）」这种半成品（`remove` 与 `edit` 是同一族） */
+      if (!instruction) return "把画面里的那个东西去掉，并用周围自然的背景补上那一块；画面里的其它内容、构图与光线一律保持不变，不要重画整张图。";
       return `只把画面中的「${instruction}」去掉，并用周围自然的背景补上那一块；画面里的其它内容、构图与光线一律保持不变，不要重画整张图。`;
     },
     sizeStrategy: () => ({ kind: "keep" }),

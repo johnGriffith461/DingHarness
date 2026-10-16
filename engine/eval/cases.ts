@@ -46,7 +46,17 @@ const conversation: EvalCase[] = [
     turns: ["随便聊一句"],
     replies: [[{ say: "好。" }]],
     useTools: false,
-    expect: { events: ["text", "done"], eventsAbsent: ["tool-call"], minSteps: 1 },
+    expect: {
+      events: ["text", "done"],
+      eventsAbsent: ["tool-call"],
+      minSteps: 1,
+      /*
+       * ⭐ 2026-10-16（审计 P153 落地）：不只断"它没调工具"，还断"**工具根本没下发**" ——
+       * 前者可能是它调了但被拒；后者才是"模型看不到，就不会试"这条设计。
+       * 判据读的是假 provider 收到的请求体（`bodies` 一直记着，此前全仓零读取）。
+       */
+      toolsNotSent: ["read_file", "write_file", "run_command", "search_files"],
+    },
   },
   {
     id: "chat-two-turns",
@@ -91,6 +101,8 @@ const tools: EvalCase[] = [
       copy: ["明天十点开会"],
       minSteps: 2,
       usage: true,
+      /* 反过来的那一半：该给的工具一个都不能少（审计 P153） */
+      toolsSent: ["read_file", "list_dir"],
     },
   },
   {

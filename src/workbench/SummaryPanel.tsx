@@ -1,12 +1,15 @@
 /**
  * 从 `Workbench.tsx` 拆出来的（C6-1）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆的理由见 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * 拆的理由原本记在 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
 import { useState } from "react";
 import { FolderOpen, PanelRight, PanelRightClose, Plus } from "lucide-react";
 import { useWorkbenchStore, openArtifact, revealArtifact } from "./store";
+import { findItemIn, useLibraryStore } from "./libraryStore";
+import { enabledSkillNames, recentFilesOf } from "./summaryData";
 import { ARTIFACT_TITLE_GENERATING, SUMMARY_RECENT_FILES, SUMMARY_RECENT_LIMIT_NOTE, SUMMARY_SESSION_FILES, SUMMARY_TABS, type SummaryTabId } from "./copy";
 import { resourceTypeOf } from "@shared/artifactProto";
 import { ARTIFACT_FORMATS } from "./artifact";
@@ -30,6 +33,10 @@ export function SummaryPanel({
   onCollapsedChange: (collapsed: boolean) => void;
 }) {
   const task = useWorkbenchStore((s) => s.tasks.find((t) => t.id === s.activeTaskId) ?? null);
+  /* P82：技能与最近文件都从已有数据推（不新增状态），见 summaryData.ts 的文件头 */
+  const lib = useLibraryStore((s) => s.lib);
+  const enabledSkills = enabledSkillNames(lib, (id) => findItemIn(lib, id)?.name);
+  const recentFiles = recentFilesOf(task);
   const [tab, setTab] = useState<SummaryTabId>("artifacts");
   const [opening, setOpening] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
@@ -215,14 +222,45 @@ export function SummaryPanel({
         </div>
       )}
 
+      {/*
+        ⚠️ 这两块原来是**写死的「暂无」**（2026-10-16，审计 P82）：
+        输入区那条正渲染「启用了 3 个」的技能 chip，右栏同一屏却写「暂无」——
+        同一个 store 的两个说法，用户只能怀疑其中一个在骗他。
+        现在都从**已有**的地方推：技能取 `useLibraryStore` 的启用项（与 chip 同源），
+        最近文件取这段会话的工具留痕里出现过的绝对路径（见 `summaryData.ts`）。
+      */}
       <div className="wb-summary-section">
         <div className="wb-summary-title">技能</div>
-        <div className="wb-summary-empty">暂无</div>
+        {enabledSkills.length ? (
+          <div className="wb-summary-list" data-testid="wb-summary-skills">
+            {enabledSkills.map((name) => (
+              <div className="wb-summary-item" key={name}>
+                <span className="wb-summary-item-name">{name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="wb-summary-empty" data-testid="wb-summary-skills-empty">
+            还没启用任何技能（在输入区的「技能」里挑）
+          </div>
+        )}
       </div>
 
       <div className="wb-summary-section">
         <div className="wb-summary-title">{SUMMARY_RECENT_FILES}</div>
-        <div className="wb-summary-empty">暂无</div>
+        {recentFiles.length ? (
+          <div className="wb-summary-list" data-testid="wb-summary-recent-files">
+            {recentFiles.map((f) => (
+              <div className="wb-summary-item" key={f.path} title={f.path}>
+                <span className="wb-summary-item-name">{f.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="wb-summary-empty" data-testid="wb-summary-recent-files-empty">
+            这段对话还没碰过文件（@ 一份资料，或让它读/写一个文件）
+          </div>
+        )}
       </div>
     </aside>
   );

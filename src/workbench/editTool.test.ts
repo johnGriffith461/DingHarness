@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describeEditResult, editFileForModel } from "@engine/runtime/tools/editTool";
+import { removeAll } from "../testFs";
 
 /**
  * agent 的「改文件」工具（2026-10-14）。
@@ -26,7 +27,7 @@ afterEach(() => {
   /* 每个用例自己写文件，这里清掉，免得互相看见 */
   for (const f of fs.readdirSync(path.join(ROOT, "work"))) {
     /* 有的用例会建目录：不加 recursive 会 EISDIR，而 afterEach 抛错会把**下一条**测试也判红 */
-    fs.rmSync(path.join(ROOT, "work", f), { recursive: true, force: true });
+    removeAll(path.join(ROOT, "work", f));
   }
 });
 

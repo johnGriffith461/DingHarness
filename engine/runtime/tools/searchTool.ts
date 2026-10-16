@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { insideDirs } from "./drivePaths";
+import { REGEX_MAX_LINE_CHARS, unsafeRegexReason } from "./regexGuard";
 
 /**
  * 「找文件」与「看目录」两个工具的执行体（2026-10-14）。
@@ -104,6 +105,8 @@ export type SearchFilesResult =
       scanned: number;
       skippedDirs: number;
       truncated: boolean;
+      /** 有多少行因为太长只看了前 `REGEX_MAX_LINE_CHARS` 个字符（如实计数，不悄悄少看）。 */
+      trimmedLines: number;
     }
   | { ok: false; error: string };
 
@@ -112,17 +115,29 @@ export type SearchFilesResult =
  *
  * @param input 检索参数
  * @param dirs 允许搜的目录白名单
+ * @param signal 中止信号（用户点停时别把剩下的文件全部扫完）
  * @returns 形如 `相对路径:行号: 行内容` 的命中列表
  */
 export async function searchFilesForModel(
   input: { pattern: string; path?: string; include?: string; literal?: boolean; limit?: number },
   dirs: readonly string[],
+  signal?: AbortSignal,
 ): Promise<SearchFilesResult> {
   const pattern = String(input.pattern ?? "");
   if (!pattern) return { ok: false, error: "pattern 是空的" };
 
   const start = input.path ? insideDirs(input.path, dirs) : dirs[0] ? path.resolve(dirs[0]) : null;
   if (!start) return { ok: false, error: "这个目录不在授权范围内（只能搜你授权目录里的东西）" };
+
+  /*
+   * ⭐ 正则安检（2026-10-16，审计 P44）：pattern 是**模型写的**，而这里是主进程 ——
+   * 一个 `(a+)+` 撞上长行就会指数回溯把界面冻住，abort 都插不进去。
+   * 字面量（`literal: true`）不过这道：它被转义过，炸不了。
+   */
+  if (input.literal !== true) {
+    const unsafe = unsafeRegexReason(pattern);
+    if (unsafe) return { ok: false, error: unsafe };
+  }
 
   let re: RegExp;
   try {
@@ -138,12 +153,15 @@ export async function searchFilesForModel(
   const matches: string[] = [];
   let scanned = 0;
   let truncated = false;
+  let trimmedLines = 0;
 
   for (const file of walked.files) {
     if (matches.length >= limit) {
       truncated = true;
       break;
     }
+    /* 用户点停：不把剩下的文件全部扫完（审计 P44 的那半句"abort 无效"） */
+    if (signal?.aborted) return { ok: false, error: "这一搜被中止了" };
     if (filter && !filter.test(path.basename(file))) continue;
     let stat;
     try {
@@ -167,14 +185,21 @@ export async function searchFilesForModel(
         truncated = true;
         break;
       }
-      if (re.test(lines[i])) {
-        const text = lines[i].length > 300 ? `${lines[i].slice(0, 300)}…` : lines[i];
+      const line = lines[i]!;
+      /*
+       * 超长行只拿前 N 个字符去匹配：把最坏的输入长度钉死
+       * （minified 的几 MB 单行文件正是 ReDoS 最爱的输入）。截过的行如实计数。
+       */
+      const probe = line.length > REGEX_MAX_LINE_CHARS ? line.slice(0, REGEX_MAX_LINE_CHARS) : line;
+      if (probe !== line) trimmedLines += 1;
+      if (re.test(probe)) {
+        const text = line.length > 300 ? `${line.slice(0, 300)}…` : line;
         matches.push(`${rel}:${i + 1}: ${text.trim()}`);
       }
     }
   }
 
-  return { ok: true, matches, scanned, skippedDirs: walked.skippedDirs, truncated };
+  return { ok: true, matches, scanned, skippedDirs: walked.skippedDirs, truncated, trimmedLines };
 }
 
 /** 一次列目录的结果。 */
@@ -250,7 +275,10 @@ function formatSize(bytes: number): string {
 export function describeSearchResult(result: SearchFilesResult, pattern: string): string {
   if (!result.ok) return `找不了「${pattern}」：${result.error}`;
   const tail = result.truncated ? "（只给了前面的命中）" : "";
-  return `找了「${pattern}」：命中 ${result.matches.length} 条（看了 ${result.scanned} 个文件）${tail}`;
+  const trimmed = result.trimmedLines
+    ? `；有 ${result.trimmedLines} 行太长，只看了每行前 ${REGEX_MAX_LINE_CHARS} 个字符`
+    : "";
+  return `找了「${pattern}」：命中 ${result.matches.length} 条（看了 ${result.scanned} 个文件）${tail}${trimmed}`;
 }
 
 /** 把列目录的结果说成**一句话**。 */

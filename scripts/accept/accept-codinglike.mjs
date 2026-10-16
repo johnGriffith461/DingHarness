@@ -105,7 +105,7 @@ try {
 
   /* ⑥ 界面上不许出现编出来的点赞数 */
   out.detailText = await page.evaluate(
-    () => document.querySelector('[data-testid="wb-coding-detail"]')?.textContent?.replace(/\\s+/g, " ").trim() ?? "",
+    () => document.querySelector('[data-testid="wb-coding-detail"]')?.textContent?.replace(/\s+/g, " ").trim() ?? "",
   );
   out.shot = await shot(page, "codinglike.png");
 
@@ -179,7 +179,7 @@ try {
   if (out.likeAfterToggle !== "喜欢") bad.push(`再点一次应当变回「喜欢」：${out.likeAfterToggle}`);
 
   /* ⑥ 没有编造的数字 */
-  if (/(^|\\D)\\d+\\s*人?喜欢/.test(out.detailText ?? "")) {
+  if (/(^|\D)\d+\s*人?喜欢/.test(out.detailText ?? "")) {
     bad.push(`⭐ 详情里出现了编出来的点赞数：${out.detailText}`);
   }
 

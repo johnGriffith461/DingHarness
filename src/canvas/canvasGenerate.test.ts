@@ -7,7 +7,17 @@ import {
   parseCodeBlock,
 } from "./canvasGenerate";
 import type { CanvasNode } from "./types";
-import { makeCodeNode, makeMarkdownNode, makeWhiteboardNode } from "./types";
+import {
+  makeCodeNode,
+  makeFrameNode,
+  makeHtmlNode,
+  makeImageNode,
+  makeMarkdownNode,
+  makeMermaidNode,
+  makeMindmapNode,
+  makeShapeNode,
+  makeWhiteboardNode,
+} from "./types";
 
 const markdown = makeMarkdownNode("n1", { x: 0, y: 0 }, "画布素材正文", { width: 300, height: 200 }, "素材");
 const code = makeCodeNode("n2", { x: 0, y: 0 }, "const a = 1;", "ts");
@@ -101,8 +111,33 @@ describe("contentPatchFor", () => {
 });
 
 describe("节点联合类型可安全传给上下文构造", () => {
-  it("六种节点都不抛错", () => {
-    const nodes: CanvasNode[] = [markdown, code, board];
-    expect(() => buildSelectionContext(nodes)).not.toThrow();
+  it("⭐ 联合类型里的**每一种**节点都不抛错（原来只传了 3 个、标题却写「六种」）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.r）：这条标题写"六种"，实际只传了 markdown / code / 白板
+     * 三个 —— 而 `CanvasNode` 联合里有 **10 支**（types.ts）。也就是说七种节点
+     * "传给上下文构造会不会炸"从来没验过，标题却在宣称验了。
+     * 现在逐个造一个：新增节点类型时这张表也要加（联合类型那侧是编译期，这里补运行期）。
+     */
+    const all: CanvasNode[] = [
+      makeMarkdownNode("n-md", { x: 0, y: 0 }, "正文"),
+      makeCodeNode("n-code", { x: 0, y: 0 }, "const a = 1;", "ts"),
+      makeImageNode("n-img", { x: 0, y: 0 }, "gen-x.png"),
+      makeMindmapNode("n-mind", { x: 0, y: 0 }, "# 一级"),
+      makeMermaidNode("n-mer", { x: 0, y: 0 }, "flowchart TD\nA-->B"),
+      makeWhiteboardNode("n-board", { x: 0, y: 0 }),
+      makeShapeNode("n-rect", { x: 0, y: 0 }, "rect"),
+      makeShapeNode("n-ellipse", { x: 0, y: 0 }, "ellipse"),
+      makeFrameNode("n-frame", { x: 0, y: 0 }, undefined, "画框"),
+      makeHtmlNode("n-html", { x: 0, y: 0 }, undefined, "<p>x</p>"),
+    ];
+    /* 十支联合 = 十个节点（少一个就说明这张表又落后于类型了） */
+    expect(all).toHaveLength(10);
+    expect(new Set(all.map((n) => n.type)).size, "每种类型各来一个").toBe(10);
+    expect(() => buildSelectionContext(all)).not.toThrow();
+    /* 每种类型至少要被写进上下文（否则"安全"只是"它被静默跳过了"） */
+    const ctx = buildSelectionContext(all);
+    for (const node of all) {
+      expect(ctx, `${node.type} 在上下文里没有出现`).toContain(node.type);
+    }
   });
 });

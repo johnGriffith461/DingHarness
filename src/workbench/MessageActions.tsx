@@ -1,12 +1,14 @@
 /**
  * 从 `Workbench.tsx` 拆出来的（C6-1）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆的理由见 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * 拆的理由原本记在 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
 import { useState } from "react";
 import { Copy, FileText, GitBranch, RotateCcw, Share2, Sparkles, ThumbsDown, ThumbsUp, Undo2, Volume2 } from "lucide-react";
 import { useWorkbenchStore } from "./store";
+import { writeClipboard } from "./uiUtil";
 import { DOC_CREATE_LABELS } from "@shared/doc";
 import { type TaskStep } from "./task";
 import { REWIND_HINT } from "./checkpoint";
@@ -78,8 +80,13 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
         title="复制"
         data-testid={`wb-act-copy-${step.id}`}
         onClick={() => {
-          void navigator.clipboard.writeText(text);
-          flash("已复制");
+          /*
+           * ⚠️ **先写成功再报喜**（2026-10-16，审计 P86）：原来是
+           * `void navigator.clipboard.writeText(text); flash("已复制")` —— 不 await、不 catch，
+           * 剪贴板被占用/无权限（Playwright、远程桌面、某些安全软件下常见）时，
+           * 界面照样说"已复制"，而用户粘出来是**上一次的东西或空的**。
+           */
+          void writeClipboard(text).then((ok) => flash(ok ? "已复制" : "复制失败：剪贴板不可用"));
         }}
       >
         <Copy size={13} />
@@ -124,8 +131,7 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
             flash("没有可分享的内容");
             return;
           }
-          void navigator.clipboard.writeText(markdown);
-          flash("对话已复制成 Markdown");
+          void writeClipboard(markdown).then((ok) => flash(ok ? "对话已复制成 Markdown" : "复制失败：剪贴板不可用"));
         }}
       >
         <Share2 size={13} />
@@ -162,8 +168,12 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
         title={`回到这一步（之后的轮次会丢掉）。${REWIND_HINT}`}
         data-testid={`wb-act-rewind-${step.id}`}
         onClick={() => {
-          rewind(taskId, step.id);
-          flash("已回到这一步");
+          /*
+           * ⚠️ 同一条毛病（P86）：`rewindTask` 是 **async**，而且解析不到可回退的目标时
+           * `resolveRewindTarget` 返回 null → `rewindTask` 里直接 return（**什么都没做**）——
+           * 而回执照旧说"已回到这一步"。现在按**真实结果**说话。
+           */
+          void rewind(taskId, step.id).then((ok) => flash(ok ? "已回到这一步" : "这一步没法回退（找不到对应的提问）"));
         }}
       >
         <Undo2 size={13} />

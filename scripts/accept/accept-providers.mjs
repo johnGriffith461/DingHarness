@@ -1,7 +1,24 @@
+/*
+ * ⚠️ **已退役（2026-10-16）—— 保留作墓碑，不要拿它证明任何事。**
+ *
+ * 它整条都建在**画布对话侧栏**上：`wb-canvas-chat-toggle` 开侧栏、点 `probe-providers` 触发真探测、
+ * 再读 `.chat-provider select` 的选项与 `.chat-compose .side-input` / `.chat-send` 发一句真对话，
+ * 验"探测之后界面把已验证的通道标出来"。那套界面（`src/chat/ChatSidebar.tsx`）后来被拆掉了 ——
+ * 现在这些 testid 在源码里一个都不存在，脚本点哪儿都不响。
+ *
+ * 现状（如实记）：
+ *   · 它**不在**批跑里（`verify-acceptances.mjs` 的 `NOT_IN_BATCH`，kind=`retired`）；
+ *   · **它的覆盖面目前没有替代品**：「真探测 → 界面标出已验证」这条**没有别的验收在盯**。
+ *     探测逻辑本身在 `electron/ipc/aiProbe.ts`（真发一次极短请求 + 记健康账本），
+ *     界面上现在由设置里的模型页承担。要重新覆盖，按现界面重写一条（别复活这份）。
+ */
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, openCanvas, pickPort, waitForPort } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, openCanvas, pickPort, waitForPort } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * provider 可用性诚实度验收。

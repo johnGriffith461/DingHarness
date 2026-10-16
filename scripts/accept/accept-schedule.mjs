@@ -2,7 +2,10 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, readStoreFile, shot, verdict, waitForPort } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, pickPort, readStoreFile, shot, verdict, waitForPort } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 定时任务真调度的验收（阶段 11.6）。

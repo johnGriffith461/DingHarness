@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { nodeTypes } from "./nodes";
 import { KNOWN_NODE_TYPES, droppedCount, normalizeCanvasDoc } from "./normalizeDoc";
+import { serializeCanvas } from "./usePersistence";
 
 /**
  * 洗画布文档（§181）。
@@ -58,9 +60,20 @@ describe("洗画布文档（§181）", () => {
     expect(got.dropped.nodes).toBe(2);
   });
 
-  it(`十种已知类型都认（${KNOWN_NODE_TYPES.length} 种）`, () => {
+  it(`已知类型都认（${KNOWN_NODE_TYPES.length} 种）`, () => {
     const nodes = KNOWN_NODE_TYPES.map((type, i) => node({ id: `k${i}`, type }));
     expect(normalizeCanvasDoc(doc({ nodes })).nodes).toHaveLength(KNOWN_NODE_TYPES.length);
+  });
+
+  it("⭐ `KNOWN_NODE_TYPES` 与 `nodeTypes` 注册表**一一对应**（G53.i：原来全仓无断言）", () => {
+    /*
+     * `normalizeDoc.ts` 的注释写着"与 `nodeTypes` 里注册的渲染组件一一对应" ——
+     * 而此前**没有任何断言**盯着这层对应：往 KNOWN_NODE_TYPES 里加一种却没有组件，
+     * 文档能存下来、渲染时炸；反过来组件有、白名单没有，文档会被默默丢掉。
+     * 这一条把两侧**对表**（新增类型必须两处都改）。
+     */
+    const registered = Object.keys(nodeTypes).sort();
+    expect([...KNOWN_NODE_TYPES].sort(), "白名单与注册的渲染组件对不上（两边都要改）").toEqual(registered);
   });
 
   it("缺 id / id 重复 → 丢掉", () => {
@@ -98,16 +111,62 @@ describe("洗画布文档（§181）", () => {
   });
 
   it("标注：形状不对的丢掉，好的留着", () => {
+    /*
+     * ⚠️⚠️ 这条用例原来**整组都在用 `points` 写**（2026-10-16 修）。
+     *
+     * 而应用真正写出去的是 `from` / `to`（见 `src/canvas/markers.ts` 的 `Marker`）——
+     * 于是这条"形状对不对"的用例与实现**自洽地一起错着**：
+     * 真实形状的标记在它眼里是"形状不对"，而它自己编的 `points` 又永远见不到。
+     * 代价在 `accept-p5` 里实测到了：**重启之后全部标记被丢掉，紧接着自动保存把空集合写回磁盘**。
+     * 现在按**真实形状**写用例，并单独钉一条"写出去→读回来"的往返（见下面那条）。
+     */
     const markers = [
-      { id: "m1", kind: "rect", points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] },
-      { id: "m2", kind: "什么", points: [{ x: 0, y: 0 }] },
-      { id: "m3", kind: "rect", points: [] },
+      { id: "m1", kind: "rect", from: { x: 0, y: 0 }, to: { x: 10, y: 10 }, color: "#f87171", width: 3 },
+      { id: "m2", kind: "什么", from: { x: 0, y: 0 }, to: { x: 1, y: 1 } },
+      { id: "m3", kind: "rect", from: { x: 0, y: 0 }, to: null },
       { id: "m4", kind: "rect" },
-      { kind: "rect", points: [{ x: 0, y: 0 }] },
+      { kind: "rect", from: { x: 0, y: 0 }, to: { x: 1, y: 1 } },
+      /* 早期若写过 `points` 那种形状，内容不该丢（兼容，不是主路径） */
+      { id: "m5", kind: "arrow", points: [{ x: 2, y: 2 }, { x: 9, y: 9 }] },
     ];
     const got = normalizeCanvasDoc(doc({ markers }));
-    expect(got.markers.map((m) => m.id)).toEqual(["m1"]);
+    expect(got.markers.map((m) => m.id), "真实形状的留下；`points` 那条也要认得（兼容）").toEqual(["m1", "m5"]);
     expect(got.dropped.markers).toBe(4);
+    const m1 = got.markers[0] as unknown as { from: { x: number }; to: { x: number } };
+    expect([m1.from.x, m1.to.x], "点要原样留下（不是挪一下）").toEqual([0, 10]);
+  });
+
+  it("⭐ 往返：`serializeCanvas` 写出去的标记，`normalizeCanvasDoc` 必须原样认回来", () => {
+    /*
+     * ⭐ 这条是给"写与读各理解一套形状"这种毛病上的锁（2026-10-16，P28 同族）。
+     * 它不引用任何一份手写的"期望形状" —— 直接拿**真写出去的东西**喂给读的那一端。
+     * 谁改了 `Marker` 的形状而忘了改归一化，这条立刻红。
+     */
+    const written = serializeCanvas({
+      nodes: [],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      revision: 3,
+      confirmedRevision: 3,
+      markers: [
+        { id: "a", kind: "rect", from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, color: "#f87171", width: 3 },
+        {
+          id: "b",
+          kind: "scratch",
+          from: { x: 5, y: 5 },
+          to: { x: 6, y: 7 },
+          trail: [{ x: 5, y: 5 }, { x: 5.5, y: 6 }],
+          color: "#4ade80",
+          width: 2,
+        },
+        { id: "c", kind: "text", from: { x: 8, y: 8 }, to: { x: 8, y: 8 }, text: "看这里", color: "#fbbf24", width: 2 },
+      ] as never,
+    });
+    const got = normalizeCanvasDoc(written);
+    expect(got.dropped.markers, "自己写出去的标记一条都不该被丢掉").toBe(0);
+    expect(got.markers.map((m) => m.id)).toEqual(["a", "b", "c"]);
+    const b = got.markers[1] as unknown as { trail: unknown[] };
+    expect(b.trail.length, "涂鸦的轨迹也要留（否则那一笔会画成一条直线）").toBe(2);
   });
 
   it("viewport / revision 坏了给默认值（视图位置不该影响内容）", () => {

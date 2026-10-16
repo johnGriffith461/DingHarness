@@ -9,11 +9,12 @@ import {
   readingStats,
 } from "@shared/reader";
 import { useReaderStore } from "./readerStore";
+import { useTransientFlag } from "@/utils/transientNote";
 
 /**
  * AI 阅读（`chat/read-web`，§155）。
  *
- * 文案与三个页签逐字取自 `docs/evidence-readweb.txt`（`copilot_*` 12 条）。
+ * 文案与三个页签逐字取自 `docs/evidence-readweb.txt`（`copilot_*` 12 条）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  *
  * ⚠️ 本机版**不做网络抓取**（没有那个能力，也不该假装有），
  * 所以内容来源是"粘进来的文本"或"从 AI 文档送过来"。
@@ -34,7 +35,8 @@ export function ReaderPanel() {
 
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
-  const [saved, setSaved] = useState(false);
+  /* 一次性提示（P91）：句柄由 hook 管（原来裸发 setTimeout，卸载后照样跑） */
+  const [saved, pulseSaved] = useTransientFlag(1500);
 
   const outline = useMemo(() => parseOutline(text), [text]);
   const hits = useMemo(() => findHits(text, query), [text, query]);
@@ -75,8 +77,7 @@ export function ReaderPanel() {
           disabled={!text.trim()}
           onClick={() => {
             void save().then(() => {
-              setSaved(true);
-              setTimeout(() => setSaved(false), 1500);
+              pulseSaved();
             });
           }}
         >

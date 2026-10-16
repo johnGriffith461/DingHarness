@@ -14,7 +14,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +22,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "dist-cli");
 const ENTRY = path.join(OUT, "hosts", "cli", "ding.js");
 
+/*
+ * ⚠️ **先清空 `dist-cli/`**（2026-10-16，审计 G40）。
+ *
+ * 不清的代价实测过：目录里留着旧配置编出来的 `dist-cli/src/workbench/**`
+ * （那时的 `rootDir/include` 把渲染层也圈进来了），而 `package.json` 的 `files`
+ * 是 `dist-cli/` 加通配**全量发布** —— 那一坨死代码会被原样发给用户，
+ * 而本地跑 `pnpm build` 看不出任何异常。tsc 自己**不会**删掉不再产出的旧文件。
+ */
+rmSync(OUT, { recursive: true, force: true });
 process.stdout.write("[cli] 编译（tsc -p tsconfig.cli.json）…\n");
 /*
  * ⚠️ 直接用**当前 node 跑 typescript 的 JS 入口**，不走 `npx`：

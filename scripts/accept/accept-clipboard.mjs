@@ -11,7 +11,12 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
  * Ctrl+V → 画布上多出这两个节点（id 已重排），且连线只保留内部那条；
  * 剪贴板里放别人的文本时，粘贴不会误吃（提示"剪贴板里不是画布内容"）。
  */
-const DATA = "data";
+/*
+ * ⚠️ 2026-10-16（审计 G01）：这里原来是 `"data"` —— 就是**仓库里那个真实数据目录**，
+ * 而下面还有一句 `rmSync(DATA/canvas)`：每次跑这条验收都**删掉真实的画布文档**。
+ * 现在落到 `.verify/` 下的专属目录（不进版本库、与真实数据无关）。
+ */
+const DATA = ".verify/data-clipboard";
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;

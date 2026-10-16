@@ -1,13 +1,14 @@
 /**
  * 从 `Workbench.tsx` 拆出来的（C6-1）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆的理由见 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * 拆的理由原本记在 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
 /*
  * ⚠️ 这一条 import 是**手工补的**：切片脚本给这个文件算出"没有一条 import 用得上"
  * （它把跨文件的引用算漏了），于是 `PERMISSION_MODES` 没了、`CONFIRM_MODES` 悬空。
- * 见 `docs/PLAN-C6-结构拆分.md`：自动搬运只保证"**删掉 + 挪走**"两种 diff，
+ * 原本记在 `docs/PLAN-C6-结构拆分.md`：自动搬运只保证"**删掉 + 挪走**"两种 diff，
  * **import 的正确性由 `tsc` 兜底** —— 这一步就是被 tsc 抓出来的。
  */
 import { CONFIRM_MODES as PERMISSION_MODES } from "@shared/ipc";
@@ -52,6 +53,29 @@ export function PenIcon() {
  */
 export const CONFIRM_MODES = PERMISSION_MODES;
 
+
+/**
+ * 往剪贴板写一段文字，**返回真的写成了没有**（2026-10-16，审计 P86）。
+ *
+ * 为什么不能是 `void navigator.clipboard.writeText(text)`：那种写法不 await、不 catch，
+ * 剪贴板被占用 / 没有权限（远程桌面、某些安全软件、自动化驱动下都常见）时，
+ * 界面照样说"已复制"，而用户粘出来是旧内容或者空的 —— **回执先于结果**。
+ *
+ * 另外浏览器策略也在这一层：非用户手势触发的写入会 reject，那同样算"没写成"，照实说。
+ *
+ * @param text 要写的内容
+ * @returns 真的写进剪贴板了吗
+ */
+export async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    const clip = navigator.clipboard;
+    if (!clip?.writeText) return false;
+    await clip.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

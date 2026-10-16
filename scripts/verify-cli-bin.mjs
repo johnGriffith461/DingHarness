@@ -54,8 +54,15 @@ function bareEnv() {
   const env = { ...process.env };
   const sys = process.platform === "win32" ? [`${process.env.SystemRoot}\\system32`, process.env.SystemRoot] : ["/usr/bin"];
   env.PATH = sys.filter(Boolean).join(path.delimiter);
-  // 数据目录指到临时位置：这一条是"产物能用吗"，不该碰真实数据
-  env.DSH_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dh-bin-verify-"));
+  /*
+   * 数据目录指到临时位置：这一条是"产物能用吗"，不该碰真实数据。
+   *
+   * ⚠️ 2026-10-16 修：这里原来写的是 `DH`**S**`_DATA_DIR` —— 而 CLI 读的是 `DH_DATA_DIR`
+   * （`hosts/cli/ding.ts` 的 `dataDir()`）。也就是说这句"隔离"从来没生效过：
+   * 这条验证一直在拿**用户真实的 `~/.ding`** 跑 sessions/doctor/eval。
+   * 这正是本仓反复清的那种"注释声称的与实际做的不一样"。
+   */
+  env.DH_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dh-bin-verify-"));
   return env;
 }
 

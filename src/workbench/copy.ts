@@ -79,7 +79,7 @@ export const PLUGIN_CATEGORIES = [
 export const SUGGESTION_POOL = [
   /*
    * 前四条是**从本体首页的实时文本转储里抄下来的原句**
-   * （`app-triage/dynamic-ui/live-text.txt`，顺序就是实机顺序）：
+   * （`app-triage/dynamic-ui/live-text.txt`，顺序就是实机顺序）：  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
    *
    *     为你推荐
    *     云文档    把这份长文档压缩一下

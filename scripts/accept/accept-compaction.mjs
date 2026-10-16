@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd } from "./harness.mjs";
 
 /**
  * 验收：**上下文压缩**（§149）。
@@ -26,8 +26,12 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9298;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9298;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);
@@ -48,13 +52,16 @@ try {
   out.knob = await page.evaluate(() => localStorage.getItem("dsh-canvas.compact-keep-tokens"));
 
   const assistantCount = () => page.locator(".wb-assistant-text").count();
-  const send = async (text, expectCount) => {
+  const send = async (text, _expectCount) => {
+    /*
+     * ⚠️ 2026-10-16（审计 G108）：原来等的是「助手气泡 count 涨到预期值」+ 固定 sleep ——
+     * 那是**半截回复**（首 token 一到就退出循环，后面那句 `waitForTimeout` 只是碰运气）。
+     * 现在等的是会话记录里的 `done`：引擎自己定义的终态（见 harness 的 `waitTurnEnd`）。
+     */
+    const before = await finishedTurns(page);
     await page.locator('[data-testid="wb-composer-input"]').fill(text);
     await page.locator('[data-testid="wb-send"]').click();
-    const deadline = Date.now() + 90000;
-    while (Date.now() < deadline && (await assistantCount()) < expectCount) {
-      await page.waitForTimeout(1500);
-    }
+    await waitTurnEnd(page, before, 120_000);
     // 提问卡会挡住后续发送，先答掉（正常情况下这几句不需要澄清）
     for (let i = 0; i < 3; i += 1) {
       if ((await page.locator('[data-testid="wb-question-card"]').count()) === 0) break;

@@ -20,7 +20,7 @@ import type { TaskStep } from "./task";
  * 后果是那段硬截断**把压缩阈值架空了**：20 条消息通常远不到 2 万 token，
  * 于是"该压就压"这个判定**几乎永远不会触发**（压了个寂寞）。
  *
- * 现在：**额度由 `shared/contextWindow.ts` 一处说了算**
+ * 现在：**额度由 `engine/core/context.ts` 一处说了算**
  * （`planContext`：按 token 保留最近的一段，只在消息边界切）。
  * 截断仍然**是诚实的截断**：切掉的部分会被丢掉，所以调用方在 `truncated` 为真时
  * 要在系统提示词里说明"更早的对话已省略"。
@@ -134,10 +134,16 @@ export function withToolLines(text: string, tools?: ToolTrace[]): string {
 export function buildHistory(
   steps: TaskStep[],
   /**
-   * 校准系数（补完④）：由调用方用**上一轮真实 usage** 算出来（`calibrationOf`）。
-   * 只影响"留多少"，不影响"发什么"。
+   * `factor`：校准系数（补完④）：由调用方用**上一轮真实 usage** 算出来（`calibrationOf`）。
+   * `keepTokens`：保留额度（2026-10-16，审计 P156）。
+   *
+   * ⚠️ 为什么额度要能注入：调用方（`taskRuntime`）**同一条回合里**还要拿
+   * `compactKeepTokens()`（按当前模型算）去决定"该不该压"——
+   * 如果这里用固定的 `KEEP_RECENT_TOKENS`，那就成了"组装历史用一把尺、
+   * 判断要不要压用另一把尺"：上限大的模型永远压不动，上限小的模型第一轮就超。
+   * 不传时保持原样（默认值），单测与旧调用零漂移。
    */
-  opts: { factor?: number } = {},
+  opts: { factor?: number; keepTokens?: number } = {},
 ): { messages: ChatMessage[]; truncated: boolean } {
   const all: ChatMessage[] = [];
   for (const step of steps) {
@@ -153,7 +159,7 @@ export function buildHistory(
    * 原来这里还有一道"最多 20 条"的硬截断 —— 它把压缩阈值架空（见文件头）。
    * 现在条数不再是判据：同样 20 条，短消息与长消息能差几十倍。
    */
-  const { older, recent } = planContext(all, KEEP_TOKENS, { factor: opts.factor ?? 1 });
+  const { older, recent } = planContext(all, opts.keepTokens ?? KEEP_TOKENS, { factor: opts.factor ?? 1 });
   return { messages: recent, truncated: older.length > 0 };
 }
 
@@ -165,7 +171,7 @@ export function buildHistory(
  */
 export function truncatedNote(): string {
   /*
-   * 文案搬去 `shared/contextWindow.ts`（C3）：聊天侧也要说同样的话。
+   * 文案搬去 `engine/core/context.ts`（C3）：聊天侧也要说同样的话。
    * ⚠️ 措辞随之变了：不再写"你只能看到最近 20 条消息" ——
    * 那个"20 条"是硬截断留下的数字，而切分现在按**额度**走，条数不是判据。
    */

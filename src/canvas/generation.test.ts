@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  CONTENT_KEYS,
   appendVersion,
   extractContent,
   readMeta,
@@ -46,7 +45,8 @@ describe("seedGeneration", () => {
     expect(meta.prompt).toBe("写一段");
     expect(meta.activeVersion).toBe(meta.versions[0].id);
     expect(meta.versions[0].content).toEqual({ text: "第一版内容" });
-    expect(meta.contentKeys).toEqual(CONTENT_KEYS.markdown);
+    /* ⚠️ 2026-10-16（审计 G53.t）：原来比的是被测模块自己的 `CONTENT_KEYS.markdown` —— 改成逐字 */
+    expect(meta.contentKeys).toEqual(["text"]);
   });
 
   it("可以带上失败状态（用于失败留痕）", () => {

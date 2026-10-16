@@ -58,6 +58,18 @@ try {
   await page.waitForTimeout(800);
   out.afterOpen = await state();
 
+  /*
+   * ⭐ **开着菜单再点一次头像**（2026-10-16，审计 P83 点名"行为侧同样没盖"）。
+   * 修前实测这条**关不掉**：mousedown 判"点在外面"先关、按钮自己的 click 又 toggle 回来。
+   * 顺带再点一次开回来，免得影响后面的步骤。
+   */
+  await page.locator('[data-testid="wb-account"]').click();
+  await page.waitForTimeout(700);
+  out.afterSecondClick = await state();
+  await page.locator('[data-testid="wb-account"]').click();
+  await page.waitForTimeout(700);
+  out.afterThirdClick = await state();
+
   // 2) 菜单里有哪些项（对齐本体的 9 项）
   out.items = await page.evaluate(() =>
     [...document.querySelectorAll('[data-testid^="wb-acct-"]')]
@@ -172,6 +184,13 @@ try {
    */
   const bad = [];
   if ((out.missingRows ?? []).length) bad.push(`账号菜单少了这些项：${out.missingRows.join(" / ")}`);
+  /* P83：开着再点一次头像要关掉（再点一次要能开回来） */
+  if (out.afterSecondClick?.menu !== 0) {
+    bad.push(`⭐ 开着菜单再点一次头像没有关掉（菜单数还是 ${out.afterSecondClick?.menu}）—— "关了又被开"，用户眼里就是关不掉`);
+  }
+  if (out.afterThirdClick?.menu !== 1) {
+    bad.push(`再点一次头像应当重新打开菜单（读到 ${out.afterThirdClick?.menu}）`);
+  }
   if ((out.stillPresent ?? []).length) {
     bad.push(`⭐ 这些"壳"本该移除却还在（看得见、点不动 = 用户眼里的坏按钮）：${out.stillPresent.join(" / ")}`);
   }

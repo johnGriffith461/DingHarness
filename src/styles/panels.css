@@ -9,7 +9,7 @@
 /* ============================================================
  * 「管理历史对话」页（本体路由 chat/thread/list）
  *
- * 依据：app-triage/dynamic-ui/shot-route-thread-list.png。
+ * 依据：app-triage/dynamic-ui/shot-route-thread-list.png。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 版式照它：顶部一行（左两个图标 / 中标题 / 右更多），下面按时间分档，
  * 每行是「标题 + 摘要（单行截断）」+ 悬停露出的 ⋯。
  *

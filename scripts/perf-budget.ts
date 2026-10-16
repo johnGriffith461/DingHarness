@@ -56,7 +56,13 @@ const OUT = path.join(ROOT, "engine", "eval", "perf-baseline.md");
 const BUDGET = {
   coldStartMs: 100,
   residentMb: 50,
-  concurrentCpuPct: 5,
+  /*
+   * ⚠️ 这条是**参考值**，不是预算（2026-10-16，审计 G79）：
+   * 方案写的是"编排 CPU ≤ 5%"（稳态利用率口径），而这里量的是**突发**口径
+   * （10 个回合跑完就结束，除以那 200ms 的墙钟）—— 两者不同口径，直接比就是粉饰。
+   * 名字里加 Reference 明示它不参与判定，免得下一个人以为"预算从来没被比较过"是漏了。
+   */
+  concurrentCpuPctReference: 5,
   concurrentMemMb: 200,
   tokenEstimateMs: 500,
 };
@@ -92,6 +98,12 @@ function coldStart(): Sample | null {
  */
 async function residentMemory(): Promise<Sample | null> {
   if (!fs.existsSync(CLI)) return null;
+  /*
+   * 工作集只能从外面读，而这条读法（`Get-Process`）是 Windows 的 ——
+   * 非 Windows 上量不出来，调用方会**明确写一行"跳过（只在 Windows 量得出）"**，
+   * 不再静默少一行（审计 G79）。
+   */
+  if (process.platform !== "win32") return null;
   const child = spawn(process.execPath, [CLI], { cwd: ROOT, stdio: ["pipe", "ignore", "ignore"] });
   await new Promise((r) => setTimeout(r, 1500));
   const got = spawnSync(
@@ -108,11 +120,13 @@ async function residentMemory(): Promise<Sample | null> {
 /** 10 个并发回合：量 CPU 时间与内存增长（编排开销，不含真模型）。 */
 async function concurrentTurns(): Promise<{ cpuPct: number; cpuMs: number; memMb: number; note: string }> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dh-perf-"));
+  /*
+   * ⚠️ 回复表是**扁平**的 `EvalReply[]`（每一条按顺序被消费），原来这里传了嵌套数组：
+   * 类型上就通不过，运行期则让假 provider 一条回复都吐不出来 ——
+   * "10 并发回合"量到的其实是**空转**（审计 G77 的原话）。
+   */
   const provider = await startFakeProvider(
-    [
-      [{ call: [{ name: "list_dir", args: { path: dir, depth: 1 } }] }],
-      [{ say: "看完了。" }],
-    ],
+    [{ call: [{ name: "list_dir", args: { path: dir, depth: 1 } }] }, { say: "看完了。" }],
     ["并发编排压测"],
   );
   const prevBase = process.env.STRATA_BASE_URL;
@@ -182,6 +196,11 @@ function tokenEstimate(): Sample {
 
 async function main(): Promise<void> {
   console.log("perf-budget 实测（Phase 10.5）—— 数字如实记，不修饰\n");
+  /*
+   * 退出码（2026-10-16，审计 G78）：一个自称"预算"的东西**不能无论超多少都退 0**。
+   * 现在：超预算 → 退 1；`--tolerate` 显式说"这次只记录不判定"（在嘈杂机器上重跑基线时用）。
+   */
+  const tolerate = process.argv.includes("--tolerate");
 
   const cold = coldStart();
   const mem = await residentMemory();
@@ -192,6 +211,7 @@ async function main(): Promise<void> {
   if (cold) rows.push({ name: "CLI 冷启动", value: cold.value, budget: BUDGET.coldStartMs, unit: "ms", note: cold.note, ok: cold.value <= BUDGET.coldStartMs });
   else console.log("⚠️ 跳过「CLI 冷启动」：dist-cli 还没构建（先跑 pnpm cli:build）\n");
   if (mem) rows.push({ name: "CLI 常驻内存", value: mem.value, budget: BUDGET.residentMb, unit: "MB", note: mem.note, ok: mem.value <= BUDGET.residentMb });
+  else if (process.platform !== "win32") console.log("⚠️ 跳过「CLI 常驻内存」：工作集只在 Windows 上量得出来（用 Get-Process）——这台是 " + process.platform + "\n");
   /*
    * ⚠️ CPU 这一条**不与预算直接比**，两个数都摆出来并写明理由：
    *
@@ -223,7 +243,7 @@ async function main(): Promise<void> {
   for (const r of rows) {
     console.log(`${r.ok ? "✓" : "✗"} ${r.name}：${r.value.toFixed(1)} ${r.unit}（预算 ≤ ${r.budget} ${r.unit}）  ${r.note}`);
   }
-  console.log(`· ${cpuRow.name}：${cpuRow.value.toFixed(1)} ${cpuRow.unit}（方案那条预算是"利用率 ≤ ${BUDGET.concurrentCpuPct}%"，口径不同，不直接比）  ${cpuRow.note}`);
+  console.log(`· ${cpuRow.name}：${cpuRow.value.toFixed(1)} ${cpuRow.unit}（方案那条预算是"利用率 ≤ ${BUDGET.concurrentCpuPctReference}%"，口径不同，不直接比）  ${cpuRow.note}`);
   console.log(`  参考：同期 CPU/墙钟 = ${concurrent.cpuPct.toFixed(0)}%（>100% 说明用了多线程；这个数里还含**同进程的假 provider**）`);
 
   const md = [
@@ -239,7 +259,7 @@ async function main(): Promise<void> {
     "| 指标 | 实测 | 预算 | 结论 | 量法 |",
     "|---|---|---|---|---|",
     ...rows.map((r) => `| ${r.name} | ${r.value.toFixed(1)} ${r.unit} | ≤ ${r.budget} ${r.unit} | ${r.ok ? "通过" : "**超了**"} | ${r.note} |`),
-    `| ${cpuRow.name} | ${cpuRow.value.toFixed(1)} ${cpuRow.unit} | 方案写的是"利用率 ≤ ${BUDGET.concurrentCpuPct}%" | **口径不同，不直接比** | ${cpuRow.note}；同期 CPU/墙钟 ${concurrent.cpuPct.toFixed(0)}%（含同进程的假 provider） |`,
+    `| ${cpuRow.name} | ${cpuRow.value.toFixed(1)} ${cpuRow.unit} | 方案写的是"利用率 ≤ ${BUDGET.concurrentCpuPctReference}%" | **口径不同，不直接比** | ${cpuRow.note}；同期 CPU/墙钟 ${concurrent.cpuPct.toFixed(0)}%（含同进程的假 provider） |`,
     "",
     "## 方法论边界（读这些数字时要一起读）",
     "",
@@ -260,7 +280,15 @@ async function main(): Promise<void> {
   const over = rows.filter((r) => !r.ok);
   if (over.length) {
     console.log(`\n⚠️ ${over.length} 项超预算：${over.map((r) => r.name).join(" / ")} —— 如实记下来，不修饰。`);
+    if (tolerate) {
+      console.log("（--tolerate：这次只记录，退出码仍为 0）");
+      return;
+    }
+    console.log("退出码 1（预算就是预算；要只记录不判定就加 --tolerate）");
+    process.exitCode = 1;
+    return;
   }
+  console.log("\n全部在预算内。");
 }
 
 void main();

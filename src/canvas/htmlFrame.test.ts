@@ -193,9 +193,18 @@ describe("describeHtml", () => {
     expect(describeHtml(html).scripts).toBe(3);
   });
 
-  it("`on` 开头的普通属性不算（例如 once / online）", () => {
-    // 只认 on + 字母 且后面跟 = 的形态；这里 once 也是 on 开头但语义不同，
-    // 保守起见按"像事件处理器"计——重要的是不漏报，宁可多报
-    expect(describeHtml('<div data-once="1">x</div>').scripts).toBe(0);
+  it("判定规则是「**空白 + on…=**」：`data-once` 不算，`once=` / `online=` **宁可多报**", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.y）：这条原来的标题写着"`on` 开头的普通属性不算（例如 once / online）"，
+     * 但实现（`\son[a-z]+\s*=`）要求 **on 前面有空白** —— 通过是因为 `data-once` 里的 `on`
+     * 前面是连字符，**不是因为认得出 once 这个词**。也就是说标题承诺的排除规则**不存在**：
+     * `once="1"` / `online="1"`（属性名本身就长这样）在实现里**会被算成事件处理器**。
+     * 实现自己的注释写得很清楚："重要的是不漏报，宁可多报" —— 所以这里按**实现的口径**钉：
+     * 带空白前缀的 on…= 一律计数；连字符里的 on 不算。
+     */
+    expect(describeHtml('<div data-once="1">x</div>').scripts, "连字符后的 on 不该算").toBe(0);
+    expect(describeHtml('<div onclick="b()">x</div>').scripts, "真事件处理器要算上").toBe(1);
+    expect(describeHtml('<div once="1">x</div>').scripts, "按「宁可多报」的口径：once= 要算").toBe(1);
+    expect(describeHtml('<div online="1">x</div>').scripts, "同上：online= 要算").toBe(1);
   });
 });

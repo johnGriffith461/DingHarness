@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { verdict } from "./harness.mjs";
+import { failOnMarks, verdict } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 验证打包产物（阶段 9.4 / 9.5）。
@@ -41,8 +44,19 @@ function peHasIcon(file) {
 const R = "release";
 const report = {};
 
-const setup = path.join(R, "工作台-0.1.0-setup.exe");
-report.setup = { exists: exists(setup), bytes: size(setup), human: mb(size(setup)) };
+/*
+ * ⚠️ 2026-10-16（审计 G11）：这里原来写死 `工作台-0.1.0-setup.exe` ——
+ * 2026-10-14 改名之后盘上只有 `ding-harness-0.{3,4,5}.0-setup.exe`，
+ * 于是"没产出 setup.exe"这条**永远红**（红的是脚本，不是产物）。
+ * 现在**从 release/ 里发现**：拿第一个 `*-setup.exe`（按修改时间取最新）。
+ */
+const setupCandidates = fs
+  .readdirSync(R)
+  .filter((f) => /-setup\.exe$/i.test(f))
+  .map((f) => path.join(R, f))
+  .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+const setup = setupCandidates[0] ?? path.join(R, "（没有找到 *-setup.exe）");
+report.setup = { path: setup, exists: exists(setup), bytes: size(setup), human: mb(size(setup)) };
 report.setupIcon = exists(setup) ? peHasIcon(setup) : null;
 
 const unpackedExe = path.join(R, "win-unpacked", "Ding Harness.exe");
@@ -65,8 +79,29 @@ if (exists(unpackedExe)) {
 const asar = path.join(R, "win-unpacked", "resources", "app.asar");
 report.asar = { exists: exists(asar), bytes: size(asar), human: mb(size(asar)) };
 
-const mainCjs = path.join(R, "win-unpacked", "resources", "app", "dist-electron", "electron", "main.cjs");
-report.unpackedMain = { path: mainCjs, exists: exists(mainCjs) };
+/*
+ * ⚠️ 2026-10-16（审计 G11）：原来找 `resources/app/dist-electron/electron/main.cjs` ——
+ * 而打包产物里**没有** `app/` 那个解包目录（源码都进了 `app.asar`），
+ * 于是这条也永远红。现在**在 asar 里核对**（用 electron-builder 自带的 @electron/asar 列目录）：
+ * 看 `dist-electron/electron/main.cjs` 到底在不在包里 —— 那才是"包起不起得来"的真判据。
+ */
+let mainInAsar = { listed: false, has: false, why: "" };
+try {
+  const { listPackage } = await import("@electron/asar");
+  const entries = listPackage(asar);
+  mainInAsar = {
+    listed: true,
+    has: entries.some((e) => String(e).replace(/\\/g, "/").endsWith("dist-electron/electron/main.cjs")),
+    why: `asar 里 ${entries.length} 个条目`,
+  };
+} catch (error) {
+  mainInAsar = { listed: false, has: false, why: `读不了 asar：${String(error).slice(0, 80)}` };
+}
+report.unpackedMain = {
+  path: "（app.asar 内）dist-electron/electron/main.cjs",
+  exists: mainInAsar.has,
+  note: mainInAsar.why,
+};
 
 report.releaseFiles = fs
   .readdirSync(R)
@@ -91,9 +126,9 @@ console.log("  解包 exe 带图标：", report.unpackedIcon?.ok ? "是" : "否"
 const bad = [];
 if (!report.setup?.exists) bad.push("⭐ 没产出 setup.exe");
 if (!report.asar?.exists) bad.push("⭐ 没产出 app.asar（把源码目录打进去了？）");
-if (!report.unpackedMain?.exists) bad.push("win-unpacked 里没有 dist-electron/electron/main.cjs（打出来的包起不来）");
+if (!report.unpackedMain?.exists) bad.push(`app.asar 里没有 dist-electron/electron/main.cjs（打出来的包起不来）：${report.unpackedMain?.note ?? ""}`);
 if (!report.setupIcon?.ok) bad.push(`安装包没带图标：${JSON.stringify(report.setupIcon)}`);
 if (!report.unpackedIcon?.ok) bad.push("解包 exe 没带图标（任务栏会是个默认白块）");
 if ((report.releaseFiles?.length ?? 0) === 0) bad.push("release 目录里没有 .exe/.blockmap/.yml 任何产物");
 
-verdict(bad, "打包产物成立：setup.exe + app.asar + main.cjs 都在，且两处图标都带上了");
+verdict(bad, "打包产物成立：setup.exe + app.asar（含主进程入口）+ 两处图标都在");

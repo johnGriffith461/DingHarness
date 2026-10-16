@@ -53,7 +53,8 @@ fs.writeFileSync(
   "utf8",
 );
 
-const PORT = 9330;
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9330;
 const out = {};
 let child = null;
 let ok = false;
@@ -61,6 +62,8 @@ let getLog = () => "";
 
 const boot = async () => {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  PORT = r.port;
   child = r.child;
   ok = r.ok;
   getLog = r.getLog;
@@ -103,7 +106,7 @@ try {
       ]),
     ),
   );
-  out.pageText = await page.evaluate(() => (document.body.textContent ?? "").replace(/\\s+/g, " ").slice(0, 600));
+  out.pageText = await page.evaluate(() => (document.body.textContent ?? "").replace(/\s+/g, " ").slice(0, 600));
   out.shot = await shot(page, "schedbad.png");
 
   await b.close();

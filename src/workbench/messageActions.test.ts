@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import path, { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -28,6 +28,8 @@ import { describe, expect, it } from "vitest";
  * 而不是让约束随着搬家悄悄失效。
  */
 const FILE = join("src", "workbench", "MessageActions.tsx");
+/** 仓库根（全仓扫描那条用）。 */
+const ROOT = path.resolve(__dirname, "../..");
 
 /**
  * 切出 `MessageActions` 那个函数的函数体。
@@ -43,6 +45,100 @@ function messageActionsBody(text: string): string | null {
   const nextFn = rest.indexOf("\nfunction ", 1);
   return nextFn === -1 ? rest : rest.slice(0, nextFn);
 }
+
+/**
+ * ⚠️ 2026-10-16（审计 G22）：原来这条只扫 `MessageActions.tsx` **一个文件** ——
+ * 而"看着能点、其实没作用"的按钮在别处也有（审计同口径查出两处真死控件）。
+ * 这里补一条**全仓**扫描：`<button>` 既没有 `onClick`、也没有 `disabled`、
+ * 也没有展开属性（`{...props}`）时，它就是一个"点了没反应"的形状。
+ *
+ * 允许的例外只有两类（写在下面，免得下一个人猜）：
+ *   · `type="submit"`（表单提交靠 form 的 onSubmit）；
+ *   · `aria-hidden` / `tabIndex={-1}` 这类**明确不可交互**的装饰（它不该是 button）。
+ */
+describe("全仓：不许有「看着能点、其实没作用」的按钮（审计 G22）", () => {
+  const offenders: string[] = [];
+  /** 按「文件::按钮文案」认领用的键（行号会漂，见 KNOWN_DEAD 那段说明）。 */
+  const offenderKeys: string[] = [];
+  /**
+   * 已知的两处（**不在这里改 UI**，登记在案只为了这条守卫还能抓新的）：
+   *   · 浮窗「本地电脑」—— 主人 2026-10-16 口述："这些假控件我自己补"；
+   *   · `PluginsPage.tsx` 分类行「更多 ▾」—— 本轮扫出来的新一处（比主人那张 8 条清单多一条），
+   *     同样等主人定夺（删 / 实现 / 标不做）。
+   * 修完之后把对应项从这名单里删掉 —— 这张表只该变短。
+   *
+   * ⚠️ 2026-10-16 修：这张表原来按**行号**钉（`FloatingAssistant.tsx:273`）——
+   * 而我当天改浮窗那两颗按钮（P79/P80）之后行号挪到了 300 多，**守卫立刻红了一条与它无关的**。
+   * 行号是"会漂的坐标"：任何一次无关的编辑都能把这条钉子拔掉，而红的是别人。
+   * 现在按「文件::按钮文案」认（文案才是那颗按钮稳定的身份）。
+   */
+  const KNOWN_DEAD = new Set([
+    "src/workbench/FloatingAssistant.tsx::本地电脑",
+    /* 那颗按钮里还有一个 `▾`（表达式/图标）—— 认领键取的是**去表达式之后的纯文本**，所以是「更多」 */
+    "src/workbench/PluginsPage.tsx::更多",
+  ]);
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+        const text = readFileSync(full, "utf8");
+        /*
+         * ⚠️ 标签扫描要**花括号/引号感知**：多行标签里的属性表达式里常有 `>` 或 `=>`
+         * （`onClick={() => …}`、`disabled={n > 0}`）—— 用 `/<button[^>]*>/` 会在那里
+         * 提前截断，把**有** onClick 的按钮误报成没接（第一版就这样误报了 ModelChip）。
+         */
+        for (const m of text.matchAll(/<button\b/g)) {
+          let i = m.index + m[0].length;
+          let depth = 0;
+          let quote = "";
+          for (; i < text.length; i += 1) {
+            const ch = text[i]!;
+            if (quote) {
+              if (ch === quote) quote = "";
+              continue;
+            }
+            if (ch === '"' || ch === "'" || ch === "`") {
+              quote = ch;
+              continue;
+            }
+            if (ch === "{") depth += 1;
+            else if (ch === "}") depth -= 1;
+            else if (ch === ">" && depth === 0) break;
+          }
+          const attrs = text.slice(m.index + m[0].length, i);
+          if (/\bonClick=|\bdisabled\b|\{\.\.\.|type="submit"/.test(attrs)) continue;
+          const line = text.slice(0, m.index).split("\n").length;
+          const rel = path.relative(ROOT, full).split(path.sep).join("/");
+          /*
+           * 认领标记取按钮**内容**里的纯文本（去掉属性、内层标签与表达式）——
+           * 行号会漂，文案不会：浮窗那颗自己就写着"本地电脑"，那才是它稳定的身份。
+           * ⚠️ 别拿"开标签"那一段抽文本（第一版就是这么写的，抽出来是空的）——
+           * 内容在闭合的 `>` 与 `</button>` 之间。
+           */
+          const closeAt = text.indexOf("</button>", i);
+          const inner = text.slice(i + 1, closeAt > 0 ? closeAt : Math.min(text.length, i + 200));
+          const tagText = inner
+            .replace(/<[^>]*>/g, " ")
+            .replace(/\{[^{}]*\}/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          offenders.push(`${rel}:${line}::${tagText}`);
+          offenderKeys.push(`${rel}::${tagText}`);
+        }
+      }
+    }
+  };
+  walk(path.join(ROOT, "src"));
+
+  it("每一个 `<button>` 都有 onClick / disabled / 展开属性之一", () => {
+    const missing = offenders.filter((_, i) => !KNOWN_DEAD.has(offenderKeys[i] ?? ""));
+    expect(
+      missing,
+      ["这些按钮点了没反应（补 onClick，或明确 disabled / 改成不可交互的形状）：", missing.join("\n")].join("\n"),
+    ).toEqual([]);
+  });
+});
 
 describe("消息操作栏：每个动作都要能点", () => {
   it("**wb-actions 里的每个 button 都带 onClick**", () => {

@@ -233,9 +233,19 @@ describe("从磁盘恢复任务（§178）", () => {
   });
 
   it("时间字段坏掉 → 给 null（不是 NaN —— NaN 会让界面显示 Invalid Date）", () => {
-    expect(normalizeJobs([{ ...good(), nextRunAt: "明天" }])[0]?.nextRunAt ?? null).toBeNull();
-    expect(normalizeJobs([{ ...good(), nextRunAt: NaN }])[0]?.nextRunAt ?? null).toBeNull();
-    expect(normalizeJobs([{ ...good(), lastRunAt: "昨天" }])[0]?.lastRunAt ?? null).toBeNull();
+    /*
+     * ⚠️ 2026-10-16（审计 G53.g）：原来断的是 `…[0]?.nextRunAt ?? null` —— 那个 `?? null`
+     * 把"**字段整个消失**"也变成了通过（`undefined ?? null === null`）。
+     * 而字段消失与字段为 null 对读的人不是一回事（界面上后者是"没有下次"，前者要查数据形状）。
+     * 现在直接断**值**，并加一条正例（好的数据必须留着数字）。
+     */
+    const broken = normalizeJobs([{ ...good(), nextRunAt: "明天" }])[0];
+    expect(broken?.nextRunAt).toBeNull();
+    expect(broken && "nextRunAt" in broken, "坏值应当被归一化成 null，而不是把字段删掉").toBe(true);
+    expect(normalizeJobs([{ ...good(), nextRunAt: NaN }])[0]?.nextRunAt).toBeNull();
+    expect(normalizeJobs([{ ...good(), lastRunAt: "昨天" }])[0]?.lastRunAt).toBeNull();
+    /* 正例：好的时间戳要原样留着（否则"全都给 null"也能让上面三条绿） */
+    expect(normalizeJobs([{ ...good(), nextRunAt: NOW }])[0]?.nextRunAt).toBe(NOW);
   });
 
   it("执行历史里坏的那几条丢掉（缺 at 的、非对象的）", () => {

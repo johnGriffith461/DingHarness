@@ -48,9 +48,22 @@ describe("extractFencedArtifact —— 什么该当产物", () => {
     expect(extractFencedArtifact("```svg\n" + "<circle r='1'/>\n".repeat(40) + "```").artifact?.kind).toBe("html");
   });
 
-  it("刚好卡在门槛上（trim 之后 399 字符）→ 不动 —— 边界行为写死在这里", () => {
-    const justUnder = "```markdown\n" + "# 标题\n".repeat(80) + "```";
-    expect(extractFencedArtifact(justUnder).artifact).toBeNull();
+  it("门槛两侧：399 字符不动、400 字符提出 —— 边界行为写死在这里", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.o）：原来只测了"**刚好不到**"（399 → 不提出），
+     * 而门槛是 `<` 还是 `<=`、甚至门槛整块写错，这条都发现不了。
+     * 现在两侧都钉：399 不动、400 提出。
+     */
+    /*
+     * 阈值是 `content.trim().length < 400`（`artifact.ts` 里的 `FENCE_MIN_CHARS`，
+     * 没有导出 —— 所以这里**写死 400**，改阈值这一条会红，这正是要的）。
+     */
+    const THRESHOLD = 400;
+    const mk = (bodyChars: number) => "```markdown\n" + "#".repeat(bodyChars) + "\n```";
+    expect(extractFencedArtifact(mk(THRESHOLD - 1)).artifact, "399 字符（trim 后）不该被提出").toBeNull();
+    const justOver = extractFencedArtifact(mk(THRESHOLD));
+    expect(justOver.artifact, "400 字符（trim 后）应当被提出").not.toBeNull();
+    expect(justOver.artifact?.kind).toBe("markdown");
   });
 
   it("语言标记大小写不敏感", () => {

@@ -108,7 +108,17 @@ describe("会话样本（Phase 10.4：≥10 条，脱敏是断言）", () => {
   });
 
   it("④ 样本里有真实日志一定有的脏东西（否则它还是「太干净」）", () => {
-    const all = files.flatMap((f) => linesOf(f));
+    /*
+     * ⚠️ 每份样本以 `
+` 结尾，`split("
+")` 的最后一个元素**必然是空串**——
+     * 不看掉它的话，下面"样本里没有空行"那条断言恒真（审计 G85）。
+     */
+    const all = files.flatMap((f) => {
+      const lines = linesOf(f);
+      if (lines.at(-1) === "") lines.pop();
+      return lines;
+    });
     // 截断的 JSON：解析不出来，但**不能**让读日志的人崩
     const truncated = all.filter((l) => l.trim().startsWith("{") && parseLogLine(l) === null);
     expect(truncated.length, "样本里一条坏行都没有 —— 那就挡不住「真实日志有坏行」这类问题").toBeGreaterThan(0);
@@ -136,7 +146,11 @@ describe("会话样本（Phase 10.4：≥10 条，脱敏是断言）", () => {
     for (const want of ["request", "text", "tool-call", "tool-result", "done"]) {
       expect(types.has(want), `样本里没有 ${want} 类型的记录`).toBe(true);
     }
-    // 委派（团队/子智能体那条路）也要有 —— 它是 Phase 7 加的，最容易在样本里被漏掉
-    expect([...types].some((t) => t === "delegation" || t === "request"), "委派事件在样本里没出现").toBe(true);
+    /*
+     * 委派（团队/子智能体那条路）也要有 —— 它是 Phase 7 加的，最容易在样本里被漏掉。
+     * ⚠️ 原来写的是 `some((t) => t === "delegation" || t === "request")` ——
+     * `request` 每一份样本都有，于是这条**恒真**，"委派事件没出现"永远逮不到（审计 G85）。
+     */
+    expect(types.has("delegation"), "委派事件在样本里没出现").toBe(true);
   });
 });

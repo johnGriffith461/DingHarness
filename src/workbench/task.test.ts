@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { normalizeTask } from "./taskPersist";
 import {
   STEP_NOTE_LIMIT,
-  makeStepId,
   normalizeArtifacts,
   normalizeQuestions,
   normalizeStep,
@@ -98,7 +97,13 @@ describe("autoTaskTitle —— 对标原版「产品周报撰写」", () => {
   });
 
   it("超长标题被截断", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.c）：原来只断 `length <= 18` —— 返回空串、或只留一个字，
+     * 这条都过。现在钉**逐字结果**（口径：先剥掉动作词与修饰语，再截到 14 个字）。
+     */
     const t = autoTaskTitle("这是一句特别特别特别特别特别长的没有任何分句的描述");
+    /* 口径：先剥动作词/修饰语，再截到 MAX=14 个字（这里没有产物词，所以不再加后缀） */
+    expect(t).toBe("这是一句特别特别特别特别特别");
     expect(t.length).toBeLessThanOrEqual(18);
   });
 
@@ -313,7 +318,14 @@ describe("恢复一步（§177）", () => {
   });
 
   it("缺 id 就按序号补一个（历史数据里可能真没有）", () => {
-    expect(normalizeStep({ text: "x" }, 4).id).toBe(makeStepId(4));
+    /*
+     * ⚠️ 2026-10-16（审计 G53.d）：期望值原来是 `makeStepId(4)` —— **被测模块自己的函数**，
+     * 把它的形状改坏（比如一律返回 "s"）这条照样过。现在钉**字面量形状**，
+     * 并顺带断"不同序号给不同 id、已有 id 不被覆盖"。
+     */
+    expect(normalizeStep({ text: "x" }, 4).id).toBe("s4");
+    expect(normalizeStep({ text: "x" }, 5).id).toBe("s5");
+    expect(normalizeStep({ id: "自己带的", text: "x" }, 6).id).toBe("自己带的");
   });
 
   it("role 只认 user，其余一律当 assistant（不出现第三种角色）", () => {
@@ -430,9 +442,23 @@ describe("恢复澄清卡（§179）", () => {
   });
 
   it("⭐ 这就是原来会**让整段对话打不开**的那种数据", () => {
-    /* 断言：归一化之后它不会带着 `options` 掉进界面 */
-    const got = normalizeQuestions([{ id: "q", text: "x" }]);
+    /*
+     * ⚠️ 2026-10-16（审计 G53.b）：原来拿"全是非法输入"的数组归一化（结果是 `[]`）
+     * 再对空数组 `every(...)` —— 空数组上 `every` **恒真**，这条什么都没验。
+     * 现在混合输入：合法的那张必须留下（且 `options` 是数组），非法的那张必须被丢掉。
+     */
+    /*
+     * ⚠️ 选项的形状是 `{ label, hint }`（不是字符串）—— 空 label 会被滤掉，
+     * 一张选项全被滤空的卡片同样算"没有选项"、要丢掉。三种情形各验一遍。
+     */
+    const got = normalizeQuestions([
+      { id: "bad", text: "没有选项" },
+      { id: "bad2", text: "选项全是空 label", options: [{ label: "  " }] },
+      { id: "ok", text: "有选项", options: [{ label: "甲" }, { label: "乙", hint: "乙的说明" }] },
+    ]);
+    expect(got.map((q) => q.id), "非法的那两种没被丢掉（界面会在它们上面炸）").toEqual(["ok"]);
     expect(got.every((q) => Array.isArray(q.options))).toBe(true);
+    expect(got[0]?.options).toEqual([{ label: "甲", hint: "" }, { label: "乙", hint: "乙的说明" }]);
   });
 
   it("选项里没有文案的那几条丢掉（点不了的选项）", () => {

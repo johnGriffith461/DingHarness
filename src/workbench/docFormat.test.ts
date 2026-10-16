@@ -14,7 +14,7 @@ import {
 /**
  * AI 文档的「调整语气」与「调整格式」（§168）。
  *
- * 断言对着 `docs/evidence-aidoc.txt`（`aiDoc_keyboard_actionBar_*`，逐字）。
+ * 断言对着 `docs/evidence-aidoc.txt`（`aiDoc_keyboard_actionBar_*`，逐字）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  *
  * ⚠️ 这一层里**只有格式是纯本地的**（语气要调模型）——
  * 所以下面测的都是"格式变换对不对"，语气那边只测"指令拼得对不对"。

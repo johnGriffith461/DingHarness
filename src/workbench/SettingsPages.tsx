@@ -199,8 +199,17 @@ export default function SettingsPages({
             <em>标准套餐</em>
           </div>
         </div>
-      ) : (
-        <div className="wb-setpage-body">
+      ) : null}
+
+      {/*
+        ⚠️ 2026-10-16（审计 P260）：这一段原来是**上一个三元式的 else 分支**
+        （`page === "profile" ? 资料 : 账号`）—— 于是"通用"与"关于"这两种页
+        都会在底下**再挂一整块账号内容**（同一个 `.wb-setpage-body` 渲染两遍：
+        通用页在「设置分类/记忆/默认模型/新话题」后面追加「当前状态/可用的能力/依赖账号的功能」）。
+        现在按页名精确匹配：只有 `account` 才渲染这一段。
+      */}
+      {page === "account" ? (
+        <div className="wb-setpage-body" data-testid="wb-setpage-account-body">
           <div className="wb-setpage-row">
             <span className="wb-setpage-label">当前状态</span>
             <em>本机模式（未登录）</em>
@@ -214,7 +223,7 @@ export default function SettingsPages({
             <em>订阅与额度、记忆云端同步、插件市场、手机遥控配对</em>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

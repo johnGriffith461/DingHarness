@@ -51,22 +51,75 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
      */
     const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "");
     const offenders: string[] = [];
+    /*
+     * ⚠️ 2026-10-16（审计 G30）：原来按**行**匹配 `transition:\s*all` —— 它只抓
+     * "transition 开头紧接 all" 那一种写法；`transition: color .2s, all .3s`（简写列表里带 all）、
+     * 跨行的声明、以及 `transition-property: all` 全都漏。现在按**声明**判：
+     * 只要 transition / transition-property 的值里出现 `all` 这个词就算。
+     */
+    const badTransition = /transition(-property)?\s*:[^;{}]*\ball\b/;
     for (const file of readdirSync(STYLE_DIR).filter((f) => f.endsWith(".css"))) {
       const full = path.join(STYLE_DIR, file);
-      const lines = strip(readFileSync(full, "utf8")).split("\n");
-      lines.forEach((line, i) => {
-        if (/transition:\s*all/.test(line)) offenders.push(`src/styles/${file}:${i + 1}`);
-      });
+      const text = strip(readFileSync(full, "utf8"));
+      /* 先按声明切，再回溯它所在的行号（跨行声明也能定位） */
+      for (const m of text.matchAll(/transition(-property)?\s*:[^;{}]*;?/g)) {
+        if (!/\ball\b/.test(m[0])) continue;
+        const line = text.slice(0, m.index).split("\n").length;
+        offenders.push(`src/styles/${file}:${line}（${m[0].trim().slice(0, 60)}）`);
+      }
     }
+    /* 自测：三种漏法各造一条，判定必须抓得到（原来那版只抓得到第一种） */
+    expect(badTransition.test("transition: all .2s;"), "`transition: all` 没抓到").toBe(true);
+    expect(badTransition.test("transition: color .2s, all .3s;"), "简写列表里的 all 没抓到").toBe(true);
+    expect(badTransition.test("transition-property: all;"), "`transition-property: all` 没抓到").toBe(true);
+    expect(badTransition.test("transition: color .2s, opacity .3s;"), "正常写法被误报").toBe(false);
     expect(
       offenders,
       `这些地方用了 transition: all —— 改成具名属性（transform/opacity/box-shadow/颜色）：\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 
-  it("② 动效令牌在（时长与曲线只有一份来源）", () => {
-    for (const token of ["--dur-quick", "--dur:", "--ease-out", "--ease-spring", "--focus-ring", "--on-accent"]) {
-      expect(css.includes(token), `缺令牌 ${token}（手感收口那节定义的）`).toBe(true);
+  it("② 动效令牌在，且**只有一份来源**（G30：原来只断「存在」）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G30）：这条的承诺是"时长与曲线**只有一份来源**"，
+     * 而断言只是 `css.includes(token)` —— 令牌存在即过：在别处**再定义一遍**
+     * （值不同、后写的赢）它照样绿，而那正是"两份来源"这条要挡的形状。
+     */
+    const TOKENS = ["--dur-quick", "--dur", "--dur-slow", "--ease-out", "--ease-spring", "--focus-ring", "--on-accent"];
+    /*
+     * 判据是"**每个主题里各只一份**"：暗色主题覆盖同名令牌是设计需要（不是第二份来源），
+     * 同一主题里定义两遍才是缺陷（后写的悄悄赢）。
+     */
+    const defsByTheme = (text: string): Array<{ token: string; dark: boolean }> => {
+      const out: Array<{ token: string; dark: boolean }> = [];
+      const stack: string[] = [];
+      let buf = "";
+      for (const ch of text.replace(/\/\*[\s\S]*?\*\//g, "")) {
+        if (ch === "{") {
+          stack.push(buf.trim());
+          buf = "";
+        } else if (ch === "}") {
+          stack.pop();
+          buf = "";
+        } else if (ch === ";") {
+          const at = buf.indexOf(":");
+          if (at > 0) {
+            const name = buf.slice(0, at).trim();
+            if (name.startsWith("--")) out.push({ token: name, dark: stack.some((s) => s.includes('data-theme="dark"')) });
+          }
+          buf = "";
+        } else {
+          buf += ch;
+        }
+      }
+      return out;
+    };
+    const defs = defsByTheme(css);
+    for (const token of TOKENS) {
+      const light = defs.filter((d) => d.token === token && !d.dark).length;
+      const dark = defs.filter((d) => d.token === token && d.dark).length;
+      expect(light, `${token} 在**浅色主题**里定义了 ${light} 处（只该一份来源）`).toBe(1);
+      expect(dark, `${token} 在深色主题里定义了 ${dark} 处（只该一份）`).toBeLessThanOrEqual(1);
     }
   });
 
@@ -153,7 +206,20 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
      * 且不许再出现"裸 `:focus-within` 就描边"的写法。
      */
     for (const sel of [".wb-composer:focus-within", ".wb-searchbox:focus-within"]) {
-      expect(lastBlock("html[data-kb=\"1\"] " + sel), `${sel} 没有挂在输入模态下（鼠标点进去会描边）`).not.toBe("");
+      const modalBlock = lastBlock('html[data-kb="1"] ' + sel);
+      expect(modalBlock, `${sel} 没有挂在输入模态下（鼠标点进去会描边）`).not.toBe("");
+      /*
+       * ⚠️ 2026-10-16（审计 G30）：光"这块在"不算数 —— 它承诺的是**键盘聚焦时看得见环**。
+       * 一个空块（或只有 `transition` 那种）也能让"存在"成立，所以这里要它真画出环。
+       */
+      /*
+       * "画环"可以是三种写法：`outline`、`box-shadow`、或**边框变色**（本仓输入区用的是第三种）。
+       * 关键是它真的**改变了一个可见属性**，而且用的是焦点环那枚令牌。
+       */
+      expect(modalBlock, `${sel} 的输入模态块没有真的画焦点环（outline / box-shadow / border-color 都没有）`).toMatch(
+        /outline|box-shadow|border-color/,
+      );
+      expect(modalBlock, `${sel} 的焦点环没用 --focus-ring 令牌`).toContain("var(--focus-ring)");
     }
     expect(css, "又出现裸 `:focus-within` 描边了（鼠标点进去就会亮）").not.toMatch(
       /^\s*\.wb-(composer|searchbox):focus-within\s*\{/m,
@@ -190,13 +256,44 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
    */
   it("⑦ 菜单/行的图标走图标库，不许 emoji / Unicode 字形顶替", () => {
     const offenders: string[] = [];
+    /*
+     * ⚠️ 2026-10-16（审计 G19）：这条原来**只匹配 `icon: "…"`** —— 而字形当图标
+     * 还有很多别的写法（`{"✎"}`、`{open ? "‹" : "›"}`、按钮里直接放一个 `✕`）。
+     * 现在把三类都算上：
+     *   ① `icon: "…"` / `icon={"…"}`（原来的那类）；
+     *   ② 按钮/可点元素里**整块内容就是一个字形**（含字面量三元，如 `‹` / `›`）；
+     *   ③ emoji（`\u{1F300}` 以上那一片）。
+     * 例外只有两个（本项目刻意的取舍，写在这里免得下一个人再猜）：
+     *   · `×`（关闭的通用记号，全仓关闭按钮都用它）与 `·`/`—`/`…`（分隔与省略号）；
+     *   · 正文里的标点与箭头符号（不在这三类里）。
+     */
+    const GLYPH = /[\u2190-\u21FF\u25A0-\u25FF\u2700-\u27BF\u{1F300}-\u{1FAFF}]/u;
+    const ALLOWED_GLYPH = /^[×·—…]+$/;
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
         else if (/\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name)) {
           const text = readFileSync(full, "utf8");
-          if (/icon:\s*"[^"]/.test(text)) offenders.push(path.relative(ROOT, full).split(path.sep).join("/"));
+          const rel = path.relative(ROOT, full).split(path.sep).join("/");
+          if (/icon:\s*"[^"]/.test(text) || /icon=\{\s*"[^"]/.test(text)) {
+            offenders.push(`${rel}（icon: "…"）`);
+            continue;
+          }
+          /* ② 可点元素的内容整块是字形：`>✎<` 或 `>{"‹"}<` 或 `>{a ? "‹" : "›"}<` */
+          for (const m of text.matchAll(/>\s*(?:\{\s*)?((?:"|')?)([^<>{}"']{1,4})\1\s*(?:\})?\s*</g)) {
+            const glyph = m[2] ?? "";
+            if (!GLYPH.test(glyph)) continue;
+            if (ALLOWED_GLYPH.test(glyph)) continue;
+            offenders.push(`${rel}（JSX 里用字形当图标：「${glyph}」）`);
+          }
+          for (const m of text.matchAll(/\?\s*"([^"]{1,4})"\s*:\s*"([^"]{1,4})"/g)) {
+            const a = m[1] ?? "";
+            const b = m[2] ?? "";
+            if (!GLYPH.test(a) && !GLYPH.test(b)) continue;
+            if (ALLOWED_GLYPH.test(a) && ALLOWED_GLYPH.test(b)) continue;
+            offenders.push(`${rel}（字面量三元里用字形当图标：「${a}」/「${b}」）`);
+          }
         }
       }
     };
@@ -239,6 +336,24 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
              */
             const stripped = body.replace(/[A-Za-z-]+=\{[^}]*\}/g, "");
             if (cjk.test(stripped)) continue;
+            /*
+             * ⚠️ 2026-10-16（审计 G18）：原来这里一句 `if (stripped.includes("{")) continue;`
+             * 把**所有带表达式内容的按钮**都放过了 —— 实测漏了 40 多处缺 `aria-label` 的
+             * 图标按钮（`Workbench.tsx:250` 的 `{canvasChatOpen ? "‹" : "›"}` 就是其中之一）。
+             * 现在只放过"判不了"的那一类（引用标识符的表达式，可能渲染出文字），
+             * **字面量**（`{"✎"}` / `{a ? "‹" : "›"}`）照样判。
+             */
+            const exprs = [...stripped.matchAll(/\{([^{}]*)\}/g)].map((x) => x[1] ?? "");
+            const judgeable = (e: string): boolean => /^\s*["'`]/.test(e) || /["'`][^"'`]*\?|[?][^"'`]*["'`]/.test(e);
+            const hasJudgedLiteral = exprs.length > 0 && exprs.every(judgeable);
+            const unknownExpr = exprs.some((e) => !judgeable(e) && e.trim() !== "");
+            if (unknownExpr && !hasJudgedLiteral) continue;
+            const exprGlyph = exprs.some((e) => /["'`]([^"'`]{1,4})["'`]/.test(e) && /[\u2190-\u21FF\u25A0-\u25FF\u2700-\u27BF\u{1F300}-\u{1FAFF}]/u.test(e));
+            if (exprGlyph) {
+              const line0 = text.slice(0, m.index).split("\n").length;
+              offenders.push(`${path.relative(ROOT, full).split(path.sep).join("/")}:${line0}（内容是以字形为选项的三元/字面量）`);
+              continue;
+            }
             if (stripped.includes("{")) continue;
             if (!/<[A-Z][A-Za-z0-9]*/.test(stripped)) continue;
             const line = text.slice(0, m.index).split("\n").length;
@@ -290,6 +405,28 @@ describe("手感守卫（UI 做工的几条规矩）", () => {
         used.get(m[1])!.add(f);
       }
       for (const m of text.matchAll(/^\s*(--[a-zA-Z0-9-]+)\s*:/gm)) defined.add(m[1]);
+    }
+    /*
+     * ⚠️ 2026-10-16（审计 G30）：扫描面原来**只有 CSS** —— 而 TSX 的内联样式里
+     * 同样会写 `style={{ color: "var(--x)" }}`，那种用法在这条里完全看不见
+     * （变量没定义也不会红）。现在把 src 下的 `.tsx` 文件里的 `var(--…)` 也算进"用了"。
+     */
+    const tsxFiles: string[] = [];
+    const walkTsx = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walkTsx(full);
+        else if (/\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name)) tsxFiles.push(full);
+      }
+    };
+    walkTsx(path.join(ROOT, "src"));
+    for (const full of tsxFiles) {
+      const rel = path.relative(path.join(ROOT, "src"), full).split(path.sep).join("/");
+      const text = strip(readFileSync(full, "utf8"));
+      for (const m of text.matchAll(/var\((--[a-zA-Z0-9-]+)/g)) {
+        if (!used.has(m[1])) used.set(m[1], new Set());
+        used.get(m[1])!.add(`（TSX）${rel}`);
+      }
     }
     const missing = [...used.entries()]
       .filter(([name]) => !defined.has(name))

@@ -54,12 +54,29 @@ describe("本地产物类型 → 协议编号", () => {
     }
   });
 
-  it("几个能一一对应的档位要精确对上", () => {
-    expect(resourceTypeOf("docx")).toBe(10);
-    expect(resourceTypeOf("xlsx")).toBe(12);
-    expect(resourceTypeOf("pptx")).toBe(9);
-    expect(resourceTypeOf("markdown")).toBe(17);
-    expect(resourceTypeOf("code")).toBe(7);
+  it("**八个档位逐个精确对上**（G53.w：原来 html / image / canvas 只断 >0）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.w）：这条原来只精确钉了五个（docx/xlsx/pptx/markdown/code），
+     * html / image / canvas 落在 `>0` 的笼统判定里 —— 把 html 顺手改成"图片"那一档
+     * （都是正数）也照样绿。现在八个一起钉死；`KIND_TO_TYPE` 里加新档位时这里要跟着加。
+     */
+    const EXPECTED: Record<string, number> = {
+      markdown: 17,
+      docx: 10,
+      pptx: 9,
+      xlsx: 12,
+      code: 7,
+      /* 下面三个是"协议里没有一一对应档位"的：html→Pages(2)、image→CanvasWorkspace(16)、canvas→CanvasPage(3) */
+      html: 2,
+      image: 16,
+      canvas: 3,
+    };
+    expect(Object.keys(ARTIFACT_FORMATS).sort(), "本地 kind 与这张表对不上（新档位要登记）").toEqual(
+      Object.keys(EXPECTED).sort(),
+    );
+    for (const [kind, type] of Object.entries(EXPECTED)) {
+      expect(resourceTypeOf(kind as ArtifactKind), `${kind} 映射到的协议编号不对`).toBe(type);
+    }
   });
 
   it("反查能回来（一一对应的那几个）", () => {
@@ -94,16 +111,40 @@ describe("两套状态别混", () => {
   });
 
   it("两套状态是不同层的东西：一次产物生成里可以有多次写操作", () => {
-    // 产物级只有"生成中/已生成"两个中间点，操作级有"开始/更新/完成"三段
-    const one = [
-      ARTIFACT_OP_STATUS.Start,
-      ARTIFACT_OP_STATUS.Updated,
-      ARTIFACT_OP_STATUS.Updated,
-      ARTIFACT_OP_STATUS.Finish,
-    ];
-    expect(one.filter((s) => s === ARTIFACT_OP_STATUS.Updated).length).toBe(2);
-    // 而产物级在这整段里只经历了 Generating → Generated
-    expect(new Set([ARTIFACT_STATUS.Generating, ARTIFACT_STATUS.Generated]).size).toBe(2);
+    /*
+     * ⚠️ 2026-10-16（审计 G53.w）：原来这段断言的是**测试自己拼的数组**
+     * （`one.filter(...).length === 2`、`new Set([两个常量]).size === 2`）——
+     * 被测模块一行没参与。现在断**产品**的两条真性质：
+     *   ① 两套编号**不相交**（混用就会把"产物已生成"读成"某次写操作完成"）；
+     *   ② 本地三态 → 协议状态是**多对一的确定性映射**（生成中/已生成/已删除各归各的）。
+     */
+    /*
+     * ⚠️ 两套编号**在数值上就是重叠的**（操作级 1–4、产物级 0–5）—— 那是上游协议定的，
+     * 不是缺陷；别把"不相交"当成产品性质来断（第一版这么写过，红的是断言不是产品）。
+     * 要钉的是两张表**各自**的取值，以及本地三态到协议态的映射。
+     */
+    expect(ARTIFACT_OP_STATUS, "操作级状态表被改了").toEqual({ Start: 1, Finish: 2, Updated: 3, Rollbacked: 4 });
+    expect(ARTIFACT_STATUS, "产物级状态表被改了").toEqual({
+      Init: 0,
+      Generating: 1,
+      Generated: 2,
+      Deleted: 3,
+      Terminal: 4,
+      UnSupport: 5,
+    });
+
+    const mapped = {
+      generating: artifactStatusOf("generating"),
+      ready: artifactStatusOf("ready"),
+      removed: artifactStatusOf("removed"),
+    };
+    expect(mapped.generating).toBe(ARTIFACT_STATUS.Generating);
+    expect(mapped.ready).toBe(ARTIFACT_STATUS.Generated);
+    expect(mapped.removed).toBe(ARTIFACT_STATUS.Deleted);
+    /* 三个本地态必须映到三个**不同**的协议态（映成一个就等于丢了状态） */
+    expect(new Set(Object.values(mapped)).size).toBe(3);
+    /* 缺省（没标状态）→ 按"已生成"算：协议里 Init 是"还没开始"，而本地拿到手的产物不是那种 */
+    expect(artifactStatusOf(undefined)).toBe(ARTIFACT_STATUS.Generated);
   });
 });
 

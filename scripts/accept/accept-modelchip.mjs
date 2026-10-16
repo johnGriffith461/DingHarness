@@ -43,10 +43,16 @@ try {
   const providers = await page.locator('[data-testid^="wb-model-provider-"]').count();
   const singleList = await page.locator('[data-testid^="wb-model-option-"]').count();
   if (providers < 1 && singleList < 1) bad.push("模型弹层里既没有 provider 也没有模型");
+  /*
+   * ⚠️ 2026-10-16 修：这一段原来是 `bad.push()` —— **空推送**，红的时候消息是 `undefined`，
+   * 读日志的人不知道哪条判据错了（等于判了也说不清）。顺手把这句补成人话。
+   */
   const searchBoxes = await page.locator('[data-testid="wb-model-search"]').count();
   const pullButtons = await page.locator('[data-testid^="wb-model-pull-"]').count();
   if (searchBoxes || pullButtons) {
-    bad.push();
+    bad.push(
+      `模型弹层里不该有搜索框与「拉取模型」（那是设置页的事），现在各读到 ${searchBoxes} / ${pullButtons} 个`,
+    );
   }
   /* 多 provider：悬停一级展开二级 */
   if (providers > 0) {

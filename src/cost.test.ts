@@ -7,6 +7,7 @@ import { costNote, fabricatedCost, sumUsage, usageRows, usageTotal } from "@shar
  * ## 为什么这些断言存在
  *
  * 本体显示的是「消耗 0.48」，而实机读数写明它**按额度计量、不是 token**（`docs/HANDOFF.md:1695`）。
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 本机版没有额度体系 —— 那个数算不出来。所以我们显示的是**按字数的估算**，
  * 而**真实用量**（provider 给的 tokens）另行如实说出。
  *
@@ -19,9 +20,15 @@ describe("fabricatedCost（本机版那个估算数）", () => {
     expect(fabricatedCost("短")).toBeLessThan(fabricatedCost("长".repeat(400)));
   });
 
-  it("有下限 0.01（空文本也不会是 0 或负数）", () => {
+  it("空文本也有底座 0.10（不是 0、不是负数）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.l）：原来除了 `toBe(0.1)` 还挂着一条
+     * `toBeGreaterThanOrEqual(0.01)` —— 在 `0.1 > 0.01` 之下它**恒真**（而且那句
+     * `Math.max(0.01, …)` 是死代码，已删）。现在钉**底座本身**：
+     * 空文本 = 0.10，且它随文本单调不降（这才是"可比较"这条口径）。
+     */
     expect(fabricatedCost("")).toBe(0.1);
-    expect(fabricatedCost("")).toBeGreaterThanOrEqual(0.01);
+    expect(fabricatedCost("a".repeat(400))).toBeGreaterThan(fabricatedCost(""));
   });
 
   it("保留两位（界面上就是「消耗 0.48」这种写法）", () => {

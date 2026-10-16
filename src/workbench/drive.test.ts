@@ -101,7 +101,12 @@ describe("sortByRecent —— 「最近」的口径", () => {
 
 describe("sortByName", () => {
   it("按名字排（中文按拼音序）", () => {
-    const list = [entry("丙"), entry("甲"), entry("乙")];
+    /*
+     * ⚠️ 2026-10-16（审计 G53.a）：原来的输入是 `[丙, 甲, 乙]`，期望也是 `[丙, 甲, 乙]` ——
+     * **输入序就等于期望序**，一个不排序的实现照样过（这就是 `sortByName` 的唯一测试）。
+     * 现在给一个乱序输入，并按拼音序给出期望（丙 bing < 甲 jia < 乙 yi）。
+     */
+    const list = [entry("乙"), entry("丙"), entry("甲")];
     expect(sortByName(list).map((e) => e.name)).toEqual(["丙", "甲", "乙"]);
   });
 });

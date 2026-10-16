@@ -14,16 +14,16 @@
  *      这个表是"再接一种格式只要加一行"的扩展点。
  */
 
-/** 产物类型。 */
-export type ArtifactKind =
-  | "markdown"
-  | "docx"
-  | "pptx"
-  | "xlsx"
-  | "html"
-  | "code"
-  | "image"
-  | "canvas";
+/**
+ * 产物类型。
+ *
+ * ⚠️ 定义搬去了 `shared/artifactProto.ts`（2026-10-16，审计 G40 顺带撞到）：
+ * 协议层要按它做编号映射，而它原来长在这里 —— 于是协议层反向依赖渲染层，
+ * 编 CLI 时把渲染层一起拉进编译图，npm 包里凭空多一个 `dist-cli/src/workbench/artifact.js`。
+ * 这里**原样再导出**：本文件与别处的既有引用一个字都不用改。
+ */
+export type { ArtifactKind } from "@shared/artifactProto";
+import type { ArtifactKind } from "@shared/artifactProto";
 
 /** 产物的生成状态（对齐上位的 `ArtifactStatus`）。 */
 export type ArtifactStatus = "generating" | "generated" | "failed";

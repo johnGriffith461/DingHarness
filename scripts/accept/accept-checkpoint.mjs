@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, readStoreFile, killTree, shot, waitTurnEnd } from "./harness.mjs";
 
 /**
  * 验收：**会话检查点**（§151）—— 回退与分叉。
@@ -25,8 +25,12 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9300;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9300;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);
@@ -49,17 +53,36 @@ try {
       ),
     );
   const title = () => page.evaluate(() => document.querySelector('[data-testid="wb-task-title"]')?.textContent?.trim() ?? "");
-  const memory = () => {
+  /*
+   * ⚠️ 2026-10-16（审计 G107）：原来这里回**整份 memory.json 的文本**，
+   * 而下面拿 `includes("42")` 当判据 —— 条目里的 ISO 时间戳（如 `2026-10-16T04:42:…`）
+   * 就能满足它，于是"记忆里真的存了 42"这条断言**恒真**。
+   * 现在只认**条目正文**里的 "42"（走 readStoreFile 拆信封）。
+   */
+  const memoryTexts = () => {
     const f = path.join(DATA, "memory.json");
-    return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
+    if (!fs.existsSync(f)) return [];
+    try {
+      const lib = readStoreFile(f);
+      const entries = Array.isArray(lib?.entries) ? lib.entries : [];
+      return entries.map((e) => String(e?.text ?? ""));
+    } catch {
+      return [];
+    }
   };
-  const send = async (text, wantAssistants) => {
+  const memoryHas42 = () => memoryTexts().some((t) => t.includes("42"));
+  const send = async (text, _wantAssistants) => {
+    /*
+     * ⚠️ 2026-10-16（审计 G108）：原来等的是「助手气泡 count 到预期值」，那是**半截回复**
+     * （首 token 一出现就退出循环）。这条脚本最要紧的三条断言（分叉真的产出新对话、
+     * 分叉不改原对话、回退不撤销已发生的动作）都在读**这一轮的正文与轮次数** ——
+     * 慢回答下会读到没写完的话，还会在上一条没结束时就发下一条（轮次数不再确定）。
+     * 现在等会话记录里的 `done`：引擎自己定义的终态（见 harness 的 `waitTurnEnd`）。
+     */
+    const before = await finishedTurns(page);
     await page.locator('[data-testid="wb-composer-input"]').fill(text);
     await page.locator('[data-testid="wb-send"]').click();
-    const deadline = Date.now() + 90000;
-    while (Date.now() < deadline && (await assistants()) < wantAssistants) {
-      await page.waitForTimeout(1500);
-    }
+    await waitTurnEnd(page, before, 120_000);
     for (let i = 0; i < 3; i += 1) {
       if ((await page.locator('[data-testid="wb-question-card"]').count()) === 0) break;
       await page.locator('[data-testid="wb-option-0"]').first().click();
@@ -75,15 +98,26 @@ try {
 
   out.userBefore = await users();
   out.assistantBefore = await assistants();
-  out.memoryBefore = memory().includes("42");
+  out.memoryBefore = memoryHas42();
   const rowsBefore = await recentIds();
   out.originalId = rowsBefore[0] ?? null;
 
   /* ── ② 分叉（在最后一条助手消息上）── */
   const branchBtns = page.locator('[data-testid^="wb-act-branch-"]');
   out.branchBtnCount = await branchBtns.count();
+  const rowsBeforeFork = rowsBefore.length;
   await branchBtns.last().click();
-  await page.waitForTimeout(1500);
+  /*
+   * ⚠️ 2026-10-16（审计 G108 同一条毛病）：这里原来是固定 `waitForTimeout(1500)` 就读标题与条数 ——
+   * 分叉慢一点读到的是**还没落地的状态**。改成等**可判定的结果**：左栏真的多出一行
+   * （这正是下面 `recentGrew` 要断的那件事），等不到就如实红。
+   */
+  {
+    const forkDeadline = Date.now() + 30_000;
+    while (Date.now() < forkDeadline && (await recentIds()).length <= rowsBeforeFork) {
+      await page.waitForTimeout(300);
+    }
+  }
   out.branchTitle = await title();
   out.branchUsers = await users();
   out.branchAssistants = await assistants();
@@ -122,7 +156,7 @@ try {
   out.rewindNote = note;
   out.userAfter = await users();
   out.assistantAfter = await assistants();
-  out.memoryAfter = memory().includes("42");
+  out.memoryAfter = memoryHas42();
   out.shot = await shot(page, "checkpoint-rewind.png");
 
   await b.close();

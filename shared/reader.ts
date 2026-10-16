@@ -3,7 +3,7 @@
  *
  * ## 证据
  *
- * 文案逐字取自 `docs/evidence-readweb.txt`（`copilot_*` 12 条）：
+ * 文案逐字取自 `docs/evidence-readweb.txt`（`copilot_*` 12 条）：  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  *
  * | 键 | 文案 |
  * |---|---|

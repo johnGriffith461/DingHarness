@@ -13,6 +13,7 @@ import "prismjs/components/prism-sql";
 import "prismjs/components/prism-yaml";
 import "prismjs/components/prism-markdown";
 import type { CodeNode as CodeNodeType } from "../types";
+import { useTransientFlag } from "@/utils/transientNote";
 import { NodeView } from "./NodeView";
 import NodeGenerationBar from "./NodeGenerationBar";
 import DeferredRender from "./DeferredRender";
@@ -70,7 +71,7 @@ export default function CodeNodeView({ id, data, selected }: NodeProps<CodeNodeT
    * 挂在这颗按钮上、2 秒后自己摘掉 —— 不飘 toast：复制这种小动作的反馈
    * 应该出现在**手指所在的地方**（与工作台 `MessageActions` 的 flash 同一套）。
    */
-  const [copied, setCopied] = useState(false);
+  const [copied, pulseCopied] = useTransientFlag(2000);
   const gutterRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -130,12 +131,11 @@ export default function CodeNodeView({ id, data, selected }: NodeProps<CodeNodeT
                * ⚠️ 这里**必须真的写剪贴板**：本项目反对"摆一颗看起来能用的假按钮"
                * （§124 死按钮审计报的就是这类）。写完给 2 秒态，失败则如实说。
                */
+              /* 一次性态走共用件（P91）：句柄与卸载都由它管，别裸发定时器 */
               navigator.clipboard.writeText(data.code).then(
-                () => {
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 2000);
-                },
-                () => setCopied(false),
+                () => pulseCopied(),
+                /* 失败：什么都不点亮（本来就没亮，不用清）—— 但也别假装成功 */
+                () => undefined,
               );
             }}
           >

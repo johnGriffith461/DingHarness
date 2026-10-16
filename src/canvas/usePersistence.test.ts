@@ -100,7 +100,14 @@ describe("serializeCanvas", () => {
       revision: 1,
       confirmedRevision: 1,
     });
+    /*
+     * ⚠️ 2026-10-16（审计 G53.v）：原来只断"是个长度 >10 的字符串" —— 任何字符串都过。
+     * 现在要求它是**合法的 ISO 时间戳**，且落在最近（这份文档刚被写过）。
+     */
     expect(typeof doc.updatedAt).toBe("string");
-    expect(doc.updatedAt && doc.updatedAt.length > 10).toBe(true);
+    const seen = new Date(String(doc.updatedAt));
+    expect(Number.isNaN(seen.getTime()), `updatedAt 不是合法时间：${doc.updatedAt}`).toBe(false);
+    expect(String(doc.updatedAt), "updatedAt 不是 ISO 形状").toBe(seen.toISOString());
+    expect(Date.now() - seen.getTime(), "updatedAt 不是「刚刚」写的").toBeLessThan(60_000);
   });
 });

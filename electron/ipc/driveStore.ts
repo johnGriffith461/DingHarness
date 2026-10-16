@@ -228,13 +228,63 @@ async function putIntoDrive(
   }
 }
 
+/**
+ * 导入源的**准入校验**（2026-10-16，审计 X01 / P03 / P04）。
+ *
+ * ## 为什么要它
+ *
+ * `importPaths` 的源路径是**渲染进程给的**（拖拽事件的路径由渲染层转手），
+ * 而这一层原来是裸 `fs.copyFile(source, target)`：
+ *   · 不 `lstat` → 源可以是**符号链接 / junction**，把校验想守的边界直接穿过去（P04）；
+ *   · 不看类型 → 目录、设备文件、FIFO 都会试着拷；
+ *   · 不设大小 → 一次拖一个 40GB 的镜像就把盘填满。
+ *
+ * ⚠️ 边界如实记：这条**不是**"只能从授权目录导入"—— 把外部文件拖进云盘本来
+ * 就是它的用途（用户从桌面/下载目录拖东西）。它守的是"**源必须是一个真实存在的
+ * 普通文件**"这条底线：符号链接与特殊文件一律拒（那是唯一能绕过"你看到的就是你
+ * 拖的那个文件"这条直觉的东西）。
+ *
+ * @param raw 渲染进程给的源路径（**不可信**）
+ * @returns 通过时给出 `realpath` 之后的路径
+ */
+async function validateImportSource(raw: string): Promise<{ ok: true; path: string } | { ok: false; why: string }> {
+  const resolved = path.resolve(String(raw ?? ""));
+  let stat;
+  try {
+    /* `lstat` 不跟随符号链接：链接本身不是"普通文件" → 直接拒 */
+    stat = await fs.lstat(resolved);
+  } catch {
+    return { ok: false, why: "源文件不存在或读不了" };
+  }
+  if (stat.isSymbolicLink()) return { ok: false, why: "源是符号链接（不跟随 —— 审计 P04）" };
+  if (!stat.isFile()) return { ok: false, why: "源不是普通文件" };
+  if (stat.size > IMPORT_MAX_BYTES) {
+    return { ok: false, why: `源超过上限 ${Math.round(IMPORT_MAX_BYTES / 1024 / 1024)}MB` };
+  }
+  /* realpath 之后拿到的才是"真的那个文件"（父目录里的链接在这一步被解开） */
+  try {
+    return { ok: true, path: await fs.realpath(resolved) };
+  } catch {
+    return { ok: false, why: "取不到真实路径" };
+  }
+}
+
+/** 单个导入源的字节上限（拖一个几十 GB 的镜像进来不该把盘填满）。 */
+const IMPORT_MAX_BYTES = 512 * 1024 * 1024;
+
 export async function importPaths(sources: readonly string[]): Promise<ImportOutcome> {
   const dir = driveDir();
   await fs.mkdir(dir, { recursive: true });
   const items: ImportItem[] = [];
   let imported = 0;
   for (const source of sources) {
-    const item = await putIntoDrive(dir, path.basename(source), (target) => fs.copyFile(source, target));
+    const checked = await validateImportSource(source);
+    if (!checked.ok) {
+      /* ⚠️ `ImportItem.reason` 是**枚举**（上传统一话术），不是自由文本 —— 这里按类归 */
+      items.push({ ok: false, name: path.basename(String(source ?? "")) || "(未命名)", reason: "parseFail" });
+      continue;
+    }
+    const item = await putIntoDrive(dir, path.basename(checked.path), (target) => fs.copyFile(checked.path, target));
     if (item.ok) imported += 1;
     items.push(item);
   }

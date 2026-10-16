@@ -6,7 +6,7 @@ import type { WorkTask } from "./task";
  *
  * ## 证据
  *
- * 文案逐字取自 `docs/evidence-taskcenter.txt`（`appEntryManage_*` 13 条，
+ * 文案逐字取自 `docs/evidence-taskcenter.txt`（`appEntryManage_*` 13 条，  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 从本体前端包抠出来的）。还有半条链路来自 `m_chat_goal_*`：
  * 「告诉豆包你想做什么，豆包会帮你持续跟进。**你可以随时在任务中心查看进展和结果**。」
  *

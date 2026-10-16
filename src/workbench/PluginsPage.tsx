@@ -1,6 +1,7 @@
 /**
  * 从 `pages.tsx` 拆出来的（C6-2）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆分理由见 `docs/PLAN-C6-结构拆分.md`（那个文件 1669 行 / 7 个顶层组件）。
+ * 拆分理由原本记在 `docs/PLAN-C6-结构拆分.md`（那个文件 1669 行 / 7 个顶层组件）。
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -16,6 +17,7 @@ import { FEATURED_ITEMS, RECOMMENDED_PLUGINS, SKILL_GROUPS, type CatalogItem } f
 import { catalogIcon } from "./catalogIcon";
 import { findItemIn, useLibraryStore } from "./libraryStore";
 import { useWorkbenchStore } from "./store";
+import { useTransientNote } from "@/utils/transientNote";
 
 import { PLUGIN_CATEGORIES } from "./ScheduledPage";
 import { ChevronRight } from "./pagesUtil";
@@ -84,7 +86,8 @@ export function PluginsPage() {
       tools: Array<{ localName: string; name: string; description: string }>;
     }>;
   } | null>(null);
-  const [mcpNote, setMcpNote] = useState("");
+  /* 提示条自己会消失（P91）：句柄由 hook 管，后一条不许被前一条的定时器提前擦掉 */
+  const [mcpNote, showMcpNote] = useTransientNote(3000);
 
   const pullMcp = useCallback(() => {
     const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
@@ -127,7 +130,7 @@ export function PluginsPage() {
       }[]
     | null
   >(null);
-  const [pluginNote, setPluginNote] = useState("");
+  const [pluginNote, showPluginNote] = useTransientNote(3000);
   /** npm 包名输入（"发现"那一半：在 npm 上找到包名，粘进来装）。 */
   const [npmSpec, setNpmSpec] = useState("");
 
@@ -150,14 +153,14 @@ export function PluginsPage() {
       void run()
         .then((r) => {
           if (!r.ok) {
-            setPluginNote((r.errors ?? ["没成功"]).join("；"));
+            showPluginNote((r.errors ?? ["没成功"]).join("；"));
             return;
           }
           if (Array.isArray(r.list)) setPlugins(r.list as never);
-          setPluginNote(okNote);
-          window.setTimeout(() => setPluginNote(""), 3000);
+          showPluginNote(okNote);
+
         })
-        .catch((e: unknown) => setPluginNote(String(e).slice(0, 120)));
+        .catch((e: unknown) => showPluginNote(String(e).slice(0, 120)));
     },
     [],
   );
@@ -312,7 +315,7 @@ export function PluginsPage() {
                   onClick={() => {
                     const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
                     void shell?.mcp?.openConfig?.().then((r) => {
-                      if (r && !r.ok) setMcpNote(`打不开配置文件：${r.error}`);
+                      if (r && !r.ok) showMcpNote(`打不开配置文件：${r.error}`);
                     });
                   }}
                 >
@@ -325,8 +328,8 @@ export function PluginsPage() {
                     const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
                     void shell?.mcp?.reload?.().then(() => {
                       pullMcp();
-                      setMcpNote("已重新连接");
-                      window.setTimeout(() => setMcpNote(""), 3000);
+                      showMcpNote("已重新连接");
+
                     });
                   }}
                 >

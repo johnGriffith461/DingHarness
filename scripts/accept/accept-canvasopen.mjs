@@ -2,7 +2,10 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { closeCanvas, connectWithRetry, openCanvas, pickPort, shot, verdict, waitForPort } from "./harness.mjs";
+import { closeCanvas, connectWithRetry, failOnMarks, openCanvas, pickPort, shot, verdict, waitForPort } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 11.21 验收：点产物卡片 = **在画布里打开**（不是记事本）。

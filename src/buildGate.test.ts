@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -60,9 +60,23 @@ const EXPECTED_STEPS = [
   "pnpm typecheck",
   "pnpm lint",
   "pnpm test",
+  // ①.5 路径校验（2026-10-16 进链：审计 G39 —— 一条没人跑的验收等于没有）
+  "pnpm verify:drive-paths",
   // ② 出产物
   "pnpm build:web",
   "pnpm electron:build",
+  /*
+   * ⚠️ `cli:build` 与 `verify-cli-npm`（2026-10-16，审计 G40/G95）：**npm 真正发出去的那份 CLI**。
+   *
+   * 在这之前，CLI 有两条产物、只有一条有门：
+   *   · `dist-bin/ding-*.exe`（Bun 单文件）—— 有 `verify-cli-bin.mjs`，但那条既不在 build 链也不在 CI；
+   *   · `dist-cli/`（tsc）—— 这才是 `package.json` 里 `bin.ding` 与 `files` 指的东西，
+   *     而它**一条门都没有**：不在 build、不在 CI、`verify:artifacts` 也不看它。
+   * 代价实测到了（就是加这两步的当口）：`pnpm cli:build` 当时**根本编不过** ——
+   * `engine/adapters/sandbox.ts` 用了 Electron 独有的 `process.resourcesPath`，
+   * 而 CLI 那份 tsconfig 只带 `@types/node`。没人跑，所以没人知道。
+   */
+  "pnpm cli:build",
   /*
    * ⚠️ 打包**不能**直接 `electron-builder`（2026-10-14 修）：
    * 必须先 `node scripts/stage-app.mjs` 摆一个只装生产依赖的 app 目录，
@@ -75,6 +89,8 @@ const EXPECTED_STEPS = [
   // ③ 拿产物去验（顺序不可换：产物先出来）
   "node scripts/verify-artifacts.mjs",
   "node scripts/verify-packaged.mjs",
+  /* npm 那份 CLI 产物级端到端：跑它自己的 --help/sessions/models/doctor/eval，并与源树对照 */
+  "node scripts/verify-cli-npm.mjs",
   "node scripts/verify-acceptances.mjs",
 ];
 
@@ -109,16 +125,50 @@ describe("pnpm build 的门禁链", () => {
   });
 
   it("用 && 串起来（任何一道红就整体失败，不是分号那种'红了也继续'）", () => {
-    expect(build).not.toContain(";");
-    expect(got.length).toBeGreaterThanOrEqual(6);
+    /*
+     * ⚠️ 2026-10-16（审计 G53.u）：原来是 `not.toContain(";")` + `length >= 6` ——
+     * 前者挡不住"某两步之间忘了写 `&&`"（那会静默变成一条命令的参数），
+     * 后者在步骤表已经逐字断言过的情况下等于同义重复。
+     * 现在：**每一步之间恰好一个 `&&`**，且步骤不空、不重复。
+     */
+    expect(build.split(" && ").length - 1, "步骤之间的 && 数量与步骤数对不上").toBe(got.length - 1);
+    expect(got.every((s) => typeof s === "string" && s.trim().length > 0), "步骤表里有空步").toBe(true);
+    expect(new Set(got).size, "步骤表里有重复的步").toBe(got.length);
+  });
+
+  it("⭐ 两道 CLI 产物门在 CI 里也真的被调用（建好却没人跑的门 = 没有门）", () => {
+    /*
+     * ⚠️ 审计 G63 的原话是"新产物门建成了却没进任何门禁链" —— 那正是本仓反复清的
+     * "一道会悄悄消失的检查"。所以这里不满足于"文件存在"，而是**读 CI 的 workflow**，
+     * 要求它真的调用这两条：
+     *   · `scripts/verify-cli-npm.mjs`：npm 发出去的 dist-cli（纯 node，CI 的 gates 里跑）；
+     *   · `scripts/verify-cli-bin.mjs`：Bun 编的单二进制（单独一个 job，要装 bun）。
+     * 谁把它们从 CI 里删掉，这一条就红 —— 改 CI 是有意的工程动作，那就得同时改这里。
+     */
+    const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+    for (const needle of ["scripts/verify-cli-npm.mjs", "scripts/verify-cli-bin.mjs"]) {
+      expect(ci, `CI 里没有调用 ${needle}（建好却没人跑的门 = 没有门）`).toContain(needle);
+    }
+    // 单二进制那条要先有产物：CI 里得真的编（`cli:bin`），不然验的是空气
+    expect(ci, "CI 里没有编单二进制（cli:bin）就想去验它 —— 那验的是上一次的旧产物").toContain("cli:bin");
   });
 
   it("引用的脚本、npm script 与 lint 配置都真的存在（清单指向不存在的东西 = 假门禁）", () => {
-    for (const f of ["scripts/verify-artifacts.mjs", "scripts/verify-packaged.mjs", "scripts/verify-acceptances.mjs"]) {
-      expect(() => readFileSync(path.join(ROOT, f), "utf8"), `${f} 不存在`).not.toThrow();
+    for (const f of [
+      "scripts/verify-artifacts.mjs",
+      "scripts/verify-packaged.mjs",
+      "scripts/verify-acceptances.mjs",
+      /* 2026-10-16（审计 G39）：路径校验这条也进了 build 链，一并查在不在 */
+      "scripts/verify-drive-paths.ts",
+      /* 2026-10-16（审计 G40/G95）：npm 产物那条门 + 它要验的两样东西都得在 */
+      "scripts/verify-cli-npm.mjs",
+      "scripts/build-cli.mjs",
+      "scripts/verify-cli-bin.mjs",
+    ]) {
+      expect(existsSync(path.join(ROOT, f)), `${f} 不存在（清单指向不存在的东西 = 假门禁）`).toBe(true);
     }
     // 新门引的是 npm script，不是文件 —— 所以这里查 scripts 表
-    for (const name of ["typecheck", "lint", "test", "build:web", "electron:build"]) {
+    for (const name of ["typecheck", "lint", "test", "build:web", "electron:build", "cli:build", "cli:release"]) {
       expect(pkg.scripts[name], `package.json 里没有 ${name} 这个 script`).toBeTruthy();
     }
     // lint 的规则集写在配置文件里，缺了它就退回默认那一大坨（B3 明确只开两条）

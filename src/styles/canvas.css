@@ -1081,3 +1081,37 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * 「回到示例画布」的确认条（2026-10-16，审计 P23）。
+ *
+ * 它出现在工具条里（不是弹窗）：那个动作的确认**只需要一句话 + 两颗按钮**，
+ * 弹一个模态框会把用户从画布上拽走。危险那一颗用强调色描边，
+ * 与 `.is-danger` 在仓里的其它用法一致。
+ */
+.canvas-reset-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.canvas-reset-confirm-text { white-space: nowrap; }
+
+.canvas-reset-confirm-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.canvas-reset-confirm-btn:hover { background: var(--surface-hover); }
+
+.canvas-reset-confirm-btn.is-danger { border-color: var(--danger); color: var(--danger); }

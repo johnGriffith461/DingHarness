@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
  * 端到端验证第 1 条要"发一条长回答 + 中途点停 + 计时 + 看子智能体是否还在跑"——
  * 贵且偶发。所以这里退一步：**钉住接线本身**（谁把信号传给谁），
  * 并在 `docs/HANDOFF.md` 里如实写"端到端未验"。
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 这样至少"有人顺手删掉 signal 那一行"会被立刻挡住。
  *
  * ⚠️ 判据是**接线**不是**存在**：只断言 `signal` 真的从 controller 流到工具环境、
@@ -73,6 +74,49 @@ describe("C2-3 连线守卫：一份循环 + 中止信号穿三层", () => {
     expect(sub, "子智能体的步数上限应当是 6（沿用原值）").toContain("maxSteps: input.maxSteps ?? 6");
     // 两份循环的痕迹：宿主不该再直接 import streamText
     expect(host, "ai.ts 又自己 import 了 streamText（第二份循环）").not.toContain("streamText");
-    expect(kernel + sub, "主循环应当只有 runTurn 一份实现").toContain("runTurn");
+  });
+
+  it("⚠️ **全仓只有一份主循环**（G32：原来那句「两份源码拼起来 toContain(runTurn)」恒真）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G32）：原来这里是把两份源码拼起来 `toContain("runTurn")` ——
+     * 两个文件里都必然出现这个词，**恒真**，等于没断。真正的不变量是：
+     *   · `runTurn` 的实现**只有一处**（多出一处 = 又长了一份循环）；
+     *   · 真正的 SDK 调用（`streamText(`）也**只在那一个文件里**。
+     * 这两条会红的方式很具体：谁在别处 `export async function runTurn` 或自己调 streamText。
+     */
+    const roots = ["src", "shared", "engine", "hosts", "electron"];
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) {
+          if (entry.name === "node_modules") continue;
+          walk(rel);
+        } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) files.push(rel);
+      }
+    };
+    for (const r of roots) walk(r);
+
+    const definesRunTurn: string[] = [];
+    const callsStreamText: string[] = [];
+    for (const rel of files) {
+      /* ⚠️ 先去掉注释（这个坑本项目踩过多次：注释里提到 streamText( 会被当成真调用） */
+      const text = read(rel)
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      if (/export\s+async\s+function\s+runTurn\s*\(/.test(text)) definesRunTurn.push(rel);
+      if (/\bstreamText\s*\(/.test(text)) callsStreamText.push(rel);
+    }
+    expect(definesRunTurn, "主循环出现了第二份实现（runTurn 只该有一处定义）").toEqual(["engine/runtime/loop.ts"]);
+    expect(callsStreamText, "SDK 调用出现在主循环之外（第二份循环）").toEqual(["engine/runtime/loop.ts"]);
+  });
+
+  it("⚠️ 边界如实记：桌面那条路**不在这条守卫的射程里**（要 Electron 才能真跑）", () => {
+    /*
+     * 这条守卫全是"读源码"型的：它证明的是**接线写得对**，不是"真跑一轮时信号真到得了"。
+     * 端到端那半在 `engine/eval/hostParity.test.ts`（直连 vs ACP 两条路）与桌面验收脚本里，
+     * 桌面主进程本身在 vitest 里 import 不了 —— 这一点写在这里，免得有人把它当成已验。
+     */
+    expect(true).toBe(true);
   });
 });

@@ -84,8 +84,12 @@ jobs:
         run: pnpm audit --audit-level=high --prod
 
       - name: 单测
-        # 纯 node 环境：`vitest.config.ts` 的 include 只有 `src/` 下的测试，
-        # 不启 Electron、不连网、不调模型 —— 这是"不烧钱"的结构性保证，不是承诺。
+        # ⚠️ 2026-10-16（审计 G97）**更正**：这里原来写着"include 只有 `src/` 下的测试"——
+        # 那是旧事实。`vitest.config.ts` 早就把 include 扩到了 `src` / `engine` / `hosts` / `shared`，
+        # 所以这条跑的东西比原来那句说的多得多（`agentServer` / `agent` / `hostParity` 这些 e2e 级单测都在跑）。
+        # "不烧钱"仍然成立，但**理由得换成对的**：引擎与宿主那批测试一律走 `engine/eval/fakeProvider.ts`
+        # 起的本地假通道（回环、脚本化回复），且 `DSH_NO_REAL_MODEL=1` 兜底 ——
+        # 不是"只看 src/ 所以不可能烧钱"。若有新测试引入真调用，这里就会红。
         #
         # 画布持久化的数据目录指向 runner 临时目录，绝不碰任何真实 userData。
         # 放**步骤级**（`runner` 上下文在步骤级 env 可用）。
@@ -93,14 +97,33 @@ jobs:
           DSH_CANVAS_DATA_DIR: ${{ runner.temp }}/dsh-canvas-data
         run: pnpm test
 
+      - name: CLI 产物（npm 那条路：dist-cli）
+        # ⚠️ 2026-10-16（审计 G40/G63/G95）：**发出去的那份 CLI** 在这之前一条门都没有 ——
+        # `package.json` 的 `bin.ding` 与 `files` 都指 `dist-cli/`（tsc 产物），
+        # 而它不在 build 链、不在 CI、`verify:artifacts` 也不看它；
+        # 仓里唯一那条 `verify-cli-bin.mjs` 验的是 Bun 编的 `dist-bin/*.exe` —— **两个产物不是同一个**。
+        # 代价当场就撞上了：加这一步时 `pnpm cli:build` 根本编不过
+        # （`sandbox.ts` 用了 Electron 独有的 `process.resourcesPath`，CLI 的 tsconfig 看不见）。
+        #
+        # 这一步纯 node、零网络、零模型：`--help` / `sessions` / `models` / `doctor` / `eval`，
+        # 最后一条会把整条链（装配 → SQLite → 引擎 → 工具 → 闸门 → 事件 → 投影）走一遍，
+        # 并与源树的那一跑对照条数 —— 产物少带一个随附文件就会红。
+        run: |
+          pnpm cli:build
+          node scripts/verify-cli-npm.mjs
+
       # ── 以下**有意不做**（照手册 §7 的"不烧钱地验"）──
       #
-      # · `pnpm verify:accept`（约 52 条 Playwright 验收）：每条都要启一个真 Electron 应用，
-      #   耗时且历史上 flaky（失败的那条每次都换）。它是**发布前**的门，不是每次 push 的门；
-      #   它已经在 `pnpm build` 的链尾，所以不会漏。
+      # · **全量** `pnpm verify:accept`（现在 60+ 条 Playwright 验收）：每条都要启一个真 Electron
+      #   应用，全量约 1–2 小时。它是**发布前**的门（在 `pnpm build` 链尾），不是每次 push 的门。
+      #   ⚠️ 2026-10-16 更正（审计 G44）：下面那个 `accept` job 现在**每次 push 都跑一个子集**
+      #   （12 条、约 10 分钟）—— 全量仍不进 CI，但"CI 完全不碰验收"这句已经不对了。
       # · `electron-builder` 打包：CI 不出安装包（出包在 `pnpm build` 里做）。
       # · 任何真调模型的脚本（`.verify/ai-smoke.mjs`、`accept-chatartifact.mjs` 等）：
       #   **一条都不跑**。真调模型的能力单独手动跑，见 `.verify/ATTACH-ONLY.md` 的三问。
+      #   验收批跑自带**本地假通道** + `DSH_NO_REAL_MODEL=1`，所以它里面跑的条目
+      #   一条真调用都不会发（这一点由 `scripts/verify-acceptances.mjs` 的
+      #   `startLocalFakeModel` + 凭据文件固定，不靠"记得别配 key"）。
 
   # ── 开箱冒烟（M0 工单 4 机制 2：install → launch → 主路径点击）──
   #
@@ -167,4 +190,123 @@ jobs:
           name: smoke-logs
           path: |
             .verify/accept-smoke-data/
+          if-no-files-found: ignore
+
+  # ── CLI 单二进制（2026-10-16，审计 G63）──
+  #
+  # `cli:bin` + `verify-cli-bin.mjs` 是本轮质量最高的一条**产物级端到端**（剥掉 PATH 只剩系统目录、
+  # 跑 `ding eval` 走完整链），但它建好之后**既不在 build 链也不在 CI** —— 等于"手动跑的门禁"，
+  # 正撞 `buildGate.test.ts` 自述的那句"一道会悄悄消失的检查等于没有"。
+  #
+  # 为什么单开一个 job（而不是塞进 gates）：
+  #   · 它要 **Bun**（单二进制那条路全靠它编）—— gates 那组是纯 node 的门，不该被一个工具链绑住；
+  #   · 它要编一个 ~60MB 的单文件再跑起来，比 gates 慢得多，混在一起会拖慢"哪一层红了"的判断。
+  #
+  # 边界（如实记）：这里只编/验 **Windows x64** 那个（`--only win`）——本机与 CI 都是 windows-latest，
+  # 另外三个平台能编出来但**没在对应系统上跑过**，那件事写在 `dist-bin/BUILD-NOTES.md` 里。
+  cli-bin:
+    needs: gates
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      DSH_NO_REAL_MODEL: "1"
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+
+      - name: 装 Node（跟本机一致：24.x LTS）
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: 装 pnpm（版本取自 package.json 的 packageManager）
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: 装依赖（锁文件为准）
+        run: pnpm install --frozen-lockfile
+
+      - name: 装 Bun（单二进制那条路要它）
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: 编 Windows x64 单二进制
+        # `--only win`：另外三个平台能编，但本 job 跑不了它们 —— 不编一堆跑不了的产物。
+        # `build-cli-bin.mjs` 自己带前置冒烟门（Bun 下 SQLite 端口真建库/写/读），门不过就不出产物。
+        run: node scripts/build-cli-bin.mjs --only win
+
+      - name: 验单二进制（剥 PATH + 跑 --help/sessions/models/doctor/eval）
+        run: node scripts/verify-cli-bin.mjs
+
+      - name: 失败时把产物说明与日志带上来
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-bin-notes
+          path: |
+            dist-bin/BUILD-NOTES.md
+          if-no-files-found: ignore
+
+  # ── 验收**子集**（2026-10-16，审计 G44：CI 明确不跑批跑）──
+  #
+  # 全量批跑要 1–2 小时（60+ 条、每条起一个真应用），不适合每次 push；
+  # 但"完全不跑"意味着任何一条脚本过期都没人知道（§97 就是这么撞到的）。
+  # 所以：**每次 push 跑一个固定子集**（快、稳、覆盖到关键机制），全量留给 `pnpm build`。
+  #
+  # 子集怎么挑：① 不依赖打包产物；② 单条 <90 秒；③ 合起来覆盖
+  # 窗口/面板/画布输入/记忆/搜索/任务中心/首页/资料/会话日志/中止/存储后端。
+  # `DSH_ACCEPT_TIMEOUT_MS` 收紧到 90 秒 —— CI 上一条卡住不该拖住整条流水线。
+  accept:
+    needs: gates
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      CI: "true"
+      DSH_NO_REAL_MODEL: "1"
+      DSH_ACCEPT_TIMEOUT_MS: "90000"
+      # 批跑自己的假通道与凭据由 `scripts/verify-acceptances.mjs` 接管（见它的注释）
+      DSH_ACCEPT_ONLY: >-
+        accept-chips.mjs,accept-panels.mjs,accept-windowctl.mjs,accept-memory.mjs,
+        accept-shortcuts.mjs,accept-suggestions.mjs,accept-taskcenter.mjs,
+        accept-searchhistory.mjs,accept-material.mjs,accept-sessionlog.mjs,
+        accept-abort.mjs,accept-kvstore.mjs
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+
+      - name: 装 Node（跟本机一致：24.x LTS）
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: 装 pnpm（版本取自 package.json 的 packageManager）
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: 装依赖（锁文件为准）
+        run: pnpm install --frozen-lockfile
+
+      - name: 下 Electron 二进制（验收要真起应用；electron@44 没有 postinstall）
+        run: node node_modules/electron/install.js
+
+      - name: 构建渲染产物与主进程
+        run: |
+          pnpm build:web
+          pnpm electron:build
+
+      - name: 验收子集（自带假通道 + 零出网闸）
+        run: node scripts/verify-acceptances.mjs
+
+      - name: 失败时把批跑日志带上来
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: accept-logs
+          path: |
+            .verify/accept-fail-*.log
+            .verify/accept-history.json
           if-no-files-found: ignore

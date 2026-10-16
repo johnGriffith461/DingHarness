@@ -21,13 +21,15 @@ import {
   type DocFormat,
 } from "@shared/docFormat";
 import { DOC_BAR_LABELS } from "@shared/doc";
+import type { ShellBridge } from "@shared/ipc";
+import type { DriveEntry } from "@shared/drive";
 
 /**
  * AI 文档面板（§153）。
  *
  * ## 文案全部逐字取自本体
  *
- * 见 `docs/evidence-aidoc.txt`（124 条 `aiDoc_*`，从本体前端包抠出来的）。
+ * 原本记在 `docs/evidence-aidoc.txt`（124 条 `aiDoc_*`，从本体前端包抠出来的）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 对应路由 `/chat/new-doc` 与 `/chat/write`。
  *
  * ## 与画布"写作助手"的区别
@@ -69,11 +71,17 @@ export function DocPanel() {
    * 那条链接指向 `dshasset://file/<origin>/<名字>`，只有云盘里的文件才解析得到。
    * （顺带：不弹框也让这件事能被自动化验。）
    */
-  const [attaches, setAttaches] = useState<Array<{ name: string; origin: string }> | null>(null);
+  /*
+   * ⚠️ 2026-10-16（审计 P93 第三处）：这里原来**手抄了一份契约的形状**
+   * （`Array<{ name: string; origin: string }>`，连 `shell` 的类型都自己拼了一遍）——
+   * 契约改了就漂。现在直接用**桥的类型 + 共享的 `DriveEntry`**：
+   * 形状只有一份，漂不了。
+   */
+  const [attaches, setAttaches] = useState<Array<Pick<DriveEntry, "name" | "origin">> | null>(null);
 
   const openAttach = () => {
     setAttaches([]);
-    const shell = (globalThis as unknown as { shell?: { drive?: { list: () => Promise<Array<{ name: string; origin: string }>> } } }).shell;
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
     void shell?.drive
       ?.list()
       .then((list) => setAttaches(list.map((f) => ({ name: f.name, origin: f.origin }))))
@@ -212,6 +220,16 @@ export function DocPanel() {
           value={doc.body}
           placeholder={DOC_TEXT_PLACEHOLDER}
           spellCheck={false}
+          /*
+           * ⚠️ **改写往返期间只读**（2026-10-16，审计 P87）。
+           *
+           * 模型改写回来是**整篇替换**（`docStore.runAction` 用回来那段覆盖 `body`），
+           * 而这里原来既没有 `disabled` 也没有 `readOnly`（`busy` 只挡住了操作条那四颗按钮）——
+           * 于是"点润色 → 等 → 期间顺手改两句 → 回来一看改动没了"：**用户打的字被静默吃掉**。
+           * 只读比"禁用"好：仍可选中/复制（等待期间常要对照原文），只是不能改。
+           */
+          readOnly={busy}
+          title={busy ? "正在改写正文，完成后整篇替换 —— 这期间先别改，免得改动被覆盖" : ""}
           onChange={(e) => patch(doc.id, { body: e.target.value }, "编辑正文")}
           onSelect={(e) => {
             const el = e.currentTarget;

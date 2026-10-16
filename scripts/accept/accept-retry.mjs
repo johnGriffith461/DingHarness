@@ -1,186 +1,185 @@
 import { chromium } from "playwright";
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness.mjs";
+import {
+  bootApp,
+  connectWithRetry,
+  failOnMarks,
+  freshDir,
+  killTree,
+  pickPort,
+  shot,
+  waitForPage,
+} from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
- * 聊天失败后的「重试」（§187 界面体检 P1 点名的两处接线之一）。
+ * 验收：**这一轮失败之后的出路**（§187 界面体检点名的两处接线之一；**2026-10-16 按现界面重写**）。
  *
- * ## 这条为什么**不连模型**
- * 要验的是"失败之后能不能处置"，那就得先有一次失败。这里用
- * `DSH_CREDENTIALS_FILE` 指到一个**空文件**：应用里一个密钥都没有 →
- * 所有通道都是"无密钥" → 发送必然立刻失败（不发任何网络请求）。
- * 于是"失败"是**确定性的**：不依赖模型在不在、快不快、有没有配额。
+ * ## 为什么重写，而不是删掉
+ *
+ * 旧版验的是**画布里的聊天侧栏**（`chat-input` / `chat-ref-add` / `chat-retry-*` / `.chat-msg.is-error`）——
+ * 那套界面在后来的改版里被拆掉了（"聊天那套拆掉之后直接问 aiClient"），
+ * 于是它点的按钮一个都不在了：批跑里红的是**脚本过期**，不是产品坏了（§56 那种）。
+ * 而它要守的那件事 —— "出了错之后用户有出路，且重试真的是同一问的重跑" ——
+ * 现在落在工作台里，**没有别的脚本在盯**，所以按工作台的界面重写。
+ *
+ * ## 失败必须是**确定性的**（这条不连模型）
+ *
+ * 把通道指到一个**没人听的回环端口**：`STRATA_BASE_URL=http://127.0.0.1:59991/v1`。
+ * 这一步同时满足三件事：
+ *   · 回环地址 → 零出网闸放行（`DSH_NO_REAL_MODEL` 只拦远程），**一次真请求都不发**；
+ *   · 连不上 → 必然失败：不依赖模型在不在、快不快、有没有配额；
+ *   · 失败原因是"本机通道没起来"——用户真会撞见的那一种，不是编出来的。
  *
  * ## 断的是后果，不是"界面上有颗按钮"
- *   ① 失败后那张红字里**有**可点的「重试」（不是一行不可处置的通知）
- *   ② 点它之后：那条失败回复**和它对应的提问一起撤掉**，用同一段话重发
- *      —— 所以用户那句话**只出现一次**（撤少了会变两句：模型以为他追问了）
- *   ③ 重发是**新一轮**（消息 id 变了），不是"把红字藏起来当无事发生"
- *   ④ 这一轮的失败**至少说了原因**（不是空白红框）
  *
- * ⚠️ 界面上的"问了几遍"是真的会误导人的：`send` 每次都往历史里追加一条用户消息，
- * 所以"重试"如果只重发不撤，历史里就有两条一样的提问。
+ *   ① 失败**说得清**：那一步的正文里有「出错了」+ 一句原因（不是空白红框）；
+ *   ② 失败**有出路**：那一步带可点的「重新生成」（`wb-act-retry-<stepId>`）；
+ *   ③ 重试是**同一问的重跑**：点完之后用户的提问**还是一句**（撤旧问答重发，不是再追加一遍）；
+ *   ④ **不卡忙碌态**：失败落定后没有残留的停止键，输入框打上字之后发送键可用。
  */
+
 const DATA = ".verify/retry-data";
-fs.rmSync(DATA, { recursive: true, force: true });
-/*
- * 凭据文件是 **YAML**（`electron/ipc/credentials.ts` 只解析 `refs:` 下一层的 KEY: value），
- * 不是 JSON —— 所以这里写一个**空的 refs 段**，而不是 `{}`。
- */
-const EMPTY_KEYS = ".verify/retry-keys-empty.yaml";
-fs.writeFileSync(EMPTY_KEYS, "refs:\n", "utf8");
+/* Windows 上"上一条实例还占着句柄"时 `rmSync` 会 EPERM 把脚本打死（实测栽过）→ 走 freshDir */
+await freshDir(DATA);
 
-const env = { ...process.env };
-delete env.ELECTRON_RUN_AS_NODE;
-env.DSH_CANVAS_DATA_DIR = DATA;
-env.DSH_CREDENTIALS_FILE = EMPTY_KEYS;
+const DEAD_PORT = 59_991; /* 没人听的端口：连不上是这条脚本的**前提**，不是意外 */
+const out = {};
+const bad = [];
+let booted = null;
+let browser = null;
 
-/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
-const __port = await pickPort([12740]);
-const child = spawn(
-  "node_modules/electron/dist/electron.exe",
-  [".", "--remote-debugging-port=" + __port],
-  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
-);
-await new Promise((r) => setTimeout(r, 9000));
-
-const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
-const ctx = browser.contexts()[0];
-const pages = ctx.pages();
-const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
-await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
-await page.waitForTimeout(2000);
-
-const report = {};
 try {
-  report.step = "打开聊天";
-  /*
-   * 聊天侧栏在画布里，开关是 `wb-canvas-chat-toggle`（`Workbench.tsx:207`）：
-   * 先开画布，再点它。没开画布就点 → 那个按钮根本不存在（会静默失败）。
-   */
-  if ((await page.locator('[data-testid="wb-canvas"]').count()) === 0) {
-    await openCanvas(page);
-    await page.waitForTimeout(2200);
+  booted = await bootApp({
+    port: await pickPort([12671]),
+    dataDir: DATA,
+    timeoutMs: 40_000,
+    extraEnv: {
+      /* 批跑会把 STRATA_BASE_URL 指向本地假通道 —— 这一条要的是**连不上**，所以覆盖掉它 */
+      STRATA_BASE_URL: `http://127.0.0.1:${DEAD_PORT}/v1`,
+      STRATA_API_KEY: "retry-local-fake",
+      /* 单独跑时也钉文件后端（批跑整体就是 file）—— 免得断言的是另一条存储路 */
+      DSH_STORE_BACKEND: "file",
+    },
+  });
+  if (!booted.ok) {
+    console.error("[诊断] 应用输出尾部：\n" + (booted.getLog() || "(空)").slice(-1200));
+    await killTree(booted.child);
+    process.exit(1);
   }
-  if ((await page.locator('[data-testid="chat-input"]').count()) === 0) {
-    await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
-    await page.waitForTimeout(1500);
-  }
-  report.chatOpen = await page.locator('[data-testid="chat-input"]').count();
 
-  /* 无密钥是这条脚本的前提：先如实记下来（前提不成立就该说清楚，而不是假绿）。 */
-  report.providerNote = await page.evaluate(() =>
-    [...document.querySelectorAll(".chat-provider select option")]
-      .map((o) => o.textContent?.trim() ?? "")
-      .filter((t) => t.includes("无密钥")).length,
-  );
+  browser = await connectWithRetry(chromium, `http://127.0.0.1:${booted.port}`);
+  const page = await waitForPage(browser);
+  if (!page) throw new Error("一个页面都没建出来");
+  await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await page.waitForTimeout(1500);
 
-  /*
-   * 「引用画布节点」那颗 @（`chat-ref-add`）—— 原来**没有任何脚本引用过它**
-   * （§208 的零覆盖清单）。断后果：点它之后输入框里真的多出一个 `@`
-   * （它就是靠这个把引用菜单唤出来的），而不是一颗摆着好看的按钮。
+  const QUESTION = "这一句注定失败（本机通道没起来）";
+  const users = () => page.$$eval(".wb-bubble-user", (els) => els.map((e) => (e.textContent ?? "").trim()));
+  const assistantTexts = () =>
+    page.$$eval(".wb-assistant-text", (els) => els.map((e) => (e.textContent ?? "").trim()));
+
+  /**
+   * 发一句、等**失败落定**。
+   *
+   * ⚠️ 等的是"正文里出现「出错了」"，不是固定 sleep —— 固定 sleep 是审计 G108 点名的那类假红源头。
+   * （这一路失败**不会**留下 `done` 记录：请求根本没发出去，所以不能用 `waitTurnEnd` 那条判据。）
    */
-  report.step = "点「引用画布节点」";
-  await page.locator('[data-testid="chat-input"]').fill("");
-  await page.locator('[data-testid="chat-ref-add"]').click();
-  await page.waitForTimeout(500);
-  report.afterRefAdd = await page.locator('[data-testid="chat-input"]').inputValue();
-  /* 引用菜单应当被唤起（@ 之后紧跟空查询） */
-  report.refMenuShown = await page.locator('[data-testid="chat-mentions"]').count();
-  await page.locator('[data-testid="chat-input"]').fill("");
+  const waitFailure = async () => {
+    const deadline = Date.now() + 90_000;
+    let texts = [];
+    while (Date.now() < deadline) {
+      texts = await assistantTexts();
+      if (texts.some((t) => t.includes("出错了"))) return texts;
+      await page.waitForTimeout(400);
+    }
+    return texts;
+  };
+  const askAndWaitFailure = async () => {
+    await page.locator('[data-testid="wb-composer-input"]').fill(QUESTION);
+    await page.locator('[data-testid="wb-send"]').click();
+    return waitFailure();
+  };
 
-  report.step = "发一句话（注定失败）";
-  const QUESTION = "帮我写一段不会成功的请求";
-  await page.locator('[data-testid="chat-input"]').fill(QUESTION);
-  await page.locator('[data-testid="chat-send"]').click();
-  /* 等失败落定：既要红字出现，也要流已经停了（停止键没了）。 */
-  await page.waitForSelector(".chat-msg.is-error", { timeout: 30000 });
-  await page.waitForTimeout(800);
+  out.step = "第一次发送（注定失败）";
+  out.afterFailure = await askAndWaitFailure();
+  out.userBubblesAfterFailure = await users();
+  out.stopLeftOver = await page.locator('[data-testid="wb-send-stop"]').count();
 
-  report.questionsBefore = await page.$$eval(".chat-msg.user .chat-bubble", (els) =>
-    els.map((e) => e.textContent.trim()),
+  /* ② 出路：失败那一步的「重新生成」 */
+  const retryIds = await page.$$eval('[data-testid^="wb-act-retry-"]', (els) =>
+    els.map((e) => e.getAttribute("data-testid") ?? ""),
   );
-  report.errorText = await page.locator(".chat-msg.is-error .chat-msg-error").textContent().catch(() => null);
-  const retryButtons = await page.$$eval('[data-testid^="chat-retry-"]', (els) =>
-    els.map((e) => e.getAttribute("data-testid")),
-  );
-  report.retryButtons = retryButtons;
-  report.firstRetryId = retryButtons[0]?.replace("chat-retry-", "") ?? null;
-
-  report.step = "点重试";
-  await page.locator(`[data-testid="${retryButtons[0]}"]`).click();
+  out.retryIds = retryIds;
+  out.step = "点「重新生成」";
   /*
-   * ⚠️ 必须等**这一轮真的收尾**再读：上面那句 `waitForSelector(".chat-msg.is-error")` 在
-   * 点完重试的瞬间就已经成立（旧的那条红字还在），于是会读到"新一轮还没长出来"的中间态 ——
-   * 第一版就是这么假红的（读到旧消息 id，判成"没重发"）。
-   * 收尾的判据用**停止键消失**：它在流式期间才在。
+   * ⚠️ 点完**只等**，不要再发一次 —— 第一版这里调的是 `askAndWaitFailure()`（又填又点发送），
+   * 于是"用户提问变成 2 句"是我自己造的，差点把产品判成"撤旧问答没做"。
+   * 「重新生成」按设计是**原地替换那一步**（`store.regenerate`：同一个 stepId 写回，
+   * 用的是 `askedWith`），所以提问本来就该还是 1 句。
    */
-  await page.waitForFunction(() => !document.querySelector('[data-testid="chat-send-stop"]'), { timeout: 20000 });
-  await page.waitForSelector(".chat-msg.is-error", { timeout: 20000 });
-  await page.waitForTimeout(800);
+  await page.locator(`[data-testid="${retryIds[0]}"]`).click();
+  out.afterRetry = await waitFailure();
+  out.userBubblesAfterRetry = await users();
+  out.assistantCount = await page.locator(".wb-assistant").count();
 
-  report.questionsAfter = await page.$$eval(".chat-msg.user .chat-bubble", (els) =>
-    els.map((e) => e.textContent.trim()),
-  );
-  report.retryIdAfter = await page
-    .$$eval('[data-testid^="chat-retry-"]', (els) => els[0]?.getAttribute("data-testid") ?? null)
-    .catch(() => null);
-  report.messageCountAfter = await page.locator(".chat-msg").count();
-  report.errorTextAfter = await page.locator(".chat-msg.is-error .chat-msg-error").textContent().catch(() => null);
-  /* 流真的停了：不该还挂着"停止" */
-  report.stoppedAfterRetry = (await page.locator('[data-testid="chat-send-stop"]').count()) === 0;
+  /* ④ 不卡忙碌态：输入框还能用（打字之后发送键可用）、没有残留的停止键 */
+  await page.locator('[data-testid="wb-composer-input"]').fill("失败之后还能打字");
+  await page.waitForTimeout(300);
+  out.sendEnabledAfterTyping = !(await page.locator('[data-testid="wb-send"]').isDisabled());
+  out.stopAfterRetry = await page.locator('[data-testid="wb-send-stop"]').count();
+  await page.locator('[data-testid="wb-composer-input"]').fill("");
 
-  await shot(page, ".verify/retry.png");
+  out.shot = await shot(page, ".verify/retry.png");
 } catch (error) {
-  report.error = `在「${report.step ?? "未知"}」这一步失败：${String(error).split(String.fromCharCode(10))[0]}`;
+  out.error = `在「${out.step ?? "未知"}」这一步失败：${String(error).split(String.fromCharCode(10))[0]}`;
 } finally {
-  console.log(JSON.stringify(report, null, 2));
+  /*
+   * ⚠️ **异常路径也要收尾**（2026-10-16 自查逮到）：原来只有正常路径 `close()` + `killTree()`，
+   * 抛异常时脚本会带着一个**活着的应用**退到 catch 里 —— 而"认领只认自己标记"的清理
+   * （见 `harness` 那段补正）**不会再自动收走它**，于是它会变成孤儿：
+   * 脚本被判成"超时"（跑不完）、机器上多一个 Electron。
+   */
+  await browser?.close().catch(() => undefined);
+  if (booted?.child) await killTree(booted.child);
+}
 
-  const bad = [];
-  if (report.error) bad.push(`异常：${String(report.error).slice(0, 200)}`);
-  if (!report.chatOpen) bad.push("聊天侧栏打不开");
-  /* 前提：这条脚本靠"没有密钥 → 必然失败"成立。前提不成立就不是绿，是**没测到**。 */
-  if (!report.providerNote) bad.push("前提不成立：没有看到「无密钥」的通道（这条脚本要靠它制造确定性失败）");
+console.log(JSON.stringify(out, null, 2));
 
-  const before = report.questionsBefore ?? [];
-  const after = report.questionsAfter ?? [];
+if (out.error) bad.push("异常：" + out.error);
 
-  /* ① 失败必须给出路 */
-  if ((report.retryButtons?.length ?? 0) !== 1) {
-    bad.push(`失败后有 ${report.retryButtons?.length ?? 0} 颗「重试」（应正好 1 颗）`);
-  }
-  /* ② 失败要说清原因 */
-  if (!/[\u4e00-\u9fa5A-Za-z]/.test(report.errorText ?? "")) {
-    bad.push(`失败那张红字没说什么原因：${JSON.stringify(report.errorText)}`);
-  }
+/* ① 失败说得清 */
+const failureText = (out.afterFailure ?? []).find((t) => t.includes("出错了")) ?? "";
+if (!failureText) bad.push("发出去之后界面里没有出现「出错了」—— 失败没有任何交代");
+else if (failureText.replace("（出错了）", "").trim().length < 6) {
+  bad.push(`失败只说了「出错了」没说原因（正文：${JSON.stringify(failureText)}）`);
+} else if (!/连不上|超时|限流|密钥|余额|模型|拒绝/.test(failureText)) {
+  bad.push(`失败的原因不像人话（正文：${JSON.stringify(failureText)}）—— 用户不知道下一步怎么办`);
+}
 
-  /* ②b 引用按钮：点了输入框里真多一个 @，并把引用菜单唤出来 */
-  if (report.afterRefAdd !== "@") bad.push(`点「引用画布节点」后输入框里是 ${JSON.stringify(report.afterRefAdd)}（应是一个 @）`);
-  if (!report.refMenuShown) bad.push("打了 @ 却没有唤出引用菜单（那颗按钮等于装饰）");
+/* ② 失败有出路 */
+if (!(out.retryIds ?? []).length) bad.push("失败的那一步没有「重新生成」—— 出了错只能自己重打一遍");
 
-  /* ③ 重试 = 撤掉失败那对 + 用同一段话重发 */
-  if (before.length !== 1) bad.push(`发送后应该只有 1 条用户消息，实际 ${before.length} 条`);
-  if (after.length !== 1) {
-    bad.push(`⭐ 重试后用户消息变成 ${after.length} 条（应仍是 1 条 —— 撤掉旧提问再用同一段话重发）`);
-  }
-  if (before[0] && after[0] && before[0] !== after[0]) bad.push("重试把用户那句话改掉了");
-  if (!after[0]?.includes("不会成功的请求")) bad.push(`重试后那句话不是原来的：${JSON.stringify(after[0])}`);
+/* ③ 重试是同一问的重跑 */
+if ((out.userBubblesAfterFailure ?? []).length !== 1) {
+  bad.push(`第一次失败之后用户提问就不是一句了（${JSON.stringify(out.userBubblesAfterFailure)}）—— 前置不成立`);
+}
+const usersNow = out.userBubblesAfterRetry ?? [];
+if (usersNow.length !== 1) {
+  bad.push(
+    `重试之后用户提问变成 ${usersNow.length} 句（${JSON.stringify(usersNow)}）—— 「撤旧问答重发」这一半没做，模型会以为他在追问`,
+  );
+}
+if (!(out.afterRetry ?? []).some((t) => t.includes("出错了"))) bad.push("重试之后没有再次失败落定 —— 这一轮的去向不明");
 
-  /* ④ 是**新一轮**，不是把红字藏起来 */
-  if (!report.retryIdAfter) bad.push("重试之后没有新的失败回复（那颗「重试」也不见了）");
-  if (report.retryIdAfter === `chat-retry-${report.firstRetryId}`) {
-    bad.push("⭐ 重试前后是同一条消息 id —— 这是把红字藏起来，不是重发");
-  }
-  /* ⑤ 这一轮也失败得说清原因，且流已经停了 */
-  if (!/[\u4e00-\u9fa5A-Za-z]/.test(report.errorTextAfter ?? "")) {
-    bad.push(`重发之后那次失败没说原因：${JSON.stringify(report.errorTextAfter)}`);
-  }
-  if (!report.stoppedAfterRetry) bad.push("重试之后「停止」键还挂着（那一轮没收尾）");
+/* ④ 不卡忙碌态 */
+if (out.stopAfterRetry) bad.push("失败之后还挂着停止键 —— 界面卡在「忙碌」态");
+if (!out.sendEnabledAfterTyping) bad.push("失败之后输入框打上字、发送键还是不可用 —— 卡住了");
 
-  verdict(bad, "聊天重试成立：失败有原因也有出路 / 点重试撤掉旧问答再用同一段话重发（话不重复、id 是新的）/ 流正常收尾");
-
-  await browser.close().catch(() => undefined);
-  child.kill();
-  process.exit(process.exitCode ?? 0);
+if (bad.length) {
+  console.error("✗ " + bad.join("；"));
+  process.exitCode = 1;
+} else {
+  console.log("✓ 失败之后有出路：说清了原因 / 那一步带「重新生成」/ 重试是同一问的重跑（提问只有一句）/ 不卡忙碌态");
 }

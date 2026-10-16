@@ -15,7 +15,12 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  *   5. 排版落盘，重启后还在
  *   6. Ctrl+Z 能把整串调整一次撤回（不是要按几十下）
  */
-const DATA = "data";
+/*
+ * ⚠️ 2026-10-16（审计 G01）：这里原来是 `"data"` —— 就是**仓库里那个真实数据目录**，
+ * 而下面还有一句 `rmSync(DATA/canvas)`：每次跑这条验收都**删掉真实的画布文档**。
+ * 现在落到 `.verify/` 下的专属目录（不进版本库、与真实数据无关）。
+ */
+const DATA = ".verify/data-textstyle";
 const SNAP = path.join(DATA, "canvas", "document.json");
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };

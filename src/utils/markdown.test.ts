@@ -67,18 +67,49 @@ describe("renderMarkdown", () => {
   });
 
   it("开启 pangu 后中英之间会自动加空格", () => {
-    const spaced = renderMarkdown("用 React Flow 做画布", { spacing: true, sanitize: false });
-    const raw = renderMarkdown("用 React Flow 做画布", { spacing: false, sanitize: false });
-    // 至少保证不会把中英挤在一起（具体空格数取决于 pangu 规则）
-    expect(spaced).toContain("用");
-    expect(spaced).toContain("React Flow");
-    expect(raw).toBe("<p>用 React Flow 做画布</p>");
+    /*
+     * ⚠️ 2026-10-16（审计 G53.m）：原来只 `toContain("用")` + `toContain("React Flow")` ——
+     * 输入本来就已经带空格，这两条在不加空格的实现上同样成立（关掉 spacing 也过）。
+     * 现在拿**挤在一起**的输入，钉住真加了空格的结果。
+     */
+    const spaced = renderMarkdown("用React Flow做画布", { spacing: true, sanitize: false });
+    expect(spaced, "中英之间没有自动加空格").toBe("<p>用 React Flow 做画布</p>");
+    const raw = renderMarkdown("用React Flow做画布", { spacing: false, sanitize: false });
+    expect(raw, "关闭 spacing 时不该动文本").toBe("<p>用React Flow做画布</p>");
   });
 
   it("消毒后保留允许的标签、去掉脚本", () => {
     const html = renderMarkdown("<b>x</b>", { spacing: false });
     expect(html).not.toContain("<b>");
     expect(html).toContain("x");
+  });
+});
+
+describe("renderMarkdown: 不许卡死（2026-10-16，审计「四反引号预览死循环」）", () => {
+  /*
+   * ⚠️ 这一组的判据是"**必须自己收场**"：这些输入在修前会让 renderMarkdown 死循环
+   * （段落分支的 i 不前进），窗口整个无响应。所以判据只要求"能返回且内容还在" ——
+   * 一旦回归，这里不是断言失败，而是**测试进程挂住**（vitest 超时把它揪出来）。
+   */
+  const inputs = [
+    ["四反引号围栏（演示代码块的标准写法）", "````markdown\n# 标题\n````"],
+    ["带 info string 的开围栏", "```python main.py\nx = 1\n```"],
+    ["带 attribute 的开围栏", '```json title="x"\n{}\n```'],
+    ["objective-c 这种带短横的 info string", "``` objective-c\nint a;\n```"],
+    ["单独一行四反引号", "````"],
+  ];
+  for (const [what, text] of inputs) {
+    it("能渲染完：" + what, () => {
+      const html = renderMarkdown(text, { spacing: false, sanitize: false });
+      expect(typeof html, "渲染没返回字符串（死循环/崩了）").toBe("string");
+      expect(html.length, "输出是空的 —— 这行文字被吞了").toBeGreaterThan(0);
+    });
+  }
+
+  it("标准的 ```ts 围栏仍按代码块渲染（修段落分支没把围栏弄坏）", () => {
+    const html = renderMarkdown("```ts\nconst a = 1;\n```", { spacing: false, sanitize: false });
+    /* 真实形态带 data-lang（`<pre data-lang="ts"><code>…`）—— 比"含 <pre"更结实一点 */
+    expect(html, "标准围栏仍要是带语言标注的 pre/code").toContain('<pre data-lang="ts">');
   });
 });
 

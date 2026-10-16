@@ -1,6 +1,9 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
-import { openApp, shot, verdict } from "./harness.mjs";
+import { failOnMarks, openApp, shot, verdict } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 左栏「项目」那一行：建 / 改名 / 归入 / 移出 / 删（2026-10-14）。

@@ -9,7 +9,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } fr
  *
  * 五条断言：
  * ① 从输入区的 `+` 能新建文档并进面板（入口是真的）
- * ② 文案与本体一致（`添加标题` / `记录你的想法` / `缩写`…）—— 证据在 `docs/evidence-aidoc.txt`
+ * ② 文案与本体一致（`添加标题` / `记录你的想法` / `缩写`…）—— 证据在 `docs/evidence-aidoc.txt`  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * ③ 编辑后落到磁盘，**重开应用还在**（磁盘是权威，不是内存）
  * ④ 复制全文真把正文写进剪贴板
  * ⑤ 历史记录里有版本，点「回到此版本」正文真的回去了
@@ -20,7 +20,8 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9301;
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9301;
 const out = {};
 let child = null;
 let ok = false;
@@ -28,6 +29,8 @@ let getLog = () => "";
 
 const boot = async () => {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  PORT = r.port;
   child = r.child;
   ok = r.ok;
   getLog = r.getLog;

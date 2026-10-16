@@ -28,7 +28,7 @@ import { buildFollowUpPrompt, parseAskReply } from "./agent";
 import { artifactFileName, extractArtifacts, type Artifact } from "./artifact";
 import { enabledPromptBlock } from "@shared/library";
 import { fallbackNote } from "@shared/settings";
-import { formatCount } from "@shared/cost";
+import { formatCount, usageTotal } from "@shared/cost";
 import { toolLabel, type ToolTrace } from "@shared/agentTools";
 import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import { assembleSystem } from "@engine/core/assembly";
@@ -68,7 +68,7 @@ import type { StorePort } from "./store";
  *
  * provider 每轮给 `usage.inputTokens`（真值），我们对"这一轮发出去的东西"也有个估算
  * （system + messages）。两者一比就是系数，**下一轮**用它把额度换算到估算单位
- * （见 `shared/contextWindow.ts` 的 `calibrationOf`）。
+ * （见 `engine/core/context.ts` 的 `calibrationOf`）。
  *
  * ⚠️ 只放内存：系数是"这台机器 + 这个 provider"的当期口径，重启后重新学即可 ——
  * 落盘反而要担心"换了模型还在用旧系数"。
@@ -250,7 +250,8 @@ export async function answerTurn(
   /** 这一轮随用户话一起带的资料（见 `WorkTask.material`）：空则只用任务上那份。 */
   material?: string,
 ): Promise<void> {
-  const { messages, truncated } = buildHistory(history, { factor: calibrationFactor });
+  /* ⚠️ 与下面 `compactKeepTokens()` 用**同一把尺**（审计 P156：两把尺会让"该压就压"失真） */
+  const { messages, truncated } = buildHistory(history, { factor: calibrationFactor, keepTokens: compactKeepTokens() });
 
   /*
    * 上下文压缩（§149）。
@@ -456,13 +457,16 @@ export async function runStream(
            * 拿不到用量就不显示数字（**不编**）。
            */
           liveSteps = event.step ?? liveSteps + 1;
-          if (event.usage) {
-            liveTokens =
-              (event.usage.inputTokens ?? 0) +
-              (event.usage.outputTokens ?? 0);
-          }
+          /*
+           * ⚠️ **要累加**（2026-10-16，审计 P150）：`step-finish` 每次只带**这一步**的用量，
+           * 而这里原来是赋值（`liveTokens = 这一步`）—— 于是进度行写的"已用 X token"
+           * 其实是"刚这一步用了 X"，和同一轮的账本差一倍以上；变量上方的注释自己写的还是"累计"。
+           * 现在把每一步加起来，与账本（`done` 事件的用量）是同一个口径。
+           */
+          const stepTokens = usageTotal(event.usage);
+          if (stepTokens !== null) liveTokens += stepTokens;
           const n = liveSteps;
-          const tk = liveTokens ? `，已用 ${formatCount(liveTokens)} token` : "";
+          const tk = liveTokens ? `，累计已用 ${formatCount(liveTokens)} token` : "";
           onPatch({ activity: `第 ${n} 步${tk}` });
         }
         if (event.type === "delegation") {

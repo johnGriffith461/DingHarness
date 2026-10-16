@@ -106,6 +106,20 @@ export type WorkbenchState = {
    * 这样"谁来清空"是明确的，不会出现"填进去又莫名其妙一直在那儿"。
    */
   composerDraft: string | null;
+  /**
+   * 输入区的草稿，**按视图各存一份**（2026-10-16，审计 P84）。
+   *
+   * 原来草稿是 `Composer` 的组件内 state，而 `Workbench` 按 view **整体换组件** ——
+   * 于是"在输入框里写着东西，按 Ctrl+N / 点左栏切个页"回来一看，**整段话没了**。
+   * 这和 `composerDraft`（一次性"创作同款"，取出即清）不是一回事：这是**用户正在写的东西**，
+   * 要一直留着，直到他自己发出去或清掉。
+   *
+   * 按视图分开存：首页那份不该跑到对话里那句输入框去（两处的用途不同：
+   * 一个"开新任务"、一个"在这段对话里接着说"）。
+   */
+  composerTexts: Record<string, string>;
+  /** 记下某个视图输入区的草稿（逐字，不做 trim —— 用户打到一半的空格也是他的内容）。 */
+  setComposerText: (view: string, text: string) => void;
   /** 带着草稿跳到定时任务页。 */
   scheduleFromTask: (title: string, prompt: string) => void;
   /** 把一句话交到主输入区（§159「创作同款」）。 */
@@ -147,7 +161,14 @@ export type WorkbenchState = {
    * ⚠️ **不撤销已发生的动作**（记忆、画布、定时任务、产物都还在）——
    * 回退改的是这段对话，不是世界。
    */
-  rewindTask: (taskId: string, stepId: string) => Promise<void>;
+  /**
+   * 回到某一步（之后的轮次丢掉）。
+   *
+   * ⚠️ 返回**真的成没成**（2026-10-16，审计 P86）：原来是 `Promise<void>`，
+   * 而解析不到可回退的目标时函数里直接 `return` —— 调用方（那颗按钮）于是
+   * 照着旧样说"已回到这一步"，**实际什么都没发生**。回执必须先知道结果。
+   */
+  rewindTask: (taskId: string, stepId: string) => Promise<boolean>;
   /** 从某一步分叉成一段新对话（§151）。 */
   branchTask: (taskId: string, stepId: string) => void;
   /** 回答当前澄清问题。 */
@@ -229,6 +250,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   closeFloat: () => set({ floatOpen: false, floatSeed: "" }),
 
   composerDraft: null,
+  composerTexts: {},
+  setComposerText: (view, text) =>
+    set((s) => ({ composerTexts: { ...s.composerTexts, [view]: text } })),
   pluginsIntent: null,
   scheduleDraft: null,
   scheduleFromTask: (title, prompt) => {
@@ -509,16 +533,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   rewindTask: async (taskId, stepId) => {
     const state = get();
     const task = state.tasks.find((t) => t.id === taskId);
-    if (!task) return;
+    if (!task) return false;
     /*
      * 按钮长在助手那一条上，但用户的意思是"这条回答不想要，重来" ——
      * 所以实际回到的是它**前面那句用户话**（保留并重答它）。
      * 见 `resolveRewindTarget`：回到助手那一步是"止步于此"，两者语义不同。
      */
     const target = resolveRewindTarget(task.steps, stepId);
-    if (!target) return;
+    if (!target) return false;
     const plan = planRewind(task.steps, target);
-    if (!plan) return;
+    if (!plan) return false;
 
     // 先落截断（用户立刻看到"后面那些没了"），再决定要不要重答
     set((s) => ({
@@ -531,13 +555,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       }),
     }));
 
-    // 停在助手话上就没有要重答的：用户接着往下说即可
-    if (!plan.reask) return;
+    /* 停在助手话上就没有要重答的：用户接着往下说即可 —— 这一步**已经算成功**（截断做了） */
+    if (!plan.reask) return true;
     /*
      * 重答那一步带一句说明 —— 用户要能看出"这条是回退之后重新答的"，
      * 否则回退前后看起来一模一样（自己都不确定刚才那下点没点上）。
      */
     await answerTurn(port, taskId, plan.kept.slice(0, -1), plan.reask, "已回到这一步重新回答", task.material);
+    return true;
   },
 
   /**

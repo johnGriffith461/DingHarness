@@ -11,6 +11,7 @@ import { MEMORY_TEXT_LIMIT } from "./memory";
  * 所以把"声明"放共享层当**唯一事实来源**，执行单独绑定 —— 避免两处各写一份 schema。
  *
  * 这一层是研究结论的直接落地（`docs/优化计划.md` 批次 1）：
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  *  - 工具的 schema 与实际校验同一处（opencode 的 `tool({ inputSchema })` 口径）；
  *  - 参数在进业务之前就被校验（schema 不合格 → 当 tool result 回注给模型，见 `unknownToolNotice`）；
  *  - 工具名是**稳定的字符串**（决定权限策略表怎么挂，批次 2）。

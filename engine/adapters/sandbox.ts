@@ -38,6 +38,23 @@ export type SandboxInfo = {
 };
 
 /**
+ * `process.resourcesPath`（打包态的 `resources/` 目录）。
+ *
+ * ⚠️ 这个字段是 **Electron 独有**的，`@types/node` 里没有；而 `tsconfig.cli.json` 只带
+ * `types: ["node"]` —— 同一份源码要供两个宿主编，CLI 那份就会在这里报
+ * `Property 'resourcesPath' does not exist on type 'Process'`（2026-10-16 审计 G40/G95
+ * 顺带撞到的：`pnpm cli:build` 当时根本编不过，因为这条 npm 产物此前**没有任何门在看**）。
+ *
+ * 取舍：**不能**为了 CLI 编得过就把这两行删掉 —— 桌面打包态真的靠它找沙箱（README 那句
+ * "安装包带着 ding-sandbox.exe"就是这个）。所以做一次显式的、带说明的收窄，
+ * 而不是 `any` 糊过去：非 Electron 环境下它就是 `undefined`，行为与原来一致。
+ */
+function resourcesPathOf(): string {
+  const value = (process as NodeJS.Process & { resourcesPath?: unknown }).resourcesPath;
+  return typeof value === "string" ? value : "";
+}
+
+/**
  * 找 `ding-sandbox`。
  *
  * 顺序：显式配置（`DING_SANDBOX`）→ 仓库里的构建产物 → PATH。
@@ -58,7 +75,7 @@ export function findSandboxBinary(): string {
    */
   const candidates = [
     /* 打包态：`extraResources` 把 ding-sandbox 放在 resources/ 下（见 package.json 的 build） */
-    ...(typeof process.resourcesPath === "string" && process.resourcesPath ? [path.join(process.resourcesPath, name)] : []),
+    ...(resourcesPathOf() ? [path.join(resourcesPathOf(), name)] : []),
     /* 打包态：与 exe 同级 */
     path.join(path.dirname(process.execPath), name),
     /* 开发态：cargo 的产物（`pnpm sandbox:build` 编到这儿） */

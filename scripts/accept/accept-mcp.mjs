@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readAllSessionRecords, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openPluginsPage, readAllSessionRecords, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**连接器（MCP）接得上、工具交给模型、调用真回到服务端**（2026-10-14）。
@@ -73,12 +73,15 @@ fs.writeFileSync(
   "utf8",
 );
 
-const PORT = 9318;
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9318;
 const out = {};
 let child = null;
 
 try {
   const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  PORT = booted.port;
   child = booted.child;
   if (!booted.ok) {
     console.error("[诊断] 应用输出尾部：\n" + (booted.getLog() || "(空)").slice(-1200));
@@ -92,7 +95,7 @@ try {
   await page.waitForTimeout(1500);
 
   /* ── ①②⑦ 连接器页签 ── */
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  await openPluginsPage(page);
   await page.waitForTimeout(800);
   await page.locator('[data-testid="wb-plugin-manage"]').click();
   await page.waitForTimeout(500);
@@ -149,7 +152,7 @@ try {
   out.toolsOffered = toolsOffered;
 
   /* ── ⑧ 重新连接 ── */
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  await openPluginsPage(page);
   await page.waitForTimeout(600);
   await page.locator('[data-testid="wb-plugin-manage"]').click();
   await page.waitForTimeout(400);

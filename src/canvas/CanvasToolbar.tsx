@@ -85,6 +85,8 @@ export default function CanvasToolbar({
   onToggleLayers,
   onExport,
 }: CanvasToolbarProps) {
+  /** 「回到示例画布」的确认条开着没有（见那颗按钮上的说明：这个动作会覆盖整张画布） */
+  const [resetAsk, setResetAsk] = useState(false);
   const [open, setOpen] = useState<OpenMenu>(null);
   const [instruction, setInstruction] = useState("");
   /** 快捷键说明面板。 */
@@ -207,11 +209,45 @@ export default function CanvasToolbar({
       <button onClick={onFitView} aria-label="适配视图" title="适配视图（一键全览） Ctrl+0">
         <Maximize2 size={15} />
       </button>
-      <button onClick={onReset} aria-label="回到示例画布" title="回到示例画布">
+      {/*
+        ⚠️ **先问一句**（2026-10-16，审计 P23）：这颗按钮原来一点就 `resetToSample()` ——
+        整张画布被示例覆盖、**没有确认、也没有撤销点**，而且改动会跟着自动保存落盘
+        （用户的画布就这么没了）。现在两段式：点一次摆出确认条，确认了才真重置；
+        真重置前还会打一个撤销点（`CanvasRuntime` 的 onReset 里做），Ctrl+Z 能拿回来。
+      */}
+      <button
+        onClick={() => setResetAsk((v) => !v)}
+        aria-label="回到示例画布"
+        title="回到示例画布（会覆盖当前画布，先问一句）"
+        data-testid="canvas-reset"
+      >
         <RotateCcw size={15} />
       </button>
 
       <span className="canvas-toolbar-sep" />
+
+      {resetAsk ? (
+        <div className="canvas-reset-confirm" data-testid="canvas-reset-confirm" role="alertdialog">
+          <span className="canvas-reset-confirm-text">回到示例画布会覆盖当前画布（可 Ctrl+Z 撤销）</span>
+          <button
+            className="canvas-reset-confirm-btn"
+            data-testid="canvas-reset-cancel"
+            onClick={() => setResetAsk(false)}
+          >
+            取消
+          </button>
+          <button
+            className="canvas-reset-confirm-btn is-danger"
+            data-testid="canvas-reset-ok"
+            onClick={() => {
+              setResetAsk(false);
+              onReset();
+            }}
+          >
+            覆盖
+          </button>
+        </div>
+      ) : null}
 
       <div className="canvas-toolbar-menu">
         <button

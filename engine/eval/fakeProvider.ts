@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
 /**
@@ -81,8 +81,9 @@ const toolFrame = (id: string | null, name: string | null, args: string) => ({
 });
 
 /** 把一次语义回复翻成一串帧。 */
-function framesOf(reply: EvalReply, index: number): object[] {
+function framesOf(reply: EvalReply, index: number, requestNo: number, bodyBytes: number): object[] {
   const out: object[] = [];
+  const saidChars = "say" in reply && reply.say ? reply.say.length : 0;
   if ("crash" in reply) return out;
   if ("say" in reply && reply.say) {
     // `chunks` 给了就按它分帧（否则整段一帧）—— 分帧要拼起来仍等于 `say`
@@ -91,15 +92,28 @@ function framesOf(reply: EvalReply, index: number): object[] {
   }
   if ("call" in reply && reply.call?.length) {
     reply.call.forEach((c, i) => {
-      const id = `call_${index}_${i}`;
+      /*
+       * ⚠️ id 里带上**第几个请求**（`requestNo`）：脚本用完会重复最后一条，
+       * 同一段脚本可能在后面的步里再来一次 —— 只用 `index_i` 会撞 id
+       * （审计 P159：两个调用共用同一个 toolCallId，投影按 id 配对就会错）。
+       */
+      const id = `call_r${requestNo}_${index}_${i}`;
       out.push(toolFrame(id, c.name, JSON.stringify(c.args)));
     });
     out.push(finishFrame("tool_calls"));
   } else {
     out.push(finishFrame("stop"));
   }
-  // 用量放在收尾之后（真 provider 也是单独一帧，choices 为空）
-  out.push(usageFrame(100 + index * 10, 20 + index));
+  /*
+   * 用量放在收尾之后（真 provider 也是单独一帧，choices 为空）。
+   *
+   * ⚠️ 2026-10-16（审计 G82）：原来是 `100 + index*10` 这套**与请求体无关**的常数 ——
+   * 于是"每轮重发全部历史"这类成本问题**结构上量不出来**（假 provider 永远说
+   * "这一轮输入 110 token"，无论历史有多长）。现在按请求体大小折：输入 ≈ body 字节 / 4、
+   * 输出 ≈ 回复字数 / 4 —— 仍然是**估算**（所以只在"相对趋势"的意义上可信），
+   * 但它让"重发全部历史 → 输入 token 涨"变成**可测的**。
+   */
+  out.push(usageFrame(Math.max(1, Math.round(bodyBytes / 4)), Math.max(1, Math.round(saidChars / 4))));
   return out;
 }
 
@@ -113,6 +127,85 @@ export type FakeProvider = {
 };
 
 /**
+ * 绑一个**真的连得上**的回环端口，返回端口号。
+ *
+ * ⚠️ 为什么不能只 `listen(0)`（2026-10-16 实测，审计那条"评测偶发红"的根因）：
+ * 本机上短时间内反复 bind/close 回环端口时，会出现一段**"这批端口连不上"的窗口** ——
+ * 端口绑得上、但从**同一个进程**里连它也一直不返回（是黑洞，不是拒绝）。
+ * `DSH_EVAL_TRACE=1` 打出来的现场（跑那 63 条时）：
+ *
+ * ```
+ * 绑上 58833，探针 不通（301ms）
+ * 绑上 58851，探针 不通（301ms）
+ * 绑上 58853，探针 不通（301ms）
+ * 绑上 58855，探针 通（1ms）        ← 就算这样，这一条用例仍然以 error 收场：
+ *                                     Cannot connect to API: connect ETIMEDOUT 127.0.0.1:58855
+ * ```
+ *
+ * 表现是"随机某几条用例红"（`chat-single` / `tool-edit-file` / `sub-delegation-window` …，
+ * 每轮换），10 轮里中 1–2 轮 —— 与产品、与用例都没关系。
+ *
+ * 判据因此从"**绑**得上"改成"**连**得上"，而且探针**真发一个 HTTP 请求**（与 SDK 同一条路）：
+ * 只探 TCP 不够 —— 现场抓到过"TCP 握手完成了、请求却没到达处理函数"的窗口，
+ * 那种情况下裸 `net.connect` 探针是**假绿**（探针绿了，SDK 照样一次都没连通）。
+ */
+/*
+ * ⚠️ 同一个知识的**第二份**在 `engine/testing/localServer.ts`（`listenReachable`）——
+ * 那一份是给"自己绑服务器的测试"用的（modelGate / team 那些）。
+ * 两份都留着是刻意的：这一份在**随 CLI 发布的 engine/eval 里**（`ding eval` 要用），
+ * 让发布路径去 import 一个 testing 目录不值得。谁改了判据（比如自检路径、重试次数），
+ * **两边一起改** —— 这一条就是为什么两处的注释都写明了另一处在哪。
+ */
+async function listenReachablePort(server: Server): Promise<number> {
+  /*
+   * 探针用 `node:http` + `agent: false`：**一次性连接**，探完即断，不碰全局 undici 池。
+   *
+   * 为什么不图省事写 `fetch(...)`：`fetch`（undici）会把连接**留在 keep-alive 池里**，
+   * 而引擎随后请求的是同一个 origin（`127.0.0.1:<同一个端口>`）—— 它一定会复用那条连接。
+   * 于是这条"自检"就不再是旁观者，而是**被测对象的一部分**：探针改了连接复用的形状，
+   * 真请求的表现也跟着改。自检工具不许改变被测对象，所以这里用一次性连接。
+   */
+  const probe = (port: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      const req = httpRequest(
+        { host: "127.0.0.1", port, path: "/__probe", method: "GET", agent: false, timeout: 600 },
+        (res) => {
+          res.resume(); // 把响应读干净，连接才好断
+          res.on("end", () => resolve((res.statusCode ?? 0) === 200));
+          res.on("error", () => resolve(false));
+        },
+      );
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on("error", () => resolve(false));
+      req.end();
+    });
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.off("error", onError);
+        reject(error);
+      };
+      server.once("error", onError);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", onError);
+        resolve();
+      });
+    });
+    const port = (server.address() as AddressInfo).port;
+    // 回环上的连接要么立刻成、要么一直不回 —— 600ms 足够区分这两种
+    if (await probe(port)) return port;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  throw new Error(
+    "连着试了 8 个回环端口都连不上 —— 这台机器的回环当时有一段是不通的（不是产品问题，重跑通常就好）",
+  );
+}
+
+/**
  * 起一个假 provider。
  *
  * @param replies 这一轮的脚本：第一步取 `replies[0]`，之后按"已用次数"递进。
@@ -120,9 +213,29 @@ export type FakeProvider = {
  *   假 provider 会先炸，把"产品行为"掩盖成"测试装置行为"。
  * @returns 见 `FakeProvider`
  */
-export async function startFakeProvider(replies: readonly EvalReply[], parentTurns: readonly string[] = []): Promise<FakeProvider> {
+export async function startFakeProvider(
+  replies: readonly EvalReply[],
+  parentTurns: readonly string[] = [],
+  opts: {
+    /**
+     * **父级请求的标记**（推荐）：宿主在 `system` 里塞一句独一无二的话，
+     * 假 provider 按它认"这是父级那一轮"。比"按用户原话认"可靠得多
+     * —— 子智能体的请求里只有它自己的任务说明，不会带上这个标记。
+     */
+    parentMark?: string;
+  } = {},
+): Promise<FakeProvider> {
   const bodies: unknown[] = [];
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    /*
+     * 自检路由（`listenReachablePort` 打的就是它）：回一个最小的 200。
+     * 不走 SSE、不记进 `bodies` —— 它不是"模型调用"，别污染用例的证据。
+     */
+    if (req.url === "/__probe") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{}");
+      return;
+    }
     let raw = "";
     req.on("data", (d: Buffer | string) => {
       raw += String(d);
@@ -143,12 +256,23 @@ export async function startFakeProvider(replies: readonly EvalReply[], parentTur
        * 那个计数恒为 0，第二轮拿到的是第一轮那一条（`chat-two-turns` 因此红）。
        * 第二版按"本实例第几个请求"算，又**被子智能体带偏**：子级也打这个服务
        * （`team-then-single` 因此少走一步）。
+       * 第三版按"带着用户原话"认 —— 但**空串会让它恒真**（审计 P158）：
+       * `turns: [""]` 的用例里，连子智能体的请求都被算成父级，
+       * 文件头那条"子级一律回一句收尾话"的规矩被整条绕开。
        *
-       * 现在：**只有"带着这条用例用户原话"的请求才算父级的** ——
-       * 子级的消息里只有它自己的任务说明，两者不会混。
+       * 现在：优先用**宿主给的标记**（`opts.parentMark`）认父级 —— 那是独一无二的；
+       * 没给标记时退回"按用户原话认"，但**空串不参与**（它正是恒真的来源）。
+       * 两条路都认不出来时（例如用例的用户话就是空串）当作"无法区分"：
+       * 一律按父级处理，并把这条边界如实留在这里。
        */
-      const isParent = parentTurns.length > 0 && parentTurns.some((t) => JSON.stringify(parsed ?? "").includes(t));
-      const parentSoFar = bodies.filter((b) => parentTurns.some((t) => JSON.stringify(b ?? "").includes(t))).length;
+      const usableTurns = parentTurns.filter((t) => t.trim().length > 0);
+      const isParentBody = (body: unknown): boolean => {
+        if (opts.parentMark) return JSON.stringify(body ?? "").includes(opts.parentMark);
+        if (!usableTurns.length) return true;
+        return usableTurns.some((t) => JSON.stringify(body ?? "").includes(t));
+      };
+      const isParent = isParentBody(parsed);
+      const parentSoFar = bodies.filter((b) => isParentBody(b)).length;
       const index = Math.max(0, Math.min(parentSoFar - 1, replies.length - 1));
       const reply = isParent ? (replies[index] ?? { say: "" }) : { say: "（子智能体收尾）" };
 
@@ -160,14 +284,13 @@ export async function startFakeProvider(replies: readonly EvalReply[], parentTur
       }
 
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-      for (const frame of framesOf(reply, index)) res.write(`data: ${JSON.stringify(frame)}\n\n`);
+      for (const frame of framesOf(reply, index, bodies.length, Buffer.byteLength(raw, "utf8"))) res.write(`data: ${JSON.stringify(frame)}\n\n`);
       res.write("data: [DONE]\n\n");
       res.end();
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const port = (server.address() as AddressInfo).port;
+  const port = await listenReachablePort(server);
   return {
     url: `http://127.0.0.1:${port}/v1`,
     bodies,

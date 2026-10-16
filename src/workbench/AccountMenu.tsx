@@ -58,6 +58,23 @@ export type AccountMenuProps = {
  *
  * 「额度用量」那一行**保留**：它不是按钮，是把已用量如实显示出来的地方。
  */
+/**
+ * 这次 `mousedown` 该不该把菜单关掉？
+ *
+ * 判据就两条：点在菜单里 → 不关（那是用户在菜单里操作）；点在**触发它的那颗按钮**上 → 不关
+ * （交给按钮自己的 click 去 toggle，否则会出现"关了又被开"的抵消 —— 见下面 useEffect 里的说明）。
+ *
+ * 抽成纯函数是为了能测：DOM 那一层在这个仓里没有渲染环境（`vitest` 的 environment 是 node），
+ * 而"该不该关"这件事本身完全不依赖 DOM。
+ *
+ * @param insideMenu 事件目标在菜单子树里
+ * @param insideTrigger 事件目标是那颗触发按钮（或其子元素）
+ * @returns true = 关菜单
+ */
+export function shouldCloseOnMouseDown({ insideMenu, insideTrigger }: { insideMenu: boolean; insideTrigger: boolean }): boolean {
+  return !insideMenu && !insideTrigger;
+}
+
 export default function AccountMenu({ onClose, onOpenSettings, onOpenStarred }: AccountMenuProps) {
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [submenuOpen, setSubmenuOpen] = useState(false);
@@ -66,7 +83,20 @@ export default function AccountMenu({ onClose, onOpenSettings, onOpenStarred }: 
   // 点外面 / 按 Esc 关掉 —— 菜单该有的基本行为
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node | null;
+      const insideMenu = Boolean(rootRef.current && target && rootRef.current.contains(target));
+      /*
+       * ⚠️ **触发它那颗按钮不算"外面"**（2026-10-16，审计 P83）。
+       *
+       * 头像不在这份 `rootRef` 子树里（`NavSidebar.tsx` 里它是菜单的兄弟节点），
+       * 于是"开着菜单再点一次头像"走的是：`mousedown` → 判定"点在外面" → 关；
+       * `click` → 那颗按钮的 `setAccountMenuOpen(v => !v)` → **又开**。
+       * 两下抵消，用户看到的是"菜单关不掉"（而 Esc 与点别处都是好的，所以特别容易被当成偶发）。
+       * `SkillPanel` 早就有这条豁免了（`if (t.closest('[data-testid="wb-skills"]')) return`）——
+       * 这里把它补上，判据抽成 `shouldCloseOnMouseDown` 好单独测。
+       */
+      const insideTrigger = Boolean(target && (target as Element).closest?.('[data-testid="wb-account"]'));
+      if (shouldCloseOnMouseDown({ insideMenu, insideTrigger })) onClose();
     };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();

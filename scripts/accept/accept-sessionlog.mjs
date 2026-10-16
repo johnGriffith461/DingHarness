@@ -1,7 +1,5 @@
 import { chromium } from "playwright";
-import fs from "node:fs";
-import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot, verdict } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readAllSessionRecords, shot, verdict } from "./harness.mjs";
 
 /**
  * 验收：**会话事件日志真的记下了"模型这一轮看见了什么"**（C2 / INV-1）。
@@ -33,8 +31,12 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9296;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9296;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);
@@ -85,54 +87,41 @@ try {
   );
   out.shot = await shot(page, "sessionlog.png");
 
-  /* ── 读日志（隔离目录，属于这次运行） ── */
-  const dir = path.join(DATA, "sessions");
-  out.logDirExists = fs.existsSync(dir);
-  const files = out.logDirExists ? fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
-  out.logFiles = files;
-  const file = files.length ? path.join(dir, files[files.length - 1]) : "";
-  out.logBytes = file ? fs.statSync(file).size : 0;
-
-  /** 逐行解析；坏行单独数（**不许因为一行坏掉就放弃整段**）。 */
-  const parseLog = (text) => {
-    const records = [];
-    let skipped = 0;
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        records.push(JSON.parse(line));
-      } catch {
-        skipped += 1;
-      }
-    }
-    return { records, skipped };
-  };
-
-  out.logText = "";
-  if (file) {
-    const { records, skipped } = parseLog(fs.readFileSync(file, "utf8"));
-    out.records = records.length;
-    out.skipped = skipped;
-    out.types = records.map((r) => r.type);
-    out.firstType = records[0]?.type ?? null;
-    out.lastType = records[records.length - 1]?.type ?? null;
-    out.requestHasUserText = Boolean(
-      records[0]?.messages?.some((m) => typeof m.content === "string" && m.content.includes(MEMO_KEY)),
-    );
-    out.requestSystemChars = typeof records[0]?.system === "string" ? records[0].system.length : 0;
-    const call = records.find((r) => r.type === "tool-call");
-    const result = records.find((r) => r.type === "tool-result" && r.toolCallId === call?.toolCallId);
-    out.toolCallName = call?.toolName ?? null;
-    out.toolCallInputHasKey = JSON.stringify(call?.input ?? "").includes("42");
-    out.toolResultPaired = Boolean(result);
-    out.usage = records.find((r) => r.type === "done")?.usage ?? null;
-    // ⑤ 正文重建（INV-1）
-    out.logText = records
-      .filter((r) => r.type === "text")
-      .map((r) => r.text)
-      .join("")
-      .trim();
-  }
+  /*
+   * ⭐ 读日志：走**应用自己的口子**（2026-10-16，审计 G09）。
+   *
+   * 这一段原来直接读 `<DATA>/sessions/*.jsonl`。可存储从 Phase 12.1 起
+   * **无条件走 SQLite**（`electron/ipc/sessionStore.ts` 里写着），
+   * 于是 `sessions/` 目录根本不出现 → `logDirExists=false` → 这几条断言
+   * **永远红**，而红的话术写着"主进程根本没写日志"——把"读错地方"说成了产品没做。
+   * `readAllSessionRecords` 走 `window.shell.session.list/load`（现成助手），
+   * 存储再换一次也不用动这里。
+   */
+  const records = await readAllSessionRecords(page);
+  out.logDirExists = records.length > 0;
+  out.logFiles = records.length ? ["（走 IPC 读取：存储是 SQLite，不再有 .jsonl 文件）"] : [];
+  out.logBytes = 0; // 不再有"文件大小"这个概念
+  out.records = records.length;
+  out.skipped = 0; // IPC 那侧已经把坏行跳过了（这里没有"行"可坏）
+  out.types = records.map((r) => r.type);
+  out.firstType = records[0]?.type ?? null;
+  out.lastType = records[records.length - 1]?.type ?? null;
+  out.requestHasUserText = Boolean(
+    records[0]?.messages?.some((m) => typeof m.content === "string" && m.content.includes(MEMO_KEY)),
+  );
+  out.requestSystemChars = typeof records[0]?.system === "string" ? records[0].system.length : 0;
+  const call = records.find((r) => r.type === "tool-call");
+  const result = records.find((r) => r.type === "tool-result" && r.toolCallId === call?.toolCallId);
+  out.toolCallName = call?.toolName ?? null;
+  out.toolCallInputHasKey = JSON.stringify(call?.input ?? "").includes("42");
+  out.toolResultPaired = Boolean(result);
+  out.usage = records.find((r) => r.type === "done")?.usage ?? null;
+  // ⑤ 正文重建（INV-1）
+  out.logText = records
+    .filter((r) => r.type === "text")
+    .map((r) => r.text)
+    .join("")
+    .trim();
 
   await b.close();
 } catch (e) {
@@ -144,8 +133,8 @@ try {
 console.log(JSON.stringify(out, null, 2));
 
 const bad = [];
-if (!out.logDirExists) bad.push("没有 sessions 目录 —— 主进程根本没写日志");
-if (!out.logFiles?.length) bad.push("没有 .jsonl 日志文件");
+if (!out.logDirExists) bad.push("这段会话一条记录都读不到（走 IPC 的 session.list/load）—— 主进程没写日志？");
+if (!out.logFiles?.length) bad.push("这段会话没有任何记录");
 if (out.firstType !== "request") bad.push(`首行应是 request，实际 ${out.firstType}`);
 if (!out.requestHasUserText) bad.push("首行 request 里没有这一轮的用户内容（模型看见了什么无从谈起）");
 if (!out.toolCallName) bad.push("日志里没有 tool-call（工具调用没记下来）");

@@ -8,10 +8,23 @@ import { readFileSync, readdirSync } from "node:fs";
  * 现在读**整个样式树**：入口 + `src/styles/` 下全部 css（按文件名排序，顺序无关紧要，
  * 因为这些守卫是在"找某条规则/某个变量在不在"，不是在比层叠顺序）。
  */
-function readAllCss(dir = "src"): string {
-  const files = [`${dir}/styles.css`, ...readdirSync(`${dir}/styles`).filter((f) => f.endsWith(".css")).sort().map((f) => `${dir}/styles/${f}`)];
-  return files.map((f) => readFileSync(f, "utf8")).join("\n");
+function readAllCssFiles(dir = "src"): Array<{ file: string; text: string }> {
+  const files = [
+    `${dir}/styles.css`,
+    ...readdirSync(`${dir}/styles`)
+      .filter((f) => f.endsWith(".css"))
+      .sort()
+      .map((f) => `${dir}/styles/${f}`),
+  ];
+  return files.map((f) => ({ file: f, text: readFileSync(f, "utf8") }));
 }
+
+/**
+ * **画布自己那两张样式表**（2026-10-16，审计 G20）：
+ * 它们里面的规则本来就只作用在画布子树里，选择器**不重复** `wb-canvas` 这个类名 ——
+ * 只按选择器认作用域会让守卫长期空转（实测只看到 1 个变量引用）。
+ */
+const CANVAS_FILES = ["canvas.css", "canvas-nodes.css"];
 import { describe, expect, it } from "vitest";
 
 /**
@@ -48,10 +61,10 @@ function usedIn(body: string): string[] {
 /**
  * 解析与画布相关的两块信息。
  *
- * @param text 样式表全文
+ * @param files 样式表（文件名 + 全文）—— 文件名用来认"这是不是画布那两张表"
  * @returns `declared` = .wb-canvas 自己声明的变量；`used` = 画布规则引用的变量（去重）
  */
-function readCanvas(text: string): { declared: Set<string>; used: Set<string> } {
+function readCanvas(files: Array<{ file: string; text: string }>): { declared: Set<string>; used: Set<string> } {
   const declared = new Set<string>();
   const used = new Set<string>();
 
@@ -68,20 +81,27 @@ function readCanvas(text: string): { declared: Set<string>; used: Set<string> } 
    * 注释才判对的。选择器归选择器、说明归说明。
    */
   const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
-  const rules = [...strip(text).matchAll(/([^{}]+)\{([^{}]*)\}/g)];
-  for (const rule of rules) {
-    const selector = rule[1];
-    const body = rule[2];
-    if (!selector.includes("wb-canvas")) continue;
-    for (const name of declaredIn(body)) declared.add(name);
-    for (const name of usedIn(body)) used.add(name);
+  for (const { file, text } of files) {
+    const rules = [...strip(text).matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    for (const rule of rules) {
+      const selector = rule[1];
+      const body = rule[2];
+      /*
+       * 作用域：**画布那两张表里的规则都算**（它们本来就在画布子树里），
+       * 其它表里则看选择器有没有写 `wb-canvas`。
+       */
+      const byFile = CANVAS_FILES.some((f) => file.endsWith(f));
+      if (!byFile && !selector.includes("wb-canvas")) continue;
+      for (const name of declaredIn(body)) declared.add(name);
+      for (const name of usedIn(body)) used.add(name);
+    }
   }
   return { declared, used };
 }
 
 describe("画布变量必须自给自足", () => {
   it("**画布引用的每个 var(--X)，.wb-canvas 都要自己声明**", () => {
-    const { declared, used } = readCanvas(readAllCss());
+    const { declared, used } = readCanvas(readAllCssFiles());
     const missing = [...used].filter((name) => !declared.has(name));
     expect(
       missing,
@@ -94,7 +114,7 @@ describe("画布变量必须自给自足", () => {
   });
 
   it("这条检查确实作用在画布上（.wb-canvas 的变量块被找到了）", () => {
-    const { declared } = readCanvas(readAllCss());
+    const { declared } = readCanvas(readAllCssFiles());
     // 画布块至少有它原有的 6 个，否则说明选择器解析坏了、这条守卫是假的
     expect(declared.size).toBeGreaterThanOrEqual(6);
     expect(declared.has("--bg")).toBe(true);
@@ -108,9 +128,9 @@ describe("画布变量必须自给自足", () => {
    * 上面那条"引用了什么就必须声明什么"因此真的开始工作了（这正是加它的意义：
    * 画布是深色孤岛，借工作台的浅色变量会在深底上糊掉）。
    */
-  it("画布引用到的变量数（当前实况：1 个，边界阴影）", () => {
-    const { used, declared } = readCanvas(readAllCss());
-    expect([...used].sort()).toEqual(["--edge-shadow-left"]);
+  it("画布变量的扫描覆盖是真的（作用域没漏掉画布那两张表）", () => {
+    const { used, declared } = readCanvas(readAllCssFiles());
+    expect(used.size, `只扫到 ${used.size} 个变量引用 —— 作用域是不是又退回去了？`).toBeGreaterThanOrEqual(8);
     /* 关键那条：引用的每个都得声明过（上面那条测试的等价直白版） */
     for (const name of used) expect(declared.has(name), `${name} 没在 .wb-canvas 里声明`).toBe(true);
   });

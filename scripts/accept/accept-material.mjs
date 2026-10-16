@@ -2,7 +2,10 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, readAllSessionRecords, verdict } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, freshDir, pickPort, readAllSessionRecords, verdict } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 「@ 添加资料」——把文件交给 agent（2026-10-14）。
@@ -20,7 +23,8 @@ import { connectWithRetry, pickPort, readAllSessionRecords, verdict } from "./ha
  * 资料正文不该混进他说的话里（那是给模型的，不是给他看的）。
  */
 const DATA = ".verify/material-data";
-fs.rmSync(DATA, { recursive: true, force: true });
+/* 2026-10-16（G02 同族）：裸 rmSync 在句柄还占着时会 EPERM 打死脚本 → 换 freshDir */
+await freshDir(DATA);
 /* 预置一份资料：内容里有**只有读到才知道**的标记 */
 const MARK = "验收专用标记-7Q4Z";
 fs.mkdirSync(path.join(DATA, "drive"), { recursive: true });
@@ -114,6 +118,13 @@ try {
   report.toolsOffered = toolsOffered;
   report.requestHasBlock = requestText.includes("【提到的文件】");
   report.requestHasPath = requestText.includes("季度总结.md");
+  /*
+   * ⚠️ 2026-10-16（审计 G08）：`report.requestHasMark` 在下面被**断言**却
+   * **从来没有被赋值** —— `!undefined` 恒真，于是这条脚本**永远红**，
+   * 而红的话术还写着"标记没送过去"，指错了方向。
+   * 现在按 `MARK` 真判：marker 只存在于那份资料文件里，读了才知道。
+   */
+  report.requestHasMark = requestText.includes(MARK);
   report.requestSlice = requestText.slice(0, 200);
 } catch (error) {
   report.error = `在「${report.step ?? "未知"}」这一步失败：${String(error).split(String.fromCharCode(10))[0]}`;

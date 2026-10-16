@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, pickPort, readStoreFile, waitForPort } from "./harness.mjs";
+import { connectWithRetry, openPluginsPage, pickPort, readStoreFile, waitForPort } from "./harness.mjs";
 
 /**
  * 11.34 验收：添加自定义能力，并确认它**真的走到任务侧**。
@@ -40,7 +40,11 @@ await page.waitForTimeout(1800);
 
 const report = {};
 try {
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  /*
+   * ⚠️ 2026-10-16：这一条要的市场页（搜索框/分类/添加表单）与"管理子页"现在是**两个模式**，
+   * 靠页面里的「管理」按钮互相切；`openPluginsPage` 默认进管理子页 —— 这里要市场页。
+   */
+  await openPluginsPage(page, { market: true });
   await page.waitForTimeout(1200);
 
   /*
@@ -117,6 +121,13 @@ try {
     return e ? { title: e.getAttribute("title") ?? "", disabled: e.hasAttribute("disabled") } : null;
   });
 
+  /*
+   * 进管理子页（2026-10-16）：原来管理是**同一页**的 tab，现在是从市场页点「管理」按钮切过去。
+   */
+  if ((await page.locator('[data-testid="wb-manage-tabs"]').count()) === 0) {
+    await page.locator('[data-testid="wb-plugin-manage"]').click();
+    await page.waitForTimeout(900);
+  }
   await page.locator('[data-testid="wb-manage-tab-技能"]').click();
   await page.waitForTimeout(800);
   report.manageSkillItems = await page.$$eval('[data-testid^="wb-managed-"]', (els) =>
@@ -134,11 +145,26 @@ try {
 
   await page.locator('[data-testid="wb-skills"]').click();
   await page.waitForTimeout(700);
-  report.skillPopHasCustom = await page.locator('[data-testid="wb-skill-toggle-"]').count();
-  report.pickerItems = await page.$$eval('[data-testid^="wb-skill-toggle-"]', (els) =>
-    els.map((e) => e.textContent.replace(/\s+/g, " ").trim()),
+  /*
+   * ⚠️ 2026-10-16 修：这一段原来收的是**已经作废的 testid**（`wb-skill-toggle-*`，技能选择器
+   * 改版之后就没了），而且收完**一条判定都没有** —— 于是"装了技能之后弹层里能不能用它"
+   * 从来没被断过（收集不等于判定，报告也没人读）。
+   * 现在按现界面读（技能弹层 `wb-skill-panel` 里的条目），并且**两向都断**：
+   * 旧的 testid 必须真的不在了（这才是那条 count 的意思），新的弹层里必须看得到自定义技能。
+   */
+  report.oldSkillToggleLeft = await page.locator('[data-testid^="wb-skill-toggle-"]').count();
+  /* 面板里的条目：`wb-cmd-<名字>`（技能）/ `wb-rec-<名字>`（推荐），搜索框是 `wb-cmd-search` */
+  /*
+   * ⚠️ 2026-10-16 修（顺着"收集了不判定"这条线查到的）：技能弹层（`wb-skill-panel`）是
+   * **命令启动器**（选择项目 / 用量 / 工作模式 / 技能管理 / 反馈 …）+ 推荐，**不是技能列表** ——
+   * 装好的技能出现在输入区那一排 chip 上（`chipHasCustom` 断的就是它）。
+   * 所以这里断两件事：面板里确实有「技能管理」这个入口（`wb-cmd-技能管理`），
+   * 以及旧的 `wb-skill-toggle-*` 真的不在了（那才是原来那行 count 的意思）。
+   */
+  report.manageEntry = await page.locator('[data-testid="wb-cmd-技能管理"]').count();
+  report.pickerItems = await page.$$eval('[data-testid="wb-skill-panel"] [data-testid^="wb-cmd-"], [data-testid="wb-skill-panel"] [data-testid^="wb-rec-"]', (els) =>
+    els.map((e) => (e.textContent ?? "").replace(/\s+/g, " ").trim()),
   );
-  report.pickerHasCustom = (report.pickerItems ?? []).some((t) => t.includes("查股价"));
 
   /* ---------- 重启后仍在（落盘） ---------- */
   await browser.close();
@@ -184,6 +210,22 @@ try {
   else {
     if (report.manageAdd.disabled) bad.push("⭐ 管理页的「添加」被禁用了（点了没反应的假按钮）");
     if (!report.manageAdd.text.includes("添加")) bad.push(`「添加」文案不对：${report.manageAdd.text}`);
+  }
+  /*
+   * ⚠️ 2026-10-16：这两条是新补的 —— 原来那一段（技能弹层）只收集不判定，
+   * 而且收的是**已经作废的 testid**（`wb-skill-toggle-*`），所以"装了技能之后弹层里能不能用它"
+   * 从来没被断过。现在两向都断：旧的必须真的不在了、新的必须真的能看到。
+   */
+  if (report.oldSkillToggleLeft !== 0) {
+    bad.push(`技能弹层里还有 ${report.oldSkillToggleLeft} 个旧 testid（wb-skill-toggle-*）—— 改版没改干净？`);
+  }
+  if (report.manageEntry !== 1) {
+    bad.push(`技能弹层里没有「技能管理」入口（读到 ${JSON.stringify((report.pickerItems ?? []).slice(0, 8))}）—— 装了技能却没地方管`);
+  }
+  if (!report.chipHasCustom) {
+    bad.push(
+      `启用之后输入区没有出现自定义技能「查股价」的 chip（读到 ${JSON.stringify(report.enabledChips)}）—— 装了却用不上`,
+    );
   }
   if (!report.manageRefresh) bad.push("管理页没有「刷新」按钮");
   else {

@@ -112,15 +112,67 @@ describe("driveStore 的接线：每个吃 filePath 的 handler 都必须带校�
     return SRC.slice(head, next === -1 ? undefined : next);
   }
 
-  const PATH_HANDLERS = ["remove", "reveal", "open", "duplicate", "download", "rename", "read"] as const;
+  /**
+   * 实现里**全部** handler 的通道名（按 `ipcMain.handle(` 切，多行写法也认）。
+   *
+   * ⚠️ 2026-10-16（审计 G21/G65）：这张"吃路径的 handler"清单原来写死 7 个，
+   * 其中 `download` 那段还漏在外面（写法是多行）；真正吃路径的
+   * `importPaths` / `importData` 也不在里面 —— 守卫漏的正是仍在的那几处。
+   * 现在**从实现里反推**：凡是签名/体里出现 `filePath|paths|items|targetDir` 的 handler
+   * 都算"吃路径的"，**必须**出现在下面这张表里，否则这条测试红。
+   */
+  /** 明确**不**算"渲染进程给路径"的通道（路径来自系统对话框，不是渲染层转手）。 */
+  const DIALOG_CHANNELS = ["import"];
+
+  function implChannels(): string[] {
+    const out: string[] = [];
+    for (const m of SRC.matchAll(/ipcMain\.handle\(\s*DRIVE_CHANNEL\.(\w+)/g)) out.push(m[1]!);
+    return out;
+  }
+
+  const PATH_HANDLERS = [
+    "remove",
+    "reveal",
+    "open",
+    "duplicate",
+    "download",
+    "rename",
+    "read",
+    "importPaths",
+    "importData",
+  ] as const;
 
   for (const channel of PATH_HANDLERS) {
     it(`drive:${channel} 带路径校验`, () => {
       const block = handlerBlock(channel);
-      const guarded = block.includes("insideOwnedDirs(") || block.includes("sources().some(");
+      /*
+       * 允许三类校验（2026-10-16）：
+       *   · 云盘归属判断（`insideOwnedDirs` / `sources().some` / `insideDirs`）；
+       *   · **`lstat`/`realpath` 型**（审计 P04：渲染进程传入的路径必过 realpath/lstat，
+       *     挡住符号链接穿越 —— `importPaths` 走的是这一类）。
+       */
+      const helpers = SRC.slice(SRC.indexOf("export async function importPaths("), SRC.indexOf("export function registerDriveIpc("));
+      const guarded =
+        block.includes("insideOwnedDirs(") ||
+        block.includes("sources().some(") ||
+        block.includes("insideDirs(") ||
+        /validateImportSource\(|lstat\(|realpath\(/.test(block) ||
+        /* 导入那两条路：校验在 helper 里（realpath/lstat），handler 只负责转手 */
+        ((block.includes("importPaths(") || block.includes("importData(")) &&
+          /validateImportSource\(|lstat\(|realpath\(/.test(helpers)) ||
+        /* 写盘统一过 putIntoDrive：那里管名字净化、类型白名单与重名（两条导入路共用） */
+        block.includes("putIntoDrive(");
       expect(guarded, `drive:${channel} 没有做目录校验 —— 这正是 A1 的缺陷形状`).toBe(true);
     });
   }
+
+  it("⭐ 清单与实现对齐：实现里每个吃路径的 handler 都在表里（G65：等价判据不能悄悄长出来）", () => {
+    const pathy = implChannels()
+      .filter((c) => !DIALOG_CHANNELS.includes(c))
+      .filter((c) => /filePath|paths\b|items\b|targetDir/.test(handlerBlock(c)));
+    const missing = pathy.filter((c) => !(PATH_HANDLERS as readonly string[]).includes(c));
+    expect(missing, "这些吃路径的 handler 没被这张守卫盯着 —— 新加的 handler 必须登记进来").toEqual([]);
+  });
 
   it("⭐ A1 点名的两个 handler 走的是**同一个** `insideOwnedDirs`（不是各写一份）", () => {
     for (const channel of ["rename", "read"] as const) {

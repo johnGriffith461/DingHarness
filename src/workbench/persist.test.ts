@@ -236,9 +236,21 @@ describe("createJsonStore", () => {
     if (res.ok) return;
     expect(typeof res.error).toBe("string");
     expect(res.error.length).toBeGreaterThan(0);
+    /*
+     * ⚠️ 2026-10-16（审计 G53.f）：用例名写着"**且不留 .tmp**"，可原来体内没有这一条
+     * （同文件另一条才验）—— 也就是把一个没验的性质写进了名字。失败的写入路径最容易
+     * 在半路留下临时文件（原子写 = 先写 .tmp 再改名），所以这里真数一遍。
+     */
+    const left = readdirSync(ROOT).filter((f) => f.endsWith(".tmp"));
+    expect(left, `失败的写入留下了临时文件：${left.join(", ")}`).toEqual([]);
   });
 
-  it("版本号取自 SCHEMA_VERSION（默认就是当前版）", async () => {
+  it("版本号：默认取 SCHEMA_VERSION，**显式给了就用给的**", async () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.e）：原来只验"没传 version 时写下去等于 SCHEMA_VERSION" ——
+     * 而落盘那一行本身就是 `opts.version ?? SCHEMA_VERSION`，这条**恒真**（传了 version
+     * 被忽略也照样绿）。补上真正有判别力的那一半：显式给 7，盘上就必须是 7。
+     */
     const file = tmpFile();
     const store = createJsonStore<string[]>({
       file: () => file,
@@ -248,5 +260,16 @@ describe("createJsonStore", () => {
     await store.write(["x"]);
     const onDisk = JSON.parse(readFileSync(file, "utf8")) as { __schema: number };
     expect(onDisk.__schema).toBe(SCHEMA_VERSION);
+
+    const pinned = tmpFile();
+    const custom = createJsonStore<string[]>({
+      file: () => pinned,
+      initial: () => [],
+      normalize: (v) => (Array.isArray(v) ? v.map(String) : []),
+      version: 7,
+    });
+    await custom.write(["y"]);
+    const customDisk = JSON.parse(readFileSync(pinned, "utf8")) as { __schema: number };
+    expect(customDisk.__schema, "显式指定的 version 被忽略了").toBe(7);
   });
 });

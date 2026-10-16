@@ -7,7 +7,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * 验收：「管理历史对话」页（本体路由 `chat/thread/list`）。
  *
  * ⚠️ 这一页**没有 swagger / 接口可依** —— 依据是本体实机截图
- * （`app-triage/dynamic-ui/shot-route-thread-list.png`）：按时间分档、每行「标题 + 摘要」+ 行内 ⋯。
+ * （`app-triage/dynamic-ui/shot-route-thread-list.png`）：按时间分档、每行「标题 + 摘要」+ 行内 ⋯。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 所以这条验收断言的就是**截图里看得到的那些形态**，外加"行内操作真的生效"。
  *
  * 用**预置 tasks.json**造记录，不调模型 —— 时间分档不该依赖一次三十秒的模型调用。
@@ -60,8 +60,12 @@ fs.writeFileSync(
   "utf8",
 );
 
-const PORT = 9290;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9290;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);

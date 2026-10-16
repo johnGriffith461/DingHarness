@@ -8,8 +8,9 @@ import type { WorkbenchView } from "./store";
  *
  *     新工作任务        Ctrl N
  *     定时任务          Ctrl Shift T
- *     插件 · 技能 · 伙伴 Ctrl Shift S
- *     云盘              Ctrl Shift D
+ *     插件 · 技能 · 伙伴 Ctrl Shift S   ← **已作废**：那一项搬进设置了（d38fe75），
+ *                                       左栏不再有它，`Ctrl Shift S` 也一并撤掉
+ *     云盘              Ctrl Shift D   ← 已作废：云盘页 2026-10-16 拆了
  *     手机遥控电脑      （无）
  *
  * ⚠️ 为什么要专门做这个文件：这些提示**早就画在左栏上了**，但全文**没有任何全局按键处理**

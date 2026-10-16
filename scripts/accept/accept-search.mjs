@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openPluginsPage, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**技能搜索**（§160 里剩下的那一处；云盘搜索随云盘页 2026-10-16 拆掉）。
@@ -17,6 +17,7 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, waitForPag
  * ⑥ 清空之后两边都**回到原样**（搜索不能把事情搞丢）
  *
  * —— 下面四条是 2026-10-14 补的。审计（`docs/UI-做工体检.md` §3.12）把这三件事
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 标成**功能**而不是样式：输入框里没有 ×、空态不给出路、不知道筛掉了几条。
  * ⑦ **清除 ×** 真的把搜索清掉（不是只画了一颗按钮）
  * ⑧ **命中 N 条** 和**真渲染出来的行/卡片数**对得上（不然那个数字就是编的）
@@ -39,7 +40,8 @@ for (const n of ["销售看板.md", "销售周报.md", "会议纪要.md", "季�
   fs.writeFileSync(path.join(DIR, n), "x", "utf8");
 }
 
-const PORT = 9310;
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9310;
 const out = {};
 let child = null;
 let ok = false;
@@ -47,6 +49,8 @@ let getLog = () => "";
 
 const boot = async () => {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  PORT = r.port;
   child = r.child;
   ok = r.ok;
   getLog = r.getLog;
@@ -68,8 +72,15 @@ try {
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
 
-  /* ── ① 技能页 ── */
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  /* ── ① 技能页 ──
+   *
+   * ⚠️ 2026-10-16：原来这里启动后**立刻**点左栏 —— 界面还没挂载完就点，
+   * Playwright 会等 30 秒然后红（"waiting for locator wb-nav-plugins"）。
+   * 别的脚本里有先等一会儿的，这条没有；顺带补上"左栏收起着就先展开"的回退
+   * （收起态也要有展开入口 —— M0 工单 3 的那条口径）。
+   */
+  await page.waitForTimeout(1200);
+  await openPluginsPage(page, { market: true });
   await page.waitForTimeout(1200);
   await page.locator('[data-testid="wb-plugin-tab-技能"]').click();
   await page.waitForTimeout(800);

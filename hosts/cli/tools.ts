@@ -149,7 +149,11 @@ export function createCliExecutor(opts: {
           literal?: boolean;
           limit?: number;
         };
-        const result = await searchFilesForModel({ pattern, ...(raw === undefined ? {} : { path: raw }), include, literal, limit }, dirs);
+        const result = await searchFilesForModel(
+          { pattern, ...(raw === undefined ? {} : { path: raw }), include, literal, limit },
+          dirs,
+          ctx.signal,
+        );
         const output = {
           ok: result.ok,
           line: describeSearchResult(result, pattern),

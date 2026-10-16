@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot, verdict, waitForPage } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readAllSessionRecords, shot, verdict, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**工作台里能"停止"正在跑的任务**（补完⑤）。
@@ -26,16 +26,21 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9313;
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9313;
 const out = {};
 let child = null;
 
 try {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  PORT = r.port;
   child = r.child;
   if (!r.ok) throw new Error(`调试端口 ${PORT} 没开：\n` + (r.getLog() || "(空)").slice(-800));
   const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
+
+  if (!page) throw new Error("应用起了但一个页面都没建（NO_PAGE_HINT）——多半是 .cjs 标记那一步没跑");
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(1200);
 
@@ -132,22 +137,16 @@ try {
     out.diskSaysAborted = out.diskStepText.some((t) => t.includes("已中止"));
   }
 
-  /* ③ 会话日志里有终止记录 */
-  const dir = path.join(DATA, "sessions");
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
-  out.logFiles = files;
-  if (files.length) {
-    const lines = fs
-      .readFileSync(path.join(dir, files[files.length - 1]), "utf8")
-      .split("\n")
-      .filter(Boolean);
-    const records = lines.map((l) => {
-      try {
-        return JSON.parse(l);
-      } catch {
-        return {};
-      }
-    });
+  /*
+   * ③ 会话日志里有终止记录 —— **走应用自己的口子**（2026-10-16，审计 G10）。
+   *
+   * 这里原来读 `<DATA>/sessions/*.jsonl`，而存储从 Phase 12.1 起无条件走 SQLite，
+   * 那个目录根本不出现 → `hasAbortRecord` 永远 false → "中止有终止记录"这条
+   * **唯一硬证据**永远是红的（而它本来该证明的是"读日志的人能分清断了还是还在跑"）。
+   */
+  const records = await readAllSessionRecords(page);
+  out.logFiles = records.length ? ["（走 IPC 读取：存储是 SQLite，不再有 .jsonl 文件）"] : [];
+  if (records.length) {
     out.lastType = records[records.length - 1]?.type ?? null;
     out.lastMessage = records[records.length - 1]?.message ?? null;
     out.hasAbortRecord = records.some((r) => r.type === "error" && String(r.message ?? "").includes("已中止"));

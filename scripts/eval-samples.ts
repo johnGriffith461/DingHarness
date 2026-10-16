@@ -54,6 +54,27 @@ const ROOT = (() => {
 const OUT_DIR = path.join(ROOT, "engine", "eval", "samples");
 
 /** 一条样本的配方：id → 场景。 */
+/**
+ * 把回复脚本里的 `{{work}}` 换成**这次运行的临时目录**（2026-10-16，审计 G75）。
+ *
+ * ⚠️ 这一步原来是**跑完之后**才做的（脱敏用），而**跑之前没有做** ——
+ * 于是 12 份"真实样本"里所有带路径的工具调用（`read_file` / `write_file` /
+ * `list_dir` 的 `path`）拿到的都是字面量 `{{work}}/note.txt` 这种路径，
+ * **一律以授权错误收场**；生成出来的样本记的是失败，不是产品真实行为。
+ * 现在：执行前回填真路径（样本才有真实内容），落盘后再反向脱敏成 `{{work}}`。
+ */
+function fillWork(replies: EvalReply[][], workDir: string): EvalReply[][] {
+  const walk = (value: unknown): unknown => {
+    if (typeof value === "string") return value.split("{{work}}").join(workDir);
+    if (Array.isArray(value)) return value.map(walk);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, walk(v)]));
+    }
+    return value;
+  };
+  return walk(replies) as EvalReply[][];
+}
+
 const RECIPES: Array<{ id: string; title: string; turns: string[]; replies: EvalReply[][]; mode?: string; maxSteps?: number }> = [
   {
     id: "01-plain-qa",
@@ -151,7 +172,7 @@ async function generate(): Promise<void> {
     const storeDir = fs.mkdtempSync(path.join(os.tmpdir(), "dh-sample-store-"));
     fs.writeFileSync(path.join(workDir, "note.txt"), "备忘：明天十点开会\n", "utf8");
 
-    const provider = await startFakeProvider(recipe.replies.flat(), recipe.turns);
+    const provider = await startFakeProvider(fillWork(recipe.replies, workDir).flat(), recipe.turns);
     const prev = { base: process.env.STRATA_BASE_URL, key: process.env.STRATA_API_KEY };
     process.env.STRATA_BASE_URL = provider.url;
     process.env.STRATA_API_KEY = "sample-key";
@@ -172,7 +193,7 @@ async function generate(): Promise<void> {
 
       /* 落盘的行就是生产里那些行（`logLine` 是同一份实现） */
       const snapshot = await built.engine.record(`sample-${recipe.id}`);
-      const lines = (snapshot?.records ?? []).map((r) => logLine(r));
+      const lines = (snapshot?.records ?? []).map((r) => logLine(r, r.seq, r.at));
       /*
        * 刻意混入"真实日志里一定有"的脏东西：
        *   · 一条截断的 JSON（进程被杀时写了一半）
@@ -226,8 +247,14 @@ async function generate(): Promise<void> {
     "| 文件 | 场景 |",
     "|---|---|",
     ...written.map((w) => {
-      const [file, , , ...rest] = w.split(/\s{2,}/);
-      return `| \`${file}\` | ${rest.join(" ").trim() || ""} |`;
+      /*
+       * ⚠️ `written` 的每一行是 `文件  行数  标题` 三段（两个及以上空格分隔）。
+       * 这里原来写成 `const [file, , , ...rest]` —— **跳过了 3 段**，
+       * 于是 `rest` 恒为空、「场景」列 12 行全空（审计 G86）。
+       * 现在按三段取，取不到时留空也不崩。
+       */
+      const [file = "", , scene = ""] = w.split(/\s{2,}/);
+      return `| \`${file}\` | ${scene.trim()} |`;
     }),
     "",
     "⚠️ 脱敏是**断言**不是承诺：`engine/eval/samples.test.ts` 会拒绝任何含绝对路径、",

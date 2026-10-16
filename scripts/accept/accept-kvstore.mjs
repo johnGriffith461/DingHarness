@@ -27,6 +27,7 @@ const note = (m) => console.log("   " + m);
  */
 async function boot(port, extraEnv = { DSH_STORE_BACKEND: "sqlite" }) {
   const booted = await bootApp({ port, dataDir: DATA, extraEnv });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
   if (!booted.ok) {
     bad.push(`应用起不来：${booted.getLog().slice(-200)}`);
     return null;

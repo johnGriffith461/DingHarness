@@ -10,7 +10,7 @@ import ContextMenu, { type MenuItem } from "./ContextMenu";
 /**
  * 「管理历史对话」页 —— 对应本体路由 `chat/thread/list`。
  *
- * 依据：`app-triage/dynamic-ui/shot-route-thread-list.png`（本体实机截图）。那一页是：
+ * 依据：`app-triage/dynamic-ui/shot-route-thread-list.png`（本体实机截图）。那一页是：  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  *
  *   ┌──────────────────────────────────────────────┐
  *   │ ▯  ✎            管理历史对话               ⋯  │   ← 左：收起侧栏 / 新建；中：标题；右：更多

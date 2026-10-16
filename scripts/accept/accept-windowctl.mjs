@@ -12,7 +12,7 @@
 // 所以这里用「标题栏底下不得有可点元素 + 自绘三个按钮」把同一件事钉住；
 // OS 层截图证据在 `.verify/m0/`（上面加一条记录）。
 import { chromium } from "playwright";
-import { openApp, sleep, killLeftovers, pickPort } from "./harness.mjs";
+import { killLeftovers, openApp, openPluginsPage, pickPort, sleep } from "./harness.mjs";
 import { realDrag, restoreWindow, winRect } from "./winProbe.mjs";
 
 const bad = [];
@@ -86,7 +86,7 @@ if (under.length) {
 /* ⚠️ 2026-10-16：原来这里点的是云盘页（`wb-cloud-new` 等三颗按钮）—— 云盘整页拆了，
    改用**插件页**的右上按钮（`wb-plugin-add` 在同一角上，判据一字未改）。 */
 
-await page.locator('[data-testid="wb-nav-plugins"]').click();
+await openPluginsPage(page);
 await sleep(1200);
 const cloud = await page.evaluate(() => {
   const ids = ["wb-plugin-add"];

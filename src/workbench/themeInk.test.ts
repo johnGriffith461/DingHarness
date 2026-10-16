@@ -1,17 +1,10 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 /*
- * ⚠️ C6-3 把 `src/styles.css`（6015 行）按区域拆成了 `src/styles/*.css` + 一串 `@import`。
- * 这条守卫原来**只读那一个文件** —— 拆分之后它扫了个空，于是"看起来还在检查"其实什么都没查
- * （`themeRatchet` 甚至直接报"两类都要非平凡"，那正是"检查在空转"的自白）。
- *
- * 现在读**整个样式树**：入口 + `src/styles/` 下全部 css（按文件名排序，顺序无关紧要，
- * 因为这些守卫是在"找某条规则/某个变量在不在"，不是在比层叠顺序）。
+ * ⚠️ 2026-10-16（审计 G24）：这里原来有个 `readAllCss()`，把整棵样式树按**文件名排序**拼起来读。
+ * 那是**字典序**而不是层叠序 —— 而 `src/styles.css` 的注释写着"这些 `@import` 的顺序就是层叠顺序"。
+ * 现在读法按 `@import` 顺序走（见 `importOrder()`），所以这个函数删掉了。
  */
-function readAllCss(dir = "src"): string {
-  const files = [`${dir}/styles.css`, ...readdirSync(`${dir}/styles`).filter((f) => f.endsWith(".css")).sort().map((f) => `${dir}/styles/${f}`)];
-  return files.map((f) => readFileSync(f, "utf8")).join("\n");
-}
 import { describe, expect, it } from "vitest";
 
 /**
@@ -45,46 +38,79 @@ import { describe, expect, it } from "vitest";
 /**
  * 现行取值（改这里 = 显式选择偏离当前设计系统）。
  *
- * ⚠️ 2026-10-14 起是 **Ding Harness 日间「纸白 + 墨」** 的三档。
- * 权威定义在 `src/styles/ding-harness-tokens.css` 的 `.wb` 块 ——
- * 本测试读的是合并后的样式树，按文件名排序，那个文件排在最前，所以读到的是它。
+ * ⚠️ 2026-10-14 起是 **Ding Harness 日间「纸白 + 墨」** 的三档（上面那张表）。
+ *
+ * ⚠️⚠️ 2026-10-16（审计 G24）：这两个表原来**只有浅色一套**，而且读法是
+ * "按**文件名排序**取第一个 `.wb { --bg: … }` 块" —— 那是**字典序**，不是层叠序：
+ * 谁在 `src/styles.css` 里后 `@import` 谁才真正生效（`styles.css` 的注释自己写着
+ * "这些 `@import` 的顺序就是层叠顺序"）。也就是说：后导入的文件改这三个值时，
+ * 守卫读到的仍是前面的旧值 → **改坏了也不红**（这正是 G24 的原话）。
+ * 现在按 **`@import` 顺序**取"最后一个声明"（真正生效的那份），
+ * 并把**深色那套**一起钉住（`[data-theme="dark"] .wb`）。
  */
 const REFERENCE = {
   "--fg-dim": "#6e6a5c",
   "--fg-faint": "#767165",
   "--fg-ghost": "#948e7d",
-};
+} as const;
+
+/** 深色主题下这三档的现行取值（来源：`ding-harness-tokens.css` 的 `[data-theme="dark"] .wb` 块）。 */
+const REFERENCE_DARK = {
+  "--fg-dim": "#948d76",
+  "--fg-faint": "#837c66",
+  "--fg-ghost": "#5c5647",
+} as const;
+
+/** `src/styles.css` 里的 `@import` 顺序（= 层叠顺序）。 */
+function importOrder(): string[] {
+  const entry = readFileSync("src/styles.css", "utf8");
+  return [...entry.matchAll(/@import\s+"\.\/(styles\/[^"]+\.css)"/g)].map((m) => `src/${m[1]}`);
+}
 
 /**
- * 读 `.wb` 变量块里这几个变量的当前取值。
+ * 读**真正生效**的那套取值：按 `@import` 顺序走一遍，同一个变量**后面的覆盖前面的**。
  *
- * @param text 样式表全文
- * @returns 变量名 → 值
+ * @param theme `light` = `.wb` 块；`dark` = `[data-theme="dark"] .wb` 块
+ * @returns 变量名 → 值（含它来自哪个文件，报错时好定位）
  */
-function readInk(text: string): Record<string, string> {
-  const found: Record<string, string> = {};
-  for (const m of text.matchAll(/\.wb \{([^}]*)\}/g)) {
-    const body = m[1];
-    if (!body.includes("--bg:")) continue;
-    for (const d of body.matchAll(/(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{3,8})/g)) {
-      if (d[1] in REFERENCE) found[d[1]] = d[2].toLowerCase();
+function readInk(theme: "light" | "dark"): Record<string, { value: string; file: string }> {
+  const found: Record<string, { value: string; file: string }> = {};
+  for (const file of importOrder()) {
+    const text = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = m[1].trim().replace(/\s+/g, " ");
+      const isDark = selector.includes('[data-theme="dark"]');
+      const isLight = !isDark && selector === ".wb";
+      if (theme === "dark" ? !(isDark && selector.endsWith(".wb")) : !isLight) continue;
+      const body = m[2];
+      if (!body.includes("--bg:")) continue;
+      for (const d of body.matchAll(/(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{3,8})/g)) {
+        found[d[1]!] = { value: (d[2] ?? "").toLowerCase(), file };
+      }
     }
-    break;
   }
   return found;
 }
 
 describe("保真锁定：三档低对比度文字色与参考一致", () => {
-  it("**取值没有被改动**（改动它等于显式选择偏离参考）", () => {
-    const actual = readInk(readAllCss());
-    const diff = Object.entries(REFERENCE)
-      .filter(([name, value]) => actual[name] !== value)
-      .map(([name, value]) => `${name}: 期望 ${value}，实际 ${actual[name] ?? "(未声明)"}`);
+  const check = (theme: "light" | "dark", reference: Record<string, string>): string[] => {
+    const actual = readInk(theme);
+    return Object.entries(reference)
+      .filter(([name, value]) => actual[name]?.value !== value)
+      .map(
+        ([name, value]) =>
+          `${name}: 期望 ${value}，实际 ${actual[name]?.value ?? "(未声明)"}${
+            actual[name] ? `（生效值来自 ${actual[name]!.file}）` : ""
+          }`,
+      );
+  };
 
+  it("**浅色取值没有被改动**（读的是层叠里真正生效的那份）", () => {
+    const diff = check("light", REFERENCE);
     expect(
       diff,
       [
-        "工作台的低对比度文字色被改动了。",
+        "工作台的低对比度文字色被改动了（浅色）。",
         "这三个值是参考应用的取值，改动它会让界面不再与参考一致（这次任务的目标是一比一）。",
         "如果这是一次**有意的可访问性改版**：请三档一起调（它们是一个层次体系），",
         "并同时更新 themeInk.test.ts 里的 REFERENCE 与上面的对比度表。",
@@ -93,8 +119,31 @@ describe("保真锁定：三档低对比度文字色与参考一致", () => {
     ).toEqual([]);
   });
 
+  it("**深色取值没有被改动**（G24：原来只钉了浅色那套）", () => {
+    const diff = check("dark", REFERENCE_DARK);
+    expect(
+      diff,
+      ["工作台的低对比度文字色被改动了（深色）。", "深色那套同样是有意定过的档，改它要一起更新这张表。", diff.join("\n")].join(
+        "\n",
+      ),
+    ).toEqual([]);
+  });
+
+  it("读法本身有效：找到的是**层叠序最后一个**声明（不是字典序第一个）", () => {
+    const light = readInk("light");
+    /* 三个变量都要读到，否则"没读到"会被当成"没改"悄悄放过 */
+    for (const name of Object.keys(REFERENCE)) {
+      expect(light[name], `${name} 没从任何 .wb 块里读到 —— 这条守卫读空了`).toBeTruthy();
+    }
+    const dark = readInk("dark");
+    for (const name of Object.keys(REFERENCE_DARK)) {
+      expect(dark[name], `深色的 ${name} 没读到`).toBeTruthy();
+    }
+  });
+
   it("三档确实都还在（少了任何一档，层次体系就断了）", () => {
-    const actual = readInk(readAllCss());
-    expect(Object.keys(actual).sort()).toEqual(Object.keys(REFERENCE).sort());
+    /* ⚠️ G24 之后 readInk 收的是主题（层叠序读取），不再是"一整份 CSS 文本" */
+    const light = Object.keys(readInk("light")).filter((k) => k in REFERENCE);
+    expect(light.sort()).toEqual(Object.keys(REFERENCE).sort());
   });
 });

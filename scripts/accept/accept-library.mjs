@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, openPluginsPage, readStoreFile, shot } from "./harness.mjs";
 
 /**
  * 插件安装（11.7）与项目分组（11.8）的验收。
@@ -49,6 +49,7 @@ fs.rmSync(DATA, { recursive: true, force: true });
  */
 async function launch(port) {
   const booted = await bootApp({ port, dataDir: DATA, timeoutMs: 40000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
   if (!booted.ok) throw new Error("应用起不来：" + booted.getLog());
   const browser = await connectWithRetry(chromium, `http://127.0.0.1:${booted.port}`);
   const pages = browser.contexts()[0].pages();
@@ -71,7 +72,7 @@ try {
   ({ child, browser, page, getLog } = await launch(9310));
 
   /* ---------- 11.7 插件安装 ---------- */
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  await openPluginsPage(page);
   await page.waitForTimeout(1200);
   report.installedCountBefore = await page.locator('[data-testid="wb-installed-count"]').textContent();
 

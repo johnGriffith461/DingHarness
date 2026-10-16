@@ -1,4 +1,21 @@
-import type { ArtifactKind } from "../src/workbench/artifact";
+/**
+ * 产物的类型（本地口径的枚举）。
+ *
+ * ⚠️ 定义**放在这一层**（2026-10-16）：它原来长在 `src/workbench/artifact.ts`，
+ * 而这一层用 `import type` 去借 —— 渲染层的东西于是被拉进了**协议层**。
+ * 后果不只是"看着别扭"：`tsconfig.cli.json` 编 CLI 时，凡是进编译图的文件都会被 emit，
+ * 于是 npm 包里凭空多出 `dist-cli/src/workbench/artifact.js`（渲染层代码，`files` 全量发布）。
+ * 协议层不该依赖渲染层，方向反过来才对。
+ */
+export type ArtifactKind =
+  | "markdown"
+  | "docx"
+  | "pptx"
+  | "xlsx"
+  | "html"
+  | "code"
+  | "image"
+  | "canvas";
 
 /**
  * 产物类型与状态的**协议层**定义（阶段 11.29）。

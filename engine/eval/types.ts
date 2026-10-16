@@ -39,7 +39,13 @@ export type EvalExpect = {
    * 与"过程语义"无关的帧；写成全等会让用例跟着实现细节漂。
    */
   events?: string[];
-  /** 关键文案：**必须出现**在（事件 + 工具结果 + 日志）拼起来的所有文本里。 */
+  /**
+   * 关键文案：**必须出现**在"产品呈现给用户的那两类字"里 —— 助手正文 +
+   * 工具留痕/工具输出（见 `run.ts` 的 `copyHaystack`）。
+   *
+   * ⚠️ 2026-10-16（审计 P149）：原来这里是"事件 + 工具结果 + 日志**全部**拼起来"，
+   * 于是模型的工具参数与用户原话也会命中 —— 把执行体整块砸掉照样绿。
+   */
   copy?: string[];
   /** 产物：工作目录里必须存在的文件（相对路径）。 */
   files?: string[];
@@ -53,8 +59,28 @@ export type EvalExpect = {
   minSteps?: number;
   /** 必须有这么多次委派事件（子智能体 / 多 agent 两类用它）。 */
   delegations?: number;
+  /** 下发给模型的工具清单里**必须**有这些名字（读的是假 provider 收到的请求体）。 */
+  toolsSent?: string[];
+  /** 下发给模型的工具清单里**不许**有这些名字（不给工具 = 模型看不到，就不会试）。 */
+  toolsNotSent?: string[];
   /** 这些工具必须**以失败收场**（`tool-result` 带 error）。 */
   toolErrors?: string[];
+  /**
+   * 失败的那些调用，错误文案里**必须**含这些子串（钉"失败的原因"）。
+   *
+   * 典型用途：`sub-task-too-long` 要证的是"被 **schema 拒**了"，不是"碰巧失败了"——
+   * 一个静默截断的实现会让调用**成功**，于是 `toolErrors` 本身就已经不成立（红）；
+   * 这条再钉住"红/绿的原因对得上"。
+   */
+  toolErrorIncludes?: string[];
+  /**
+   * 这一用例**允许工具失败**（默认不允许 —— 任何未声明的工具错误都判红）。
+   *
+   * 这是"改坏就红"的主柱子：把任一个执行体（`read_file` / `write_file` /
+   * `run_command`…）整块砸掉，`tool-result` 就会带 error，这一条立刻红。
+   * 读不存在的文件、闸门拦下这类**本来就该失败**的用例，显式打开它。
+   */
+  allowToolFailures?: boolean;
   /** 必须有用量账本（有真实 usage）。 */
   usage?: boolean;
 };

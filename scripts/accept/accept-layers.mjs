@@ -15,7 +15,12 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
  *   5. 执行「置顶」后，DOM 里该节点排到最后（= 最上层）
  */
 
-const DATA = "data";
+/*
+ * ⚠️ 2026-10-16（审计 G01）：这里原来是 `"data"` —— 就是**仓库里那个真实数据目录**，
+ * 而下面还有一句 `rmSync(DATA/canvas)`：每次跑这条验收都**删掉真实的画布文档**。
+ * 现在落到 `.verify/` 下的专属目录（不进版本库、与真实数据无关）。
+ */
+const DATA = ".verify/data-layers";
 fs.rmSync(path.join(DATA, "canvas"), { recursive: true, force: true });
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;

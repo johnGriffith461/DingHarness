@@ -1,6 +1,7 @@
 /**
  * 从 `Workbench.tsx` 拆出来的（C6-1）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆的理由见 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * 拆的理由原本记在 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
@@ -169,7 +170,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       <div className="wb-setfull-body">
         {/* ⚠️ 2026-10-16：改成 **ZCode 的两列形态** —— 左列是分区，右列是内容。
             原来这里是"要么一列行、要么整块子页"（二选一）—— 那看不出"我在哪一层"。
-            ⚠️ 面包屑 / 搜索框还没加（见 docs/ZCODE-设置与模型选择-反解.md 的清单）。 */}
+            ⚠️ 面包屑 / 搜索框还没加（原本记在 docs/ZCODE-设置与模型选择-反解.md 的清单）。 */}
         <div className="wb-set-shell">
           <nav className="wb-set-rail" data-testid="wb-set-rail">
             {/* 搜索：分区一多就得能搜（ZCode 的 SettingsSearchInput） */}

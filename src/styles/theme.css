@@ -248,6 +248,15 @@
   --accent: #d9603a;
   --dh-font-mono: "Martian Mono Variable", "Martian Mono", "Cascadia Code", Consolas, monospace;
   /*
+   * 2026-10-16（P23 的确认条落地时，守卫又逮到一次同一族的毛病）：
+   * 「回到示例画布」的确认条长在**工具条里**，它用到 `--surface` / `--surface-hover` / `--danger`，
+   * 而这三个 `.wb-canvas` 也没声明 —— 会从 `.wb` 取到浅色值（浅灰底 + 深红字）贴在深色画布上，
+   * 又是对比度不够的那一档。按同一族给深色值。
+   */
+  --surface: rgba(27, 32, 41, 0.97);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --danger: #e0806f;
+  /*
    * 深色底上"层次阴影基本看不见"（`better-ui/surfaces.md` 明说），
    * 所以边界靠**一条浅发丝环**交代，抬升只留一层柔和的（不用生硬的大黑投影 ——
    * 那是 `high-end-visual-design` 点名的反面）。

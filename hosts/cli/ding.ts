@@ -13,7 +13,7 @@ import { allProviders, firstAvailableProvider, getProvider } from "../../engine/
 import { describeBudget } from "../../engine/runtime/budget";
 import { budgetOf } from "../../engine/runtime/budget";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
-import { formatCount } from "../../shared/cost";
+import { formatCount, usageTotal } from "../../shared/cost";
 import { buildEngine as buildEngineIn } from "./assembly";
 import { cmdEval } from "./cmdEval";
 import { cmdInit, cmdDoctor } from "./cmdSetup";
@@ -222,13 +222,21 @@ async function cmdRun(p: Parsed): Promise<number> {
    * 口径与桌面**同一个字段**（`step-finish` 的 `usage`），所以两边说的是同一件事。
    * 拿不到用量就不显示数字（**不编**）。
    */
+  /** 这一轮的累计 token（先累加、后报 —— 见下面那段说明） */
+  let totalTokens = 0;
   const outcome = await engine.run({
     ...request,
     onEvent: (event) => {
       if (event.type !== "step-finish") return;
-      const used = (event.usage?.inputTokens ?? 0) + (event.usage?.outputTokens ?? 0);
+      /*
+       * ⚠️ **累加**（2026-10-16，审计 P150）：`step-finish` 带的是**这一步**的用量，
+       * 原来每次都拿它当"已用"报出去 —— 与同一轮的账本差一倍以上。
+       * 桌面那边（`taskRunner` 的进度行）读同一个字段、同一套累加，措辞也一致。
+       */
+      const stepTokens = usageTotal(event.usage);
+      if (stepTokens !== null) totalTokens += stepTokens;
       const head = event.step ? `第 ${event.step} 步` : "一步";
-      const tail = used ? `（已用 ${formatCount(used)} token）` : "";
+      const tail = totalTokens ? `（累计已用 ${formatCount(totalTokens)} token）` : "";
       process.stderr.write(`· ${head}${tail}\n`);
     },
   });

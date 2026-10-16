@@ -1,7 +1,10 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, pickPort, shot, waitForPort } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 11.10 验收：对话流里的产物卡片 + 悬浮助手窗。

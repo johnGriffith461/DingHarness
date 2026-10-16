@@ -28,8 +28,6 @@ import { EVAL_CATEGORIES } from "./types";
  */
 
 const BASELINE = path.resolve(__dirname, "baseline.json");
-/** 允许的跌幅（方案 10.3 的原文：跌超 5% 即红）。 */
-const MAX_DROP = 5;
 
 let report: EvalReport;
 
@@ -53,11 +51,13 @@ beforeAll(async () => {
     sessionPrefix: "eval",
   });
   // 让失败信息一次看全（默认只在断言里打一行）
-  if (report.failed) {
+  if (report.failed || report.environment) {
     for (const r of report.results.filter((x) => !x.ok)) {
-      console.log(`✗ ${r.id}（${r.category}）${r.title}`);
+      console.log(`✗ ${r.id}（${r.category}）${r.title}${r.environment ? "［装置不可达］" : ""}`);
       for (const f of r.failures) console.log(`    ${f.what}：${f.detail}`);
       console.log(`    实际事件：${r.eventTypes.join(" → ") || "(空)"}`);
+      /* 事件里 error 说了什么，一条都别省 —— 不然"为什么红"只能靠猜 */
+      for (const e of r.errors ?? []) console.log(`    error 事件：${e}`);
     }
   }
 }, 300_000);
@@ -100,22 +100,47 @@ describe("评测集（Phase 10：离线回放 + 基线棘轮）", () => {
   it("③ 全部用例通过（离线回放，一条真 provider 都不调）", () => {
     const detail = report.results
       .filter((r) => !r.ok)
-      .map((r) => `${r.id}: ${r.failures.map((f) => `${f.what}(${f.detail})`).join("; ")}`)
+      .map((r) => `${r.id}: ${r.failures.map((f) => `${f.what}(${f.detail})`).join("; ")}${
+        r.errors?.length ? ` ［error 事件：${r.errors.join(" ／ ")}］` : ""
+      }`)
       .join(" | ");
     expect(report.failed, detail).toBe(0);
+    /*
+     * ⭐ **装置不可达也要红**（2026-10-16）。
+     *
+     * `failed` 里已经不包含"本机回环连不上自己的假 provider"那一类（它由
+     * `runSuite` 重跑一次、仍不可达则标成 `environment`）—— 那条判据故意收得很窄，
+     * 因为那种失败**按构造**不可能来自产品：产品在这一步做的事就是"往宿主给的 baseURL 发个请求"。
+     * 但"不算产品失败"不等于"可以放过"：这台机器如果**系统性**连不上回环，
+     * 那这套评测在这里本来就不该给出"全绿"的结论 —— 所以这里要求 `environment` 必须是 0。
+     */
+    expect(
+      report.environment,
+      report.results
+        .filter((r) => r.environment && !r.ok)
+        .map((r) => `${r.id}: ${r.environment}`)
+        .join(" | "),
+    ).toBe(0);
   });
 
-  it("④ 通过率没有跌破基线 5 个百分点（模型/prompt/SDK/引擎变更的棘轮）", () => {
+  it("④ 基线棘轮：用例只增不减，且基线本身必须记的是「全绿」", () => {
     if (!fs.existsSync(BASELINE)) {
       // 还没有基线时不该红：第一条基线是 `ding eval --update-baseline` 落下来的
       console.log(`（还没有基线文件 ${path.relative(process.cwd(), BASELINE)}：本次通过率 ${report.rate}%）`);
       return;
     }
     const baseline = JSON.parse(fs.readFileSync(BASELINE, "utf8")) as { rate: number; total: number };
-    expect(report.rate).toBeGreaterThanOrEqual(
-      baseline.rate - MAX_DROP,
-    );
-    // 用例被删掉也是漂移：总数只该涨
+    /*
+     * ⚠️ 2026-10-16（审计 G76）：这里原来写的是 `report.rate >= baseline.rate - 5`
+     * —— "跌超 5% 即红"。可 ③ 已经要求 **0 失败**：走到 ④ 时通过率必然是 100%，
+     * 那条容忍度**永远不可能成为先红的那个门**（恒真的判据 = 没有判据）。
+     *
+     * 改成棘轮真正能管的两件事：
+     *   · **用例只增不减** —— 删掉用例来"提高通过率"是漂移；
+     *   · **基线本身必须是 100%** —— 拿一次半绿的运行去 `--update-baseline`
+     *     等于把及格线调低，那正是"全绿"这个词被稀释的方式。
+     */
     expect(report.total, `基线有 ${baseline.total} 条，现在只剩 ${report.total} 条`).toBeGreaterThanOrEqual(baseline.total);
+    expect(baseline.rate, `基线记的是 ${baseline.rate}% 而不是 100% —— 及格线被调低过`).toBe(100);
   });
 });

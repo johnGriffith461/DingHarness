@@ -1,7 +1,10 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, pickPort, verdict } from "./harness.mjs";
+import { connectWithRetry, failOnMarks, openPluginsPage, pickPort, verdict } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 验证**安装出来的**应用能跑（而不是只验证 unpacked 目录能跑）。
@@ -49,7 +52,7 @@ try {
   report.navItems = await page.$$eval('[data-testid^="wb-nav-"]', (els) =>
     els.map((e) => e.textContent.replace(/\s+/g, "")).slice(0, 7),
   );
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  await openPluginsPage(page);
   await page.waitForTimeout(1500);
   report.pluginsPageOpened = (await page.locator('[data-testid="wb-plugin-add"]').count()) === 1;
 

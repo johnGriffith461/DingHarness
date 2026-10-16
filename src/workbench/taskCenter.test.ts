@@ -15,7 +15,7 @@ import type { WorkTask } from "./task";
 /**
  * 任务中心（§154）。
  *
- * ⚠️ 文案断言对着 `docs/evidence-taskcenter.txt`（本体前端包里的原文）——
+ * ⚠️ 文案断言对着 `docs/evidence-taskcenter.txt`（本体前端包里的原文）——  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 它们同时是"证据仍然对齐"的守卫。
  */
 const task = (id: string, stage: WorkTask["stage"], createdAt = 0): WorkTask => ({

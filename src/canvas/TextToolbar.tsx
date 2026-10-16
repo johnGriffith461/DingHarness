@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight, Frame, Type, X } from "lucide-react";
 import { useRuntimeStore } from "./runtimeStore";
+import { createFollowLoop, nextToolbarPos } from "./toolbarFollow";
 import {
   TEXT_STYLE_LIMITS,
   normalizeTextStyle,
@@ -39,19 +40,42 @@ export default function TextToolbar() {
      * 位置从**节点元素的实际矩形**算，不从 flow 坐标算 ——
      * flow 坐标还要过一遍视口变换（平移 + 缩放），自己算一遍就等于把
      * React Flow 的变换逻辑抄一遍，抄错了面板就会飘走。
-     * 拖动/缩放时靠 rAF 轮询跟随，简单且不会漏掉任何一种引起移动的操作。
+     *
+     * ⚠️ 2026-10-16（审计 P71）：这里原来是**无条件 60fps** 的 rAF 自续循环 ——
+     * 每帧 `querySelector` + `getBoundingClientRect()`（强制布局）+ `setPos({...})`（新对象 → 重渲染），
+     * 一块静止不动的界面也常年 60fps。现在两条一起改：
+     *   · 位置没变就**不 setState**（`nextToolbarPos` 返回原对象，引用相等 → React 跳过）；
+     *   · 只有**指针按下期间**与**事件之后的一小段尾巴**才排帧（`createFollowLoop`）。
+     * 这两条都在 `toolbarFollow.test.ts` 里钉着（"静止时一帧都不排"就是其中一条）。
      */
-    let raf = 0;
-    const follow = () => {
-      const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${node.id}"]`);
-      if (el) {
+    const loop = createFollowLoop({
+      measure: () => {
+        const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${node.id}"]`);
+        if (!el) return false;
         const rect = el.getBoundingClientRect();
-        setPos({ left: rect.left + rect.width / 2, top: rect.top });
-      }
-      raf = requestAnimationFrame(follow);
+        setPos((prev) => nextToolbarPos(prev, rect));
+        return true;
+      },
+    });
+    /* 先量一次：选中那一刻面板就该出现在正确位置 */
+    loop.burst(0);
+
+    const onPointerDown = () => loop.pointerDown();
+    const onPointerUp = () => loop.pointerUp();
+    const onViewportish = () => loop.burst(600);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("pointerup", onPointerUp, true);
+    window.addEventListener("pointercancel", onPointerUp, true);
+    window.addEventListener("wheel", onViewportish, { passive: true });
+    window.addEventListener("resize", onViewportish);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("pointerup", onPointerUp, true);
+      window.removeEventListener("pointercancel", onPointerUp, true);
+      window.removeEventListener("wheel", onViewportish);
+      window.removeEventListener("resize", onViewportish);
+      loop.stop();
     };
-    follow();
-    return () => cancelAnimationFrame(raf);
   }, [node, supported]);
 
   if (!node || !supported || !pos) return null;

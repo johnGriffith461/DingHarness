@@ -1,7 +1,7 @@
 /**
  * Lunora 图像尺寸规格（机器可读实现）。
  *
- * 依据：`C:\Users\Administrator\WorkBuddy\2026-10-10-18-19-59\outputs\lunora\lunora-image-size-rules.md`
+ * 依据：`C:\Users\Administrator\WorkBuddy\2026-10-10-18-19-59\outputs\lunora\lunora-image-size-rules.md`  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * （该文档标注 `status: authoritative`，来自真实浏览器逐项点击实测）。
  * **不要估算、不要自行推导近似值** —— 这张表是离散枚举 + 确定性规整，没有模型自由裁量。
  *

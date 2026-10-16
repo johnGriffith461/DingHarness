@@ -7,18 +7,19 @@
  * 而那道校验原先是 `driveStore.ts` 里的一个私有函数 —— 后者顶层 `import` 了 `electron`，
  * 于是"限制被绕过"这件事**既没有断言、也没法在 Electron 之外复现**。
  *
- * 现在判断被抽到 `electron/ipc/drivePaths.ts`（只依赖 `node:path`），
+ * 现在判断被抽到 `engine/runtime/tools/drivePaths.ts`（只依赖 `node:path`），
  * 所以这个脚本能拿着**生产里用的同一个函数**跑真文件系统：
  * 越界路径真的被拒、云盘里的文件真的还能改名（不是"读一遍源码看看有没有写校验"）。
  *
  * ⚠️ 全程只在一份 `mkdtemp` 出来的临时目录里动手，**不碰任何真实数据目录**。
  *
- * 跑法：`npx tsx scripts/verify-drive-paths.ts`
+ * 跑法：`pnpm verify:drive-paths`（2026-10-16 起也挂在 `pnpm build` 链上 ——
+ * 审计 G39 的原话是"没有任何自动化会跑它"，一条没人跑的验收等于没有）。
  */
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { insideDirs } from "../electron/ipc/drivePaths";
+import { insideDirs } from "../engine/runtime/tools/drivePaths";
 
 let failed = 0;
 

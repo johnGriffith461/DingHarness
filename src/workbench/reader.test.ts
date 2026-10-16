@@ -16,7 +16,7 @@ import {
  * AI 阅读的纯逻辑（§155）。
  *
  * 三件事（大纲 / 页面检索 / 图表）在本地都**算得准**，所以它们是这一版的主体：
- * 不依赖模型、也不依赖网络。文案断言对着 `docs/evidence-readweb.txt`。
+ * 不依赖模型、也不依赖网络。文案断言对着 `docs/evidence-readweb.txt`。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  */
 const DOC = [
   "# 季度复盘",
@@ -120,8 +120,18 @@ describe("findHits（页面检索）", () => {
   });
 
   it("长行截断，免得把列表撑爆", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.h）：原来只断 `length <= 81` —— 一个"整行都不截"的实现
+     * 只要行长恰好 ≤81 也过；把截断整块删掉、或截到 5 个字符，这条都发现不了。
+     * 现在钉**形状**：截到 80 字符 + 一个省略号（共 81），且开头是命中的那段文本。
+     */
     const long = `关键词${"字".repeat(200)}`;
-    expect((findHits(long, "关键词")[0]?.text ?? "").length).toBeLessThanOrEqual(81);
+    const hit = findHits(long, "关键词")[0]?.text ?? "";
+    expect(hit, "长行没有截断（列表会被撑爆）").toHaveLength(81);
+    expect(hit.startsWith("关键词"), "截断把命中位置切掉了").toBe(true);
+    expect(hit.endsWith("…"), "截断没有省略号 —— 看的人会以为行就这么长").toBe(true);
+    /* 短行不该被加上省略号 */
+    expect(findHits("关键词很短", "关键词")[0]?.text).toBe("关键词很短");
   });
 
   it("超过上限就停（避免几万条把界面卡死）", () => {

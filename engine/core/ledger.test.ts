@@ -93,7 +93,17 @@ describe("成本账本 · 汇总", () => {
   });
 
   it("按天汇总用**本地时区**（用户按自己的日期理解「今天花了多少」）", () => {
-    expect(localDay(T(0))).toBe(localDay(T(0)));
+    /*
+     * ⚠️ 这条原来是 `expect(localDay(T(0))).toBe(localDay(T(0)))` —— 左右是**同一个调用**，
+     * 把 `localDay` 改成 UTC 或彻底算错都照样过（审计 G102：用例名承诺钉"本地时区"，
+     * 实际全仓没有一条断言钉它）。现在用本地构造的时刻去对本地渲染出的日期。
+     */
+    const localMidnightish = new Date(2026, 0, 2, 0, 30, 0).getTime();
+    expect(localDay(localMidnightish)).toBe("2026-01-02");
+    /* 本机时区的"日"与 UTC 不同时（绝大多数时区如此），再钉一次"不是 UTC 日" */
+    const utcDay = new Date(localMidnightish).toISOString().slice(0, 10);
+    if (utcDay !== "2026-01-02") expect(localDay(localMidnightish)).not.toBe(utcDay);
+
     const rows = rollup(entries, "day");
     expect(rows).toHaveLength(1); // 三条都在同一天（测试时间戳相邻）
     expect(rows[0]?.turns).toBe(3);

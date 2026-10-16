@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SCHEMA_VERSION, wrap } from "@shared/persist";
+import { removeAll } from "./testFs";
 
 /**
  * C1：主进程那 6 个 json store 的**接线**必须被钉住。
@@ -76,7 +77,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(env.userData, { recursive: true, force: true });
+  removeAll(env.userData);
   delete process.env.DSH_STORE_BACKEND;
 });
 
@@ -343,7 +344,7 @@ describe("provider 探测记录（provider-probe.json）· C1 收编后", () => 
   };
 
   it("往返 + 落盘带信封；坏条目在读回时被丢掉（原来是一句裸 as ProbeRecord）", async () => {
-    const { markProviderOk, listProvidersWithProbe } = await import("../electron/ipc/aiProbe");
+    const { markProviderOk, listProvidersWithProbe, normalizeProbes } = await import("../electron/ipc/aiProbe");
     markProviderOk("deepseek");
 
     const raw = (await waitForProbe(1)) as { __schema: number; data: Record<string, unknown> } | null;
@@ -357,8 +358,22 @@ describe("provider 探测记录（provider-probe.json）· C1 收编后", () => 
       JSON.stringify({ __schema: 1, data: { deepseek: { ok: true, verifiedAt: "x" }, 坏: { ok: "yes" } } }),
       "utf8",
     );
+
+    /*
+     * ⚠️ 审计 G57①：原来这里只有一句 `expect(Array.isArray(list)).toBe(true)`——
+     * 用例名说"坏条目被丢掉"，可**坏条目到底丢没丢、好条目还在不在，一条都没断**：
+     * 收窄整个失效（原样返回）它也是绿的。现在两个方向都钉死。
+     */
+    expect(
+      normalizeProbes({ deepseek: { ok: true, verifiedAt: "x" }, 坏: { ok: "yes" } }),
+      "坏条目（ok 不是布尔）必须被丢；同时好的那条必须原样留着",
+    ).toEqual({ deepseek: { ok: true, verifiedAt: "x" } });
+
     const list = await listProvidersWithProbe();
-    expect(Array.isArray(list)).toBe(true); // 不抛就说明收窄生效了
+    const ds = list.find((p) => p.id === "deepseek");
+    expect(ds, "好条目 `deepseek` 不许被坏条目连坐丢掉").toBeDefined();
+    expect(ds!.verified, "读回来的好条目要真的生效（verified 升为 true），不是只做到「不抛」").toBe(true);
+    expect(list.map((p) => p.id), "坏条目不许出现在列表里").not.toContain("坏");
   });
 
   it("⭐⭐ 并发记多条**不丢**（这就是当初把它列进例外的那条理由，现在被队列解掉了）", async () => {
@@ -394,25 +409,62 @@ describe("结构守卫：JSON 落盘不许再有第二份手写", () => {
    */
   const ALLOWED = new Set(["snapshotStore.ts"]);
 
+  /** 从 `(` 取到配平的那个 `)`（跳过字符串/模板串里的括号）。取不到返回 null。 */
+  function balancedArgs(src: string, open: number): string | null {
+    let depth = 0;
+    for (let i = open; i < src.length; i += 1) {
+      const ch = src[i];
+      if (ch === "`" || ch === '"' || ch === "'") {
+        for (i += 1; i < src.length && src[i] !== ch; i += 1) {
+          if (src[i] === "\\") i += 1;
+        }
+        continue;
+      }
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0) return src.slice(open + 1, i);
+      }
+    }
+    return null;
+  }
+
   /**
-   * 在源码里找出"手写 JSON 落盘"的行。
+   * 在源码里找出"手写 JSON 落盘"的调用。
    *
-   * 判定刻意收窄成**同一条语句**：`writeFileSync(...JSON.stringify...)`。
-   * 只按"这个文件里同时出现了 `writeFileSync` 和 `JSON.stringify`"来判会误报两类
-   * 完全正当的代码：注释里提到旧写法（`memoryStore` 的说明）、
+   * 判定口径（2026-10-16 审计 G29/G57 加严）：
+   * 把每个 `writeFile*` 调用的**实参**按括号配平整段取出来（跨行照取），
+   * 实参里出现 `JSON.stringify(...)` —— 或者出现某个"来自 `JSON.stringify` 的局部变量"—— 即命中。
+   * 于是旧口径漏掉的两种顺手写法都进来了：
+   *  - 拆行：`fs.writeFileSync(path.join(d, n),\n  JSON.stringify(x))`（旧口径要求同行共现）；
+   *  - 异步：`await fs.promises.writeFile(f, JSON.stringify(x))`。
+   *
+   * 只按"这段**实参**里有没有 JSON 序列化"判，不按"文件里同时出现过两者"判：
+   * 后者会误报两类完全正当的代码 —— 注释里提到旧写法（`memoryStore` 的说明）、
    * 以及"写二进制 + 另有一处序列化 HTTP body"（`imageGen`）。
    *
-   * ⚠️ 这是**触发器不是证明**：把 `writeFileSync` 与 `JSON.stringify` 拆到两行就能绕过。
-   * 它要拦的是"照抄旁边那份旧写法"这种**顺手**动作，真正的证据是上面那些往返测试。
+   * ⚠️ 这仍然是**触发器不是证明**：绕分两步走（先 JSON.stringify 存进变量，隔很远再写这个变量、
+   * 或经过一层辅助函数）仍躲得过。它要拦的是"照抄旁边那份旧写法"这种**顺手**动作，
+   * 真正的证据是上面那些往返测试。
    *
    * @param src 源码
-   * @returns 命中的行（去掉注释之后）
+   * @returns 命中处的实参片段（已去注释、压缩空白）
    */
   function handRolledJsonWrites(src: string): string[] {
     const noComments = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    return noComments
-      .split("\n")
-      .filter((line) => line.includes("writeFileSync(") && line.includes("JSON.stringify"));
+    const viaVar = new Set<string>();
+    for (const m of noComments.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*JSON\.stringify\s*\(/g)) {
+      viaVar.add(m[1]!);
+    }
+    const hits: string[] = [];
+    for (const m of noComments.matchAll(/\bwriteFile(?:Sync)?\s*\(/g)) {
+      const args = balancedArgs(noComments, m.index + m[0].length - 1);
+      if (args === null) continue;
+      const stringsJson = /JSON\.stringify\s*\(/.test(args);
+      const usesVar = [...viaVar].some((name) => new RegExp(`\\b${name}\\b`).test(args));
+      if (stringsJson || usesVar) hits.push(args.replace(/\s+/g, " ").trim().slice(0, 160));
+    }
+    return hits;
   }
 
   function tsFiles(dir: string, out: string[] = []): string[] {
@@ -430,6 +482,27 @@ describe("结构守卫：JSON 落盘不许再有第二份手写", () => {
     expect(handRolledJsonWrites("/* fs.writeFileSync(p, JSON.stringify(x)) */")).toEqual([]);
     expect(handRolledJsonWrites("fs.writeFileSync(path.join(dir, name), buf)")).toEqual([]);
     expect(handRolledJsonWrites("fs.writeFileSync(p, JSON.stringify(x, null, 2))")).toHaveLength(1);
+
+    /* ⚠️ G29/G57③：旧口径要求同行共现 —— 拆行写下同一件事就绕过了。现在不许绕过。 */
+    expect(
+      handRolledJsonWrites("fs.writeFileSync(\n  path.join(dir, name),\n  JSON.stringify(value),\n)"),
+      "拆行手写 JSON 落盘必须被抓到（旧口径只按同行共现判，拆行即绕过）",
+    ).toHaveLength(1);
+    /* 异步写是同一个毛病，另一种写法 */
+    expect(
+      handRolledJsonWrites("await fs.promises.writeFile(f, JSON.stringify(x))"),
+      "异步手写 JSON 落盘同样要抓",
+    ).toHaveLength(1);
+    /* 序列化结果先存进变量、再写进文件 —— 也抓 */
+    expect(
+      handRolledJsonWrites("const sealed = JSON.stringify(doc);\nfs.writeFileSync(file, sealed, \"utf8\");"),
+      "`JSON.stringify` 存进变量再写盘属于同一件事，也要抓",
+    ).toHaveLength(1);
+    /* 同文件里序列化的是别的东西、写的是二进制 → 不许误报（`imageGen` 那种形状） */
+    expect(
+      handRolledJsonWrites('await fetch(url, { body: JSON.stringify(payload) });\nfs.writeFileSync(out, buf);'),
+    ).toEqual([]);
+    expect(handRolledJsonWrites('const reqBody = JSON.stringify(payload);\nawait post(reqBody);\nfs.writeFileSync(out, buf);')).toEqual([]);
   });
 
   it("electron/ 下凡是手写 JSON 落盘的地方，只能是明列的例外", () => {

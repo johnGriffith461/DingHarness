@@ -1,10 +1,11 @@
 /**
  * 从 `pages.tsx` 拆出来的（C6-2）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆分理由见 `docs/PLAN-C6-结构拆分.md`（那个文件 1669 行 / 7 个顶层组件）。
+ * 拆分理由原本记在 `docs/PLAN-C6-结构拆分.md`（那个文件 1669 行 / 7 个顶层组件）。
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  */
 
 import { useEffect, useState } from "react";
-import { Check, Plus } from "lucide-react";
+import { Check, Loader2, Pause, Pencil, Play, Plus } from "lucide-react";
 import { NavCollapseButton } from "./NavCollapseButton";
 import { SCHEDULED_RECOMMEND, SCHEDULED_SERVED_IDS } from "./copy";
 import { useScheduleStore } from "./scheduleStore";
@@ -191,7 +192,7 @@ export function ScheduledPage() {
              * 少了它，用户点完「编辑」看到表单里已有内容，会以为这是上次没提交的草稿。
              */
             <div className="wb-sched-editing" data-testid="wb-sched-editing">
-              ✎ 正在编辑「{draft.title || "未命名"}」 —— 保存后按新时间重新计时，执行历史保留
+              <Pencil size={13} /> 正在编辑「{draft.title || "未命名"}」 —— 保存后按新时间重新计时，执行历史保留
             </div>
           ) : null}
           <input
@@ -334,28 +335,31 @@ export function ScheduledPage() {
                 <div className="wb-sched-item-actions">
                   <button
                     className="wb-icon"
+                    aria-label="立刻执行一次"
                     title="立刻执行一次"
                     data-testid={`wb-job-run-${job.id}`}
                     disabled={runningId !== null}
                     onClick={() => void runNow(job.id)}
                   >
-                    {runningId === job.id ? "…" : "▶"}
+                    {runningId === job.id ? <Loader2 size={13} /> : <Play size={13} />}
                   </button>
                   <button
                     className="wb-icon"
+                    aria-label={job.status === "running" ? "暂停" : "继续"}
                     title={job.status === "running" ? "暂停" : "继续"}
                     data-testid={`wb-job-toggle-${job.id}`}
                     onClick={() => toggle(job.id)}
                   >
-                    {job.status === "running" ? "⏸" : "▶︎"}
+                    {job.status === "running" ? <Pause size={13} /> : <Play size={13} />}
                   </button>
                   <button
                     className="wb-icon"
+                    aria-label="编辑（改名字 / 改时间 / 改内容）"
                     title="编辑（改名字 / 改时间 / 改内容）"
                     data-testid={`wb-job-edit-${job.id}`}
                     onClick={() => startEdit(job.id)}
                   >
-                    ✎
+                    <Pencil size={13} />
                   </button>
                   <button
                     className="wb-icon"

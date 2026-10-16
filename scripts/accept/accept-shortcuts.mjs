@@ -80,6 +80,29 @@ await waitForPort(__port, 40000);
   await page.waitForTimeout(400);
   out.ctrlShiftN = await activeNav(page);
 
+  /*
+   * ⭐ **在输入框里打字时，导航快捷键不许抢**（2026-10-16，审计 P84）。
+   *
+   * 两件事一起验（它们是同一条 bug 的两半）：
+   *   ① 打字打到一半按 Ctrl+N —— 页面**不该**被切走（修前会直接切走）；
+   *   ② 打完 / 切走 / 切回来 —— 那段字**还在**（修前草稿是组件 state，换视图就没了）。
+   */
+  await page.locator('[data-testid="wb-nav-home"]').click();
+  await page.waitForTimeout(500);
+  const DRAFT = "这段话不能丢（P84）";
+  await page.locator('[data-testid="wb-composer-input"]').fill(DRAFT);
+  await page.keyboard.press("Control+n");
+  await page.waitForTimeout(700);
+  out.typingCtrlN = { nav: await activeNav(page), draft: await page.locator('[data-testid="wb-composer-input"]').inputValue() };
+
+  /* 明确切到别的页再切回来（这条验的是"草稿跟着 store 走"而不是"没切成功"） */
+  await page.locator('[data-testid="wb-nav-scheduled"]').click().catch(() => undefined);
+  await page.waitForTimeout(700);
+  out.afterLeaveNav = await activeNav(page);
+  await page.locator('[data-testid="wb-nav-home"]').click();
+  await page.waitForTimeout(700);
+  out.draftAfterReturn = await page.locator('[data-testid="wb-composer-input"]').inputValue();
+
   out.shot = await shot(page, "shortcuts.png");
   await b.close();
 } catch (e) {
@@ -95,6 +118,16 @@ await waitForPort(__port, 40000);
   if (out.ctrlN?.nav !== "新工作任务") bad.push("Ctrl N 没回到新工作任务");
   if (out.plainT !== "新工作任务") bad.push("按了个光杆 t 就把界面切走了（会导致打字误触）");
   if (out.ctrlShiftN !== "新工作任务") bad.push("没定义的 Ctrl Shift N 也把界面切走了");
+  /* P84：打字时不许被抢 + 草稿不许丢 */
+  if (out.typingCtrlN?.nav !== "新工作任务") {
+    bad.push(`⭐ 在输入框里按 Ctrl+N 把页面切走了（到了「${out.typingCtrlN?.nav}」）—— 打字打到一半会被打断`);
+  }
+  if (out.typingCtrlN?.draft !== "这段话不能丢（P84）") {
+    bad.push(`在输入框里按 Ctrl+N 之后输入框里变成了 ${JSON.stringify(out.typingCtrlN?.draft)}`);
+  }
+  if (out.draftAfterReturn !== "这段话不能丢（P84）") {
+    bad.push(`⭐ 切走再切回来草稿丢了（读到 ${JSON.stringify(out.draftAfterReturn)}）`);
+  }
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
     console.error("✗ " + bad.join("；"));

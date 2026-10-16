@@ -32,7 +32,10 @@ if (!(await freshDir(DATA))) {
 async function launch(port) {
   /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
   port = await pickPort([port]);
-  const { child, ok, getLog } = await bootApp({ port, dataDir: DATA });
+  const booted = await bootApp({ port, dataDir: DATA });
+  const { child, ok, getLog } = booted;
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  port = booted.port;
   if (!ok) {
     console.error(`✗ 应用起了但调试端口 ${port} 没开 —— 看下面这段日志：\n${getLog()}`.slice(0, 1200));
     process.exit(1);

@@ -23,7 +23,14 @@ import { join } from "node:path";
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
 /** 参与"源码新鲜度"比较的目录与文件。 */
-const SOURCES = ["src", "electron", "shared", "scripts"];
+/*
+ * ⚠️ 2026-10-16（审计 G94）：原来只有四棵 —— 而本区间新增了两棵**主要源码树**：
+ *   · `engine/` 成了默认存储与评测的家；
+ *   · `hosts/` 是 server / acp / CLI 的家。
+ * 改它们**不会**让安装包判旧 → 一个只改了内核的提交可以带着旧包装发布。
+ * （`hosts/` 的 CLI 产物在 dist-cli；桌面包里用的是 engine 的编译产物，两棵都该算。）
+ */
+const SOURCES = ["src", "electron", "shared", "scripts", "engine", "hosts"];
 const FILES = ["package.json", "vite.config.ts", "tsconfig.json", "tsconfig.electron.json"];
 
 /** 安装包所在目录与匹配。 */

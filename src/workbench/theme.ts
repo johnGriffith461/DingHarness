@@ -164,16 +164,23 @@ export function applyTheme(theme: Theme): boolean {
  * 下载入时应用一次。根组件调用 —— **不能只放在设置里**：
  * 设置类组件只在打开时挂载，启动时没人应用，于是本地存着深色、界面却是浅色。
  *
+ * ⚠️ 2026-10-16（审计 P90）：监听里原来判的是**开机那一刻**读到的档位
+ * （`let current = readTheme()`，之后**再也没有被赋过值**；`saveTheme` 只写 localStorage、
+ * 两者不通信）。于是"先跟随系统 → 手动改成深色 → 系统再切深浅"这条顺序里，
+ * 监听仍然以为用户选的是「跟随系统」，**把用户的选择覆盖掉**。
+ * 现在监听**每次都重读当前档位** —— 事实只在 localStorage 里那一份，
+ * 闭包里再留一份就必然有一份是旧的。
+ *
  * @returns 解除监听的函数
  */
 export function startTheme(): () => void {
-  let current = readTheme();
-  applyTheme(current);
+  applyTheme(readTheme());
 
   // 「跟随系统」要在系统主题变化时**立刻**跟着变，而不是等下次启动
   const mq = typeof matchMedia === "function" ? matchMedia(DARK_QUERY) : null;
   const onChange = (): void => {
-    if (current === "system") applyTheme(current);
+    /* 每次重读（见上面那段说明）：用户中途改成"深色"之后，系统再切也不该动他的选择 */
+    if (readTheme() === "system") applyTheme("system");
   };
   mq?.addEventListener("change", onChange);
 

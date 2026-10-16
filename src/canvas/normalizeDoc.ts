@@ -106,23 +106,47 @@ export function normalizeCanvasDoc(raw: unknown): NormalizedCanvas {
   }
 
   const markers: Marker[] = [];
+  const asPoint = (v: unknown): { x: number; y: number } | null => {
+    if (!v || typeof v !== "object") return null;
+    const p = v as { x?: unknown; y?: unknown };
+    return isFiniteNum(p.x) && isFiniteNum(p.y) ? { x: p.x, y: p.y } : null;
+  };
+  const asPointList = (v: unknown): { x: number; y: number }[] =>
+    Array.isArray(v) ? v.map(asPoint).filter((p): p is { x: number; y: number } => p !== null) : [];
+
   for (const item of rawMarkers) {
     if (!item || typeof item !== "object") continue;
     const m = item as Record<string, unknown>;
     const id = typeof m.id === "string" ? m.id : "";
     const kind = m.kind as MarkerKind;
     if (!id || !(MARKER_KINDS as readonly string[]).includes(kind)) continue;
-    const points = Array.isArray(m.points)
-      ? m.points.filter(
-          (p): p is { x: number; y: number } =>
-            Boolean(p) &&
-            typeof p === "object" &&
-            isFiniteNum((p as { x?: unknown }).x) &&
-            isFiniteNum((p as { y?: unknown }).y),
-        )
-      : [];
-    if (points.length === 0) continue;
-    markers.push({ ...(m as object), id, kind, points } as unknown as Marker);
+    /*
+     * ⚠️⚠️ **这里原来是按 `points` 判的 —— 而写出去的是 `from` / `to`**（2026-10-16 修，审计 P28 同族）。
+     *
+     * 代价实测到了（`accept-p5` 的三处读数 + 渲染层日志）：
+     * 应用自己写出去的标记长这样 `{id, kind, from, to, color, width}`（见 `Marker` 类型），
+     * 而这里找的是 `points` —— 于是**每一条都被判成"没有点"丢掉**。
+     * 后果不是"少画几笔"：载入时全丢 → 紧接着自动保存把空集合写回去（revision 还 +1），
+     * **用户画的所有批注在重启后消失，而且盘上那份也被覆盖了**（只剩历史 `rev-*.json` 里还有）。
+     *
+     * 读的人和写的人对同一个东西的两套理解 —— 这就是它为什么静默：
+     * 单测当时也在按 `points` 写用例（见 `normalizeDoc.test.ts`），所以两边自洽、只有产品是坏的。
+     *
+     * 现在：**以真实形状（`from`/`to`）为准**；顺手兼容 `points`（早期若写过这种文档，别丢内容）。
+     * `trail` 也照样洗（涂鸦那一笔的轨迹）。
+     */
+    const from = asPoint(m.from) ?? asPointList(m.points)[0] ?? null;
+    const to = asPoint(m.to) ?? (asPointList(m.points).length > 0 ? asPointList(m.points)[asPointList(m.points).length - 1]! : null);
+    if (!from || !to) continue;
+    const trail = asPointList(m.trail);
+    markers.push({
+      ...(m as object),
+      id,
+      kind,
+      from,
+      to,
+      ...(trail.length ? { trail } : {}),
+    } as unknown as Marker);
   }
 
   const vp = (doc.viewport ?? {}) as Record<string, unknown>;

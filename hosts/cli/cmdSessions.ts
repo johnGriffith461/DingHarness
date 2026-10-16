@@ -3,7 +3,7 @@
  *
  * 从 `ding.ts` 拆出来的（结构守卫 C6-5）。
  */
-import { formatTotal, ledgerOf, rollup, type LedgerEntry } from "../../engine/core/ledger";
+import { formatTotal, ledgerOf, localDay, rollup, type LedgerEntry } from "../../engine/core/ledger";
 import { logLine } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { modelInfoOf } from "../../engine/runtime/models";
@@ -45,8 +45,18 @@ export async function cmdCost(p: Parsed, dataDir: string): Promise<number> {
      */
     const limit = readConfig(dataDir).config.softLimitUsd;
     if (limit && limit > 0) {
-      const today = rows.find((r) => r.key === new Date().toISOString().slice(0, 10));
-      const spent = today?.estimatedCost ?? 0;
+      /*
+       * ⭐ 今天花了多少：**直接从账目里按"本地日"取**（2026-10-16，审计 P151 / P203）。
+       *
+       * 原来是在 rollup 的结果行里找 `key === new Date().toISOString().slice(0, 10)`：
+       *   · 默认维度是 `session`，行的 key 是 sessionId —— 永远找不到，
+       *     于是 `spent = 0`、整块 `if (spent > 0)` 进不去，**这条提示在默认调用下从不出现**；
+       *   · 就算显式用 `--by day`，`toISOString` 给的是 **UTC 日**，
+       *     而账本自己（`localDay`）用的是本地日 —— 跨零点那几小时会算到前一天上。
+       */
+      const today = localDay(Date.now());
+      /* 复用同一份"按天汇总 + 目录单价估算"的口径（`rollup` 的 day 维就是 localDay） */
+      const spent = rollup(entries, "day", (key) => key, modelInfoOf).find((r) => r.key === today)?.estimatedCost ?? 0;
       if (spent > 0) {
         console.log("");
         console.log(softLimitNotice(spent, limit, spent / limit));

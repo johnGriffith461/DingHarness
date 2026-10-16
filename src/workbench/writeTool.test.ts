@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { WRITE_MAX_CHARS, describeWriteResult, resolveWriteTarget, writeFileForModel } from "@engine/runtime/tools/writeTool";
+import { removeAll } from "../testFs";
 
 /**
  * agent 的「写文件」工具（2026-10-14）。
@@ -32,8 +33,8 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  fs.rmSync(ROOT, { recursive: true, force: true });
-  fs.rmSync(OUTSIDE, { recursive: true, force: true });
+  removeAll(ROOT);
+  removeAll(OUTSIDE);
 });
 
 /** 本测试里的"用户目录"。 */

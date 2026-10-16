@@ -38,14 +38,20 @@ describe("matchShortcut", () => {
     expect(matchShortcut(ev("N", { ctrlKey: true }))).toBe("home");
   });
 
-  it("Ctrl Shift T / S / D 分别到定时任务、插件、云盘", () => {
+  it("Ctrl Shift T 到定时任务；**没有** Ctrl Shift S / D 了（那两项的入口都搬走/拆了）", () => {
     expect(matchShortcut(ev("t", { ctrlKey: true, shiftKey: true }))).toBe("scheduled");
-    expect(matchShortcut(ev("s", { ctrlKey: true, shiftKey: true }))).toBe("plugins");
+    /*
+     * ⚠️ 2026-10-16：插件页搬进设置（d38fe75）、云盘页拆掉 —— 左栏没有这两项了，
+     * 键位表里也没有它们。这里断"按下去**不认**"（而不是断某一个视图）：
+     * 认了反而说明表里还挂着一个界面上不存在的入口。
+     */
+    expect(matchShortcut(ev("s", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(matchShortcut(ev("d", { ctrlKey: true, shiftKey: true }))).toBeNull();
   });
 
   it("macOS 的 Cmd 等价于 Ctrl", () => {
     expect(matchShortcut(ev("n", { metaKey: true }))).toBe("home");
-    expect(matchShortcut(ev("s", { metaKey: true, shiftKey: true }))).toBe("plugins");
+    expect(matchShortcut(ev("s", { metaKey: true, shiftKey: true }))).toBeNull();
   });
 
   it("无修饰键、或带 Alt 的，一律不认（否则打字会把界面切走）", () => {
@@ -61,10 +67,11 @@ describe("matchShortcut", () => {
 });
 
 describe("键位表与提示文本", () => {
-  it("每一个视图都能查到自己的提示文本", () => {
+  it("每一个视图都能查到自己的提示文本（搬走/拆掉的入口没有键位）", () => {
     expect(shortcutFor("home")).toBe("Ctrl N");
     expect(shortcutFor("scheduled")).toBe("Ctrl Shift T");
-    expect(shortcutFor("plugins")).toBe("Ctrl Shift S");
+    /* 插件搬进设置（d38fe75）之后左栏不再有它 → 提示文本为空（不渲染角标） */
+    expect(shortcutFor("plugins")).toBe("");
   });
 
   it("没有快捷键的视图返回空串（左栏据此不渲染那枚角标）", () => {

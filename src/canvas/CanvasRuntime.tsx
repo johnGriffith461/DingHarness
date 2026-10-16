@@ -31,6 +31,7 @@ import {
 } from "./selection";
 import type { SelectionMode } from "./selection";
 import { useCanvasSelection, useBlankClickClear } from "./useCanvasSelection";
+import { mergeHandlers } from "./mergeHandlers";
 import { usePersistence } from "./usePersistence";
 import { useMarkerDraw } from "./useMarkerDraw";
 import MarkerLayer from "./MarkerLayer";
@@ -45,7 +46,7 @@ import NodeContextMenu from "./NodeContextMenu";
 import GeneratePanel from "./GeneratePanel";
 import type { MarkerKind } from "./markers";
 import { instructionFromMarkers } from "./markers";
-import { matchShortcut } from "./shortcuts";
+import { matchShortcut, mayStealInEditor } from "./shortcuts";
 import { parseClipboard, planPaste, serializeClipboard } from "./clipboard";
 import { NODE_KIND_META } from "./types";
 import { useRuntimeStore } from "./runtimeStore";
@@ -513,8 +514,20 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
         inEditor,
       });
       if (!hit) return;
-      // 输入框里只放行全局语义的操作，其余交回浏览器做文本编辑
-      if (inEditor && (hit === "toggleMarkers" || hit === "clearMarkers" || hit === "duplicate")) return;
+      /*
+       * ⚠️⚠️ **在输入框里，改内容的那几个命令一律不许抢**（2026-10-16 修，审计 P70）。
+       *
+       * 这里原来是 `if (inEditor && (hit === "toggleMarkers" || hit === "clearMarkers" || hit === "duplicate")) return;`
+       * —— 只挡了三个，而**挡的还正好是不该挡的那三个**（切标记模式、清标记、原地复制），
+       * 真正会改内容的 `cut` / `delete` / `paste` 一个都没挡。代价是用户在**聊天框/节点输入框里按 Ctrl+X**
+       * 会把画布上选中的节点**剪掉**（`store.removeSelected()`），而他以为自己在剪切文字。
+       * 更糟的是 `cut` 那里 `event.preventDefault()` 了 —— 连浏览器原本的"剪切文字"也一起没了。
+       *
+       * 现在反过来列：**只有"不碰画布内容"的几个命令在输入框里放行**，
+       * 其余一律 `return`（把按键交回浏览器做文本编辑）。这份名单短是刻意的：
+       * 少放行一个，用户最多是发现"输入框里按不了"；多放行一个，用户会丢数据。
+       */
+      if (inEditor && !mayStealInEditor(hit)) return;
 
       const store = useRuntimeStore.getState();
       switch (hit) {
@@ -642,15 +655,31 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
       data-canvas-keyboard-root
       data-selection-mode={mode}
       data-marker-tool={markerTool ?? "off"}
-      {...selection.handlers}
-      {...markerDraw.handlers}
+      /*
+       * ⚠️ **必须合并，不能叠着展开**（2026-10-16，审计 P69）。
+       *
+       * 原来这两行是 `{...selection.handlers}` 然后 `{...markerDraw.handlers}` ——
+       * 对象展开**同键就是覆盖**，两份都带的 `onPointerMove` / `onPointerUp` /
+       * `onPointerCancel` 于是被后者顶掉：selection 的 `sweep()`（框选）与 `end()`
+       * **永不执行**。表现是**框选与涂抹整体失效**，而界面上只是"点了没反应"。
+       * 两份都真的跑才叫"两个功能都在" —— 顺序与原来一致（先框选、后涂抹）。
+       */
+      {...mergeHandlers(selection.handlers, markerDraw.handlers)}
     >
       <CanvasToolbar
         onAddNode={onAddNode}
         selectionCount={selectedCount}
         onGenerate={onGenerate}
         onFitView={onFitView}
-        onReset={resetToSample}
+        /*
+         * ⚠️ 重置前**先打撤销点**（2026-10-16，审计 P23）：原来一次点击就覆盖整张画布且落盘，
+         * 用户连 Ctrl+Z 都救不回来。`commitHistory()` 把当前状态推进历史栈，
+         * 于是"点了确认"之后仍然能一步撤回（确认条只管"你确定吗"，撤销点管"点错了怎么办"）。
+         */
+        onReset={() => {
+          commitHistory();
+          resetToSample();
+        }}
         versionsOpen={versionsOpen}
         onToggleVersions={() => setVersionsOpen((prev) => !prev)}
         layersOpen={layersOpen}

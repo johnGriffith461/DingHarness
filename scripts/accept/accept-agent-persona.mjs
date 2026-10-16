@@ -28,8 +28,12 @@ if (!(await freshDir(DATA))) {
 /** 人设里的「暗号」：只要它进了系统提示词，回复就必然带这个词。 */
 const MARK = "【喵】";
 
-const PORT = 9306;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9306;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);

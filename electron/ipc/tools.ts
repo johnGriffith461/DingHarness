@@ -237,7 +237,7 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     };
   },
 
-  [SEARCH_FILES_TOOL]: async (input) => {
+  [SEARCH_FILES_TOOL]: async (input, env) => {
     const { pattern, path, include, literal, limit } = input as {
       pattern: string;
       path?: string;
@@ -245,7 +245,7 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       literal?: boolean;
       limit?: number;
     };
-    const result = await searchFilesForModel({ pattern, path, include, literal, limit }, ownedDirs());
+    const result = await searchFilesForModel({ pattern, path, include, literal, limit }, ownedDirs(), env.signal);
     return {
       ok: result.ok,
       line: describeSearchResult(result, pattern),

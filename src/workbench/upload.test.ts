@@ -18,7 +18,7 @@ import {
 /**
  * 上传任务的状态与文案（§170）。
  *
- * 断言对着 `docs/evidence-drive.txt` 里的 `drive_upload_*`（十余条，逐字）。
+ * 断言对着 `docs/evidence-drive.txt` 里的 `drive_upload_*`（十余条，逐字）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  */
 const task = (patch: Partial<UploadTask> = {}): UploadTask => ({
   name: "a.md",

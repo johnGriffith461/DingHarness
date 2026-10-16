@@ -12,7 +12,7 @@ import {
 /**
  * 生成图片独立页的纯逻辑（§165）。
  *
- * 断言对着 `docs/evidence-aicreation.txt`（`aiCreation_*` 330 条）。
+ * 断言对着 `docs/evidence-aicreation.txt`（`aiCreation_*` 330 条）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * **生成与尺寸选择不在这里**（它们早就在 `src/canvas/GeneratePanel.tsx` 里，有各自的测试）——
  * 这一层只做"这一页独有的东西"。
  */

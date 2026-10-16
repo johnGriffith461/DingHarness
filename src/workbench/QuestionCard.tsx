@@ -1,6 +1,7 @@
 /**
  * 从 `Workbench.tsx` 拆出来的（C6-1）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆的理由见 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * 拆的理由原本记在 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
@@ -8,6 +9,7 @@ import { useEffect, useState } from "react";
 import { Clipboard, Plus, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { currentQuestion, questionProgress, type WorkTask } from "./task";
+import { SKIP_ANSWER_TEXT } from "./agent";
 
 export function QuestionCard({ task }: { task: WorkTask }) {
   const answer = useWorkbenchStore((s) => s.answer);
@@ -26,7 +28,20 @@ export function QuestionCard({ task }: { task: WorkTask }) {
         <span className="wb-question-text">{question.text}</span>
         <span className="wb-question-page">
           <span data-testid="wb-question-progress">‹ {questionProgress(task)} ›</span>
-          <button className="wb-icon" aria-label="关闭" title="关闭" onClick={() => useWorkbenchStore.getState().abort()}>
+          {/*
+            ⚠️ 2026-10-16（审计 P81）：这颗 × 原来调 `abort()` —— 而**提问态下没有任何在跑的流**
+            （`activeHandle` / `runningRequestId` 都是 null），那一下什么都不做：
+            卡片不动、任务**永远停在「正在询问用户」**。
+            现在它的语义是**跳过这一问**（标题也照实写出来），走的是与点选项同一条路：
+            记一句答复 → 任务继续往下走。
+          */}
+          <button
+            className="wb-icon"
+            aria-label="跳过这一问（让它自己定）"
+            title="跳过这一问（让它自己定）"
+            data-testid="wb-question-skip"
+            onClick={() => void answer(undefined, SKIP_ANSWER_TEXT)}
+          >
             <X size={14} />
           </button>
         </span>

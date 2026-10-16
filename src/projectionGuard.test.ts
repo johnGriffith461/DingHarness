@@ -94,27 +94,61 @@ function sources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** 在源码里找"手搓留痕/自己判待确认"的痕迹。 */
+/**
+ * 在源码里找"手搓留痕 / 自己判待确认"的痕迹。
+ *
+ * ⚠️ 2026-10-16（审计 G25 扩面之后的三处误报，逐条收窄）：
+ *   · `approvalRecord({ toolCallId: … })` 是**官方形状**（`engine/core/gates.ts`），
+ *     不是"手搓" —— 只有**同时**出现 `toolCallId` 与 `name`/`ok`/`line` 才算一个自造 trace；
+ *   · `t.pending === true`（读**投影**里已有的字段，做个归一化）不该报 ——
+ *     要报的是从**裸 output** 里自己判：`output…pending`；
+ *   · 宿主的**线上翻译层**（把一条事件翻成 ACP/CLI 的对外形状）确实要看单条事件的
+ *     `output.pending`：那是协议要求，不是第二份解析。这类按文件白名单放行（见下），
+ *     白名单里的每一处都要写清理由。
+ */
 function secondParserMarks(src: string): string[] {
   const marks: string[] = [];
   const code = stripComments(src);
-  if (/\btoolCallId:\s*\w+\.toolCallId/.test(code)) marks.push("手搓 ToolTrace（toolCallId: …）");
-  if (/output as \{\s*pending/.test(code)) marks.push("自己从 output 里判 pending");
-  if (/\bpending === true/.test(code)) marks.push("自己比 pending === true");
+  /* 自造 trace：一个对象字面量里同时有 toolCallId 与 line/ok/name（跨行也算） */
+  if (/\{[^{}]{0,200}\btoolCallId:\s*\w+\.toolCallId[^{}]{0,200}\b(?:ok|line):/.test(code)) {
+    marks.push("手搓 ToolTrace（toolCallId: …）");
+  }
+  if (/output as \{\s*pending|output[^;\n]{0,24}\.pending/.test(code)) marks.push("自己从 output 里判 pending");
   return marks;
 }
 
+/**
+ * 放行的宿主翻译层（把**一条事件**翻成对外协议形状的地方）。
+ *
+ * ⚠️ 它们读 `output.pending` 是协议要求（ACP 要把"闸门拦下"报成 failed、
+ * CLI 要把待确认标出来），不是"第二份投影"。产品层（`src/` / `engine/` /
+ * `shared/`）**不在此列** —— 那里必须走 `engine/core/events.ts` 的投影。
+ */
+const HOST_TRANSLATORS = ["hosts/acp/agent.ts"];
+
 describe("C2 结构守卫：事件流只有一份解析", () => {
+  /*
+   * ⚠️ 2026-10-16（审计 G25）：扫描面原来只有 src / shared / engine ——
+   * 而**主进程（`electron/`）与两个新宿主（`hosts/`）**里同样会"手搓留痕 /
+   * 自己判待确认"，那正是这条守卫要挡的东西（事件流只有一份解析）。
+   * 漏掉它们 = 守卫在最重要的两个调用方上不设防。
+   */
   const files = sources(path.join(ROOT, "src"))
     .concat(sources(path.join(ROOT, "shared")))
-    .concat(sources(path.join(ROOT, "engine")));
+    .concat(sources(path.join(ROOT, "engine")))
+    .concat(sources(path.join(ROOT, "electron")))
+    .concat(sources(path.join(ROOT, "hosts")));
 
   it("判定本身有效（注释不误报、真痕迹必须抓到）", () => {
     expect(secondParserMarks("// 以前这里写 toolCallId: event.toolCallId")).toEqual([]);
     expect(secondParserMarks("/* toolCallId: event.toolCallId */")).toEqual([]);
-    expect(secondParserMarks("const t = { toolCallId: event.toolCallId, name: 'x' };")).toHaveLength(1);
+    /* 自造 trace：同一对象字面量里 toolCallId + ok/line（`approvalRecord({...})` 的官方形状不算） */
+    expect(secondParserMarks("const t = { toolCallId: event.toolCallId, ok: true, line: 'x' };")).toHaveLength(1);
+    expect(secondParserMarks("approvalRecord({ toolCallId: request.toolCallId, name: request.name, line });")).toEqual([]);
+    /* 从**裸 output** 里判 pending 要抓；读**投影**里已有的字段不抓 */
     expect(secondParserMarks("const p = (output as { pending?: boolean })?.pending;")).toHaveLength(1);
-    expect(secondParserMarks("if (x.pending === true) return;")).toHaveLength(1);
+    expect(secondParserMarks("if (event.output.pending) return;")).toHaveLength(1);
+    expect(secondParserMarks("if (t.pending === true) return;")).toEqual([]);
   });
 
   it("src/ 与 shared/ 里没有第二份解析（留痕与 pending 只能来自投影）", () => {
@@ -122,7 +156,8 @@ describe("C2 结构守卫：事件流只有一份解析", () => {
     for (const file of files) {
       const rel = path.relative(ROOT, file).replace(/\\/g, "/");
       // 见上面 SHAPE_OWNERS / TOOLCALL_ID_OK 的理由
-      if (SHAPE_OWNERS.has(rel) || TOOLCALL_ID_OK.has(rel)) continue;
+      // 见上面 SHAPE_OWNERS / TOOLCALL_ID_OK / HOST_TRANSLATORS 的理由
+      if (SHAPE_OWNERS.has(rel) || TOOLCALL_ID_OK.has(rel) || HOST_TRANSLATORS.includes(rel)) continue;
       const marks = secondParserMarks(readFileSync(file, "utf8"));
       if (marks.length) offenders.push(`${rel} → ${marks.join("、")}`);
     }

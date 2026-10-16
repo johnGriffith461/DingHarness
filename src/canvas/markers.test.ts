@@ -183,11 +183,28 @@ describe("工具分派", () => {
     expect(MARKER_KINDS).toHaveLength(8);
   });
 
-  it("拖拽类标记需要拖动，单击类不需要", () => {
-    expect(markerNeedsDrag("rect")).toBe(true);
-    expect(markerNeedsDrag("scratch")).toBe(true);
-    expect(markerNeedsDrag("text")).toBe(false);
-    expect(markerNeedsDrag("number")).toBe(false);
+  it("拖拽类标记需要拖动，单击类不需要（**八个 kind 逐个分类**）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.k）：原来只挑了 4 个 kind 验 —— 而 `markerNeedsDrag`
+     * 是**手写枚举**（`kind === "rect" || …`），新加一个 kind 会**静默落进"不需要拖"**那一档。
+     * 现在把八个 kind 的归属**写在测试里**逐个核对：加第九种而不来这张表登记，这条立刻红。
+     */
+    const NEEDS_DRAG: Record<string, boolean> = {
+      rect: true,
+      ellipse: true,
+      arrow: true,
+      scratch: true,
+      highlight: true,
+      mask: true,
+      text: false,
+      number: false,
+    };
+    expect(Object.keys(NEEDS_DRAG).sort(), "MARKER_KINDS 与这张分类表对不上（新 kind 要登记）").toEqual(
+      [...MARKER_KINDS].sort(),
+    );
+    for (const [kind, needsDrag] of Object.entries(NEEDS_DRAG)) {
+      expect(markerNeedsDrag(kind as never), `markerNeedsDrag("${kind}") 的归属与表里不一致`).toBe(needsDrag);
+    }
   });
 });
 

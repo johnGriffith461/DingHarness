@@ -21,11 +21,18 @@ import type { RpcMessage } from "../../hosts/acp/agent";
  * 「结构性成立」是我写在注释里的主张 —— 主张要能被证伪，所以这里做第二种：
  * **同一批用例，一次走内核直连、一次走 ACP 协议**，比对模型实际看见的与吐出的东西。
  *
- * ## 为什么只比"正文"，不比字节
+ * ## 比什么（2026-10-16，审计 G80 修）
  *
  * ACP 那条路的输出是 JSON-RPC 消息（多一层协议外壳），而直连那条是 TurnEvent 数组 ——
- * 比字节比的是外壳，不是行为。**要证的是"同一句话、同一个工具调用都到了"**，
- * 所以比的是：用户消息、模型回复文本、工具调用名与参数。
+ * 比字节比的是外壳，不是行为。要比的是**行为**：
+ *
+ *   ① 模型**收到的用户消息**（从假 provider 收到的请求体里读，两条路逐条相等）；
+ *   ② 模型**吐出的正文**（两边拼起来相等）；
+ *   ③ **工具调用名与参数**（两边逐条相等 —— 参数也算，原来只比了名字）。
+ *
+ * ⚠️ 如实记一条边界：这一格量的是**内核直连 vs ACP** 两条路。
+ * **桌面宿主那条路不在这一格里**（它要 Electron，vitest 里 import 不了）——
+ * 所以对外只能说"直连与 ACP 一致"，不能说"桌面也验过"（CHANGELOG 的口径据此改）。
  */
 
 const dirs: string[] = [];
@@ -39,13 +46,23 @@ function tmp(prefix: string): string {
   return d;
 }
 
-/** 挑几条"判据与脚本无关"的用例（纯对话 —— 真模型与假 provider 都能同样地过）。 */
-const CASES = EVAL_CASES.filter((c) => c.category === "纯对话" && c.kind !== "core").slice(0, 3);
+/**
+ * 挑用例（2026-10-16，审计 G80 修）。
+ *
+ * ⚠️ 原来只挑 `纯对话` 那三条 —— 它们**一条都不调工具**，于是"工具调用名与参数"
+ * 那一路永远是 `[] vs []`：比了个寂寞。现在**必须有调工具的**，再搭一条不调工具的。
+ */
+const TOOL_CASE_IDS = ["tool-read", "tool-multi-step"];
+const CASES = [
+  ...EVAL_CASES.filter((c) => TOOL_CASE_IDS.includes(c.id)),
+  ...EVAL_CASES.filter((c) => c.category === "纯对话" && c.kind !== "core").slice(0, 1),
+];
 
 describe("宿主一致性：内核直连 vs ACP（Phase 17 的「评测集零漂移」）", () => {
   it("同一批用例走两条路：用户消息、模型回复、工具调用都一致", async () => {
     expect(CASES.length, "没挑到用例（纯对话那类是不是被改了？）").toBeGreaterThan(0);
 
+    let toolCallingCases = 0;
     for (const c of CASES) {
       const workDir = tmp(`dh-parity-${c.id}-`);
       const storeDir = tmp(`dh-parity-store-${c.id}-`);
@@ -71,7 +88,8 @@ describe("宿主一致性：内核直连 vs ACP（Phase 17 的「评测集零漂
             model: "deepseek-flash",
             messages: [{ role: "user", content: turn }],
             mode: c.mode ?? "按需确认",
-            useTools: true,
+            /* ⚠️ 按用例声明来（审计 G87：原来写死 true，`chat-no-tools` 那条被静默改掉） */
+            ...(c.useTools === false ? { useTools: false } : { useTools: true }),
             maxSteps: c.maxSteps ?? 4,
             onEvent: (e) => events.push(e as { type: string; text?: string; toolName?: string }),
           });
@@ -92,10 +110,18 @@ describe("宿主一致性：内核直连 vs ACP（Phase 17 的「评测集零漂
         });
         await agent.handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: workDir, mcpServers: [] } }));
         const sessionId = String((sent.find((m) => m.id === 1)?.result as { sessionId: string }).sessionId);
+        let promptId = 2;
         for (const turn of c.turns ?? []) {
+          /* ⚠️ 每轮一个**新 id**（审计 G87：原来两轮复用同一个 id —— 拼错了也看不出来） */
           await agent.handleLine(
-            JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/prompt", params: { sessionId, prompt: [{ type: "text", text: turn }] } }),
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: promptId,
+              method: "session/prompt",
+              params: { sessionId, prompt: [{ type: "text", text: turn }] },
+            }),
           );
+          promptId += 1;
         }
 
         /* ③ 比对：模型吐出的正文与调用的工具 */
@@ -115,6 +141,45 @@ describe("宿主一致性：内核直连 vs ACP（Phase 17 的「评测集零漂
           .filter((u) => u.sessionUpdate === "tool_call")
           .map((u) => u.title ?? "");
         expect(acpTools, `${c.id}：两条路的工具调用不一样`).toEqual(directTools);
+        /*
+         * 工具这一路**至少要有用例真的用上它**（原来三条纯对话 → 恒 [] vs []）。
+         * 对不调工具的用例（`chat-single`）不硬要求有调用，但整批里必须有。
+         */
+        const expectsTools = (c.expect?.events ?? []).includes("tool-call");
+        if (expectsTools) {
+          expect(directTools.length, `${c.id}：用例要求有工具调用，实际一次都没调`).toBeGreaterThan(0);
+        }
+
+        /*
+         * ③ 工具调用的**参数**也要一样（审计 G80：原来只比了名字）。
+         * 形状：OpenAI 兼容请求体里助手消息的 `tool_calls[].function` = 名字 + 参数字符串。
+         */
+        type WireMessage = {
+          role?: string;
+          tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+        };
+        const toolCallsOf = (list: unknown[]): string[] =>
+          list
+            .flatMap((b) => (b as { messages?: WireMessage[] }).messages ?? [])
+            .filter((m) => m.role === "assistant" && Array.isArray(m.tool_calls))
+            .flatMap((m) => (m.tool_calls ?? []).map((t) => `${t.function?.name}(${t.function?.arguments})`));
+        const directArgs = toolCallsOf(directProvider.bodies);
+        const acpArgs = toolCallsOf(acpProvider.bodies);
+        if (expectsTools) expect(acpArgs.length, `${c.id}：两条路的工具参数都没抓到（判据失效）`).toBeGreaterThan(0);
+        expect(acpArgs, `${c.id}：两条路的工具调用参数不一样`).toEqual(directArgs);
+
+        /* 整批至少有一条是"真的用了工具"的 —— 否则这一格又退化成空比空 */
+        toolCallingCases += expectsTools ? 1 : 0;
+
+        /* ① 模型收到的**用户消息**：两条路的请求体逐条相等 */
+        const userMessages = (list: unknown[]): string[] =>
+          list
+            .flatMap((b) => ((b as { messages?: Array<{ role?: string; content?: unknown }> }).messages ?? []))
+            .filter((m) => m.role === "user")
+            .map((m) => String(m.content));
+        expect(userMessages(acpProvider.bodies), `${c.id}：两条路发给模型的用户消息不一样`).toEqual(
+          userMessages(directProvider.bodies),
+        );
       } finally {
         await directProvider.close();
         if (acpProvider) await acpProvider.close();
@@ -124,5 +189,6 @@ describe("宿主一致性：内核直连 vs ACP（Phase 17 的「评测集零漂
         else process.env.STRATA_API_KEY = prev.key;
       }
     }
+    expect(toolCallingCases, "这批用例一条都不调工具 —— 工具那一路等于没比").toBeGreaterThan(0);
   }, 120_000);
 });

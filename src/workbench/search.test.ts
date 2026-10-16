@@ -13,7 +13,7 @@ import {
 /**
  * 搜索（§160）。
  *
- * 断言对着 `docs/evidence-search.txt`（`search_*`）与 `docs/evidence-drive.txt`
+ * 断言对着 `docs/evidence-search.txt`（`search_*`）与 `docs/evidence-drive.txt`  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * （`drive_searchWindow_*` 那一组）—— 两处搜索**共用同一条匹配口径**。
  */
 describe("文案与本体对齐（逐字取自证据）", () => {

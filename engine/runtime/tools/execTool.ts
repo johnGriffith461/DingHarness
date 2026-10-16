@@ -48,6 +48,51 @@ export const COMMAND_MAX_TIMEOUT_MS = 30 * 60 * 1000;
 export const COMMAND_MAX_OUTPUT_LINES = 2_000;
 export const COMMAND_MAX_OUTPUT_BYTES = 50 * 1024;
 
+/**
+ * 边跑边留在内存里的**尾部上限**（2026-10-16，审计 P43）。
+ *
+ * 原来是 `out += chunk` 一直累加、结束时才 `clampOutput` 裁一次 ——
+ * 一条 `yes`、一个狂打日志的构建，就能在"裁剪"发生之前把主进程内存吃到一个 GB。
+ * 这里边收边丢**最前面**的（结论通常在尾部，与 `clampOutput` 的取舍一致），
+ * 丢了多少字节如实记账。
+ */
+export const COMMAND_STREAM_KEEP_BYTES = 256 * 1024;
+
+/**
+ * 只保尾部的一段字节缓冲。
+ *
+ * `push` 是热路径（stdout 每来一块就调一次），所以按块存、只在超出上限时丢头，
+ * 不做每块的字符串拼接。
+ */
+export class TailBuffer {
+  private chunks: Buffer[] = [];
+  private size = 0;
+  /** 累计进来的总字节（含后来被丢掉的）。 */
+  total = 0;
+
+  constructor(private readonly keep: number) {}
+
+  push(chunk: Buffer): void {
+    this.total += chunk.length;
+    this.chunks.push(chunk);
+    this.size += chunk.length;
+    while (this.size > this.keep && this.chunks.length > 1) {
+      this.size -= this.chunks.shift()!.length;
+    }
+  }
+
+  /** 被丢掉的字节数（0 = 一个字节都没丢）。 */
+  get dropped(): number {
+    return this.total - this.size;
+  }
+
+  /** 剩下的尾部文本（从字节中间开头会出乱码 —— 与 `clampOutput` 同一个处理）。 */
+  text(): string {
+    const buf = this.chunks.length === 1 ? this.chunks[0]! : Buffer.concat(this.chunks);
+    return buf.toString("utf8").replace(/^�*/, "");
+  }
+}
+
 /** 跑一条命令的结果。 */
 export type RunCommandResult =
   | {
@@ -148,13 +193,13 @@ export async function runCommandForModel(
       return;
     }
 
-    let out = "";
+    const out = new TailBuffer(COMMAND_STREAM_KEEP_BYTES);
     let timedOut = false;
     let settled = false;
 
     /* stdout 与 stderr 合成一份：终端里看到的就是合在一起的（opencode 走 PTY 同理） */
-    child.stdout?.on("data", (d: Buffer) => (out += d.toString("utf8")));
-    child.stderr?.on("data", (d: Buffer) => (out += d.toString("utf8")));
+    child.stdout?.on("data", (d: Buffer) => out.push(d));
+    child.stderr?.on("data", (d: Buffer) => out.push(d));
 
     const timer =
       timeout > 0
@@ -168,7 +213,9 @@ export async function runCommandForModel(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      const { output, truncated } = clampOutput(out);
+      const clamped = clampOutput(out.text());
+      const truncated = clamped.truncated || out.dropped > 0;
+      const output = clamped.output;
       const notes: string[] = [];
       if (truncated) notes.push(`（输出过长，只留了最后 ${COMMAND_MAX_OUTPUT_LINES} 行 / ${Math.round(COMMAND_MAX_OUTPUT_BYTES / 1024)}KB）`);
       if (timedOut) {

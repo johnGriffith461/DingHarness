@@ -13,7 +13,12 @@ import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
  *   5. 标记当提示词：拼进生成要求（读请求内容做断言）
  */
 
-const DATA = "data";
+/*
+ * ⚠️ 2026-10-16（审计 G01）：这里原来是 `"data"` —— 就是**仓库里那个真实数据目录**，
+ * 而下面还有一句 `rmSync(DATA/canvas)`：每次跑这条验收都**删掉真实的画布文档**。
+ * 现在落到 `.verify/` 下的专属目录（不进版本库、与真实数据无关）。
+ */
+const DATA = ".verify/data-p5";
 const SNAP = path.join(DATA, "canvas", "document.json");
 const OUT = ".verify/shots-p5";
 fs.mkdirSync(OUT, { recursive: true });
@@ -141,9 +146,30 @@ const report = {};
   report.disk = { markers: (doc.markers ?? []).length, kinds: (doc.markers ?? []).map((m) => m.kind) };
   report.promptToggleOn = await page.locator('[data-testid="marker-prompt"]').getAttribute("class");
 
+  /*
+   * ⚠️ 关掉第一个实例之后、第二个起来之前，**读一次磁盘**（2026-10-16）。
+   *
+   * 为什么要卡这一刀：这条脚本原来的写法只能看到"重启之后界面上没有标记"，
+   * 而"标记没了"可能发生在三个地方 —— 关窗时被写没了、重启时被回滚了、
+   * 或者只在界面上没画出来（盘上其实还在）。三个原因三个修法，先分清是谁。
+   */
+  report.diskBeforeClose = (() => {
+    try {
+      return (JSON.parse(fs.readFileSync(SNAP, "utf8")).markers ?? []).length;
+    } catch {
+      return -1;
+    }
+  })();
   await browser.close();
   child.kill();
-  await new Promise((r) => setTimeout(r, 2000));
+  await new Promise((r) => setTimeout(r, 2500));
+  report.diskAfterKill = (() => {
+    try {
+      return (JSON.parse(fs.readFileSync(SNAP, "utf8")).markers ?? []).length;
+    } catch {
+      return -1;
+    }
+  })();
 }
 
 // 重启：标记应还在
@@ -152,10 +178,88 @@ const report = {};
   report.afterRestart = {
     shapes: await shapes(page),
     status: await page.locator(".canvas-statusbar").textContent(),
+    markerToolbar: await page.locator('[data-testid="marker-toolbar"]').count(),
+    disk: (() => {
+      try {
+        return (JSON.parse(fs.readFileSync(SNAP, "utf8")).markers ?? []).length;
+      } catch {
+        return -1;
+      }
+    })(),
   };
+  /* 标记层可能只在标记模式下渲染 —— 开着再数一次，免得把"没开模式"读成"标记丢了" */
+  if (report.afterRestart.markerToolbar > 0) {
+    await page.locator('[data-marker-tool="rect"]').click();
+    await page.waitForTimeout(700);
+    report.afterRestart.shapesWithTool = await shapes(page);
+  }
   await shot(page, `${OUT}/03-restart.png`);
   await browser.close();
   child.kill();
 }
 
 console.log(JSON.stringify(report, null, 2));
+
+/*
+ * ══════════ 判定（2026-10-16 补）══════════
+ *
+ * ⚠️ 这条原来**一条判定都没有**：它把 report 打印出来就退 0，所以"八种标记能不能画 / 重启还在不在"
+ * 全靠人读 JSON —— 而人是不会读的（批跑的分类器把它标成"跑通但没有任何判定"）。
+ * 现在把报告里那些数变成判定。边界如实留在这里：**涂抹（scratch/highlight）与"当提示词"两条
+ * 只断"画出来了 / 开关是开的"**，没有断像素是不是真的涂上去了。
+ */
+{
+  const bad = [];
+  if (report.toolbarPresent < 1) bad.push("标记工具条根本不在（进不了标记模式）");
+
+  const wantKinds = ["rect", "ellipse", "arrow", "scratch", "highlight", "mask", "text", "number"];
+  const got = report.shapes ?? [];
+  for (const k of wantKinds) {
+    if (!got.includes(k)) bad.push(`八种标记里「${k}」没画出来（实际：${got.join(" / ") || "一个都没有"}）`);
+  }
+  if (Number(report.countText?.trim() ?? "0") !== got.length) {
+    bad.push(`工具条上写「${report.countText?.trim()}」而画布上实际有 ${got.length} 个 —— 计数与画面不一致`);
+  }
+
+  if (report.beforeUndo !== report.afterUndo + 1) {
+    bad.push(`撤销一笔之后数量没少一个（${report.beforeUndo} → ${report.afterUndo}）—— 撤销没接上`);
+  }
+  if ((report.disk?.markers ?? -1) !== report.afterUndo) {
+    bad.push(`落盘数与画面不一致（盘上 ${report.disk?.markers} vs 画面 ${report.afterUndo}）—— 标记没跟上磁盘`);
+  }
+  if (!(report.disk?.kinds ?? []).length) bad.push("磁盘快照里一个标记都没有 —— 标记层没进快照");
+
+  /*
+   * ⭐ 重启那一段是这条脚本的主柱子。三个数分开看（见上面那一刀的解释）：
+   *   `diskBeforeClose` → 关窗前的落盘；`diskAfterKill` → 关窗后还在不在；
+   *   `afterRestart.disk` → 重启（并加载）之后还在不在。
+   */
+  if (report.diskBeforeClose !== report.disk?.markers) {
+    bad.push(`关窗那一刻盘上变成了 ${report.diskBeforeClose} 个（读盘时是 ${report.disk?.markers} 个）—— 关窗把标记写丢了`);
+  }
+  if (report.diskAfterKill !== report.diskBeforeClose) {
+    bad.push(`杀进程之后盘上从 ${report.diskBeforeClose} 变成 ${report.diskAfterKill} 个 —— 退出路径改了磁盘上的内容`);
+  }
+  const after = report.afterRestart ?? {};
+  if (after.disk !== report.diskAfterKill) {
+    bad.push(`重启之后盘上从 ${report.diskAfterKill} 变成 ${after.disk} 个 —— 重启过程中被改写了（这就是丢数据的形态）`);
+  }
+  /* ⚠️  回的是**种类数组**（不是个数）—— 比长度，别把数组直接当数（第一版就这么自己坑了自己） */
+  if (after.markerToolbar > 0 && (after.shapesWithTool ?? []).length !== report.diskAfterKill) {
+    bad.push(
+      `重启之后界面上只画出 ${(after.shapesWithTool ?? []).length} 个标记，而盘上还有 ${report.diskAfterKill} 个 —— 载入没把标记画回来`,
+    );
+  }
+
+  if (!(report.disk?.kinds?.length)) bad.push("落盘的标记里没有 kind 信息");
+  if (!String(report.promptToggleOn ?? "").includes("is-on")) {
+    bad.push("「标记当提示词」的开关不是开着的（脚本最后一步读的就是它）");
+  }
+
+  if (bad.length) {
+    console.error("✗ " + bad.join("；"));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 标记层成立：八种都画得出来 / 计数与画面一致 / 撤销接上 / 进快照 / 重启之后盘上与界面上都还在");
+  }
+}

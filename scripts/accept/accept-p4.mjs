@@ -14,7 +14,12 @@ import { bootApp, connectWithRetry, killLeftovers, killTree, openCanvas, shot } 
  *   3. 伪造"未确认快照"→ 再开 → 回退到确认版并弹出提示
  */
 
-const DATA = "data";
+/*
+ * ⚠️ 2026-10-16（审计 G01）：这里原来是 `"data"` —— 就是**仓库里那个真实数据目录**，
+ * 而下面还有一句 `rmSync(DATA/canvas)`：每次跑这条验收都**删掉真实的画布文档**。
+ * 现在落到 `.verify/` 下的专属目录（不进版本库、与真实数据无关）。
+ */
+const DATA = ".verify/data-p4";
 const SNAP = path.join(DATA, "canvas", "document.json");
 const OUT = ".verify/shots-p4";
 fs.mkdirSync(OUT, { recursive: true });
@@ -42,7 +47,10 @@ async function boot(port) {
    * 机器有负载时这个竞态更容易输 —— 这正是 §119~§122 三轮都没查明原因的"批跑偶发红"。
    * `setTimeout(8000)` 赌的是"8 秒够久"，`waitForPort` 赌的是"端口开了没有"。
    */
-  const { child, ok, getLog } = await bootApp({ port, dataDir: DATA, timeoutMs: 30000 });
+  const booted = await bootApp({ port, dataDir: DATA, timeoutMs: 30000 });
+  const { child, ok, getLog } = booted;
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  port = booted.port;
   if (!ok) {
     /*
      * 失败时**把应用自己的输出带出来**。

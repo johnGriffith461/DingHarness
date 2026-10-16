@@ -93,6 +93,14 @@ export type EngineRunRequest = {
    * 与日志里记的**顺序与内容一致**（这正是 C2 收敛时定下的口径）。
    */
   onEvent?: (event: TurnEvent) => void;
+  /**
+   * **上游报错原文**的出口（诊断用，可选；2026-10-16）。
+   *
+   * 界面不要用它 —— 那是 `onEvent` 里那句人话的事。它给的是
+   * "要做判定的装置"（评测/验收脚本）：只有原文里才有 `ETIMEDOUT 127.0.0.1:58855`
+   * 这种能分辨"产品坏了"与"本机那会儿回环不通"的信息。见 `TurnRequestInput.onRawError`。
+   */
+  onRawError?: (raw: string) => void;
 };
 
 /** 一轮的结局。 */
@@ -205,6 +213,7 @@ export function createEngine(ports: EnginePorts): Engine {
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
+          ...(request.onRawError ? { onRawError: request.onRawError } : {}),
           ...(request.useTools
             ? {
                 tools: buildToolSet({ registry, mode: request.mode, executor: ports.executor, ctx }),

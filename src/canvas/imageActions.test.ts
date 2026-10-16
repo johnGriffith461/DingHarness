@@ -50,9 +50,23 @@ describe("提示词内容", () => {
   });
 
   it("自由编辑的空指令不会产出半截提示词", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.p）：原来断的是 `p.endsWith("：")` —— 把**缺陷形态**
+     * （以冒号结尾的半截话）钉成了期望值。现在钉**完整句**：没有冒号、以句号收尾，
+     * 且与"有指令"那一路只差在拼没拼上要求。
+     */
     const p = imageAction("edit")?.prompt({}) ?? "";
-    expect(p.endsWith("：")).toBe(true); // 结尾是冒号，说明确实没拼上东西
-    // 界面上这种动作会被禁用（needsInstruction + 空输入），所以不会真的发出去
+    expect(p.endsWith("："), "空指令又产出了半截提示词").toBe(false);
+    expect(p.endsWith("。")).toBe(true);
+    expect(p).not.toContain("：");
+    const withInstr = imageAction("edit")?.prompt({ instruction: "把天空换成星空" }) ?? "";
+    expect(withInstr.startsWith(p.slice(0, -1)), "有指令与无指令的基础句应当是同一条").toBe(true);
+  });
+
+  it("消除的空指令也不产出「（空的）」", () => {
+    const p = imageAction("remove")?.prompt({}) ?? "";
+    expect(p, "空指令漏进了提示词").not.toContain("「」");
+    expect(p.length).toBeGreaterThan(20);
   });
 });
 
@@ -84,10 +98,12 @@ describe("targetSizeFor", () => {
   });
 
   it("超大源图放大后会被夹回上限，不会产出越界尺寸", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.q）：原来只断"夹回来了"（≤3840 / ≤8294400）——
+     * 一个"什么都不做、原样返回"的实现也过。现在钉**具体结果**（超上限时保持比例缩到边界）。
+     */
     const out = targetSizeFor(imageAction("expand")!, { w: 3840, h: 2160 }, normalize);
-    const [w, h] = out!.split("x").map(Number);
-    expect(Math.max(w, h)).toBeLessThanOrEqual(3840);
-    expect(w * h).toBeLessThanOrEqual(8294400);
+    expect(out, "扩图的结果不对（应当按比例缩到上限内）").toBe("3840x2160");
   });
 });
 

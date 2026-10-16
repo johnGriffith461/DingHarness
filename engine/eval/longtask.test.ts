@@ -70,6 +70,25 @@ async function engineOn(workDir: string, storeDir: string): Promise<Engine> {
   return built.engine;
 }
 
+/**
+ * 同上，但把 `close` 也交出来。
+ *
+ * ⚠️ ③「断点恢复」要的是**模拟重启**：必须先关掉第一段的句柄再开第二个，
+ * 否则测的是"同一进程里两个 SQLite 连接并开"（审计 G81）—— 那与重启是两回事，
+ * WAL / 崩溃恢复那两条最要紧的失效它一条都碰不到。
+ */
+async function engineHandle(workDir: string, storeDir: string): Promise<{ engine: Engine; close: () => void }> {
+  const built = await buildEngine([workDir], storeDir);
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    built.close();
+  };
+  cleanups.push(close);
+  return { engine: built.engine, close };
+}
+
 /** 跑一轮并收集事件。 */
 async function run(
   engine: Engine,
@@ -185,14 +204,21 @@ describe("长任务评测（Phase 10.6）", () => {
       ],
       ["第一段任务", "第二段任务"],
     );
-    const first = await engineOn(workDir, storeDir);
-    await run(first, "resume-1", "第一段任务", 4);
-    await run(first, "resume-1", "第二段任务", 4);
+    const firstHandle = await engineHandle(workDir, storeDir);
+    await run(firstHandle.engine, "resume-1", "第一段任务", 4);
+    await run(firstHandle.engine, "resume-1", "第二段任务", 4);
 
-    const before = await first.resume("resume-1");
+    const before = await firstHandle.engine.resume("resume-1");
     expect(before.turns.length, "第一段跑完却读不到任何回合").toBeGreaterThan(0);
 
-    /* 第二段：**新引擎**（同一个 store 目录）—— 这就是"重启" */
+    /*
+     * ⭐ **真的重启**（审计 G81）：先关掉第一段的句柄 —— 原来第一段全程不关，
+     * 两个引擎同时开着同一个 SQLite 文件，测的是"两个连接并开"，
+     * 而"重启后历史还在不在（WAL / 收尾 / 落盘时机）"恰恰是它漏掉的那一类。
+     */
+    firstHandle.close();
+
+    /* 第二段：**新引擎**（同一个 store 目录、第一个句柄已关）—— 这就是"重启" */
     await withProvider([{ say: "重启之后接着跑。" }], ["重启之后接着跑"]);
     const second = await engineOn(workDir, storeDir);
     const resumed = await second.resume("resume-1");
@@ -224,15 +250,10 @@ describe("长任务评测（Phase 10.6）", () => {
     for (let i = 0; i < steps; i += 1) replies.push({ call: [{ name: "list_files", args: {} }] });
     replies.push({ say: "完了。" });
 
-    await withProvider(replies, ["数一数成本"]);
+    const provider = await withProvider(replies, ["数一数成本"]);
     const engine = await engineOn(workDir, storeDir);
     const out = await run(engine, "cost-1", "数一数成本", steps + 2);
 
-    /*
-     * 假 provider 每次回固定用量（100 / 20）。所以"每步都带用量"+"步数对得上"
-     * 就等于"成本随步数线性" —— 如果哪一步把全部历史重发并重复计费，
-     * 这里的条数或数值就会明显偏离。
-     */
     const doneWithUsage = out.events.filter((e) => e.type === "done" && e.usage);
     expect(doneWithUsage.length).toBeGreaterThan(0);
 
@@ -240,12 +261,56 @@ describe("长任务评测（Phase 10.6）", () => {
     expect(stepCount, `步数 ${stepCount} 与脚本 ${steps} 差太远`).toBeGreaterThanOrEqual(steps);
 
     /*
+     * ⭐ 成本这一格的**真判据**（2026-10-16，审计 G82）。
+     *
+     * 原来只有"有 usage""步数够"两条 —— 一个成本数字都没断；而假 provider 的用量
+     * 当时是与请求体无关的常数（100 + index*10），所以"每轮重发全部历史"这件事
+     * **结构上量不出来**。现在假 provider 按请求体字节报用量，于是下面两条真的能断：
+     *
+     *   ① **账本记的就是真发出去的**：每一步的 `inputTokens` 与那一次请求的
+     *      原始字节数（÷4）对得上 —— 挡"用量是编的 / 是赋值不是累加"；
+     *   ② **历史是"每步加一段"，不是重发多份**：每次请求的 `messages` 条数
+     *      随步号增长，而且不会暴涨（挡"整段历史被塞两遍"这类静默翻倍）。
+     */
+    const bodies = provider.bodies as Array<{ messages?: unknown[] }>;
+    const stepUsages = out.events
+      .filter((e): e is { type: "step-finish"; usage?: { inputTokens?: number } } => e.type === "step-finish")
+      .map((e) => e.usage?.inputTokens ?? 0);
+    expect(bodies.length, "假 provider 收到的请求数少于步数").toBeGreaterThanOrEqual(steps);
+    const zipped = Math.min(bodies.length, stepUsages.length);
+    for (let i = 0; i < zipped; i += 1) {
+      const expected = Math.max(1, Math.round(Buffer.byteLength(JSON.stringify(bodies[i]), "utf8") / 4));
+      const got = stepUsages[i] ?? 0;
+      expect(Math.abs(got - expected), `第 ${i + 1} 步的 inputTokens ${got} 与真发的字节（约 ${expected}）对不上`).toBeLessThanOrEqual(2);
+    }
+    const counts = bodies.map((b) => (Array.isArray(b.messages) ? b.messages.length : 0));
+    for (let i = 1; i < counts.length; i += 1) {
+      expect(counts[i], `第 ${i + 1} 次请求的 messages 没有增长（历史被丢了？）`).toBeGreaterThan(counts[i - 1] ?? 0);
+    }
+    expect(
+      counts.at(-1) ?? 0,
+      `最后一次请求带了 ${counts.at(-1)} 条 messages —— 比"每步加两条"多太多（历史被重复塞了？）`,
+    ).toBeLessThanOrEqual(counts.length * 2 + 2);
+
+    /*
      * 时钟也要有界：这条长任务不该跑到分钟级。
      * （假 provider 是本地的，所以这里量的其实是内核自己的编排开销。）
+     *
+     * ⚠️ 2026-10-16（审计 G83）：原来第二段打在**同一个 provider 实例**上，
+     * 而它那边的脚本已经消费到末尾 → 第二段其实只有 1 步，
+     * `30 秒` 量的是"一次空回合"。现在换一个 provider 实例（同体量：又是 12 步），
+     * 并且顺手断一下它确实走了那么多步。
      */
+    const secondProvider = await withProvider(replies, ["数一数成本"]);
     const started = Date.now();
     const second = await run(engine, "cost-2", "数一数成本", steps + 2);
     expect(second.events.length).toBeGreaterThan(0);
+    const secondSteps = second.events.filter((e) => e.type === "step-finish").length;
+    expect(secondSteps, `第二段只有 ${secondSteps} 步 —— 那不是"同样体量的一轮"`).toBeGreaterThanOrEqual(steps);
+    expect(
+      secondProvider.bodies.length,
+      "第二段用的还是上一个 provider 实例（脚本早被吃完了）",
+    ).toBeGreaterThanOrEqual(steps);
     expect(Date.now() - started, "同样体量的一轮跑了 30 秒以上（编排开销失控）").toBeLessThan(30_000);
   }, 120_000);
 });

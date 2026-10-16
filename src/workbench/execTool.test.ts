@@ -11,6 +11,7 @@ import {
   describeRunResult,
   runCommandForModel,
 } from "@engine/runtime/tools/execTool";
+import { removeAll } from "../testFs";
 
 /**
  * agent 的「跑命令」工具（2026-10-14）。
@@ -49,8 +50,8 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  fs.rmSync(ROOT, { recursive: true, force: true });
-  fs.rmSync(OUTSIDE, { recursive: true, force: true });
+  removeAll(ROOT);
+  removeAll(OUTSIDE);
 });
 
 const dirs = () => [path.join(ROOT, "work")];
@@ -88,7 +89,7 @@ describe("真的能跑", () => {
     expect(r.output).toContain("bad-thing");
   });
 
-  it("没输出时说明「没有输出」，不是空白", async () => {
+  it.skipIf(process.platform !== "win32")("没输出时说明「没有输出」，不是空白（ver 是 Windows 命令）", async () => {
     const r = await runCommandForModel({ command: "ver >nul" }, dirs());
     expect(r.ok).toBe(true);
     if (!r.ok) return;

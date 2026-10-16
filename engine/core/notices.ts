@@ -94,9 +94,15 @@ export function softLimitNotice(spentUsd: number, limitUsd: number, fraction: nu
    */
   const money = (v: number) => (v < 1 ? v.toFixed(4) : v.toFixed(2));
   const over = fraction >= 1;
+  /*
+   * ⚠️ 口径（审计 P152）：这个数是**按目录单价估算**的，不是账单 ——
+   * 同一句里的限额却是用户自己设的真值。一句里两个 "$x" 一个实测口径一个估算口径
+   * 而不标注，是把账本自己立的那条规矩（`ledger.ts` 的 `formatTotal` 写"约 …（按目录单价估）"）
+   * 在这里破掉了。
+   */
   const head = over
-    ? `今天的用量已经超过你设的软限额（已用 $${money(spentUsd)}，限额 $${money(limitUsd)}）`
-    : `今天的用量快到软限额了（已用 $${money(spentUsd)} / $${money(limitUsd)}，${Math.round(fraction * 100)}%）`;
+    ? `今天的用量已经超过你设的软限额（约 $${money(spentUsd)}（按目录单价估），限额 $${money(limitUsd)}）`
+    : `今天的用量快到软限额了（约 $${money(spentUsd)}（按目录单价估） / $${money(limitUsd)}，${Math.round(fraction * 100)}%）`;
   return `${head}。**这只是提示，不会拦你** —— 想调就改 config.json 里的 softLimitUsd，想去掉就设成 0。`;
 }
 

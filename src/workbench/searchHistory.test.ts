@@ -14,7 +14,7 @@ import {
 /**
  * 搜索历史（§162）。
  *
- * 断言对着 `docs/evidence-search.txt` 与 `docs/evidence-drive.txt`：
+ * 断言对着 `docs/evidence-search.txt` 与 `docs/evidence-drive.txt`：  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * `search_history`（全部搜索记录）/ `search_history_clear`（清空全部搜索记录）
  * / `drive_search_history_sectionHeader`（搜索历史）。
  */

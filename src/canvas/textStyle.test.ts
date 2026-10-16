@@ -12,35 +12,48 @@ import {
 } from "./textStyle";
 
 describe("clampTextValue", () => {
-  it("夹到区间内", () => {
-    expect(clampTextValue("fontSize", 100)).toBe(TEXT_STYLE_LIMITS.fontSize.max);
-    expect(clampTextValue("fontSize", 1)).toBe(TEXT_STYLE_LIMITS.fontSize.min);
+  it("夹到区间内（阈值写死：9–18 是设计定的，不是从被测模块自己读的）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.t）：原来期望值取自 `TEXT_STYLE_LIMITS.fontSize.max/min` ——
+     * **被测模块自己的常量**。常量被改（比如上限改成 200）这条照样绿，
+     * 而"字号能到 200px"显然不是设计意图。现在把区间**写死**在这里。
+     */
+    expect(clampTextValue("fontSize", 100)).toBe(18);
+    expect(clampTextValue("fontSize", 1)).toBe(9);
     expect(clampTextValue("fontSize", 14)).toBe(14);
+    expect(TEXT_STYLE_LIMITS.fontSize, "字号区间被改了（要同时改这里与设计稿）").toEqual({ min: 9, max: 18, step: 0.5 });
   });
 
   it("字距允许负值（中文大字标题要收紧）", () => {
     expect(clampTextValue("letterSpacing", -0.03)).toBe(-0.03);
-    expect(clampTextValue("letterSpacing", -5)).toBe(TEXT_STYLE_LIMITS.letterSpacing.min);
+    expect(clampTextValue("letterSpacing", -5)).toBe(-0.06);
   });
 
   it("NaN / Inf 退回默认值，不产出 NaN 的 CSS", () => {
-    expect(clampTextValue("lineHeight", Number.NaN)).toBe(DEFAULT_TEXT_STYLE.lineHeight);
-    expect(clampTextValue("lineHeight", Number.POSITIVE_INFINITY)).toBe(
-      TEXT_STYLE_LIMITS.lineHeight.max,
-    );
+    expect(clampTextValue("lineHeight", Number.NaN)).toBe(1.6);
+    expect(clampTextValue("lineHeight", Number.POSITIVE_INFINITY)).toBe(2.4);
   });
 });
 
 describe("normalizeTextStyle", () => {
-  it("空值补默认", () => {
-    expect(normalizeTextStyle(undefined)).toEqual(DEFAULT_TEXT_STYLE);
+  it("空值补默认（默认值逐字写死）", () => {
+    expect(normalizeTextStyle(undefined)).toEqual({
+      align: "left",
+      letterSpacing: 0,
+      lineHeight: 1.6,
+      fontSize: 13,
+      fontWeight: 400,
+      borderWidth: 0,
+      autoWidth: false,
+      autoHeight: false,
+    });
   });
 
   it("缺失字段逐个补、越界字段逐个夹", () => {
     const out = normalizeTextStyle({ fontSize: 999, align: "center" });
-    expect(out.fontSize).toBe(TEXT_STYLE_LIMITS.fontSize.max);
+    expect(out.fontSize).toBe(18);
     expect(out.align).toBe("center");
-    expect(out.lineHeight).toBe(DEFAULT_TEXT_STYLE.lineHeight);
+    expect(out.lineHeight).toBe(1.6);
   });
 
   it("布尔字段被强转（历史数据里可能是 0/1）", () => {

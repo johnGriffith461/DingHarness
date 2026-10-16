@@ -2,7 +2,8 @@
 
  * 工作台外壳（C6-1 拆过：原来 2188 行 / 14 个顶层组件，现在这里只剩导航、视图切换与这个外壳本身）。
 
- * 各面板在 `src/workbench/*.tsx`；拆分理由见 `docs/PLAN-C6-结构拆分.md`。
+ * 各面板在 `src/workbench/*.tsx`；拆分理由原本记在 `docs/PLAN-C6-结构拆分.md`。
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
 
  */
 
@@ -105,6 +106,20 @@ export default function Workbench() {
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      /*
+       * ⚠️ **焦点在输入框里时，导航快捷键不许抢**（2026-10-16，审计 P84）。
+       *
+       * 这一段原来一行 `target` 判定都没有（下面处理 Esc 的那段有，于是它看着像已经处理了）。
+       * 后果：在输入框里写着东西、顺手按 Ctrl+N / Ctrl+Shift+T，**页面直接切走、草稿整段丢**。
+       * 判据与 Esc 那段保持一致：INPUT / TEXTAREA / contentEditable 一律让开
+       * （这两个组合在文本框里没有编辑含义，让开就是"不打断打字、也不切页"）。
+       *
+       * 注：草稿本身也已经搬到 store（按视图分开存，见 `composerDraft.ts`）——
+       * 两道一起上：打字时不该被抢，真切走了回来也还在。
+       */
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
       const to = matchShortcut(e);
       if (!to) return;
       // 认下的组合要拦掉浏览器/系统的默认行为，否则会和默认快捷键打架。

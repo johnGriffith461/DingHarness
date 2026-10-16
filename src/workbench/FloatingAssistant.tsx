@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Minus, Sparkles, Volume2 } from "lucide-react";
-import { abortStream, streamChat } from "@/ai/aiClient";
+import { Mic, Minus, Sparkles, Square, Volume2, X } from "lucide-react";
+import { streamChat } from "@/ai/aiClient";
 import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import type { ShellBridge } from "@shared/ipc";
 import { extractFilePaths, fileContextBlock } from "./fileContext";
@@ -53,11 +53,27 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
   const [streaming, setStreaming] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
-  const requestRef = useRef<string | null>(null);
+  /**
+   * 这一轮的**句柄**（不是只记 id）—— 停止要调它的 `abort()`。
+   *
+   * ⚠️ 2026-10-16（审计 P79）：原来这里只留 `requestId`，停止走的是 `abortStream(id)`。
+   * 那条路只让**主进程**断开，渲染层这条 `handle.done` **永远不会 resolve** ——
+   * 于是 `await handle.done` 卡住、`finally` 里的 `setStreaming(false)` 不执行：
+   * **浮窗永久卡在「生成中」**，输入框与发送键一起锁死（`send()` 第一行 `if (streaming) return`）。
+   * 工作台那边早就改成 `handle.abort()` 了（`taskRuntime.ts` 里那段注释逐字写着这件事），
+   * 浮窗把同一个 bug 又抄了一遍 —— 因为"怎么中止"在它这里长成了第二份实现。
+   * `handle.abort()` 一次做两件：断主进程的连接 + **本地 settle**（抛一条「已中止」事件）。
+   */
+  const handleRef = useRef<{ abort: () => void } | null>(null);
+  /** 空闲态那颗按钮是**朗读**（P80：它原来只写着"朗读"，点了什么都不做）。 */
+  const [speaking, setSpeaking] = useState(false);
   const scroller = useRef<HTMLDivElement | null>(null);
   const seq = useRef(0);
-  /** 预填的问题只发一次（否则每次重渲染都会再发一遍）。 */
-  const seeded = useRef(false);
+  /** 上一次已经发出去的预填问题（**记文本而不是布尔**：浮窗开着时换了新问题也要发 —— P89）。 */
+  const seeded = useRef("");
+
+  /* 浮窗关掉/卸载时把朗读停掉（否则念到一半关了浮窗，声音还在） */
+  useEffect(() => () => globalThis.speechSynthesis?.cancel(), []);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
@@ -100,10 +116,17 @@ export default function FloatingAssistant({ onClose, seed }: { onClose: () => vo
     dragRef.current = null;
   }, []);
 
-  /** 带着预填问题打开：自动发一次（只发一次）。 */
+  /**
+   * 带着预填问题打开：自动发一次。
+   *
+   * ⚠️ 2026-10-16（审计 P89）：判据原来是 `seeded.current`（一个**布尔**）——
+   * 浮窗**已经开着**时再点一次别的文件的「问问助手」，`seed` 换了新问题，
+   * 而 `seeded` 早就是 true → **既不发也不填，连个回执都没有**（用户以为点了没反应）。
+   * 现在记的是"**上一次吃掉的那一个问题**"：同一个问题不重复发，换了新问题就照发。
+   */
   useEffect(() => {
-    if (seeded.current || !seed) return;
-    seeded.current = true;
+    if (!seed || seed === seeded.current) return;
+    seeded.current = seed;
     void send(seed);
     // send 每次渲染都是新引用，依赖它会导致重复触发；这里只关心 seed
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,13 +207,14 @@ ${block}` : value;
           setBubbles((prev) => prev.map((b) => (b.id === replyId ? { ...b, text: shown } : b)));
         },
       );
-      requestRef.current = handle.requestId;
+      /* 记**句柄**（不是 id）：停止要调 `handle.abort()`，见 handleRef 上的说明 */
+      handleRef.current = handle;
       await handle.done;
     } catch (error) {
       const message = `（出错了）${error instanceof Error ? error.message : String(error)}`;
       setBubbles((prev) => prev.map((b) => (b.id === replyId ? { ...b, text: message } : b)));
     } finally {
-      requestRef.current = null;
+      handleRef.current = null;
       setStreaming(false);
     }
   };
@@ -216,18 +240,44 @@ ${block}` : value;
         <span className="wb-float-user" data-testid="wb-float-user">
           本机用户 ›
         </span>
+        {/*
+          ⚠️ **一颗按钮，两种语义 —— 两边都得真的做事**（2026-10-16，审计 P79 + P80）：
+            · 流式中 = 停止：必须走 `handleRef.current.abort()`。走 `abortStream(id)` 只断主进程，
+              `handle.done` 永不 resolve → 浮窗永久卡在生成中（P79）。
+            · 空闲 = 朗读：标题一直承诺「朗读」，而原来函数体里**没有任何朗读调用**（P80）——
+              点了没反应，用户只会以为浮窗坏了。现在真的念最后一条助手回复（与消息操作栏那颗同一个做法）。
+        */}
         <button
           className="wb-icon"
-          title={streaming ? "停止" : "朗读"}
+          title={streaming ? "停止" : speaking ? "停止朗读" : "朗读"}
+          aria-label={streaming ? "停止" : speaking ? "停止朗读" : "朗读"}
+          data-testid="wb-float-action"
+          data-mode={streaming ? "stop" : "speak"}
           onClick={() => {
-            const id = requestRef.current;
-            if (id) void abortStream(id);
+            if (streaming) {
+              handleRef.current?.abort();
+              return;
+            }
+            const synth = globalThis.speechSynthesis;
+            if (!synth) return;
+            if (speaking) {
+              synth.cancel();
+              setSpeaking(false);
+              return;
+            }
+            const last = [...bubbles].reverse().find((b) => b.role === "assistant");
+            if (!last?.text.trim()) return;
+            const utterance = new SpeechSynthesisUtterance(last.text);
+            utterance.onend = () => setSpeaking(false);
+            utterance.onerror = () => setSpeaking(false);
+            setSpeaking(true);
+            synth.speak(utterance);
           }}
         >
-          <Volume2 size={14} />
+          {streaming ? <Square size={13} /> : <Volume2 size={14} />}
         </button>
-        <button className="wb-icon" title="关闭" data-testid="wb-float-close" onClick={onClose}>
-          ✕
+        <button className="wb-icon" aria-label="关闭" title="关闭" data-testid="wb-float-close" onClick={onClose}>
+          <X size={12} />
         </button>
       </div>
 
@@ -277,12 +327,13 @@ ${block}` : value;
               <span className="wb-float-level">低</span>
               <button
                 className="wb-icon"
+                aria-label="语音输入"
                 title="语音输入"
                 onClick={() => void send()}
                 data-testid="wb-float-send"
                 disabled={!text.trim() || streaming}
               >
-                🎤
+                <Mic size={13} />
               </button>
             </div>
           </div>

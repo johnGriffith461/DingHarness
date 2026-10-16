@@ -607,6 +607,32 @@
 /* 空态是正文级信息（用户真的在读它）：ghost 那档不够 → 提到 faint（4.74:1） */
 .wb-summary-empty { padding: 10px 0 14px; font-size: 12px; color: var(--fg-faint); }
 
+/*
+ * 右摘要里那两块小清单（技能 / 最近文件，2026-10-16 审计 P82 起从写死的「暂无」改成真数据）。
+ *
+ * 样式刻意与 `.wb-artifacts` 同一路的密度：那两块是**同屏邻居**，
+ * 一块行距松一块紧会让右栏看起来像两个人做的。
+ */
+.wb-summary-list { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 10px; }
+
+.wb-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--fg);
+  transition: background-color var(--dur-quick) var(--ease-out);
+}
+
+.wb-summary-item:hover { background: var(--surface-hover); }
+
+.wb-summary-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- 设置弹窗 ---------- */
 
 .wb-modal-mask {

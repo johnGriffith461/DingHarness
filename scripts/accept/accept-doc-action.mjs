@@ -24,8 +24,12 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9302;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9302;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);
@@ -56,6 +60,27 @@ try {
   out.before = await page.locator('[data-testid="wb-doc-body"]').inputValue();
 
   await page.locator('[data-testid="wb-doc-act-refine"]').click();
+  /*
+   * ⭐ **往返期间正文必须只读**（2026-10-16，审计 P87）：模型回来是整篇替换，
+   * 期间还能编辑的话，"顺手改两句"会被静默吃掉。这里在读**当下**的那一刻就判，
+   * 所以放在等结果之前（等完了 `busy` 已经落回 false，就看不到这个状态了）。
+   */
+  {
+    /*
+     * ⚠️ 要**轮询**着看：点下去之后 React 还得提交一次渲染，属性才会出现 ——
+     * 点完立刻读会读到 false，那是"还没渲染到"，不是"没做只读"（第一版就这么误判了一次）。
+     */
+    const until = Date.now() + 5000;
+    let seen = false;
+    while (Date.now() < until) {
+      seen = await page.evaluate(
+        () => document.querySelector('[data-testid="wb-doc-body"]')?.hasAttribute("readonly") ?? false,
+      );
+      if (seen) break;
+      await page.waitForTimeout(120);
+    }
+    out.readOnlyDuringRewrite = seen;
+  }
   /* 等正文变掉（模型往返），最多 90 秒 */
   const deadline = Date.now() + 90000;
   let now = "";
@@ -89,6 +114,12 @@ try {
 
   const bad = [];
   if (out.error) bad.push("异常: " + out.error);
+  /* P87：往返期间不许还能编辑（还能编辑 = 用户打的字会被整篇替换吃掉） */
+  if (out.readOnlyDuringRewrite !== true) {
+    bad.push(
+      `⭐ 改写往返期间正文还能编辑（readonly=${JSON.stringify(out.readOnlyDuringRewrite)}）—— 期间打的字会被模型结果整篇覆盖`,
+    );
+  }
   /* ① 真的被改写 */
   if (!out.after || out.after === out.before) {
     bad.push("点了「润色」正文没变 —— 模型没干活，或者结果没落回去");

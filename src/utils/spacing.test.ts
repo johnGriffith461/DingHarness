@@ -3,12 +3,15 @@ import { spacing, spacingLines, __fallbackSpacing } from "./spacing";
 
 describe("spacing（中英混排）", () => {
   it("中文与英文之间自动加空格", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.n）：原来是 `/用\s?React/` —— `\s?` 让"没有空格"也算命中，
+     * 于是这条与紧随其后的 `not.toContain("用React")` **完全等价**：真正的"加空格"
+     * 一次都没被验过。现在钉逐字结果（pangu 的实际输出）。
+     */
     const out = spacing("用React Flow做画布");
-    // 具体空格形态取决于 pangu，但中英之间不能挤在一起
-    expect(out).toMatch(/用\s?React/);
-    expect(out).toMatch(/Flow\s?做/);
-    expect(out).not.toContain("用React");
-    expect(out).not.toContain("Flow做");
+    expect(out).toBe("用 React Flow 做画布");
+    expect(out, "中英之间没加空格").not.toContain("用React");
+    expect(out, "中英之间没加空格").not.toContain("Flow做");
   });
 
   it("中文与数字之间自动加空格", () => {

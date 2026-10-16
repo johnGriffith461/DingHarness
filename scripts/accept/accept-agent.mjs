@@ -10,7 +10,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } fr
  *
  * 五条断言：
  * ① 入口（输入区 `+` → 创建 AI 智能体）真能进
- * ② 文案与四组标签**与本体逐字一致**（`docs/evidence-bot.txt`）
+ * ② 文案与四组标签**与本体逐字一致**（`docs/evidence-bot.txt`）  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * ③ 校验：名称/描述没填时**说清缺什么**，不偷偷建一个空智能体
  * ④ 填完点「开始聊天」→ 落到 `agents.json`，**重开还在**
  * ⑤ 建出来的智能体**是"正在使用"**的（人设要能真的用上；真调模型的那条另见 accept-agent-persona）
@@ -22,7 +22,8 @@ if (!(await freshDir(DATA))) {
 }
 fs.mkdirSync(DATA, { recursive: true });
 
-const PORT = 9305;
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9305;
 const out = {};
 let child = null;
 let ok = false;
@@ -30,6 +31,8 @@ let getLog = () => "";
 
 const boot = async () => {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  PORT = r.port;
   child = r.child;
   ok = r.ok;
   getLog = r.getLog;

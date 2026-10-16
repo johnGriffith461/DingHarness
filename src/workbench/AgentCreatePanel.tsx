@@ -15,7 +15,7 @@ import { useWorkbenchStore } from "./store";
 /**
  * 创建 AI 智能体（`chat/bot/create`，§156）。
  *
- * 文案与四组标签**逐字取自** `docs/evidence-bot.txt`（`create_bot_*` 49 条）。
+ * 文案与四组标签**逐字取自** `docs/evidence-bot.txt`（`create_bot_*` 49 条）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  *
  * ⚠️ 本体的智能体在云端（有头像生成、有封禁、能发现别人的）。本机版只做本机这一份：
  * 建好、存本地、能在对话里选用。**头像生成 / 封禁 / discover 不做。**

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MODEL_MAX_CHARS, READ_MAX_BYTES, describeReadResult, readFileForModel } from "@engine/runtime/tools/readTool";
+import { removeAll } from "../testFs";
 
 /**
  * agent 的「读文件」工具（2026-10-14）。
@@ -30,8 +31,8 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  fs.rmSync(ROOT, { recursive: true, force: true });
-  fs.rmSync(OUTSIDE, { recursive: true, force: true });
+  removeAll(ROOT);
+  removeAll(OUTSIDE);
 });
 
 const dirs = () => [path.join(ROOT, "drive")];

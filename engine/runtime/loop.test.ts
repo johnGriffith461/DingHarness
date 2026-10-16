@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { humanError, resolveTurnTarget, runTurn, type TurnEvent } from "./loop";
+import { humanError, resolveTurnTarget, runTurn, effectiveMaxSteps, type TurnEvent } from "./loop";
 import { createToolRegistry, buildToolSet } from "./registry";
 import { getProvider } from "./providers";
 import type { HealthStore } from "../ports/health";
@@ -330,6 +330,47 @@ describe("主循环 · 步数上限是参数（Phase 3.2）", () => {
     // 子智能体那条路（`runSubagent`）用的就是这个数
     await run((e) => six.push(e), { tools, maxSteps: 6 });
     expect(six.filter((e) => e.type === "tool-call"), "子智能体应当跑 6 步才停").toHaveLength(6);
+  });
+
+  it("⭐⭐ 坏的上限（NaN）不会拆掉刹车：退回默认 6 步就停（审计 P49）", async () => {
+    /*
+     * `ding run --steps`（漏值）原来会变成 `Number("true") = NaN`，而
+     * `stepCountIs(NaN)` 的判据恒假 —— "最多跑几步"这道防失控闸**恒不成立**。
+     * 假 provider 每次都回工具调用 ⇒ 没有刹车就是**死循环**。
+     * 这条断言 6 步停下：把 `effectiveMaxSteps` 改坏（退回 `raw ?? 6`），
+     * 这一条会**跑到超时变红** —— 那正是缺陷的形状。
+     */
+    let n = 0;
+    script = () => [toolChunk(`call_${(n += 1)}`, "read_file", '{"path":"a.md"}'), finish("tool_calls")];
+    const tools = buildToolSet({
+      registry: createToolRegistry(),
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true, output: { line: "ok" } }) },
+      ctx: { mode: "全部允许", provider: "strata" },
+    });
+
+    const events: TurnEvent[] = [];
+    await run((e) => events.push(e), { tools, maxSteps: Number.NaN });
+    expect(events.filter((e) => e.type === "tool-call"), "NaN 上限应当退回默认 6").toHaveLength(6);
+  });
+});
+
+describe("步数上限的兜底换算（effectiveMaxSteps）", () => {
+  it("没给就是 6；正常整数原样过", () => {
+    expect(effectiveMaxSteps(undefined)).toBe(6);
+    expect(effectiveMaxSteps(8)).toBe(8);
+  });
+
+  it("⭐ NaN / Infinity 退回 6（不许变成「恒不成立的上限」）", () => {
+    expect(effectiveMaxSteps(Number.NaN)).toBe(6);
+    expect(effectiveMaxSteps(Number.POSITIVE_INFINITY)).toBe(6);
+    expect(effectiveMaxSteps(Number.NEGATIVE_INFINITY)).toBe(6);
+  });
+
+  it("0 / 负值抬到 1；小数取整", () => {
+    expect(effectiveMaxSteps(0)).toBe(1);
+    expect(effectiveMaxSteps(-5)).toBe(1);
+    expect(effectiveMaxSteps(7.9)).toBe(7);
   });
 });
 

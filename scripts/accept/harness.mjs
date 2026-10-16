@@ -17,19 +17,102 @@ import fs from "node:fs";
  * 那是**用户本体的进程**（我这边是复刻版，进程名不同）。
  */
 
+/**
+ * 「印了 ✗ 就要真的红」——共用的收口（2026-10-16，审计 G15 / P 段同族）。
+ *
+ * ## 它挡的是什么（实测数出来的）
+ *
+ * 全仓有 **20 条**验收脚本会把不对的地方印出来（`✗ …` / `❌ …`），
+ * 却**从不改退出码** —— 在批跑里它们**永远是绿的**，等于没测。
+ * 一条条去改判定当然也行，但"新脚本又写回旧样子"这条路必须一起堵上，
+ * 所以给一个共用的：脚本开头调一次 `failOnMarks()`，
+ * 之后**任何一条含 ✗ / ❌ 的输出**都会让进程以 1 退出。
+ *
+ * ⚠️ 两条边界如实记：
+ *   · 它只把"脚本已经印出来的失败"变成退出码，**不发明新判据**；
+ *   · 重试过程中的临时 ✗（"这次没通，再试一次"）会被误判成失败 ——
+ *     那种脚本**不要调它**（或在重试成功时把 ✗ 换成别的记号）。
+ */
+export function failOnMarks() {
+  for (const name of ["log", "error", "warn"]) {
+    const orig = console[name];
+    console[name] = (...args) => {
+      const text = args.map((a) => (typeof a === "string" ? a : "")).join(" ");
+      if (/✗|❌/.test(text)) process.exitCode = 1;
+      orig(...args);
+    };
+  }
+}
+
 export function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** 现在还活着的 electron / 工作台 进程数。 */
+/**
+ * 本次验收跑的**标记**（2026-10-16，审计 G43 的修法）。
+ *
+ * ⚠️ 原来清残留是 `taskkill /F /IM electron.exe /T` —— **按程序名全机强杀**：
+ * 同机上别人的 Electron 应用（另一个会话正在跑的验证实例、用户自己装的应用）
+ * 会被一起杀掉。审计者的验证会话就是这么被打断的，而且它还会留下孤儿。
+ *
+ * 现在：验收起的每个应用都带上这个独一无二的开关（`--dsh-accept-run=<tag>`），
+ * 清残留**只按自己的标记认领** —— 别人的进程一个都不碰。
+ * 标记不带路径，所以换了仓库目录、跑的是 release 产物，一样认得出。
+ *
+ * ⚠️⚠️ **2026-10-16 补正（这条原来是坏的）**：上面写着"只按自己的标记认领"，
+ * 而实现判的是 `cmd.includes("--dsh-accept-run=")` —— **只要有这个开关就认领**，
+ * 标签写了却没用上。后果当场撞到：本机有**两个会话同时在跑验收**，
+ * 于是甲清残留时把乙的应用杀掉了，表现成"脚本跑着跑着
+ * `Target page, context or browser has been closed`"（看着像产品崩了，
+ * 其实是隔壁会话收走了我们的窗口）。这与 G43 要修的是同一件事，只是方向相反：
+ * 按"开关存在"认领 = 谁带开关都算我的 = 一样会误杀别人的。
+ *
+ * 现在判的是**完整标签**（`<开关><本次的标记>`）。更早那些跑崩留下的孤儿
+ * **不再被自动杀** —— 宁可留个孤儿（`leftoverCount()` 会数出来），
+ * 也不误杀隔壁会话正在验的东西（G43 定下的取舍，这里只是把它真正实现）。
+ */
+export const ACCEPT_RUN_TAG = `dh-accept-${process.pid}-${Date.now().toString(36)}`;
+const RUN_SWITCH = "--dsh-accept-run=";
+
+/** 本线程起过的应用标记（认领只认这些；见上面那段补正）。 */
+const ownTags = new Set([ACCEPT_RUN_TAG]);
+
+/**
+ * 列出**带我们开关**的 Electron 进程（PID + 完整命令行）。
+ *
+ * @returns {Array<{pid:number, cmd:string}> | null} null = 查不出来（没有 powershell）
+ */
+function ownAppProcesses() {
+  const psCmd =
+    "Get-CimInstance Win32_Process -Filter \"Name='electron.exe' or Name='Ding Harness.exe'\" | ForEach-Object { [string]$_.ProcessId + '|' + $_.CommandLine }";
+  const got = spawnSync("powershell", ["-NoProfile", "-Command", psCmd], { encoding: "utf8" });
+  if (got.error || typeof got.stdout !== "string") return null;
+  const out = [];
+  for (const line of got.stdout.split(/\r?\n/)) {
+    const at = line.indexOf("|");
+    if (at <= 0) continue;
+    const pid = Number(line.slice(0, at).trim());
+    const cmd = line.slice(at + 1);
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    /* 认领判据：带**我们自己的**完整标记（不是"带开关就算我的"，见文件头那段补正） */
+    if ([...ownTags].some((tag) => cmd.includes(RUN_SWITCH + tag))) out.push({ pid, cmd });
+  }
+  return out;
+}
+
+/** 现在还活着的**我们自己的**应用进程数（查不出来时返回 -1，调用方据此降级）。 */
 export function leftoverCount() {
+  const own = ownAppProcesses();
+  if (own) return own.length;
+  /*
+   * 没有 powershell（或它被策略挡住）：退回"按程序名数"——
+   * ⚠️ 这个数**只用于等待**（等到 0 或者超时），不用于杀进程 ——
+   * 所以数到别人的进程最多让等待变长，不会误杀。
+   */
   const r = spawnSync("tasklist", ["/FI", "IMAGENAME eq electron.exe", "/NH"], { encoding: "utf8" });
   const s = r.stdout ?? "";
-  const n = /no tasks|没有运行|信息: 没有/i.test(s) ? 0 : (s.match(/electron\.exe/gi) ?? []).length;
-  const w = spawnSync("tasklist", ["/FI", "IMAGENAME eq Ding Harness.exe", "/NH"], { encoding: "utf8" });
-  const ws = w.stdout ?? "";
-  const wn = /no tasks|没有运行|信息: 没有/i.test(ws) ? 0 : (ws.match(/工作台\.exe/gi) ?? []).length;
-  return n + wn;
+  if (/no tasks|没有运行|信息: 没有/i.test(s)) return 0;
+  return (s.match(/electron\.exe/gi) ?? []).length;
 }
 
 /**
@@ -48,10 +131,18 @@ export function leftoverCount() {
 export async function killLeftovers({ budgetMs = 12000 } = {}) {
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
-    spawnSync("taskkill", ["/F", "/IM", "electron.exe", "/T"], { stdio: "ignore" });
-    spawnSync("taskkill", ["/F", "/IM", "Ding Harness.exe", "/T"], { stdio: "ignore" });
+    /*
+     * ⚠️ 只按**我们自己的开关**认领（G43）。查不出进程表时**不杀** ——
+     * "宁可留一个孤儿，也不误杀别人"是这里刻意的取舍：孤儿下一轮还能按开关认领，
+     * 误杀别人的进程是不可挽回的（审计者的验证实例就是这么挂的）。
+     */
+    const own = ownAppProcesses();
+    if (own) {
+      for (const { pid } of own) spawnSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
+    }
     await sleep(450);
-    if (leftoverCount() === 0) {
+    const left = leftoverCount();
+    if (left === 0) {
       await sleep(450);
       if (leftoverCount() === 0) return true;
     }
@@ -229,7 +320,11 @@ async function bootOnce({ port, dataDir, extraEnv = {}, cwd = ".", timeoutMs = 3
    * `--force-device-scale-factor=1.25` 这类）。放参数而不是另写一份 spawn ——
    * 起应用这一整套（端口探测、CDP 握手、stderr 读掉防阻塞）就是这个文件存在的理由。
    */
-  const child = spawn("node_modules/electron/dist/electron.exe", [".", `--remote-debugging-port=${port}`, ...extraArgs], {
+  const child = spawn(
+    "node_modules/electron/dist/electron.exe",
+    /* 标记开关：清残留时按它认领（G43）——Electron 忽略不认识的开关，落在 process.argv 里 */
+    [".", `--remote-debugging-port=${port}`, `${RUN_SWITCH}${ACCEPT_RUN_TAG}`, ...extraArgs],
+    {
     cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -326,6 +421,89 @@ export async function readAllSessionRecords(page) {
     }
     return out;
   });
+}
+
+/**
+ * 数一数**已经结束的回合**：会话记录里 `done` 的条数。
+ *
+ * 为什么拿它当终态信号：引擎自己的口径就是一回合以 `done` / `error` 收场
+ * （`engine/core/events.test.ts` 钉的就是这个），而记录是**从那条路落下来的**，
+ * 不是界面上的观感。见下面 `waitTurnEnd` 的说明。
+ *
+ * @param page 页面
+ * @returns 已结束的回合数
+ */
+export async function finishedTurns(page) {
+  const records = await readAllSessionRecords(page);
+  return records.filter((r) => r && r.type === "done").length;
+}
+
+/**
+ * 等**下一个回合真的结束**（不是"助手气泡出现了"）。
+ *
+ * ⚠️ 2026-10-16（审计 G108）：`accept-checkpoint.mjs` 与 `accept-compaction.mjs` 等模型那一轮，
+ * 原来的判据是「`.wb-assistant-text` 的 count 涨到预期值」再补一个**固定** `waitForTimeout`
+ * 就去读正文。真调模型时那是**半截回复**：首 token 出现就算"有了"，尾部长一点、
+ * 机器一忙，读到的就是一段没写完的话 —— 而那三条断言（"压缩把关键数字带过去"、
+ * "回退之后没有重答"、"历史原样还在"）正是这一批最要紧的证据，慢回答下会变成**假红**，
+ * 而 checkpoint/compaction 还会在上一条没结束时就发下一条（会话状态与预期轮次数不再确定）。
+ *
+ * 按引擎口径，一回合的终态是 `done`/`error`（`events.test.ts` 钉的就是这个），
+ * 验收却用一个 DOM 出现当终态 —— 这正是 `engine/core/snapshot.ts` 里点名要淘汰的
+ * 「等 300ms 不够就红」形态。所以这里改成等记录里的 `done`：确定、可判定、与产品同一套真相。
+ *
+ * 用法：**发之前**先取 `before = await finishedTurns(page)`，发完 `await waitTurnEnd(page, before)`。
+ *
+ * @param page 页面
+ * @param before 发之前那一轮的已结束回合数
+ * @param timeoutMs 等多久算不可达（默认 3 分钟：真模型长回答也要容得下）
+ * @returns 结束后的回合数
+ */
+export async function waitTurnEnd(page, before, timeoutMs = 180_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const now = await finishedTurns(page);
+    if (now > before) return now;
+    if (Date.now() > deadline) {
+      throw new Error(`这一轮 ${Math.round(timeoutMs / 1000)} 秒内没结束（会话记录里没等到 done）—— 别拿半截回复去判`);
+    }
+    await page.waitForTimeout(300);
+  }
+}
+
+/**
+ * 进「插件·技能·伙伴」页（**新的入口**，2026-10-16）。
+ *
+ * 左栏那个 `wb-nav-plugins` 导航项被拆了（导航收敛成 三项），现在走：
+ * 输入区「技能」下拉 → 「技能管理」（与本体口径一致：直接进管理子页）。
+ * 7 条验收脚本原来都点那个已经不存在的 testid —— 它们红的是**脚本过期**，不是产品坏了。
+ *
+ * @param page 页面
+ * @returns 插件页是否真的打开了
+ */
+export async function openPluginsPage(page, { market = false } = {}) {
+  const onMarket = async () => (await page.locator('[data-testid="wb-page-plugins"]').count()) > 0;
+  const onManage = async () => (await page.locator('[data-testid="wb-page-plugins-manage"]').count()) > 0;
+  if (market ? await onMarket() : await onManage()) return true;
+  if (!(await onMarket()) && !(await onManage())) {
+    await page.locator('[data-testid="wb-skills"]').click();
+    await page.waitForTimeout(600);
+    await page.getByText("技能管理", { exact: true }).first().click();
+    await page.waitForTimeout(1200);
+  }
+  /*
+   * 「技能管理」进的是**管理子页**（`wb-page-plugins-manage`），
+   * 而搜索与市场在**市场页**（`wb-page-plugins`）——两者是两套标签
+   * （管理用 `wb-manage-tab-*`，市场用 `wb-plugin-tab-*`）。要市场的回到市场。
+   */
+  if (market && !(await onMarket())) {
+    const crumb = page.locator('[data-testid="wb-crumb-market"]');
+    if ((await crumb.count()) > 0) {
+      await crumb.click();
+      await page.waitForTimeout(900);
+    }
+  }
+  return market ? onMarket() : onManage();
 }
 
 export async function openCanvas(page) {

@@ -169,6 +169,29 @@ describe("外观设置：跟随系统要真的'跟随'", () => {
     stop();
   });
 
+  it("⭐ 先跟随系统 → 中途改成深色 → 系统再切，不许覆盖用户的选择（P90）", () => {
+    /*
+     * ⚠️ 这条是 P90 的现场顺序：`startTheme()` 先跑（此时档位是「跟随系统」），
+     * 用户之后手动选了「深色」，然后系统主题变了 ——
+     * 修前监听里留的是**开机那一刻**的档位（永远是 system），于是它照样 applyTheme("system")，
+     * **把用户明确选的那一档覆盖掉**。
+     */
+    const mq = stubMatchMedia(false); // 系统当前是浅色
+    const root = stubRoot();
+    saveTheme("system");
+    const stop = startTheme();
+    expect(root.has()).toBe(false);
+
+    /* 用户中途改成「深色」 */
+    saveTheme("dark");
+    expect(root.has()).toBe(true);
+
+    /* 系统这时候切到浅色：用户选的是深色，界面**不该**被拽回去 */
+    mq.emit(false);
+    expect(root.has(), "系统的变化把用户选的那一档覆盖了（监听读的是旧档位）").toBe(true);
+    stop();
+  });
+
   it("解绑之后系统再变就不该动了", () => {
     const mq = stubMatchMedia(false);
     const root = stubRoot();

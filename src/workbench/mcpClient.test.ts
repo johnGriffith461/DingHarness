@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { McpClient } from "../../electron/ipc/mcpClient";
+import { removeAll } from "../testFs";
 
 /**
  * MCP 客户端 vs **一个真的假 server**（2026-10-14）。
@@ -63,7 +64,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  fs.rmSync(ROOT, { recursive: true, force: true });
+  removeAll(ROOT);
 });
 
 const cfg = (file: string, name = "fake") => ({ name, command: process.execPath, args: [path.join(ROOT, file)] });

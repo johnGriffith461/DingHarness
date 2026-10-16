@@ -1,12 +1,15 @@
 /**
  * 从 `Workbench.tsx` 拆出来的（C6-1）。**纯挪位**：一个字没改，只加了 export 与 import。
- * 拆的理由见 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * 拆的理由原本记在 `docs/PLAN-C6-结构拆分.md`：那个文件 2188 行、14 个顶层组件，
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Blocks, Check, ChevronDown, Paperclip, Plus, Send, Sparkles, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
+import { draftKeyOf } from "./composerDraft";
+import { useTransientNote } from "@/utils/transientNote";
 import { PHRASE_LABELS, applyPhrase, detectAtTrigger, filterPhrases, phraseGroups, type AtTrigger, type Phrase } from "@shared/phrases";
 import { COMPOSER_PLACEHOLDER } from "./copy";
 import { resolveImportedMaterials } from "./materialImport";
@@ -73,7 +76,22 @@ export function Composer({
    * 会让每次渲染都被判成"变了"，很容易转成重渲染环。
    */
   const activeTask = useWorkbenchStore((s) => s.tasks.find((t) => t.id === s.activeTaskId));
-  const [text, setText] = useState("");
+  /*
+   * ⚠️ 输入区的草稿**放在 store 里、按视图分开存**（2026-10-16，审计 P84）。
+   *
+   * 原来是组件内 `useState`，而 `Workbench` 按 view **整体换组件** ——
+   * "在输入框里写着东西，按 Ctrl+N / 点左栏切个页"回来一看，**整段话没了**。
+   * 现在这份文本跟着 store 走：换视图再回来，字还在。
+   *
+   * `draftKey` 由调用方给（首页一个 key、每段对话一个 key）——
+   * 首页那份不该跑到对话那句输入框里去（两处用途不同：一个开新任务、一个在这段里接着说）。
+   */
+  const view = useWorkbenchStore((s) => s.view);
+  const activeTaskId = useWorkbenchStore((s) => s.activeTaskId);
+  const draftKey = draftKeyOf(view, activeTaskId);
+  const text = useWorkbenchStore((s) => s.composerTexts[draftKey] ?? "");
+  const setComposerText = useWorkbenchStore((s) => s.setComposerText);
+  const setText = useCallback((next: string) => setComposerText(draftKey, next), [setComposerText, draftKey]);
 
   /**
    * **随这一轮交给 agent 的资料**（2026-10-14）。
@@ -91,7 +109,8 @@ export function Composer({
    * 失败**必须有回执**：选了 3 个文件只进来 1 个却什么都不说，用户只会以为坏了
    * （云盘那边有逐条状态面板，这里只有一行字，但**不能没有**）。
    */
-  const [materialNote, setMaterialNote] = useState("");
+  /* 提示条自己会消失（P91）：句柄由 hook 管 —— 后一条提示不许被前一条的定时器提前擦掉 */
+  const [materialNote, showMaterialNote] = useTransientNote(4000);
 
   /** 读一次云盘清单（失败就当没有资料可加 —— 不该因为读不到清单让输入区报错）。 */
   const loadDriveFiles = async (): Promise<void> => {
@@ -120,7 +139,7 @@ export function Composer({
   useEffect(() => {
     const draft = takeComposerDraft();
     if (draft) setText(draft);
-  }, [takeComposerDraft]);
+  }, [takeComposerDraft, setText]);
 
   /*
    * 输入区那几个 chip 的下拉，**共用一个"当前打开的是哪个"状态**。
@@ -520,8 +539,7 @@ export function Composer({
                       );
                     }
                     if (unmatched.length) parts.push(`${unmatched.length} 个导入后在云盘里没找到：${unmatched.join("、")}`);
-                    setMaterialNote(parts.length ? parts.join("；") : picked.length ? `已添加 ${picked.length} 个文件` : "");
-                    window.setTimeout(() => setMaterialNote(""), 4000);
+                    showMaterialNote(parts.length ? parts.join("；") : picked.length ? `已添加 ${picked.length} 个文件` : "");
                   })();
                 }}
               >
@@ -557,8 +575,7 @@ export function Composer({
                         const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
                         void shell?.workspace?.remove?.(dir).then((r) => {
                           setWorkspaces(r?.dirs ?? []);
-                          setMaterialNote(WORKSPACE_LABELS.removedNote);
-                          window.setTimeout(() => setMaterialNote(""), 4000);
+                          showMaterialNote(WORKSPACE_LABELS.removedNote);
                         });
                       }}
                     >
@@ -577,8 +594,7 @@ export function Composer({
                     setWorkspaces(got?.list?.dirs ?? []);
                     /* 用户取消时 `dir` 是 null：不报错、不写回执（他什么都没做） */
                     if (!got?.dir) return;
-                    setMaterialNote(addedNote(got.dir));
-                    window.setTimeout(() => setMaterialNote(""), 6000);
+                    showMaterialNote(addedNote(got.dir));
                   })();
                 }}
               >

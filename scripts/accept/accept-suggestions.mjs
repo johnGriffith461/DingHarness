@@ -4,7 +4,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
 /**
  * 验收：首页「为你推荐」的卡片形态（§139）。
  *
- * 依据本体首页实机截图（`app-triage/dynamic-ui/shot-doubaowork-chat-chat.png`）：
+ * 依据本体首页实机截图（`app-triage/dynamic-ui/shot-doubaowork-chat-chat.png`）：  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 每张卡是**一行**，由「类目图标 + 类目 + 指令」三段组成，且**一列竖排、各自收窄**。
  *
  * 之前渲染的是一整条字符串 + 一枚统一的 ✨ —— 结构上就少了两段，
@@ -16,8 +16,12 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9296;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9296;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);

@@ -32,13 +32,20 @@ export function hasShellBridge(): boolean {
   return Boolean(bridge()?.ai);
 }
 
-/** 浏览器里跑时的占位 provider 列表。 */const BROWSER_PROVIDERS: ProviderInfo[] = [
+/** 浏览器里跑时的占位 provider 列表。 */
+const BROWSER_PROVIDERS: ProviderInfo[] = [
   {
     id: "unavailable",
     label: "不可用（未在 Electron 中运行）",
     models: [],
     note: "AI 通道需要主进程：请用 pnpm dev:app 从 Electron 启动",
     available: false,
+    /*
+     * ⚠️ `keyRef` 是 2026-10-16 起契约里的必填字段（设置里「填 key」要用它决定写到哪个名字下）。
+     * 这条占位记录代表的就是"不在 Electron 里、没有 AI 通道"——**没有**密钥通道可言，
+     * 所以如实给空串，而不是编一个名字出来（编译不过是另一会话改契约时漏了这个构造点）。
+     */
+    keyRef: "",
   },
 ];
 

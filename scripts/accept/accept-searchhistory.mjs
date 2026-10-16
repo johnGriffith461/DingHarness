@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openPluginsPage, readStoreFile, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**搜索历史**（§162，对应 `search_history` / `清空全部搜索记录`）。
@@ -29,7 +29,8 @@ const DIR = path.join(DATA, "drive");
 fs.mkdirSync(DIR, { recursive: true });
 for (const n of ["销售看板.md", "会议纪要.md"]) fs.writeFileSync(path.join(DIR, n), "x", "utf8");
 
-const PORT = 9313;
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9313;
 const out = {};
 let child = null;
 let ok = false;
@@ -37,6 +38,8 @@ let getLog = () => "";
 
 const boot = async () => {
   const r = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /* 用实际端口（bootApp 换过端口时它与首选不同） */
+  PORT = r.port;
   child = r.child;
   ok = r.ok;
   getLog = r.getLog;
@@ -81,7 +84,7 @@ try {
   let { b, page } = await page1();
 
   /* ── ① 技能搜索：搜一次 ── */
-  await page.locator('[data-testid="wb-nav-plugins"]').click();
+  await openPluginsPage(page, { market: true });
   await page.waitForTimeout(1200);
   await page.locator('[data-testid="wb-plugin-tab-技能"]').click();
   await page.waitForTimeout(700);
@@ -140,7 +143,7 @@ try {
     out.error = "重启失败：" + (getLog() || "(空)").slice(-300);
   } else {
     ({ b, page } = await page1());
-    await page.locator('[data-testid="wb-nav-plugins"]').click();
+    await openPluginsPage(page, { market: true });
     await page.waitForTimeout(1200);
     await page.locator('[data-testid="wb-plugin-tab-技能"]').click();
     await page.waitForTimeout(800);
@@ -178,7 +181,7 @@ try {
       out.error = (out.error ?? "") + " 二次重启失败";
     } else {
       ({ b, page } = await page1());
-      await page.locator('[data-testid="wb-nav-plugins"]').click();
+      await openPluginsPage(page, { market: true });
       await page.waitForTimeout(1200);
       await page.locator('[data-testid="wb-plugin-tab-技能"]').click();
       await page.waitForTimeout(800);

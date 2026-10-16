@@ -69,6 +69,14 @@ describe("快捷键表", () => {
   });
 
   it("说明面板覆盖全部快捷键", () => {
-    expect(shortcutCheatsheet()).toHaveLength(SHORTCUTS.length);
+    /*
+     * ⚠️ 2026-10-16（审计 G53.j）：原来只比**长度**，而两个数都来自同一个模块 ——
+     * `shortcutCheatsheet()` 整块返回空数组时长度是 0 vs SHORTCUTS.length 也会不等，
+     * 但"少了一条、多了一条同长度的假条目"它看不出来。现在比**逐条内容**，
+     * 并钉住至少一条具体条目（改键位就会红）。
+     */
+    const sheet = shortcutCheatsheet();
+    expect(sheet).toEqual(SHORTCUTS.map((s) => ({ keys: s.keys, label: s.label })));
+    expect(sheet.find((x) => x.label === shortcutOf("undo").label)?.keys).toBe("Ctrl+Z");
   });
 });

@@ -13,6 +13,7 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, ver
  * 原来工作台**把真实 usage 丢了**（`onEvent` 连 `done` 分支都没有），
  * 界面上那个「消耗 0.48」是**按字数估的**。而实机读数写明本体那个数是
  * **按额度计量**（`docs/HANDOFF.md:1695`）——本机没有额度体系，所以那个数算不出来。
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  *
  * 于是 C5 的口径是两条一起：
  * ① **数据上接上真值**（`tasks.json` 里的步骤带 `usage`）；
@@ -26,8 +27,12 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-const PORT = 9311;
-const { child, ok, getLog } = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+/* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
+let PORT = 9311;
+const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+const { child, ok, getLog } = booted;
+/* 用实际端口（bootApp 换过端口时它与首选不同） */
+PORT = booted.port;
 if (!ok) {
   console.error("[诊断] 应用输出尾部：\n" + (getLog() || "(空)").slice(-1200));
   await killTree(child);
@@ -38,6 +43,8 @@ const out = {};
 try {
   const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = await waitForPage(b);
+
+  if (!page) throw new Error("应用起了但一个页面都没建（NO_PAGE_HINT）——多半是 .cjs 标记那一步没跑");
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(1200);
 

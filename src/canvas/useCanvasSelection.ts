@@ -288,7 +288,12 @@ export function useBlankClickClear(mode: SelectionMode, selectNodes: (ids: strin
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
-      if (target.closest(".react-flow__node, .canvas-toolbar, .canvas-statusbar, .side, .titlebar")) {
+      /*
+       * ⚠️ 2026-10-16（审计 P97）：这里原来还有一条 `.titlebar` —— 那个类**早就删干净了**
+       * （标题栏现在是 `wb-titlebar`，K01 修的时候删的 CSS）。留一条命中不了的死选择器
+       * 会让下一个人以为"这里排除掉了标题栏"，而其实什么都没排除。
+       */
+      if (target.closest(".react-flow__node, .canvas-toolbar, .canvas-statusbar, .side, .wb-titlebar")) {
         return;
       }
       if (!target.closest(".canvas-flow")) return;

@@ -31,6 +31,7 @@ import {
   type ToolTrace,
 } from "@shared/agentTools";
 import { MEMORY_TEXT_LIMIT } from "@shared/memory";
+import { REPEAT_VALUES as SCHEDULE_REPEAT_VALUES } from "@shared/schedule";
 
 /**
  * 工具协议（§141）。
@@ -109,7 +110,20 @@ describe("schedule_create 的参数校验（§145）", () => {
   });
 
   it("⭐ 重复方式只认那五个值（模型编一个别的出来就挡在这儿）", () => {
-    for (const ok of REPEAT_VALUES) {
+    /*
+     * ⚠️ 2026-10-16（审计 G53.x）：这条原来**拿被测常量自己做循环** —— 用 `REPEAT_VALUES`
+     * 建的判据再拿 `REPEAT_VALUES` 去喂：常量整表被改（比如删掉 "weekly"）、
+     * 或两份**同名常量分叉**，它照样绿。现在：
+     *   ① 五个值**逐字写死**（改常量表这里就红）；
+     *   ② 两份同名 `REPEAT_VALUES`（`shared/agentTools.ts` 与 `shared/schedule.ts`）
+     *      必须**相等** —— 分叉是"同一件事两份口径"的经典形状。
+     */
+    const EXPECTED = ["noRepeat", "hourly", "daily", "weekly", "custom"];
+    expect([...REPEAT_VALUES], "重复方式的取值表被改了（改它要同时改这里与用法）").toEqual(EXPECTED);
+    expect([...SCHEDULE_REPEAT_VALUES], "两份同名 REPEAT_VALUES 分叉了（agentTools 与 schedule 各一份）").toEqual(
+      EXPECTED,
+    );
+    for (const ok of EXPECTED) {
       expect(SCHEDULE_CREATE_INPUT.safeParse({ title: "t", prompt: "p", repeat: ok }).success, ok).toBe(true);
     }
     for (const bad of ["everyday", "每天", "", "DAILY"]) {

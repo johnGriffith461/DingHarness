@@ -25,7 +25,7 @@ import { likedHere, useCodingLikes } from "./codingLikes";
 /**
  * 创作广场（`chat/coding`，§159）。
  *
- * 文案与七个分类**逐字取自** `docs/evidence-coding.txt`（`coding_*` 260 条）。
+ * 文案与七个分类**逐字取自** `docs/evidence-coding.txt`（`coding_*` 260 条）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  *
  * ⚠️ **本机版做到哪一步**：那 260 条里大半是**云端功能** ——
  * 投稿审核、创作挑战赛、举报、分享链接、跨用户排行。

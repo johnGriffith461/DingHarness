@@ -1,5 +1,6 @@
 import { stepCountIs, streamText, type ToolSet } from "ai";
 
+import { blockedReason, realModelBlocked as gateBlocked } from "./modelGate";
 import { reasoningProviderOptions, type ReasoningEffort } from "./protocols/reasoning";
 
 import type { StepUsage } from "../../shared/cost";
@@ -18,7 +19,8 @@ import { humanFailure } from "../../shared/errors";
  * 在它之前，"调一次模型、把流读出来"这件事有**两份**实现：
  * `ai.ts:164-196`（IPC 那条，`stepCountIs(4)`）与 `subagent.ts:90-101`
  * （子智能体那条，`stepCountIs(6)`）。两份各自长出了不同的毛病
- * （实测差异清单见 `docs/PLAN-C2-Agent运行时收敛.md` §1.1）：
+ * （实测差异清单原本记在 `docs/PLAN-C2-Agent运行时收敛.md` §1.1）：
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  *
  * | 能力 | 父级 | 子级（改造前） |
  * |---|---|---|
@@ -114,6 +116,18 @@ export type TurnRequestInput = {
    * ⚠️ 子智能体**必须**拿到父级的那个：用户点停时，子智能体还在跑就是"停不下来"。
    */
   abortSignal?: AbortSignal;
+  /**
+   * **上游报错原文**的出口（诊断用；2026-10-16）。
+   *
+   * 为什么需要它：给用户看的那句是 `humanError` 翻过的"人话"（`连不上 provider…`），
+   * 而原文里才有**可判定的信息**（`connect ETIMEDOUT 127.0.0.1:58855`）。
+   * 评测/验收要分辨"产品真的坏了"与"这台机器那一会儿回环不通"，
+   * 而人话把这两件事抹成了同一句 —— 于是只能再开一条**只给装置看**的口子。
+   *
+   * ⚠️ 它**不是给界面用的**：界面继续只吃 `TurnEvent.error.message`（人话）。
+   * 谁把它直接糊到用户面前，就是又造了一个"把 SDK 堆栈丢给用户"的问题。
+   */
+  onRawError?: (raw: string) => void;
 };
 
 /** 一次调用的结果（两条路都能用：IPC 那条主要靠 `onEvent`，子智能体主要靠它）。 */
@@ -171,22 +185,15 @@ export function humanError(error: unknown): string {
  * （实测过代价：跑一条验收脚本 `accept-tools.mjs` 会真的打 provider，
  * 它往输入框里填提示词然后点发送。整批 99 条跑一遍就是 99 次真调用。）
  *
- * 判据是**地址**而不是"哪个 provider"：指向 `127.0.0.1`/`localhost` 的（本地假服务、
- * 本地推理）照常放行 —— 那正是"不烧钱地测主循环"该走的路。
- *
- * ⚠️ 解析不出主机名时**当远程拦掉**：宁可拦错一次，不要放过一次真花钱的调用。
+ * ⚠️ 2026-10-16（审计 P53）：判定**搬去 `./modelGate`** —— 原来只有这一条路
+ * 问闸，图像/视频/探测四条路都绕开它（开着闸照样真出网，有记账为证）。
+ * 现在这里只留调用点，判定与文案在那一份里。
  *
  * @param baseURL provider 的地址
  * @returns 是否该拒
  */
 function realModelBlocked(baseURL: string): boolean {
-  if (!process.env.DSH_NO_REAL_MODEL?.trim()) return false;
-  try {
-    const host = new URL(baseURL).hostname;
-    return !(host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]");
-  } catch {
-    return true;
-  }
+  return gateBlocked(baseURL);
 }
 
 export function resolveTurnTarget(
@@ -196,10 +203,7 @@ export function resolveTurnTarget(
   const provider = getProvider(providerId);
   if (!provider) return { ok: false, error: `未知 provider：${providerId}` };
   if (realModelBlocked(provider.baseURL)) {
-    return {
-      ok: false,
-      error: `DSH_NO_REAL_MODEL 已设置：拒绝调用远程 provider（${provider.label} → ${provider.baseURL}）。只有指向本机的任务才允许跑。`,
-    };
+    return { ok: false, error: blockedReason(provider.label, provider.baseURL) };
   }
   if (!resolveSecret(provider.keyRef)) {
     return { ok: false, error: `${provider.label} 没有可用密钥（需要 ${provider.keyRef}）` };
@@ -419,6 +423,8 @@ export async function runTurn(
     return { ok: true, aborted: false, provider: provider.id, model };
   } catch (error) {
     const message = humanError(error);
+    /* 原文只喂给装置（见 `TurnRequestInput.onRawError` 的说明） */
+    input.onRawError?.(error instanceof Error ? error.message : String(error));
     const aborted = Boolean(input.abortSignal?.aborted);
     if (!aborted) health.markFailed(provider.id, message);
     onEvent({ type: "error", message });

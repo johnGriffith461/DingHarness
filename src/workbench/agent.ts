@@ -221,6 +221,19 @@ function stripMarkers(s: string): string {
  * @param option 用户选的选项（自己写的话为 undefined）
  * @param custom 用户自己写的描述
  */
+/**
+ * 「跳过这一问」留下的答复文本（2026-10-16，审计 P81）。
+ *
+ * 澄清提问卡的 × 原来调的是 `abort()` —— 而提问态下**没有任何在跑的流**
+ * （`activeHandle` / `runningRequestId` 都是 null），那一下什么都不做：
+ * 卡片不动、任务永远停在「正在询问用户」。
+ *
+ * 现在 × 的语义是**跳过**：把这句话当作答复记进对话，任务照常往下走。
+ * 之所以用一句写明"跳过"的话、而不是空串：模型收到空答复只会再问一遍，
+ * 而"你自己定"是用户真正表达的意思（也让事后翻记录的人看得懂当时跳过了）。
+ */
+export const SKIP_ANSWER_TEXT = "（已跳过这一问：你自己定）";
+
 export function describeAnswer(
   question: TaskQuestion,
   option: TaskOption | undefined,

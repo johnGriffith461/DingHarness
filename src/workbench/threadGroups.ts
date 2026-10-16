@@ -3,7 +3,7 @@ import type { WorkTask } from "./task";
 /**
  * 「管理历史对话」页的时间分桶与行摘要（纯逻辑，可单测）。
  *
- * 依据：本体该页的实机截图 `app-triage/dynamic-ui/shot-route-thread-list.png`
+ * 依据：本体该页的实机截图 `app-triage/dynamic-ui/shot-route-thread-list.png`  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * （路由 `chrome://doubaowork-chat/chat/thread/list`）。
  * 截图里能看到三档分组：**近一年 / 昨天 / 近 7 天**。
  *

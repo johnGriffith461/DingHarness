@@ -8,7 +8,8 @@ import { describe, expect, it } from "vitest";
  * ## 为什么这条必须有
  *
  * C6 之前：`styles.css` 6015 行、`Workbench.tsx` 2188 行、`pages.tsx` 1669 行、`store.ts` 1253 行。
- * 它们**不是"不优雅"**，是三种具体代价（见 `docs/PLAN-C6-结构拆分.md`）：
+ * 它们**不是"不优雅"**，是三种具体代价（原本记在 `docs/PLAN-C6-结构拆分.md`）：
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 改一处要读两千行（于是"顺手加一行"变成默认做法）、重渲染没有边界、以及
  * **结构会自己退化** —— C2 之前"主循环被写四遍"就是同一个机理：文件够大，多写一份没人发现。
  *
@@ -54,12 +55,36 @@ function sources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** 一个文件的行数与阈值。 */
-function check(full: string): { rel: string; lines: number; limit: number; over: boolean } {
+/** 一个文件的行数与阈值（`limitOverride` 只给自测用：验证"超一行就判红"的那个比较）。 */
+function check(full: string, limitOverride?: number): { rel: string; lines: number; limit: number; over: boolean } {
   const rel = path.relative(ROOT, full).replace(/\\/g, "/");
   const lines = readFileSync(full, "utf8").split("\n").length;
-  const limit = rel.endsWith(".css") ? LIMIT.css : LIMIT.code;
+  const limit = limitOverride ?? (rel.endsWith(".css") ? LIMIT.css : LIMIT.code);
   return { rel, lines, limit, over: lines > limit };
+}
+
+/**
+ * 例外名单里**已经不超阈值**的那些（该被删掉）。
+ *
+ * ⚠️ 2026-10-16（审计 G26）：原来这段逻辑直接写在用例里，而 `EXEMPT` 是**空集** ——
+ * 于是"例外不许空转"那段循环体**一次都不执行**，自测只是在自证"我没有例外"。
+ * 抽成函数之后，自测可以喂**构造的**例外集与查询函数，把"该删的会被认出来"
+ * 这件事真的跑一遍（见下）。
+ *
+ * @param exempt 例外名单
+ * @param lookup 给 rel 返回它的检查结果
+ * @returns 该从名单里删掉的（`[]` = 名单仍然有效）
+ */
+function staleExemptions(
+  exempt: Iterable<string>,
+  lookup: (rel: string) => { over: boolean; limit: number },
+): string[] {
+  const stale: string[] = [];
+  for (const rel of exempt) {
+    const got = lookup(rel);
+    if (!got.over) stale.push(`${rel}（不到 ${got.limit} 行了）`);
+  }
+  return stale;
 }
 
 describe("C6-5：巨石文件守卫", () => {
@@ -68,23 +93,36 @@ describe("C6-5：巨石文件守卫", () => {
     .concat(sources(path.join(ROOT, "engine")))
     .concat(sources(path.join(ROOT, "hosts")));
 
-  it("判定本身有效（超一行就该判红，例外的文件也要真超）", () => {
-    const sample = { rel: "x.ts", lines: LIMIT.code + 1, limit: LIMIT.code };
-    expect(sample.lines > sample.limit).toBe(true);
-    // 例外名单不许空转：里面的文件**必须真的超阈值**
-    for (const rel of EXEMPT) {
-      const full = path.join(ROOT, rel);
-      const got = check(full);
-      expect(
-        got.over,
-        `${rel} 已经不到 ${got.limit} 行了 —— 请把它从 EXEMPT 里删掉（例外名单不许空转）`,
-      ).toBe(true);
-    }
+  it("判定本身有效（拿**真文件**跑 check，不用自己造的算术自证）", () => {
+    /*
+     * ⚠️ 2026-10-16（审计 G26）：原来这里 `const sample = { lines: LIMIT.code + 1, … }`
+     * 然后断言 `sample.lines > sample.limit` —— 那是**纯算术**，`check()` 一行都没跑，
+     * "超一行就判红"这件事从来没被验证过。现在拿一份真文件：
+     *   ① 它数出来的行数必须与独立数出来的相等；
+     *   ② 把阈值降到它行数以下 → `over` 为真；抬到行数以上 → `over` 为假。
+     */
+    const real = path.join(ROOT, "src/structureGuard.test.ts");
+    const lines = readFileSync(real, "utf8").split("\n").length;
+    const got = check(real);
+    expect(got.lines, "check() 数出来的行数与独立数的不一样").toBe(lines);
+    expect(check(real, lines - 1).over, "把阈值降到行数以下时没判超").toBe(true);
+    expect(check(real, lines + 1).over, "阈值高于行数时误判超了").toBe(false);
+  });
+
+  it("例外名单不许空转（这段判定本身也要能红）", () => {
+    /* 真名单（现在是空的）：有例外就必须真的超阈值 */
+    expect(
+      staleExemptions(EXEMPT, (rel) => check(path.join(ROOT, rel))),
+      "这些例外已经不超阈值了 —— 从 EXEMPT 里删掉它们",
+    ).toEqual([]);
+    /* 判定本身有效：喂构造数据，两种情形各走一遍（否则循环体一次都不执行） */
+    expect(staleExemptions(["still-big.ts"], () => ({ over: true, limit: 10 }))).toEqual([]);
+    expect(staleExemptions(["now-small.ts"], () => ({ over: false, limit: 10 }))).toHaveLength(1);
   });
 
   it(`没有文件超过上限（.ts/.tsx ≤ ${LIMIT.code}、.css ≤ ${LIMIT.css}；例外见 EXEMPT）`, () => {
     const offenders = files
-      .map(check)
+      .map((f) => check(f)) // ⚠️ 不能直接写 .map(check)：map 会把**下标**当第二参数传给 limitOverride
       .filter((r) => r.over && !EXEMPT.has(r.rel))
       .map((r) => `${r.rel}（${r.lines} 行 > ${r.limit}）`);
     expect(

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SCHEMA_VERSION, wrap } from "@shared/persist";
 import { createJsonStore } from "../electron/ipc/jsonStore";
 import { KV_FILE, backendKind, closeKv, kvList, kvRead, kvWrite } from "../engine/adapters/kvStore";
+import { removeAll } from "./testFs";
 
 /**
  * 存储 SQLite 化（Phase 12.1）—— **KV 后端 + 迁移 + 回退开关**。
@@ -52,7 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   closeKv(env.userData);
-  fs.rmSync(env.userData, { recursive: true, force: true });
+  removeAll(env.userData);
   delete process.env.DSH_STORE_BACKEND;
 });
 

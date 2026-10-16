@@ -5,7 +5,7 @@ import type { TextRange } from "./docFormat";
  *
  * ## 证据
  *
- * 整套界面文案**逐字取自本体前端包**（`docs/evidence-aidoc.txt`，124 条 `aiDoc_*`）。
+ * 整套界面文案**逐字取自本体前端包**（`docs/evidence-aidoc.txt`，124 条 `aiDoc_*`）。  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 对应路由 `/chat/new-doc` 与 `/chat/write`（线上包独有的路由级接口）。
  *
  * 所以这里的每个标签都不是我编的：

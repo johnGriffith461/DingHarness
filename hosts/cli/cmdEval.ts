@@ -44,6 +44,7 @@ function repoRoot(): string {
  * 基线落哪（**进版本库**）。
  *
  * ⚠️ 不放 `docs/`：那个目录被 `.gitignore` 排除了（内部施工笔记不入公开仓，2026-10-15 的决定）。
+ * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  * 基线必须跟着版本走 —— 它是"通过率不许往下掉"的那个参照。
  */
 function evalBaselinePath(): string {
@@ -103,15 +104,24 @@ export async function cmdEval(p: Parsed): Promise<number> {
     },
     (r, i, total) => {
       if (p.flags.has("json")) return;
-      process.stdout.write(`${r.ok ? "✓" : "✗"} [${i}/${total}] ${r.id}  ${r.title}\n`);
+      /* 装置不可达的用 ⚠️ 而不是 ✗ —— 它不是产品失败，但**绝不能不吭声** */
+      const mark = r.ok ? "✓" : r.environment ? "⚠️" : "✗";
+      process.stdout.write(`${mark} [${i}/${total}] ${r.id}  ${r.title}\n`);
       for (const f of r.failures) process.stdout.write(`     ${f.what}：${f.detail}\n`);
+      if (r.environment) process.stdout.write(`     装置：${r.environment}\n`);
+      /* error 事件说了什么 —— 没有这一行，"为什么红"只能靠猜 */
+      for (const e of r.errors ?? []) process.stdout.write(`     error 事件：${e}\n`);
     },
   );
 
   if (p.flags.has("json")) {
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
   } else {
-    process.stdout.write(`\n共 ${report.total} 条，通过 ${report.passed}，失败 ${report.failed}，通过率 ${report.rate}%\n`);
+    process.stdout.write(
+      `\n共 ${report.total} 条，通过 ${report.passed}，失败 ${report.failed}` +
+        (report.environment ? `，装置不可达 ${report.environment}（不算产品失败，但仍会让退出码为 1）` : "") +
+        `，通过率 ${report.rate}%\n`,
+    );
     for (const [category, slot] of Object.entries(report.byCategory)) {
       process.stdout.write(`  ${category}：${slot.passed}/${slot.total}\n`);
     }
@@ -131,6 +141,10 @@ export async function cmdEval(p: Parsed): Promise<number> {
     process.stdout.write(`（还没有基线：跑 \`ding eval --update-baseline\` 落一份）\n`);
   }
 
-  return report.failed ? 1 : 0;
+  /*
+   * 退出码：产品失败 → 1；**装置不可达也 → 1**。
+   * 后者不是"甩锅给机器就算了" —— 这一批的结论在这台机器上不成立，重跑一次再来。
+   */
+  return report.failed || report.environment ? 1 : 0;
 }
 

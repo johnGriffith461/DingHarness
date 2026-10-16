@@ -181,6 +181,27 @@ function renderBlocks(lines: string[]): string {
       body.push(lines[i]);
       i += 1;
     }
+    /*
+     * 段落分支必须保证前进（2026-10-16 修，审计里「四反引号预览死循环」那条）。
+     *
+     * 上面那个 while 的条件里有一条 `!/^```/.test(lines[i])`，而**进不进围栏分支**的收束判断
+     * 在更前面用的是更严的 `/^```\w*\s*$/`。两处口径不一致时就有一种行两头都不认：
+     * **以 ``` 开头、但不匹配 `^```\w*\s*$`** 的行 —— 例如
+     *   · 四反引号围栏 ````markdown（文档里演示代码块的标准写法）；
+     *   · 带 info string 的开围栏 ```python main.py / ``` objective-c；
+     *   · ```json title="x" 这种带属性的。
+     * 它进不了围栏分支 → 落到这里 → 而 `body` 是**空的**（while 第一轮就被 `!/^```/` 挡下）→
+     * 外层 while 拿着同一个 `i` 再来一遍 —— **死循环**：`out` 无限增长，
+     * 渲染进程主线程在 React 提交里卡死（窗口整个无响应，未保存的画布改动全丢）。
+     *
+     * 修法（就地收束，不改别处口径）：body 为空说明这一行谁都不认 —— 当**普通一行**吞掉，
+     * 至少保证 `i` 前进。宁可把它渲染成一段纯文本，也不能让整个界面挂死。
+     */
+    if (body.length === 0) {
+      out.push(`<p>${renderInline(lines[i]!)}</p>`);
+      i += 1;
+      continue;
+    }
     out.push(`<p>${body.map(renderInline).join("<br />")}</p>`);
   }
 

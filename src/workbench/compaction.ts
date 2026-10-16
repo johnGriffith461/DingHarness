@@ -31,7 +31,7 @@ import type { ChatMessage } from "@shared/ipc";
  * 为什么是删而不是接上：留额度要先知道**每个模型的上下文上限**，而
  * `electron/ipc/aiProviders.ts` 里没有这个字段 —— 我们只知道有哪几个模型，
  * 不知道它们能装多少。硬编一个数就是编数据。
- * 等 provider 带上真实上限，`shared/contextWindow.ts` 的 `planContext` 加一个
+ * 等 provider 带上真实上限，`engine/core/context.ts` 的 `planContext` 加一个
  * `reserveTokens` 参数即可（**那时**它是"上限减去保留"，而不是凭空定的 16384）。
  */
 
@@ -40,7 +40,7 @@ export const SUMMARY_MARKER = "【更早对话的摘要】";
 
 /*
  * 计量与切分（`estimateTokens` / `totalTokens` / `shouldCompact` / `planContext`）
- * **搬去了 `shared/contextWindow.ts`**（C3）—— 那是"上下文窗口的唯一负责人"：
+ * **搬去了 `engine/core/context.ts`**（C3）—— 那是"上下文窗口的唯一负责人"：
  * 聊天与工作台两条路都调它，免得同一条规矩在两处各长一份。
  *
  * 这里只留**压缩本身**：怎么把要压的那些拼成一段、摘要怎么挂回系统提示词。

@@ -58,8 +58,8 @@ describe("buildHistory", () => {
    *
    * 原来这里断言"超过 20 条只留最近 20 条"——那道硬截断把压缩阈值架空了
    * （20 条短消息远不到 2 万 token，"该压就压"于是几乎永远不触发）。
-   * 现在留多少由 `shared/contextWindow.ts` 的 `planContext` **按 token 额度**决定，
-   * 那条规矩本身在 `src/contextWindow.test.ts` 里被测。
+   * 现在留多少由 `engine/core/context.ts` 的 `planContext` **按 token 额度**决定，
+   * 那条规矩本身在 `src/workbench/compaction.test.ts` 里被测（本文件从这里 re-export）。
    *
    * 这里只测**本文件该负责的那段**：把步骤拼成消息、空步骤跳过、折叠工具行、
    * 以及"切了就给 truncated"这个信号。
@@ -81,6 +81,15 @@ describe("buildHistory", () => {
     // 留的是**最新**的：最后一条一定在，最早那条一定不在
     expect(got.messages[got.messages.length - 1]?.content).toContain(`第${many.length - 1}条`);
     expect(got.messages[0]?.content).not.toContain("第0条");
+  });
+
+  it("⭐ 保留额度可注入（审计 P156：别让同一条回合用两把尺）", () => {
+    const many = Array.from({ length: 40 }, (_, i) => step(i % 2 ? "assistant" : "user", "字".repeat(500), `K${i}`));
+    const wide = buildHistory(many);
+    const narrow = buildHistory(many, { keepTokens: 3000 });
+    expect(wide.truncated).toBe(false);
+    expect(narrow.truncated, "小额度必须真的切（参数被无视了？）").toBe(true);
+    expect(narrow.messages.length).toBeLessThan(wide.messages.length);
   });
 
   it("⭐ 保留段尽量以 user 开头（否则模型以为自己没头没脑说了那句）", () => {

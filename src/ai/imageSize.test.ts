@@ -15,7 +15,7 @@ import {
 } from "@shared/imageSize";
 
 /**
- * 这张表的期望值**全部抄自规格文档**（`lunora-image-size-rules.md`，标注 authoritative，
+ * 这张表的期望值**全部抄自规格文档**（`lunora-image-size-rules.md`，标注 authoritative，  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * 来自真实浏览器逐项实测）。不是我推出来的 —— 所以任何一条对不上都是实现有问题，不是"差不多"。
  */
 
@@ -179,8 +179,13 @@ describe("inferSize —— 文档 §6 反向映射", () => {
         const size = resolveSize(tier, ratio);
         expect(size).not.toBeNull();
         const back = inferSize(size as string);
-        // 反查不保证回到"最小那个档"（同一尺寸可能被多个档命中），但必须能命中某一档
-        expect(back).not.toBeNull();
+        /*
+         * ⚠️ 2026-10-16（审计 G53.s）：原来只断 `back !== null` —— 反查把比例算错、
+         * 或者把档位张冠李戴，这条都过。现在钉**比例必须一致**（反查不保证回到最小的
+         * 那个档 —— 同一尺寸可能被多个档命中 —— 但**比例**是确定的）。
+         */
+        expect(back, `${tier}/${ratio} 的尺寸 ${size} 反查不出来`).not.toBeNull();
+        expect(back!.ratio, `${tier}/${ratio} → ${size} 反查出来的比例不对`).toBe(ratio);
       }
     }
   });

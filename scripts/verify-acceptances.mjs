@@ -95,6 +95,74 @@ const RECORDS_DIR = ".verify";
  * 这份清单**不是"以后再说"**：§97 撞过的就是"久没跑 → 早已失效 → 谁都不知道"。
  * 逐步把它们归到"能跑且会判定"或"明确废弃"，缺口才算真的关掉。
  */
+/*
+ * ⚠️ **不在批跑里的脚本 —— 结构化名单**（2026-10-16，审计 G96）。
+ *
+ * 这份文件里原来有一段很长的散文，讲"哪些脚本为什么不进批跑"。散文的问题不在长短，
+ * 而在**它不可执行**：DEFECT-PROTOCOL 第 4/5 步写的是硬规矩
+ * （「不进批跑 = 没人跑」「没有回归用例的修复不算修完」），而仓里只有**一个方向**的对账
+ * （登记了 → 文件在不在，缺则记一笔红）；反过来「文件在 → 没登记」**没有任何东西在查**。
+ * 实测：`scripts/accept/` 有 99 个 `accept-*.mjs`，`CASES` 只登记 71 个 ——
+ * 剩下那 28 个到底是"按设计不进"还是"忘了"，只有散文说了算，而散文不会红。
+ *
+ * 现在两条一起做：
+ *   ① 这份名单是**数据**（`kind` + `why` 必填），`src/acceptRegistry.test.ts` 拿它跟文件系统对账，
+ *      两边对不上就红 —— 新写一个脚本忘了登记，第一次 `pnpm test` 就会撞上；
+ *   ② `kind` 里 **`debt` 是明账**：它承认"本该进批跑、现在还没进"，
+ *      守卫会把它印出来并卡住总数（只许少不许多）。债可以欠，但要记账。
+ *
+ * kind 的四种取值：
+ *   · `needs-model`   真调模型（烧钱 + 受上游波动影响，不适合无模型批跑）
+ *   · `needs-package` 要先有打包/安装产物（`pnpm package:win` 之后才谈得上跑）
+ *   · `debt`          本该进批跑，还没进（要么改造它、要么把它跑通后登记进 CASES）
+ *   · `retired`       已退役（脚本自己头部写了退役声明），留着只供开发期手工排查
+ *   · `fossil`        化石：早就与产品脱节（打 dev server / 硬编码本机路径），要么重写、要么删
+ */
+const NOT_IN_BATCH = {
+  /* ── 真调模型（烧钱）── */
+  "accept-agent-persona.mjs": { kind: "needs-model", why: "§156：用带暗号的智能体提问，断言回复真的带上了暗号" },
+  "accept-checkpoint.mjs": { kind: "needs-model", why: "§151：验分叉不动原对话、回退重答、且不撤销已发生的动作" },
+  "accept-compaction.mjs": { kind: "needs-model", why: "§149：把上下文额度调小，断言真压了 + 关键数字穿过摘要" },
+  "accept-doctone.mjs": { kind: "needs-model", why: "§168：口语化原文点「更学术」，断言真的被重写" },
+  "accept-followup.mjs": { kind: "needs-model", why: "§147：第二轮要答出只在第一轮出现过的信息" },
+  "accept-image-actions.mjs": { kind: "needs-model", why: "先真生成一张图，再验图片动作条（真调图像模型）" },
+  "accept-imageedit.mjs": { kind: "needs-model", why: "§167：真生成一张 → 点「变清晰」→ 新图落进 assets（真调图像模型 2 次）" },
+  "accept-imagegen.mjs": { kind: "needs-model", why: "图片生成端到端：必须真出一张图，否则一条都断不了" },
+  "accept-mcp.mjs": { kind: "needs-model", why: "连接器：断言的是模型看见了什么（请求体里有没有资料块 / 下发了哪些工具）" },
+  "accept-memoryinject.mjs": { kind: "needs-model", why: "§164：不许调工具，问只存在于记忆库里的称呼" },
+  "accept-providers.mjs": { kind: "retired", why: "整条建在画布对话侧栏上（那套界面已拆），点哪儿都不响；墓碑写在脚本头部。⚠️ 它覆盖的「真探测 → 界面标出已验证」目前没有替代品" },
+  "accept-subagent.mjs": { kind: "needs-model", why: "§150：两段分别验子智能体的汇合与审批穿透" },
+  "accept-toolargs.mjs": { kind: "needs-model", why: "§175：断言留痕里出现只有工具参数里才有的内容" },
+  "accept-toolfeed.mjs": { kind: "needs-model", why: "§163：第 2 轮要说出只存在于上一步工具输出里的内容" },
+  "accept-tools.mjs": { kind: "needs-model", why: "§141：断言模型真的调了工具 + 磁盘上真有结果" },
+  "accept-usage.mjs": { kind: "needs-model", why: "C5：真实用量要到步骤上（头部自述「这条会真调模型 1 次」）" },
+  "accept-writing-model.mjs": { kind: "needs-model", why: "写作助手：点「写短一点」然后等真模型回（文件名里的 -model 就是标记）" },
+
+  /* ── 要先有打包 / 安装产物 ── */
+  "accept-p6.mjs": { kind: "needs-package", why: "跑的是 release/win-unpacked 里的 exe，先得 package:win" },
+  "accept-package.mjs": { kind: "needs-package", why: "验 setup.exe 存在、体积、图标嵌没嵌进 PE 资源" },
+  "accept-installed.mjs": { kind: "needs-package", why: "验静默安装出来的那份应用能起来并渲染" },
+  "accept-packaged-run.mjs": { kind: "needs-package", why: "打包版端到端（asar 内的入口、打包版真出图）——既要产物又要图像模型" },
+
+  /* ── 明账：本该进批跑，还没进 ── */
+  "accept-library.mjs": { kind: "debt", why: "不调模型、用 bootApp + 自隔离数据目录（插件装/启用/项目/置顶的持久化）—— 本该登记进批跑" },
+  "accept-canvasopen.mjs": { kind: "debt", why: "点产物卡片在画布里打开；自己 spawn Electron —— 改造后再进批跑" },
+  "accept-float.mjs": { kind: "debt", why: "对话流产物卡片 + 悬浮助手窗；自己 spawn Electron —— 改造后再进批跑" },
+  "accept-rowmenu.mjs": { kind: "debt", why: "左栏行悬停 ⋯ 菜单 + 标题重命名；自己 spawn Electron —— 改造后再进批跑" },
+  "accept-workbench.mjs": { kind: "debt", why: "工作台外壳三栏；自己 spawn Electron —— 改造后再进批跑" },
+
+  "accept-size-spec.mjs": { kind: "needs-model", why: "图像尺寸规格：三档模式与规格表对不上就得真出图来验（它原来在 CASES 里被注释掉，理由写着「其实会出图」）" },
+
+  /* ── 退役 ── */
+  "accept-p5-prompt.mjs": { kind: "retired", why: "脚本头部自带退役声明（2026-10-14）：读的是 DEV-only 探针 window.__lastAiPrompt，打包产物里没有" },
+  "accept-theme.mjs": { kind: "retired", why: "脚本头部自带退役声明（2026-10-14）：它点的「外观」行早已挪到账号菜单，导航是死的；判据已由 accept-accountmenu.mjs 接住，留文件是当墓碑" },
+
+  /* ── 化石：早就与产品脱节，要么重写进批跑、要么删掉 ── */
+  "accept-final.mjs": { kind: "fossil", why: "打的是 http://localhost:5173（vite dev server）+ 硬编码本机 Chromium 路径，不起真应用；判据是几何量。要么按 bootApp 重写、要么删" },
+  "accept-image.mjs": { kind: "fossil", why: "同上：dev server + 本机 Chromium 路径；验的是画布图片节点的几何量，与现在那条 accept-image-actions 不是一回事" },
+  "accept-p2.mjs": { kind: "fossil", why: "同上：dev server + 本机 Chromium 路径（画布阶段 2 的几何断言）" },
+};
+
 const CASES = [
   /*
    * 窗口控制（2026-10-15，M0 工单 1）。用户报「右上角关闭/最小化按钮重复显示」，
@@ -211,6 +279,25 @@ const CASES = [
    * 判据与 §109 一致：**读脚本里有没有真调模型的调用**，不是"看起来像不像功能测试"。
    */
   ["accept-versions.mjs", "版本清单与对比（不调模型）"],
+  /*
+   * 消息操作栏的六个动作（11.19）—— 含「重新生成必须是同一次提问的重跑」。
+   * 2026-10-16：从 `NOT_IN_BATCH` 的明账里收进来（它原来因为"自己 spawn Electron"没进批跑），
+   * 实跑过一次绿的；它与 `accept-retry`（旧的聊天侧栏那条，已随界面改版退役）覆盖同一件事。
+   */
+  ["accept-actions.mjs", "消息操作栏六个动作（复制 / 重新生成是同一次提问的重跑 / 幂等）"],
+  /*
+   * 「一个人都没来过」的几处空态（§208 那类"没人点过的界面"）。
+   * 2026-10-16：从 `NOT_IN_BATCH` 的明账里收进来（它不调模型、用 bootApp + 自隔离数据目录，
+   * 判据是空态文案逐字 + 容器宽度 ≥200px）。
+   */
+  ["accept-emptystates.mjs", "空态（历史对话 / 任务中心 / 摘要产物 / 摘要媒体：文案逐字 + 没被挤塌）"],
+  /* 标记层与框选（阶段 5）：八种标记能画、样式能切、撤销/清空、落盘、当提示词（2026-10-16 从明账收进来试跑） */
+  ["accept-p5.mjs", "标记层（八种标记 / 样式切换 / 撤销清空 / 落盘 / 拼进生成要求）"],
+  /*
+   * AI 文档操作条（§153 + P87）：润色真的改写了正文、历史记着由来、磁盘跟上，
+   * 且**往返期间正文只读**（2026-10-16 从"需要模型"那一类收进来试跑 —— 假通道能驱动它）。
+   */
+  ["accept-doc-action.mjs", "文档操作条（润色真改写 / 历史记由来 / 磁盘跟上 / 往返期间只读）"],
   /*
    * §135/§136 新增的三条。它们比上面那批**更抗环境干扰**：开头用 `.verify/harness.mjs`
    * 的 `freshDir()` —— 先杀掉上一轮的残留 Electron 再删数据目录，而不是直接 `rmSync`。
@@ -418,21 +505,111 @@ function startLocalFakeModel() {
     req.on("end", () => {
       /*
        * 认两个端点：`/chat/completions`（文本轮）与 `/models`（列模型/探测）。
-       * 一律回最短的合法形状 —— 不编工具调用（脚本要工具就自己会暴露出来）。
+       * 文本轮的行为见下面：默认分片流式；消息里点了名要工具就先回一个工具调用。
        */
       if (req.url?.includes("/models")) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ data: [{ id: "deepseek-flash" }, { id: "accept-fake" }] }));
         return;
       }
+      /* 最后一条 user 消息（决定"要不要回工具调用"用） */
+      let lastUserText = "";
+      try {
+        const msgs = JSON.parse(raw)?.messages ?? [];
+        for (let i = msgs.length - 1; i >= 0; i -= 1) {
+          const m = msgs[i];
+          if (m?.role === "user" && typeof m.content === "string") {
+            lastUserText = m.content;
+            break;
+          }
+        }
+      } catch {
+        /* 体不合法就当没有用户消息 */
+      }
+
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const frame = (delta, finish) =>
         `data: ${JSON.stringify({ id: "accept", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish ?? null }] })}\n\n`;
-      res.write(frame({ role: "assistant", content: "（本地假通道）收到。" }));
-      res.write(frame({}, "stop"));
-      res.write(`data: ${JSON.stringify({ id: "accept", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 } })}\n\n`);
-      res.write("data: [DONE]\n\n");
-      res.end();
+
+      /*
+       * ⭐ 两个"像真 provider"的行为（2026-10-16），缺了它们有些脚本没法验：
+       *
+       *  ① 消息里出现 `请调用 <名字> 工具` 时**先回一个工具调用**：
+       *     `accept-sessionlog` 要验的是"tool-call 与 tool-result 成对落进日志"，
+       *     假通道不回工具调用，这条就没法绿（它以前靠真模型）。
+       *     参数里带上用户那句话 —— 脚本埋的标记词（如 "42"）就在里面。
+       *  ② 否则**分片 + 间隔**地吐正文（约 3 秒）：`accept-abort` 要验的正是
+       *     "流式过程中正文在长、停止键在"，一次性吐完那一轮会瞬间结束，它什么都看不到。
+       */
+      const askTool = /请调用\s*([a-z_]+)\s*工具/.exec(lastUserText);
+      if (askTool) {
+        const args = JSON.stringify({ text: lastUserText.slice(0, 120) });
+        const half = Math.ceil(args.length / 2);
+        const callFrame = (first, delta, finish) =>
+          `data: ${JSON.stringify({
+            id: "accept",
+            object: "chat.completion.chunk",
+            choices: [
+              {
+                index: 0,
+                delta: first
+                  ? {
+                      role: "assistant",
+                      tool_calls: [
+                        { index: 0, id: "accept-call-1", type: "function", function: { name: askTool[1], arguments: delta } },
+                      ],
+                    }
+                  : { tool_calls: [{ index: 0, function: { arguments: delta } }] },
+                finish_reason: finish ?? null,
+              },
+            ],
+          })}\n\n`;
+        /* 真 provider 调工具时通常也带一句正文 —— 脚本要断"正文能从日志重建" */
+        res.write(frame({ role: "assistant", content: "（本地假通道）好，安排上了。" }));
+        res.write(callFrame(true, args.slice(0, half)));
+        res.write(callFrame(false, args.slice(half), "tool_calls"));
+        res.write(
+          `data: ${JSON.stringify({ id: "accept", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } })}\n\n`,
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
+      }
+
+      /*
+       * ⚠️ 每轮**带一个序号**（2026-10-16）：假通道原来每轮吐的字**一模一样**，
+       * 于是"重生成之后回复真的变了"这类判据在批跑里永远立不起来
+       * （`accept-actions` 的「重新生成」那一格就是这么卡住的 —— 它 `after !== before` 恒为假）。
+       * 真模型每轮的字当然不一样；这一句让**装置**也具备那个性质，判据才谈得上"能红"。
+       */
+      const pieces = [
+        `（本地假通道第 ${++round} 轮）`,
+        "正在",
+        "逐段",
+        "返回，",
+        "用来",
+        "验证",
+        "流式",
+        "与",
+        "中止",
+        "。",
+      ];
+      let i = 0;
+      const tick = () => {
+        if (i >= pieces.length) {
+          res.write(frame({}, "stop"));
+          res.write(
+            `data: ${JSON.stringify({ id: "accept", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 24, completion_tokens: pieces.length * 2, total_tokens: 24 + pieces.length * 2 } })}\n\n`,
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        res.write(frame(i === 0 ? { role: "assistant", content: pieces[i] } : { content: pieces[i] }));
+        i += 1;
+        setTimeout(tick, 300);
+      };
+      tick();
     });
   });
   return new Promise((resolve) => {
@@ -443,8 +620,30 @@ function startLocalFakeModel() {
   });
 }
 
+/* 第几轮请求（每轮正文里带出来，见上面 pieces 的说明） */
+let round = 0;
+
 const localModel = await startLocalFakeModel();
 console.log(`批跑自带假通道：${localModel.url}（配 DSH_NO_REAL_MODEL=1 —— 零出网是结构上成立的）`);
+
+/*
+ * ⭐ **只留假通道那一把键**（2026-10-16）。
+ *
+ * 桌面侧挑通道的顺序是"用户存过的 → **第一个可用的**"。而"可用"= 有密钥，
+ * 本机 shell 里就躺着 `ANXIN_API_KEY` 之类的真 key、`~/.dsh/.credentials.yaml` 里还有几把 ——
+ * 于是脚本里的应用会挑到**真远程**，被 `DSH_NO_REAL_MODEL` 一拦，
+ * 表现成"这一轮出错了"（红得莫名其妙，而根因其实是环境里那几把真 key）。
+ *
+ * 现在：把凭据文件指向一份**只有 `STRATA_API_KEY`** 的临时文件，
+ * 并在子进程环境里把其它 `*_API_KEY` 摘掉 —— 于是"第一个可用通道"只能是
+ * 我们那个指向 127.0.0.1 的假通道。"零出网"从"闸拦着"变成"根本没别的可挑"。
+ */
+const CRED_FILE = join(RECORDS_DIR, "batch-credentials.yaml");
+try {
+  writeFileSync(CRED_FILE, "refs:\n  STRATA_API_KEY: accept-local-fake\n", "utf8");
+} catch {
+  /* 写不进去就退回"只靠闸"（下面的环境清理照做） */
+}
 
 /**
  * 一条验收的硬超时（2026-10-16，待补收尾方案 §三.1）。
@@ -496,6 +695,11 @@ function run(file) {
     env.DSH_NO_REAL_MODEL = "1";
     env.STRATA_BASE_URL = localModel.url;
     env.STRATA_API_KEY = "accept-local-fake";
+    env.DSH_CREDENTIALS_FILE = CRED_FILE;
+    /* 把别的 provider 的键摘掉（见上面那段说明）——只留我们这一把 */
+    for (const name of Object.keys(env)) {
+      if (/_API_KEY$/i.test(name) && name !== "STRATA_API_KEY") delete env[name];
+    }
     /*
      * ⭐ **批跑强制一个隔离数据目录**（2026-10-16，审计 G01 的兜底）。
      *
@@ -518,21 +722,31 @@ function run(file) {
        * 用 /T 杀整棵树 —— 只杀脚本进程的话，它起的应用会变成孤儿。
        */
       try {
-        spawnSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });
+        /* 已经退出的进程不杀 —— 免得撞上 PID 复用（见下面 close 里那句说明） */
+        if (child.exitCode === null && child.signalCode === null) {
+          spawnSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });
+        }
       } catch {
         /* 已经死了就算了 */
       }
     }, CASE_TIMEOUT_MS);
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
-    child.on("close", (code) =>
+    child.on("close", (code) => {
+      /*
+       * ⚠️ **必须撤定时器**（2026-10-16 自查逮到）：不撤的后果不是"多跑一次 setTimeout"——
+       * 那个定时器到点会 `taskkill /F /T /PID <child.pid>`，而这条脚本**早就跑完了**、
+       * PID 可能已经被系统**复用**给别的进程。那正是审计 G43 说的危害形状
+       * （"按名字全机强杀"换成"按一个已经失效的 PID 强杀"，一样会打到不相干的进程）。
+       */
+      clearTimeout(timer);
       resolve({
         code: timedOut ? 124 : (code ?? 1),
         out,
         tail: out.trim().split("\n").slice(-3).join(" | "),
         timeout: timedOut,
-      }),
-    );
+      });
+    });
   });
 }
 
@@ -706,6 +920,28 @@ for (const [file, what] of SELECTED) {
     /* 读不出来就按"有判定"处理（隔离守卫那一步已经会拦读不出来的） */
   }
   const verdictClass = classify({ code, out, timeout: timedOut }, source);
+  /*
+   * ⚠️ `no-judge` 也要留输出（2026-10-16 修）：这类是**退 0 但没有判定** ——
+   * 上面那几处写日志的条件都是 `code !== 0`，于是屏幕上报"跑通却没判定"、
+   * 下面失败清单里还列出一个**根本不存在**的 `accept-fail-*.log`（照着去开文件的人会以为文件被删了）。
+   * 判"没有判定"靠的是读**报告内容**，那就得把报告留下来。
+   */
+  if (verdictClass === "no-judge" && out.trim()) {
+    try {
+      writeFileSync(
+        join(RECORDS_DIR, `accept-fail-${file.replace(/\.mjs$/, "")}.log`),
+        `# ${file}（${what}）跑通但没有判定（${new Date().toISOString()}）
+
+` +
+          `# ⚠️ 没有判定 = 在批跑里等于没测（要补判据或标废）——下面它的原始输出:
+
+${out}`,
+        "utf8",
+      );
+    } catch {
+      /* 写不进去不影响判定 */
+    }
+  }
   results.push({
     file,
     what,
@@ -838,6 +1074,28 @@ if (byVerdict("no-judge")) {
   console.log("⚠️ 上面这些「无判定」的脚本跑通了却什么都没断 —— 在批跑里等于没测（要补判据或标废）");
 }
 console.log(`记录已写入 ${HISTORY}（今天 ${today}）`);
+
+/*
+ * ⚠️ **把"没跑的那部分"也报出来**（2026-10-16，审计 G96）。
+ *
+ * 这一批跑完之后屏幕上原来只有"多少条通过/失败"—— 而"这一批只覆盖了一部分脚本"这件事
+ * 从来没出现在任何输出里。`NOT_IN_BATCH` 就是那部分，它不是"不存在"，
+ * 而是"今天没人跑"。`debt`（本该进批跑还没进）与 `fossil`（早与产品脱节）
+ * 这两类尤其要报 —— 它们的棘轮钉在 `src/acceptRegistry.test.ts` 里。
+ */
+{
+  const outside = Object.entries(NOT_IN_BATCH);
+  const byKind = (kind) => outside.filter(([, e]) => e.kind === kind).map(([name]) => name);
+  console.log(
+    `本轮没跑的有 ${outside.length} 个脚本（需要模型 ${byKind("needs-model").length} / ` +
+      `要打包产物 ${byKind("needs-package").length} / 已退役 ${byKind("retired").length} / ` +
+      `明账之债 ${byKind("debt").length} / 化石 ${byKind("fossil").length}）—— 名单在 verify-acceptances.mjs 的 NOT_IN_BATCH`,
+  );
+  const debts = byKind("debt");
+  if (debts.length) console.log(`   ⚠️ 明账（本该进批跑、还没进）：${debts.join(" / ")}`);
+  const fossils = byKind("fossil");
+  if (fossils.length) console.log(`   🗿 化石（早不是本产品的验收了，重写或删）：${fossils.join(" / ")}`);
+}
 
 if (stales.length) {
   console.log("");

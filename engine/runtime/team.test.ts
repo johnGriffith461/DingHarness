@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { listenReachable } from "../testing/localServer";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { ToolSet } from "ai";
@@ -49,8 +49,8 @@ beforeAll(async () => {
       }, delayMs);
     });
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  port = (server.address() as AddressInfo).port;
+  /* 共用的"绑一个连得上的端口"（见 engine/testing/localServer.ts 的说明） */
+  port = await listenReachable(server);
   process.env.STRATA_BASE_URL = `http://127.0.0.1:${port}/v1`;
   process.env.STRATA_API_KEY = "team-test";
 });

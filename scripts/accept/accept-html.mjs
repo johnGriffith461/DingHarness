@@ -1,7 +1,10 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { openApp, openCanvas, shot, verdict } from "./harness.mjs";
+import { failOnMarks, openApp, openCanvas, shot, verdict } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * HTML 节点端到端验收（阶段 9.1）。

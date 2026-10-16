@@ -1,5 +1,4 @@
-import { calibrationOf, estimateTokens, omittedNote, planContext, shouldCompact, totalTokens } from "../core/context";
-import { KEEP_RECENT_TOKENS } from "../core/context";
+import { KEEP_RECENT_TOKENS, calibrationOf, estimateTokens, omittedNote, planContext, shouldCompact, totalTokens } from "../core/context";
 import { KEEP_RATIO, KEEP_RECENT_TOKENS_MIN, MAX_KEEP_TOKENS, budgetOf, describeBudget, keepTokensFor } from "../runtime/budget";
 import { MODEL_CATALOG, UNKNOWN_MODEL_BUDGET, isStale } from "../runtime/models";
 import type { EvalCase } from "./types";
@@ -133,7 +132,18 @@ export const tools2: EvalCase[] = [
       [{ call: [{ name: "read_file", args: {} }] }],
       [{ say: "我下次把路径说清楚。" }],
     ],
-    expect: { events: ["tool-call", "tool-result", "done"], minSteps: 2 },
+    expect: {
+      events: ["tool-call", "tool-result", "done"],
+      minSteps: 2,
+      /*
+       * ⚠️ 2026-10-16（审计 P154）：title 说"失败是结果"，而原来 expect 里没有
+       * **任何**关于"它真的失败了"的判据 —— 断言序列是绿的（调用照样发生），
+       * 只有"失败"这件事没人管。`Invalid input` 是 AI SDK 的 schema 拒收文案：
+       * 参数合法时它不会出现，参数被静默修好时也不会出现。
+       */
+      toolErrors: ["read_file"],
+      toolErrorIncludes: ["Invalid input"],
+    },
   },
   {
     id: "tool-two-turns-tool-use",
@@ -243,7 +253,18 @@ export const subagents2: EvalCase[] = [
       [{ call: [{ name: "spawn_agent", args: { task: "任务".repeat(400) } }] }],
       [{ say: "我说明短一点。" }],
     ],
-    expect: { events: ["tool-call", "tool-result", "done"], minSteps: 2 },
+    expect: {
+      events: ["tool-call", "tool-result", "done"],
+      minSteps: 2,
+      /*
+       * ⚠️ 2026-10-16（审计 P154）：title 承诺的是"**被 schema 拒**（不许悄悄截断）"，
+       * 而原来 expect 只有 events/minSteps —— 拒绝、放行 800 字、还是静默截到 500 字，
+       * 事件序列**一模一样**。现在：必须失败，且失败文案是 schema 拒收那一种；
+       * 一个"悄悄截断"的实现会让调用成功（error 不存在）→ 这里立刻红。
+       */
+      toolErrors: ["spawn_agent"],
+      toolErrorIncludes: ["Invalid input"],
+    },
   },
   {
     id: "sub-two-turns",
@@ -292,7 +313,14 @@ export const teams2: EvalCase[] = [
     turns: ["派一个空团队"],
     mode: "全部允许",
     replies: [[{ call: [{ name: "spawn_agents", args: { tasks: [] } }] }], [{ say: "没有要派的事。" }]],
-    expect: { events: ["tool-call", "tool-result", "done"], eventsAbsent: ["error"], minSteps: 2 },
+    expect: {
+      events: ["tool-call", "tool-result", "done"],
+      eventsAbsent: ["error"],
+      minSteps: 2,
+      /* 空 tasks 被 schema 拒（审计 P154：title 说的"不能崩"要能被证伪） */
+      toolErrors: ["spawn_agents"],
+      toolErrorIncludes: ["Invalid input"],
+    },
   },
   {
     id: "team-duplicate-role",
@@ -358,7 +386,7 @@ export const teams2: EvalCase[] = [
 ];
 
 /**
- * 上下文压缩（补 8 条，全部是 `core` 格子）。
+ * 上下文压缩（12 条，全部是 `core` 格子）。
  *
  * 这一类验的是**核心里那把尺子**，不是回合流程（压缩是宿主的编排，见 `cases.ts` 的说明）。
  * 为什么值得单独占 12 条：这一层算错了**不会报错** —— 它只会悄悄多发几万 token 或少发关键历史，
@@ -376,13 +404,21 @@ export const compaction2: EvalCase[] = [
        * 第一版按"4 字符 1 token"估中文，于是 7.9 万字被判成需要压缩 —— 红的是我的假设。
        * 这里两种文字各测一次（规则对两种都成立才算对）。
        */
-      const just = [{ role: "user" as const, content: "字".repeat(19_000) }];
-      const over = [{ role: "user" as const, content: "字".repeat(21_000) }];
-      if (shouldCompact(just)) return "中文 1.9 万字被判成需要压缩（CJK 一字 1 token 的规则不成立？）";
-      if (!shouldCompact(over)) return "中文 2.1 万字没被判成需要压缩（阈值偏大）";
-      // 同一把尺子量拉丁字母：8 万字符附近才该翻（4 字符 1 token）
-      const asciiJust = [{ role: "user" as const, content: "a".repeat(79_000) }];
-      const asciiOver = [{ role: "user" as const, content: "a".repeat(81_000) }];
+      /*
+       * ⚠️ 2026-10-16（审计 P161）：这里原来把 20000 抄成裸字面量（19_000/21_000、
+       * 79_000/81_000，按"CJK 一字 1 token、拉丁 4 字符 1 token"倒推）——
+       * 于是合法阈值区间只剩 ±5%，把 `KEEP_RECENT_TOKENS` 从 20000 改成别的值，
+       * 这四条断言会一起红（而阈值本来就是可以调的）。
+       * 现在从常量推：紧贴阈值上下各取一档。
+       */
+      const KEEP = KEEP_RECENT_TOKENS;
+      const just = [{ role: "user" as const, content: "字".repeat(KEEP - 1000) }];
+      const over = [{ role: "user" as const, content: "字".repeat(KEEP + 1000) }];
+      if (shouldCompact(just)) return `中文 ${KEEP - 1000} 字被判成需要压缩（CJK 一字 1 token 的规则不成立？）`;
+      if (!shouldCompact(over)) return `中文 ${KEEP + 1000} 字没被判成需要压缩（阈值偏大）`;
+      // 同一把尺子量拉丁字母：4 字符 1 token → 阈值附近就是 4×KEEP 个字符
+      const asciiJust = [{ role: "user" as const, content: "a".repeat(KEEP * 4 - 4000) }];
+      const asciiOver = [{ role: "user" as const, content: "a".repeat(KEEP * 4 + 4000) }];
       if (shouldCompact(asciiJust)) return "拉丁 7.9 万字符被判成需要压缩（4 字符 1 token 的规则不成立？）";
       if (!shouldCompact(asciiOver)) return "拉丁 8.1 万字符没被判成需要压缩";
       return null;
@@ -428,6 +464,19 @@ export const compaction2: EvalCase[] = [
       const over = calibrationOf(1000, 700);
       if (!(over < 1)) return `高估 30% 时系数应 < 1，实际 ${over}`;
       if (calibrationOf(1000, undefined) !== 1) return "没有真实用量时应当回落到 1（不猜）";
+      /*
+       * ⚠️ 2026-10-16（审计 P162）：原来三个入参组合（1.3 / 0.7 / 1）全落在
+       * `Math.min(2, Math.max(0.5, …))` 的**非夹持区** —— 把夹紧整段删掉照样绿，
+       * 而注释正把夹紧写成理由（"不该与估算差出一倍以上…夹住比放任安全"）。
+       * 现在把上下两个夹持分支都真的踩到。
+       */
+      /* 系数 = 真实 ÷ 估算：低估 → 系数大（夹到 2）；高估 → 系数小（夹到 0.5） */
+      if (calibrationOf(1000, 100_000) !== 2) {
+        return `极端低估（真实是估算的 100 倍）应当夹在上限 2，实际 ${calibrationOf(1000, 100_000)}`;
+      }
+      if (calibrationOf(1000, 100) !== 0.5) {
+        return `极端高估（真实只有估算的 1/10）应当夹在下限 0.5，实际 ${calibrationOf(1000, 100)}`;
+      }
       return null;
     },
   },
@@ -455,19 +504,30 @@ export const compaction2: EvalCase[] = [
        * 由 SDK 自己配对）—— 所以"切割点别落在工具结果上"这条在**这一层**表现为
        * "别让保留段以 assistant 开头"：`planContext` 的注释就是这么写的（要往后挪）。
        */
+      /*
+       * ⚠️ 2026-10-16（审计 P155）：原来是 `planContext(msgs, 0)` —— 额度 0 时
+       * 循环里的 `recent.length > 0` 前置条件保证**只收一条**，于是
+       * `plan.recent.length > 1` 这个守卫**永远不成立**，这条用例恒绿：
+       * 把"往后挪"那段代码整块删掉，它也照样过（数学上不可命中）。
+       *
+       * 现在给一个**刚好收三条**的额度（1000 一条、共 5000）：
+       * 从尾部收 = [assistant("乙"), user("丙"), assistant("丁")] —— 开头是助手，
+       * 必须往后挪一条；判据同时钉住"挪了"（长度 2）与"挪到哪儿去"（older 多一条）。
+       */
       const msgs = [
         { role: "user" as const, content: "甲".repeat(1000) },
         { role: "assistant" as const, content: "乙".repeat(1000) },
         { role: "user" as const, content: "丙".repeat(1000) },
         { role: "assistant" as const, content: "丁".repeat(3000) },
       ];
-      // 额度小到只能留住最后一条：切点本来会落在 assistant("丁") 上
-      const plan = planContext(msgs, 0);
+      const plan = planContext(msgs, 5000);
       const first = plan.recent[0];
       if (!first) return "保留段为空";
-      if (plan.recent.length > 1 && first.role === "assistant") {
-        return "保留段以助手发言开头（应当往后挪到用户那一句）";
+      if (first.role === "assistant") return "保留段以助手发言开头（应当往后挪到用户那一句）";
+      if (plan.recent.length !== 2) {
+        return `保留段应当是挪过之后的 2 条（原切点 3 条、开头是助手），实际 ${plan.recent.length} 条 —— "往后挪"没发生？`;
       }
+      if (plan.older.length !== 2) return `被挪出去的那条应当进 older（期望 2 条），实际 ${plan.older.length} 条`;
       return null;
     },
   },

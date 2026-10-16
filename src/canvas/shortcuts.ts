@@ -54,6 +54,24 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "escape", keys: "Esc", aria: "Escape", label: "退出当前工具 / 取消选择", key: "escape" },
 ];
 
+/**
+ * 输入框里**允许被画布抢走**的命令（其余按键交回浏览器做文本编辑）。
+ *
+ * ⚠️ 这份名单短是刻意的（2026-10-16，审计 P70）：
+ * 原来这里是一张"**要挡掉**"的黑名单（只挡了 3 个，而且挡的正好是不该挡的：切标记模式 / 清标记 / 原地复制），
+ * 于是 `cut`（Ctrl+X）在聊天框里按下会**删掉画布上选中的节点** —— 用户以为自己在剪切文字，
+ * 而画布那份内容已经没了（而且它 `preventDefault()` 了，连文本剪切也一起没了）。
+ *
+ * 取舍：**少放行一个，用户最多发现"输入框里按不了"；多放行一个，用户会丢数据**。
+ * 所以按"不碰画布内容"来列，而不是按"我们想得起来的那几个"。
+ *
+ * @param id 命中的快捷键
+ * @returns true = 输入框里也让它生效
+ */
+export function mayStealInEditor(id: ShortcutId): boolean {
+  return id === "save" || id === "escape" || id === "toggleMarkers" || id === "fitView";
+}
+
 /** 按 id 取快捷键定义。 */
 export function shortcutOf(id: ShortcutId): Shortcut {
   const found = SHORTCUTS.find((s) => s.id === id);
@@ -68,7 +86,13 @@ export type KeyLike = {
   metaKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
-  /** 事件目标是不是输入框（输入框里不抢纯字母键）。 */
+  /**
+   * 事件目标是不是输入框。
+   *
+   * ⚠️ `matchShortcut` **故意不读它**：命中哪个快捷键与焦点在哪无关，
+   * "要不要让画布抢这一下"是**调用方**的决定（见 `mayStealInEditor`，2026-10-16 审计 P70 之后）。
+   * 留这个字段是因为调用方算出来顺手放进来，且测试夹具也按这个形状拼。
+   */
   inEditor: boolean;
 };
 

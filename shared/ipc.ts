@@ -11,6 +11,17 @@ import type {
   CanvasSaveResult,
   CanvasSnapshotFile,
 } from "./canvas";
+/*
+ * 契约里用到的**真形状**都从各自的模块引（2026-10-16，审计 P93）。
+ *
+ * 教训：`drive.list` 原来在手抄一份形状，抄漏了 `origin` 的第四个值（`"asset"`）、
+ * 还把 `kind` 写松成 `string`；`agents` / `readings` / `docs` 写的是 `unknown[]`
+ * 而主进程返回的是具体类型。**契约里手抄形状 = 迟早有一份是旧的**。
+ */
+import type { AgentFile } from "./agent";
+import type { Doc } from "./doc";
+import type { DriveEntry } from "./drive";
+import type { Reading } from "./reader";
 
 export type { CanvasDocument, CanvasLoadResult, CanvasSaveResult, CanvasSnapshotFile };
 
@@ -429,17 +440,16 @@ export type ShellBridge = {
   };
   /** 云盘（阶段 11.5）：真实目录里的文件列表、导入、删除、打开。 */
   drive: {
-    list: () => Promise<
-      Array<{
-        name: string;
-        path: string;
-        bytes: number;
-        createdAt: number;
-        modifiedAt: number;
-        kind: string;
-        origin: "artifact" | "export" | "drive";
-      }>
-    >;
+    /**
+     * 列云盘条目。
+     *
+     * ⚠️ 2026-10-16（审计 P93）：这里原来**手抄了一份形状**，而且抄漏了 ——
+     * `origin` 只写了 `"artifact" | "export" | "drive"` 三个值，而 `DriveEntry.origin`
+     * 是**四个**（多一个 `"asset"`：生成出来的图片/视频走它，`driveStore` 实发）；
+     * `kind` 还被写松成 `string`（比 `DriveKind` 松）。契约于是在**说谎** ——
+     * 照着它写渲染层的人会漏掉一种来源。现在直接用 `DriveEntry`（真形状只有一份）。
+     */
+    list: () => Promise<DriveEntry[]>;
     /**
      * 弹系统文件选择框导入到云盘；返回**按文件**的结果（§170）。
      */
@@ -549,18 +559,27 @@ export type ShellBridge = {
   };
   /** 本机 AI 智能体（§156）。 */
   agents: {
-    load: () => Promise<unknown[]>;
-    save: (agents: unknown) => Promise<unknown[]>;
+    /*
+     * ⚠️ 2026-10-16（审计 P93）：这两个原来声明成 `Promise<unknown[]>`，而主进程
+     * （`electron/ipc/agentStore.ts`）返回的是 `AgentFile`（`{ agents, selected }`）——
+     * 契约把"数组"说成了事实。唯一那个调用点之所以没炸，是因为它在外面套了一层
+     * `normalizeAgentFile(await shell.agents.load())`。**契约说谎**与"当下崩溃"是两件事：
+     * 下一个人照着 `unknown[]` 写 `.map()`，就会在真数据上炸。
+     */
+    load: () => Promise<AgentFile>;
+    save: (agents: AgentFile) => Promise<AgentFile>;
   };
   /** AI 阅读的「最近阅读」（§155）。 */
   readings: {
-    load: () => Promise<unknown[]>;
-    save: (readings: unknown) => Promise<unknown[]>;
+    /* 整库存成**一个数组**（不是 `{items}` 那种信封）—— 见 `electron/ipc/readerStore.ts` */
+    load: () => Promise<Reading[]>;
+    save: (readings: Reading[]) => Promise<Reading[]>;
   };
   /** AI 文档（§153）：一次读写整库。 */
   docs: {
-    load: () => Promise<unknown[]>;
-    save: (docs: unknown) => Promise<unknown[]>;
+    /* 同样是**裸数组**（`Doc[]`）*/
+    load: () => Promise<Doc[]>;
+    save: (docs: Doc[]) => Promise<Doc[]>;
   };
   /** 工作台任务（阶段 11.9）：读 / 写（原子写）。 */
   tasks: {

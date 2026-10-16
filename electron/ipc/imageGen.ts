@@ -3,6 +3,7 @@ import path from "node:path";
 import { app, ipcMain, nativeImage, net, protocol } from "electron";
 import { normalize } from "../../shared/imageSize";
 import { humanFailure } from "../../shared/errors";
+import { fetchRemote } from "../../engine/runtime/modelGate";
 
 /**
  * 图像生成（对标原版画布的核心用途：`aiCreation_canvas_toolbar_imageGenerator`）。
@@ -297,7 +298,7 @@ export function registerImageIpc(): void {
         // 其它情况传规整好的 WxH
         if (size && size !== "auto") body.size = size;
 
-        const res = await fetch(`${provider.baseURL}/images/generations`, {
+        const res = await fetchRemote(`${provider.baseURL}/images/generations`, "生成图片", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${resolveSecret(provider.keyRef)}`,
@@ -340,7 +341,7 @@ export function registerImageIpc(): void {
         } satisfies GenerateImageResult;
       }
       if (item?.url) {
-        const imgRes = await fetch(item.url, { signal: AbortSignal.timeout(120_000) });
+        const imgRes = await fetchRemote(item.url, "下载生成的图片", { signal: AbortSignal.timeout(120_000) });
         const buf = Buffer.from(await imgRes.arrayBuffer());
         const dir = assetsDir();
         fs.mkdirSync(dir, { recursive: true });
@@ -398,7 +399,7 @@ export function registerImageIpc(): void {
       form.append("image", new Blob([new Uint8Array(prepared.buffer)], { type: "image/png" }), "input.png");
       form.append("size", size);
 
-      const res = await fetch(`${provider.baseURL}/images/edits`, {
+      const res = await fetchRemote(`${provider.baseURL}/images/edits`, "编辑图片", {
         method: "POST",
         // multipart：**不要**手写 Content-Type，让 fetch 自己带 boundary，否则上游解析不了
         headers: { Authorization: `Bearer ${resolveSecret(provider.keyRef)}` },
@@ -429,7 +430,7 @@ export function registerImageIpc(): void {
       if (item.b64_json) {
         buffer = Buffer.from(item.b64_json, "base64");
       } else if (item.url) {
-        const imgRes = await fetch(item.url, { signal: AbortSignal.timeout(120_000) });
+        const imgRes = await fetchRemote(item.url, "下载生成的图片", { signal: AbortSignal.timeout(120_000) });
         buffer = Buffer.from(await imgRes.arrayBuffer());
       } else {
         return { ok: false, error: "上游没有返回图片数据" } satisfies EditImageResult;

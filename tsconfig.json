@@ -23,5 +23,5 @@
       "@engine/*": ["engine/*"]
     }
   },
-  "include": ["src", "shared", "electron", "engine", "hosts", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "shared", "electron", "engine", "hosts", "scripts", "vite.config.ts", "vitest.config.ts"]
 }

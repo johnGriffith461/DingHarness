@@ -270,6 +270,8 @@ export const useDocStore = create<DocState>()((set, get) => {
       }
       set({ busy: true });
       try {
+        /* 记下**发起时**的正文（回来要拿它比一比：这期间用户有没有改） */
+        const sentFrom = doc.body;
         const { text, error } = await completeOnce({
           provider,
           ...(model ? { model } : {}),
@@ -280,7 +282,23 @@ export const useDocStore = create<DocState>()((set, get) => {
           set({ note: `${DOC_ACTION_LABEL[action]}失败：${error ?? "没有返回内容"}` });
           return;
         }
-        get().patch(id, { body: text.trim() }, DOC_ACTION_LABEL[action]);
+        const rewritten = text.trim();
+        /*
+         * ⚠️ **改写期间正文被改过 → 不许覆盖**（2026-10-16，审计 P87）。
+         *
+         * 面板那边已经把它设成只读了（改不了就不会丢），这里是**兜底**：
+         * 只要正文在往返期间真的变了（别处粘进来、还原版本、多窗口…），
+         * 就把模型这一段**存成另一个版本**而不是覆盖他刚写的东西 —— 两边的成果都留着，
+         * 并如实说明发生了什么（静默覆盖是这件事里最坏的部分）。
+         */
+        const now = get().docs.find((d) => d.id === id);
+        if (now && now.body !== sentFrom && now.body !== rewritten) {
+          get().patch(id, { body: rewritten }, `${DOC_ACTION_LABEL[action]}（改写期间的版本，未覆盖你改的）`);
+          get().patch(id, { body: now.body }, "你的改动（保留了）");
+          set({ note: `${DOC_ACTION_LABEL[action]}的版本已存进历史；你在改写期间的改动保留了（没被覆盖）` });
+          return;
+        }
+        get().patch(id, { body: rewritten }, DOC_ACTION_LABEL[action]);
         set({ note: `已${DOC_ACTION_LABEL[action]}` });
       } finally {
         set({ busy: false });
