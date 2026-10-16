@@ -8,7 +8,10 @@
 // 判据都是"点了要有真后果"：两类 chip 都在 → 模型列表真列出来 → 选一条真落盘（`resolveChatRoute`
 // 读的就是那个键）→ chip 文案跟着变 → 档位选真落盘、选回「默认」要把键**删掉**（默认 = 一个字段都不发）。
 import { chromium } from "playwright";
-import { killLeftovers, openApp, pickPort, sleep, verdict } from "./harness.mjs";
+import { failOnMarks, killLeftovers, openApp, pickPort, sleep, verdict } from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+failOnMarks();
 
 const bad = [];
 const note = (m) => console.log("   " + m);
@@ -33,18 +36,26 @@ try {
   if (!effort0) bad.push("输入区没有思考强度 chip（wb-effort）");
   note(`两颗 chip：${model0} ／ ${effort0}`);
 
-  /* ② 模型弹层：真列模型；**不许**有搜索框与拉取按钮（那是设置页的事） */
+  /* ② 模型弹层：一级是 provider（ZCode 的形态：多 provider 时一级列 provider、悬停展开二级模型）；
+     **不许**有搜索框与拉取按钮（那是设置页的事） */
   await page.locator('[data-testid="wb-model"]').click();
   await sleep(800);
-  const options = await page.locator('[data-testid^="wb-model-option-"]').count();
-  if (options < 1) bad.push("模型弹层里一个模型都没有");
+  const providers = await page.locator('[data-testid^="wb-model-provider-"]').count();
+  const singleList = await page.locator('[data-testid^="wb-model-option-"]').count();
+  if (providers < 1 && singleList < 1) bad.push("模型弹层里既没有 provider 也没有模型");
   const searchBoxes = await page.locator('[data-testid="wb-model-search"]').count();
   const pullButtons = await page.locator('[data-testid^="wb-model-pull-"]').count();
   if (searchBoxes || pullButtons) {
-    bad.push(`主页的模型弹层里不该有搜索(${searchBoxes}) / 拉取(${pullButtons}) —— 那是设置页的事`);
+    bad.push();
   }
-  note(`模型：${options} 个 / 搜索 ${searchBoxes} · 拉取 ${pullButtons}（都该是 0）`);
-
+  /* 多 provider：悬停一级展开二级 */
+  if (providers > 0) {
+    await page.locator('[data-testid^="wb-model-provider-"]').first().hover();
+    await sleep(500);
+  }
+  const options = await page.locator('[data-testid^="wb-model-option-"]').count();
+  if (options < 1) bad.push("展开一级之后二级一个模型都没有");
+  note();
   /* ③ 选一条 → 真落盘 + 文案跟着走 */
   const first = page.locator('[data-testid^="wb-model-option-"]').first();
   const picked = ((await first.getAttribute("data-testid")) ?? "").replace("wb-model-option-", "");

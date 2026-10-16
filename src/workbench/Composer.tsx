@@ -736,7 +736,13 @@ export function Composer({
 
         <span className="wb-spacer" />
         {/* 模型 · 思考：真选择器（组件在 ModelChip.tsx） */}
-        <ModelChip open={openPop === "model"} onToggle={() => togglePop("model")} onClose={() => setOpenPop(null)} />
+        <ModelChip
+          open={openPop === "model"}
+          onToggle={() => togglePop("model")}
+          onClose={() => setOpenPop(null)}
+          /* 「管理模型」→ 打开设置（开关在 NavSidebar；跨组件用一条 DOM 事件，不引全局 store） */
+          onOpenSettings={() => window.dispatchEvent(new CustomEvent("dsh-open-settings"))}
+        />
         {/* 思考强度是**另一颗**（主人的口径：模型一颗、档位一颗） */}
         <EffortChip open={openPop === "effort"} onToggle={() => togglePop("effort")} onClose={() => setOpenPop(null)} />
 

@@ -76,6 +76,12 @@ export function NavSidebar() {
   const setView = useWorkbenchStore((s) => s.setView);
   const openTask = useWorkbenchStore((s) => s.openTask);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /* 输入区的「管理模型」要能打开设置（见 Composer 那处说明） */
+  useEffect(() => {
+    const onOpen = () => setSettingsOpen(true);
+    window.addEventListener("dsh-open-settings", onOpen);
+    return () => window.removeEventListener("dsh-open-settings", onOpen);
+  }, []);
   /** 左栏收起（工单 3）：状态在 store 里，六个页面的那颗按钮共用一个开关。 */
   const navCollapsed = useWorkbenchStore((s) => s.navCollapsed);
   /*
