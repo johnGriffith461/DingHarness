@@ -291,6 +291,17 @@ export type ShellBridge = {
     listProviders: () => Promise<ProviderInfo[]>;
     /** 主动探测真实连通性（较慢，只在用户触发时跑）。 */
     probe: () => Promise<Array<{ id: string; ok: boolean; ms: number; error?: string }>>;
+    /**
+     * 拉取**真实的模型清单**（`GET {baseURL}/models`）。
+     *
+     * 两种目标：表里那家（`providerId`，用它自己的地址与密钥）或**用户自填的地址与 key**。
+     * 名字对不对不靠猜 —— 名单由对方给（`engine/runtime/modelsFetch.ts` 里有口径说明）。
+     */
+    fetchModels: (target: { providerId: string } | { baseURL: string; apiKey: string }) => Promise<{
+      ok: boolean;
+      models?: string[];
+      error?: string;
+    }>;
     chat: (request: ChatRequest) => Promise<ChatStartResult>;
     abort: (requestId: string) => Promise<{ ok: boolean }>;
     onStream: (listener: (event: AiStreamEvent) => void) => () => void;

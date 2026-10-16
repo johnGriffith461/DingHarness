@@ -1,7 +1,10 @@
 import path from "node:path";
 import { app } from "electron";
 import type { ProviderInfo } from "../../shared/ipc";
+import { modelIdsFromJson, modelsUrlFor } from "../../engine/runtime/modelsFetch";
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { allProviders, getProvider, listProviders } from "../../engine/runtime/providers";
+import { blockedReason, realModelBlocked } from "../../engine/runtime/modelGate";
 import { createJsonStore } from "./jsonStore";
 import type { HealthStore } from "../../engine/ports/health";
 
@@ -169,6 +172,14 @@ export async function probeProviders(timeoutMs = 8000): Promise<ProbeOutcome[]> 
     if (!info?.available) continue;
     const key = resolveSecret(def.keyRef);
     const started = Date.now();
+    /*
+     * ⭐ 闸（2026-10-16，审计 P53）：开着 `DSH_NO_REAL_MODEL` 时探测也**不许真出网**。
+     * 记成"被闸拦下"而不是"provider 坏了" —— 前者是用户自己的开关，后者会污染健康账本。
+     */
+    if (realModelBlocked(def.baseURL)) {
+      out.push({ id: def.id, ok: false, ms: 0, error: blockedReason("探测 provider", def.baseURL) });
+      continue;
+    }
     try {
       const client = createOpenAICompatible({
         name: def.id,
@@ -195,3 +206,54 @@ export async function probeProviders(timeoutMs = 8000): Promise<ProbeOutcome[]> 
 }
 
 export { getProvider };
+
+/**
+ * 拉取某家 provider 真实的模型清单（2026-10-16）。
+ *
+ * 两种目标：表里那家（用它自己的地址与密钥）或用户自填的地址与 key。
+ * 网络在这一层，解析在 `engine/runtime/modelsFetch.ts`（纯函数，单测钉住）。
+ *
+ * ⚠️ 密钥**不出主进程**：这里只把它放进请求头，返回值里只有模型名。
+ *
+ * @param target 目标（providerId 或自填 baseURL + apiKey）
+ * @returns 模型名列表；失败时 `ok:false` 且 `error` 是给人看的一句话
+ */
+export async function fetchModelsFor(
+  target: { providerId: string } | { baseURL: string; apiKey: string },
+): Promise<{ ok: boolean; models?: string[]; error?: string }> {
+  let baseURL: string;
+  let apiKey: string | undefined;
+  if ("providerId" in target) {
+    const info = getProvider(target.providerId);
+    if (!info) return { ok: false, error: `没有这家 provider：${target.providerId}` };
+    baseURL = info.baseURL;
+    apiKey = resolveSecret(info.keyRef) ?? undefined;
+    if (!apiKey) return { ok: false, error: `${info.label} 还没有密钥 —— 先填一条再拉` };
+  } else {
+    baseURL = target.baseURL;
+    apiKey = target.apiKey.trim() || undefined;
+  }
+
+  try {
+    const res = await fetch(modelsUrlFor(baseURL), {
+      headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(20_000),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      return { ok: false, error: `拉取失败（${res.status}）：${text.slice(0, 160) || "没有说明"}` };
+    }
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, error: `返回的不是 JSON：${text.slice(0, 120)}` };
+    }
+    const models = modelIdsFromJson(parsed);
+    if (!models.length) return { ok: false, error: "对方没给出可识别的模型清单（不猜，宁可说没有）" };
+    return { ok: true, models };
+  } catch (e) {
+    const message = String((e as Error)?.message ?? e);
+    return { ok: false, error: /timeout|abort/i.test(message) ? "超时（20 秒）——地址对不对？" : message.slice(0, 160) };
+  }
+}

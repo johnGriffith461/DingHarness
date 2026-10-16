@@ -1,5 +1,5 @@
 import { ipcMain, type WebContents } from "electron";
-import { healthStore, listProvidersWithProbe, probeProviders } from "./aiProbe";
+import { fetchModelsFor, healthStore, listProvidersWithProbe, probeProviders } from "./aiProbe";
 import { desktopSessionStore } from "./sessionStore";
 import { hostExecutor, mcpToolEntries, pluginToolEntries, runToolOnce, type ToolEnv } from "./tools";
 import { describeToolResult, rejectedLine } from "../../shared/agentTools";
@@ -22,6 +22,8 @@ import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "
 export const AI_CHANNEL = {
   listProviders: "ai:listProviders",
   probe: "ai:probe",
+  /** 拉真实的模型清单（见 `engine/runtime/modelsFetch.ts`）。 */
+  fetchModels: "ai:fetchModels",
   chat: "ai:chat",
   abort: "ai:abort",
   /** 用户放行后执行一次被拦下的工具调用（§144）。 */
@@ -105,6 +107,9 @@ export function registerAiIpc(): void {
    * 不在启动时自动跑（会拖慢启动 + 白烧额度），只在用户需要时触发。
    */
   ipcMain.handle(AI_CHANNEL.probe, () => probeProviders());
+  ipcMain.handle(AI_CHANNEL.fetchModels, (_event, target: { providerId: string } | { baseURL: string; apiKey: string }) =>
+    fetchModelsFor(target),
+  );
 
   /**
    * 用户点了「允许」→ 执行那一次被拦下的工具调用（§144）。

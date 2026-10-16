@@ -108,6 +108,7 @@ const api = {
     },
     /** 主动探测各 provider 真实连通性（不在启动时自动跑）。 */
     probe: () => ipcRenderer.invoke(AI_CHANNEL.probe),
+    fetchModels: (target) => ipcRenderer.invoke(AI_CHANNEL.fetchModels, target),
     /** 用户放行后执行一次被拦下的工具调用（§144）。 */
     runTool: (request: unknown) => ipcRenderer.invoke(AI_CHANNEL.runTool, request),
   },
