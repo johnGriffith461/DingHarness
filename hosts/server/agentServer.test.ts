@@ -708,3 +708,93 @@ describe("路径里的坏百分号编码（三条路都要 400）", () => {
     }
   });
 });
+
+/**
+ * 成员 token 与归属过滤（V5-2 任务 2.2）。
+ *
+ * 三条要挡的事：
+ *   ① **认证机制不变、身份细化**：主口令仍是"本机主人"（全权），
+ *      成员口令认得出是谁（`/v1/info` 的 `you`）——而 401 / 限速那条路一个字不改；
+ *   ② **成员只看得到归自己的**：不给参数也只列自己的；指别人的 owner → **403**
+ *      （不是"悄悄过滤成空"—— 那会让人以为对方没有会话）；
+ *   ③ 坏配置**启动就拒**（重复 id / 空口令 / 口语与主口令相同）。
+ */
+describe("成员 token 与 owner 过滤（V5-2 2.2）", () => {
+  const members = [
+    { id: "alice", token: "sk-alice-123" },
+    { id: "bob", token: "sk-bob-456" },
+  ];
+  const sessions = [
+    { sessionId: "s-1", conversationId: "s-1", title: "alice 的", updatedAt: 3, bytes: 1, owner: "alice" },
+    { sessionId: "s-2", conversationId: "s-2", title: "bob 的", updatedAt: 2, bytes: 1, owner: "bob" },
+    { sessionId: "s-3", conversationId: "s-3", title: "本机主人的", updatedAt: 1, bytes: 1, owner: "local" },
+  ];
+  const boot2 = (over: Partial<ServerOptions> = {}) => boot({ members, listSessions: async () => sessions, ...over });
+
+  it("⭐ 成员口令认得出身份（/v1/info 的 you）；主口令 = 本机主人", async () => {
+    const { port, token } = await boot2();
+    const asAlice = await call(port, "/v1/info", { headers: { Authorization: "Bearer sk-alice-123" } });
+    expect(asAlice.status).toBe(200);
+    expect(JSON.parse(asAlice.text).you).toEqual({ id: "alice", owner: false });
+
+    const asOwner = await call(port, "/v1/info", { headers: { Authorization: `Bearer ${token}` } });
+    expect(JSON.parse(asOwner.text).you).toEqual({ id: "local", owner: true });
+  });
+
+  it("⭐ 成员只列归自己的（不给参数也一样）；指别人的 owner → 403", async () => {
+    const { port } = await boot2();
+    const aliceAuth = { Authorization: "Bearer sk-alice-123" };
+
+    const implicit = await call(port, "/v1/sessions", { headers: aliceAuth });
+    expect(implicit.status).toBe(200);
+    const listed = JSON.parse(implicit.text) as { sessions: Array<{ sessionId: string }> };
+    expect(listed.sessions.map((s) => s.sessionId), "成员看到了别人的会话").toEqual(["s-1"]);
+
+    /* 显式要自己的：照给 */
+    const own = await call(port, "/v1/sessions?owner=alice", { headers: aliceAuth });
+    expect(own.status).toBe(200);
+
+    /* 要别人的：403（不是空列表） */
+    const theirs = await call(port, "/v1/sessions?owner=bob", { headers: aliceAuth });
+    expect(theirs.status).toBe(403);
+    expect(theirs.text).toContain("只能查归你的会话");
+  });
+
+  it("本机主人：不给参数列全部；给 `?owner=` 就过滤（老口径照旧）", async () => {
+    const { port, token } = await boot2();
+    const auth = { Authorization: `Bearer ${token}` };
+    const all = JSON.parse((await call(port, "/v1/sessions", { headers: auth })).text) as { sessions: unknown[] };
+    expect(all.sessions).toHaveLength(3);
+    const filtered = JSON.parse((await call(port, "/v1/sessions?owner=bob", { headers: auth })).text) as {
+      sessions: Array<{ sessionId: string }>;
+    };
+    expect(filtered.sessions.map((s) => s.sessionId)).toEqual(["s-2"]);
+  });
+
+  it("旧会话（没有 owner 那一格）按兼容口径 local 读：成员看不到，主人看得到", async () => {
+    const legacy = [{ sessionId: "s-old", conversationId: "s-old", title: "老会话", updatedAt: 1, bytes: 1 }];
+    const { port, token } = await boot({ members, listSessions: async () => legacy });
+    const asAlice = JSON.parse((await call(port, "/v1/sessions", { headers: { Authorization: "Bearer sk-alice-123" } })).text) as {
+      sessions: unknown[];
+    };
+    expect(asAlice.sessions, "alice 看到了本机主人的旧会话").toHaveLength(0);
+    const asOwner = JSON.parse((await call(port, "/v1/sessions", { headers: { Authorization: `Bearer ${token}` } })).text) as {
+      sessions: unknown[];
+    };
+    expect(asOwner.sessions).toHaveLength(1);
+  });
+
+  it("坏口令照旧 401（新身份层不是后门）；主口令与成员口令并存互不干扰", async () => {
+    const { port, token } = await boot2();
+    expect((await call(port, "/v1/info", { headers: { Authorization: "Bearer sk-nope" } })).status).toBe(401);
+    expect((await call(port, "/v1/info", { headers: { Authorization: `Bearer ${token}` } })).status).toBe(200);
+    expect((await call(port, "/v1/info", { headers: { Authorization: "Bearer sk-bob-456" } })).status).toBe(200);
+  });
+
+  it("坏成员配置：启动就拒（重复 id / 空口令 / 口语与主口令相同）", async () => {
+    await expect(boot({ members: [{ id: "a", token: "x" }, { id: "a", token: "y" }] })).rejects.toThrow(/重复/);
+    await expect(boot({ members: [{ id: "  ", token: "x" }] })).rejects.toThrow(/缺 id/);
+    await expect(boot({ members: [{ id: "a", token: "   " }] })).rejects.toThrow(/口令是空的/);
+    await expect(boot({ token: "same-token", members: [{ id: "a", token: "same-token" }] })).rejects.toThrow(/与主口令相同/);
+  });
+});

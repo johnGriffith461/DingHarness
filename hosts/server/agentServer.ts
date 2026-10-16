@@ -69,6 +69,17 @@ export type ServerOptions = {
   hooks?: Record<string, string>;
   /** webhook 验签密钥（HMAC-SHA256）。不给 = 所有 webhook 一律 403。 */
   hooksSecret?: string;
+  /**
+   * **成员 token**（V5-2 任务 2.2）：`id` + 各自一把口令。
+   *
+   * 与 `token`（单口令 = 本机主人）并存 —— **认证机制不变、身份细化**：
+   * 每个请求现在知道"是谁在请求"，`GET /v1/sessions` 据此过滤（成员只看得到自己的），
+   * 2.3 的 SSE actor 也从这里来。
+   *
+   * ⚠️ 成员口令**不自动生成**（生成出来的必须打印，而打印多份凭据是坏习惯）；
+   * 重复 id / 空口令在**启动时**就拒（fail fast，不等到有人请求）。
+   */
+  members?: readonly ServerMember[];
   /** 会话列表（宿主注入的真实实现）。不给 = `/v1/sessions` 回 501。 */
   listSessions?: () => Promise<SessionSummary[]>;
   /**
@@ -84,8 +95,7 @@ export type ServerOptions = {
   log?: (line: string) => void;
 };
 
-/** 起服务之后拿到的句柄（端口可能被系统改过 —— 传 0 时就是随机端口）。 */
-export type StartedAgentServer = {
+/** 起服务之后拿到的句柄（端口可能被系统改过 —— 传 0 时就是随机端口）。 */export type StartedAgentServer = {
   server: Server;
   port: number;
   url: string;
@@ -101,6 +111,55 @@ export type StartedAgentServer = {
 /** 认证失败限速的阈值（同一来源）。 */
 const AUTH_FAIL_LIMIT = 8;
 const AUTH_LOCK_MS = 30_000;
+
+/**
+ * 一个成员的身份（V5-2 2.2）：id + 一把口令。
+ *
+ * `roles` 暂时不在这里 —— 服务端现在只需要"谁在请求"（owner 过滤）；
+ * 角色权限（C2 的两轴判定）在 V5-3 的团队空间接上来时再进这一层（ADR-007 的 follow-up）。
+ */
+export type ServerMember = {
+  id: string;
+  token: string;
+};
+
+/** 服务端认出来的"现在是谁在请求"。 */
+export type RequesterIdentity = {
+  id: string;
+  /**
+   * 是不是**本机主人**（单口令那条路）。
+   *
+   * `true` = 全权（能列全部会话、能指定任意 owner）；`false` = 某个成员
+   * （只看得到归自己的会话）。这个区分是 2.2 的核心：**认证机制不变、身份细化**。
+   */
+  owner: boolean;
+};
+
+/** 本机主人那个 id（与 C1 的 owner / C5 的 actor / C4 的归属同一个 id 空间）。 */
+const LOCAL_OWNER_ID = "local";
+
+/**
+ * 启动前把成员表收窄（坏配置**立刻**拒，别等到有人请求才发现）。
+ *
+ * @param members 配置里给的成员
+ * @returns 干净的成员表
+ * @throws 重复 id / 空 id / 空口令 / 口令与主口令相同
+ */
+function normalizeMembers(members: readonly ServerMember[] | undefined, ownerToken: string): ServerMember[] {
+  const out: ServerMember[] = [];
+  const ids = new Set<string>();
+  for (const member of members ?? []) {
+    const id = String(member?.id ?? "").trim();
+    const token = String(member?.token ?? "");
+    if (!id) throw new Error("成员 token 缺 id：--member <id>:<口令>");
+    if (!token.trim()) throw new Error(`成员 ${id} 的口令是空的：--member ${id}:<口令>`);
+    if (ids.has(id)) throw new Error(`成员 id 重复：${id}（一个成员一把口令）`);
+    if (sameToken(token, ownerToken)) throw new Error(`成员 ${id} 的口令与主口令相同（那样就分不出身份了）`);
+    ids.add(id);
+    out.push({ id, token });
+  }
+  return out;
+}
 
 /** 请求体上限（别让人用一个超大 body 把内存吃光）。 */
 const BODY_LIMIT = 1_000_000;
@@ -148,12 +207,14 @@ export async function startAgentServer(opts: ServerOptions): Promise<StartedAgen
   const token = explicitToken || randomBytes(24).toString("base64url");
 
   const hostNames = allowedHostNamesFor(bind);
+  /* 成员表在**启动前**收窄（坏配置立刻拒，别等有人请求才发现） */
+  const members = normalizeMembers(opts.members, token);
   const authFailures = new Map<string, { count: number; until: number }>();
   const activeRuns = new Set<AbortController>();
   const sockets = new Set<Socket>();
 
   const server = createServer((req, res) => {
-    handle(req, res, opts, token, hostNames, authFailures, activeRuns).catch((error: unknown) => {
+    handle(req, res, opts, token, members, hostNames, authFailures, activeRuns).catch((error: unknown) => {
       /* 兜底：这一层再漏出去就是"未处理拒绝"（进程会被带走）—— 宁可留一行日志 */
       opts.log?.(`handler 未处理异常：${String((error as Error)?.message ?? error)}`);
       if (!res.headersSent) {
@@ -270,10 +331,28 @@ function sameToken(a: string, b: string): boolean {
   return timingSafeEqual(digest(a), digest(b));
 }
 
-function authorized(req: IncomingMessage, token: string): boolean {
+/**
+ * 认出"现在是谁"（V5-2 2.2）。
+ *
+ * ⚠️ **候选全比一遍再决定**（不提前 return）：提前退出会让"匹配上的是第几个成员"
+ * 从耗时里漏出去。与 `sameToken` 的常数时间比较是同一条纪律的两半。
+ *
+ * @param req 请求
+ * @param ownerToken 主口令（单口令那条路 = 本机主人）
+ * @param members 成员表（可能为空）
+ * @returns 身份；凭据不对/没带给 null（调用方按 401 + 限速处理）
+ */
+function identify(req: IncomingMessage, ownerToken: string, members: readonly ServerMember[]): RequesterIdentity | null {
   const header = req.headers.authorization ?? "";
   const got = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  return Boolean(got) && sameToken(got, token);
+  if (!got) return null;
+  let identity: RequesterIdentity | null = null;
+  /* 主口令优先（它是主人；成员的 id 万一也叫 local，主人身份不该被成员抢走） */
+  if (sameToken(got, ownerToken)) identity = { id: LOCAL_OWNER_ID, owner: true };
+  for (const member of members) {
+    if (sameToken(got, member.token) && !identity) identity = { id: member.id, owner: false };
+  }
+  return identity;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -331,6 +410,7 @@ async function handle(
   res: ServerResponse,
   opts: ServerOptions,
   token: string,
+  members: readonly ServerMember[],
   hostNames: ReadonlySet<string>,
   authFailures: Map<string, { count: number; until: number }>,
   activeRuns: Set<AbortController>,
@@ -392,7 +472,8 @@ async function handle(
     json(res, 429, { error: "认证失败次数过多，稍后再试" });
     return;
   }
-  if (!authorized(req, token)) {
+  const identity = identify(req, token, members);
+  if (!identity) {
     const entry = authFailures.get(ip) ?? { count: 0, until: 0 };
     entry.count += 1;
     if (entry.count >= AUTH_FAIL_LIMIT) {
@@ -410,6 +491,8 @@ async function handle(
     if (path === "/v1/info" && req.method === "GET") {
       note = "info";
       json(res, 200, {
+        /* 身份（V5-2 2.2）：调用方现在知道"服务端认为我是谁" */
+        you: { id: identity.id, owner: identity.owner },
         name: PRODUCT_NAME,
         version: PRODUCT_VERSION,
         provider: opts.provider,
@@ -435,9 +518,25 @@ async function handle(
         json(res, 501, { error: "这个服务没有接会话库，列不了会话（宿主没把 store 交给它）" });
         return;
       }
-      const sessions = await opts.listSessions();
-      note = `${sessions.length} 段会话`;
-      json(res, 200, { sessions });
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const wanted = (url.searchParams.get("owner") ?? "").trim();
+      /*
+       * ⭐ **归属过滤**（V5-2 2.2 的验收那条）：
+       *   · 本机主人（单口令）：不给 `?owner=` = 列全部；给了就只列那个 owner 的；
+       *   · 成员：**默认只列归自己的**（不给参数也一样）；指定别人的 owner → **403**
+       *     （不是"悄悄过滤成空的" —— 那会让人以为对方没有会话）。
+       * 归属缺省按兼容口径 `local`（旧会话补列之前没有这一格）。
+       */
+      if (!identity.owner && wanted && wanted !== identity.id) {
+        note = `成员 ${identity.id} 想看 ${wanted} 的会话`;
+        json(res, 403, { error: `只能查归你的会话（你是 ${identity.id}）` });
+        return;
+      }
+      const all = await opts.listSessions();
+      const ownerWanted = identity.owner ? wanted : identity.id;
+      const sessions = ownerWanted ? all.filter((s) => (s.owner ?? LOCAL_OWNER_ID) === ownerWanted) : all;
+      note = `${sessions.length} 段会话${ownerWanted ? `（owner=${ownerWanted}）` : ""}`;
+      json(res, 200, { sessions, you: { id: identity.id, owner: identity.owner } });
       return;
     }
 

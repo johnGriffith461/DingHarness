@@ -108,6 +108,23 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
     process.stderr.write("--hook-secret 要一个密钥值（或改用环境变量 DH_HOOK_SECRET）\n");
     return 2;
   }
+  /*
+   * 成员 token（V5-2 2.2）：`--member <id>:<口令>`，可重复。
+   *
+   * 口令里可以带冒号（切**第一个**冒号，剩下的都当口令）—— 生成的随机口令
+   * 本来就可能含各种字符，用最后一个冒号切会把 id 吃掉。
+   */
+  const members: Array<{ id: string; token: string }> = [];
+  for (const spec of flagAll(p, "member")) {
+    const at = spec.indexOf(":");
+    const id = at > 0 ? spec.slice(0, at).trim() : "";
+    const memberToken = at > 0 ? spec.slice(at + 1) : "";
+    if (!id || !memberToken.trim()) {
+      process.stderr.write(`--member 要写成 <id>:<口令>（收到 ${JSON.stringify(spec)}）\n`);
+      return 2;
+    }
+    members.push({ id, token: memberToken });
+  }
   const hooks: Record<string, string> = {};
   for (const spec of flagAll(p, "hook")) {
     const at = spec.indexOf("=");
@@ -132,6 +149,8 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
       cwd: deps.dirs[0] ?? process.cwd(),
       hooks,
       ...(hookSecret ? { hooksSecret: hookSecret } : {}),
+      /* 成员 token（V5-2 2.2）：认证机制不变、身份细化 —— 每个成员一把口令 */
+      ...(members.length ? { members } : {}),
       /* 会话列表：把真实会话库交给服务层（不给的话那个接口只能回 501） */
       listSessions: async () => {
         const store = createSqliteSessionStore(dataDir, "sessions.db", {}, { protectBefore: startedAt });
@@ -167,6 +186,7 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
        */
       `  口令：${started.token}${token ? "" : "（本次随机生成；要固定就 --token 或 DH_SERVE_TOKEN）"}`,
       `  用法：curl -H "Authorization: Bearer ${started.token}" ${started.url}/v1/info`,
+      `  成员：${members.length ? members.map((m) => m.id).join(" / ") + "（各自一把口令；只能看归自己的会话）" : "无（只有主口令）"}`,
       `  接口：GET /healthz　GET /v1/info　GET /v1/sessions　POST /v1/run（SSE）　PUT/POST/GET /v1/streams/<流>（同步中继：建流/接管/推/拉）${hookNames.length ? `　POST /v1/hooks/<名字>（${hookNames.join(" / ")}，要签名）` : ""}`,
       ...(deps.mode === "按需确认"
         ? ["  ⚠️ 档位是「按需确认」：服务态没有审批通道，需要确认的工具会被拦下（不会执行），对外如实报失败"]
