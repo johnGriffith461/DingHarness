@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Blocks, Sparkles, Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
+import { Search, Blocks, Sparkles, Brain, ChevronRight, CircleDollarSign, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -22,6 +22,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
    */
   /** 当前在设置的哪个子页（null = 显示主列表）。 */
   const [subPage, setSubPage] = useState<SettingsSubPage | null>(null);
+  /** 分区搜索词（ZCode 的 `SettingsSearchInput` 的最小可用版）。 */
+  const [setQuery, setSetQuery] = useState("");
+  /** 当前分区名（面包屑用）—— 点哪一项就记哪个，不靠 subPage 反查（一个分区可能开多个子页）。 */
+  const [sectionLabel, setSectionLabel] = useState("");
   const [memoryOpen, setMemoryOpen] = useState(false);
   const memCount = useMemoryStore((s) => s.lib.entries.length);
   /** 记忆开关（列表里那一行的 value 用它）。 */
@@ -137,10 +141,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             ⚠️ 面包屑 / 搜索框还没加（见 docs/ZCODE-设置与模型选择-反解.md 的清单）。 */}
         <div className="wb-set-shell">
           <nav className="wb-set-rail" data-testid="wb-set-rail">
+            {/* 搜索：分区一多就得能搜（ZCode 的 SettingsSearchInput） */}
+            <label className="wb-set-search">
+              <Search size={12} />
+              <input
+                data-testid="wb-set-search"
+                placeholder="搜设置项"
+                value={setQuery}
+                onChange={(e) => setSetQuery(e.target.value)}
+              />
+            </label>
           {[0, 1].map((group) => (
             <div className="wb-modal-group" key={group}>
               {rows
-                .filter((r) => r.group === group)
+                .filter((r) => r.group === group && (!setQuery.trim() || r.label.includes(setQuery.trim())))
                 .map((r) => (
                   <div key={r.label}>
                     <button
@@ -149,6 +163,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       title={r.todo ?? ""}
                       disabled={Boolean(r.todo)}
                       onClick={() => {
+                        setSectionLabel(r.label);
                         if (r.label === "插件·技能·伙伴") {
                           setSubPage("plugins");
                           return;
@@ -206,6 +221,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           ))}
           </nav>
           <section className="wb-set-panel" data-testid="wb-set-panel">
+            {/* 面包屑：告诉用户"我在哪一层"（ZCode 的 settings-header-breadcrumb） */}
+            <div className="wb-set-crumb" data-testid="wb-set-crumb">
+              <button className="wb-set-crumb-root" data-testid="wb-set-crumb-root" onClick={() => { setSubPage(null); setSectionLabel(""); }}>
+                设置
+              </button>
+              <span>›</span>
+              <b>{sectionLabel || "选一项"}</b>
+            </div>
             {subPage ? (
   
             <SettingsPages
