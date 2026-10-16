@@ -1,5 +1,5 @@
 import { openSqlite, type SqliteDatabase, type SqliteStatement } from "./sqliteDriver";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "../core/events";
 import type { LogInputAt, SearchHit, SessionKind, SessionStore } from "../ports/store";
 import { excerptOf, prepareSearchIndex, searchBodyOf } from "./sqliteSearch";
+import { pendingMigrations, runMigrations } from "./sqliteSchema";
 import type { SessionSummary } from "../../shared/ipc";
 
 /**
@@ -52,42 +53,26 @@ import type { SessionSummary } from "../../shared/ipc";
  */
 
 /**
- * 会话库的**表结构版本**（审计 P101）。
- *
- * 为什么要有它：这次表变更（加 `body` 列、把全文索引从整行 JSON 改成正文）**必须自己搬旧数据** ——
- * external-content 的 FTS 表**不会**自动索引既有行，老库里的行不加处理就永远搜不到。
- * 有了版本号，"搬过一次"与"还没搬过"才分得开（`PRAGMA user_version` 是本库私有的，
- * 与 `kvStore` 那份 `stores.db` 互不影响）。
+ * ⚠️ 2026-10-17（V5-1 3.3）：表结构（基线 DDL）与**版本化迁移链**搬去了
+ * `./sqliteSchema.ts`（`MIGRATIONS` + `schema_version` 账本 + 不可降级闸门）。
+ * 这个文件不再持有 `SCHEMA` / `SCHEMA_VERSION` —— 迁移只有一份实现，
+ * 内存里的表结构描述与链上的步骤必须是同一个（ADR-005）。
  */
-const SCHEMA_VERSION = 2;
 
 /**
- * 建表语句（幂等；每次打开都跑一遍，代价可忽略）。
+ * 库文件里**有没有东西**（决定迁移前要不要留备份）。
  *
- * ⚠️ **FTS5 那一套刻意不在这里**（审计 P140）：`CREATE VIRTUAL TABLE ... USING fts5`
- * 一放进这条串里，任何没编 FTS5 的 SQLite 构建上 `db.exec(SCHEMA)` 就直接抛 ——
- * 会话库**整个打不开**，而不是"检索退化"。现在它在 `FTS_SCHEMA` 里，
- * 由 `prepareSearchIndex` 先探测能力再决定建不建。
+ * ⚠️ 不能只看 `existsSync`：`openSqlite` 会把不存在的文件建出来 ——
+ * 全新库在跑到这里时**文件已经在、但 0 字节**（第一次实现就是这么把
+ * "空文件"也备份了一份）。SQLite 的空库也有 4KB 头，所以用"字节数 > 0"当判据。
  */
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS sessions (
-  id         TEXT PRIMARY KEY,
-  kind       TEXT NOT NULL,
-  title      TEXT NOT NULL DEFAULT '',
-  updated_at INTEGER NOT NULL,
-  bytes      INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS events (
-  session_id TEXT NOT NULL,
-  seq        INTEGER NOT NULL,
-  at         INTEGER NOT NULL,
-  type       TEXT NOT NULL,
-  payload    TEXT NOT NULL,
-  body       TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (session_id, seq)
-);
-CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
-`;
+function dbHasContent(file: string): boolean {
+  try {
+    return statSync(file).size > 0;
+  } catch {
+    return false;
+  }
+}
 
 /** 会话种类 → 前缀。写成表而不是 `if`：加第三种会话时只改这里。 */
 const KIND_PREFIX: Record<SessionKind, string> = {
@@ -222,13 +207,49 @@ export function createSqliteSessionStore(
    * Bun（单二进制那条路）用 `bun:sqlite` —— 见 `./sqliteDriver.ts` 的说明与实测证据。
    * `open.driver` 是测试留的口子（见 `OpenOptions.driver`），生产不传。
    */
-  const db = open.driver ? open.driver(path.join(dir, file)) : openSqlite(path.join(dir, file));
-  db.exec(SCHEMA);
+  const dbFile = path.join(dir, file);
   /*
-   * 检索那一套（老库回填 / 索引列 / FTS5 能力）由它负责，并**如实回报**能不能走 FTS：
+   * ⚠️ **打开之前**先看盘上有没有东西（`dbHasContent`）：`openSqlite` 本身会把文件
+   * 建出来、还会切 WAL（切日志模式要写库头）—— 打开之后再量，一个全新库也是 4KB。
+   */
+  const hadContent = dbHasContent(dbFile);
+  const db = open.driver ? open.driver(dbFile) : openSqlite(dbFile);
+
+  /*
+   * ⭐ **迁移前先给库文件留一份**（V5 §3.1 的"迁移前自动快照"，G01 流血项的教训）。
+   *
+   * 只在**盘上本来就有东西且有 pending** 时做（全新库 / 已迁移库都不复制）。
+   * 一份就够（覆盖式 `.pre-migrate.bak`）：链只在升级那一刻跑，
+   * 要回退就是"用旧程序 + 这份文件"。⚠️ 复制**不删源**，失败了也不拦着迁移 ——
+   * 备份是保险，不是闸门（闸门是"迁移失败就 ROLLBACK 停在旧版"，见 `runMigrations`）。
+   */
+  let backup: string | null = null;
+  if (hadContent && pendingMigrations(db).length) {
+    try {
+      backup = `${dbFile}.pre-migrate.bak`;
+      copyFileSync(dbFile, backup);
+    } catch (error) {
+      backup = null;
+      console.error("[sqlite] 迁移前备份没做成（继续迁移，库没法回退这一步）：", error);
+    }
+  }
+
+  /* 版本化迁移链（`./sqliteSchema.ts`）：有序、记账、不可降级 */
+  const migration = runMigrations(db);
+  /* 只报"**升级**"：全新库（from 0）建出来不算迁移，别在日志里制造噪音 */
+  if (migration.applied.length && migration.from > 0) {
+    console.log(
+      `[sqlite] 会话库已迁移：v${migration.from} → v${migration.to}` +
+        `（应用 ${migration.applied.join(", ")}${migration.adopted.length ? `；认领 ${migration.adopted.join(", ")}` : ""}）` +
+        (backup ? `；迁移前备份在 ${backup}` : ""),
+    );
+  }
+
+  /*
+   * 检索那一套（FTS5 能力探测 / 索引形态不对时重建）由它负责，并**如实回报**能不能走 FTS：
    * 不能就只走 LIKE（审计 P140 要的"降级而不是打不开"）。
    */
-  const ftsReady = prepareSearchIndex(db, SCHEMA_VERSION);
+  const ftsReady = prepareSearchIndex(db);
 
   /*
    * 所有语句都从这里出去并记下来：`close()` 时逐个 `finalize()`（审计 P144 ——

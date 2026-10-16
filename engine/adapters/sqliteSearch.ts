@@ -1,7 +1,7 @@
 import type { SqliteDatabase } from "./sqliteDriver";
 
 /**
- * 会话库的**检索那一套**：正文列（审计 P136）、FTS5 能力与索引迁移（P140 / P101）、
+ * 会话库的**检索那一套**：正文列（审计 P136）、FTS5 能力与索引维护（P140）、
  * 以及摘要截取。
  *
  * ## 为什么从 `sqliteStore.ts` 拆出来（2026-10-16）
@@ -10,21 +10,19 @@ import type { SqliteDatabase } from "./sqliteDriver";
  * （`src/structureGuard.test.ts`：`.ts` ≤ 900 行）。拆的依据是**它自己本来就是一整块**：
  *
  *   · 正文怎么拼（`searchBodyOf` —— 给检索用的那一列，与"落盘形态"是两件事）；
- *   · 库里的索引能不能用 FTS（`fts5Available`）以及**老库怎么把索引搬过来**
- *     （`prepareSearchIndex`：补列 → 回填 → 重建，顺序有意义）；
+ *   · 库里的索引能不能用 FTS（`fts5Available`）以及**索引形态不对时怎么修**
+ *     （`prepareSearchIndex`：探测 → 重建，顺序有意义）；
  *   · 命中了怎么摘一小段给用户看（`excerptOf`）。
  *
  * 这三件事都不碰"会话/事件怎么写进去"（那才是 store 的事），
  * 所以边界不靠"行数够了"，靠"它只认一个 `SqliteDatabase` 和一张正文表"。
  *
- * ## 版本号为什么是参数
- *
- * `PRAGMA user_version` 由**库的持有者**决定（`sqliteStore.ts` 的 `SCHEMA_VERSION`）：
- * 版本说的是"这张表结构是哪一版"，不是"检索那一套是哪一版"，所以它不搬过来。
- *
- * @param db 打开好的库
- * @param schemaVersion 迁移完之后要写上的表结构版本
- * @returns 这台机器上的检索能不能走 FTS（false = 调用方降级到 LIKE）
+ * ⚠️ 2026-10-17（V5-1 3.3）：**版本化的那一半搬去了 `./sqliteSchema.ts`** ——
+ * "补 `body` 列 + 回填既有行"是一次**数据形态迁移**（P101/P136 那次已经是版本化的一步），
+ * 它进迁移链（`adoptSearchBody` 由 `MIGRATIONS` 的第 2 步调用）；
+ * `PRAGMA user_version` 的读写也归迁移链（版本是"这张表结构是哪一版"，不是"检索是哪一版"）。
+ * 这里只剩**每次打开都要做的能力探测与索引修形**（与版本无关：
+ * 索引被删掉、或建在别的列上，都得修）。
  */
 /**
  * 全文索引（Phase 12.4；审计 P136 把索引的列从 `payload` 改成 `body`）。
@@ -171,18 +169,14 @@ function tableSql(db: SqliteDatabase, name: string): string | null {
   return typeof row?.sql === "string" ? row.sql : null;
 }
 
-/** 老库（12.4 之前）没有 `body` 列：补上。@returns 这次是不是真加了 */
+/**
+ * 老库（12.4 之前）没有 `body` 列：补上。@returns 这次是不是真加了
+ */
 function ensureBodyColumn(db: SqliteDatabase): boolean {
   const cols = queryAll(db, "PRAGMA table_info(events)") as { name?: string }[];
   if (cols.some((c) => c.name === "body")) return false;
   db.exec("ALTER TABLE events ADD COLUMN body TEXT NOT NULL DEFAULT ''");
   return true;
-}
-
-/** 当前库的 schema 版本（`PRAGMA user_version` 是本库私有的）。 */
-function userVersion(db: SqliteDatabase): number {
-  const row = queryGet(db, "PRAGMA user_version") as { user_version?: number } | undefined;
-  return Number(row?.user_version ?? 0);
 }
 
 /**
@@ -201,7 +195,14 @@ function fts5Available(db: SqliteDatabase): boolean {
   }
 }
 
-/** 老库的 `body` 空白行回填（**只补空串**，反复跑无副作用）。@returns 回填了几行 */
+/**
+ * 老库的 `body` 空白行回填（**只补空串**，反复跑无副作用）。@returns 回填了几行
+ *
+ * ⚠️ **不自己开事务**（2026-10-17，V5-1 3.3）：调用方是迁移链的一步，
+ * 链已经把它包在 `BEGIN IMMEDIATE … COMMIT` 里了 —— 这里再 `BEGIN` 会直接
+ * "cannot start a transaction within a transaction"（集成时第一次跑就撞上了）。
+ * 换句话说：**事务归链管，这一步只管数据**。
+ */
 function backfillBodies(db: SqliteDatabase): number {
   const rows = queryAll(db, "SELECT rowid AS rid, payload FROM events WHERE body = ''") as {
     rid: number | bigint;
@@ -209,7 +210,6 @@ function backfillBodies(db: SqliteDatabase): number {
   }[];
   if (!rows.length) return 0;
   const update = db.prepare("UPDATE events SET body = ? WHERE rowid = ?");
-  db.exec("BEGIN IMMEDIATE");
   try {
     for (const row of rows) {
       let record: Record<string, unknown> | null = null;
@@ -220,33 +220,50 @@ function backfillBodies(db: SqliteDatabase): number {
       }
       update.run(record ? searchBodyOf(record) : "", row.rid);
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
+  } finally {
+    update.finalize?.(); // 局部语句用完就放（Bun 有 finalize，node:sqlite 靠 GC）
   }
-  update.finalize?.(); // 局部语句用完就放（Bun 有 finalize，node:sqlite 靠 GC）
   return rows.length;
+}
+
+/**
+ * **数据形态迁移**：补 `body` 列并回填既有行（审计 P101 / P136）。
+ *
+ * ⚠️ 它是迁移链的一步（`MIGRATIONS` 里 v2），不是"每次打开都跑"的准备工序 ——
+ * 由 `./sqliteSchema.ts` 的 `runMigrations` 在版本落后时调它，成功才推进版本号。
+ * 本函数**自己不管版本**（那是链的事），只做那件数据活。
+ *
+ * @returns 这次真加了列没有（列已存在且回填过时是 false）
+ */
+export function adoptSearchBody(db: SqliteDatabase): boolean {
+  const addedBody = ensureBodyColumn(db);
+  if (addedBody) backfillBodies(db);
+  else {
+    /*
+     * 列在、但可能还有空正文的行（回填跑到一半崩、或有人手工插过行）——
+     * 回填只补空串，反复跑无副作用；顺手跑一遍，空表的代价是一次 SELECT。
+     */
+    backfillBodies(db);
+  }
+  return addedBody;
 }
 
 /**
  * 把"检索那一套"准备好，并如实返回**能不能走 FTS**。
  *
- * 三件事，顺序有意义（审计 P101 · P136 · P140）：
- *   ① 老库补 `body` 列并**回填**（不补的话那些行在新索引里永远不存在 ——
- *      external-content 表不会自动索引既有行）；
- *   ② 探测 FTS5 能力：**没有就降级**（撤掉触发器、只走 LIKE），
+ * 两件事（审计 P140；与版本无关 —— 索引被删掉、或建在别的列上，都得修）：
+ *   ① 探测 FTS5 能力：**没有就降级**（撤掉触发器、只走 LIKE），
  *      而不是让整个会话库打不开；
- *   ③ 现存索引若不是"按正文索引"那一版（老库是 `fts5(payload)`，或索引丢了），
- *      重建 + `'rebuild'` 回填 —— 版本迁移与"索引被删掉"两种情况一起兜住。
+ *   ② 现存索引若不是"按正文索引"那一版（老库是 `fts5(payload)`，或索引丢了），
+ *      重建 + `'rebuild'` 回填。
+ *
+ * ⚠️ 2026-10-17（V5-1 3.3）：「补列 + 回填」那一半（原来也在这里、按版本号判断）
+ * 搬进了迁移链（`adoptSearchBody` 是它的一步）—— 见文件头。
+ *
+ * @param db 打开好的库（迁移链已跑完）
+ * @returns 这台机器上的检索能不能走 FTS（false = 调用方降级到 LIKE）
  */
-export function prepareSearchIndex(db: SqliteDatabase, schemaVersion: number): boolean {
-  const addedBody = ensureBodyColumn(db);
-  if (addedBody || userVersion(db) < schemaVersion) {
-    backfillBodies(db);
-    db.exec(`PRAGMA user_version = ${schemaVersion}`);
-  }
-
+export function prepareSearchIndex(db: SqliteDatabase): boolean {
   if (!fts5Available(db)) {
     /*
      * 没有 FTS5：触发器必须撤掉。留着它们的话，每次 append 都要去写那张表 ——
