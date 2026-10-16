@@ -29,6 +29,22 @@
   **同一份实现**，复制一份到脚本里迟早漂）。PLUGIN.md 补了"签名"一节（怎么签、
   签什么、装的时候五种情形分别发生什么）。
 
+### V5-4 施工：画布 MCP server（任务 4.5）
+
+- `hosts/mcp/canvasServer.ts`：**stdio + JSON-RPC 2.0** 的 MCP server，
+  把画布工具族（C6）暴露给任何外部 MCP 客户端 —— `initialize` / `ping` /
+  `tools/list` / `tools/call`。接法与边界写在 `hosts/mcp/README.md`。
+- 工具面**从 `engine/core/canvasContract.ts` 那张表读**（不在 MCP 层重抄一份）：
+  于是"策略表里是 ask、MCP 这边放行"这种分叉在结构上不可能。
+- 它驱动的是**磁盘上那份 `CanvasDocument`**（`<数据目录>/canvas/document.json`，
+  与桌面同一个文件、同一个格式）。⚠️ 如实说：**不是热协作** —— 桌面正打开同一张画布时
+  两边各写各的（后写的赢）；真正的协作是 V5-3 的方向。
+- 验收 `pnpm verify:canvas-mcp`（也进了 CI）：真起 server、真当 MCP 客户端握手、
+  `tools/call` 加节点，然后**读磁盘上的文档**确认节点真在里面、`revision` 真涨了
+  —— 不然"能调"只证明了协议，没证明画布被改了。数据目录是临时目录（不碰用户那张画布）。
+- 单测 `hosts/mcp/canvasMcp.test.ts`：改画布的规则 + 协议边界（通知不回、
+  未知方法 -32601、工具层拒绝是 `isError` 结果而不是协议错 —— 与"错误即结果"同一口径）。
+
 ### V5-4 施工：引擎独立包与 SDK（任务 4.1 / 4.2 / 4.6）
 
 - **两个包**（Cline 式分包）：`@ding/engine-core`（事件 + 主循环，**无 IO**）与

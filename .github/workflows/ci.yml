@@ -122,6 +122,11 @@ jobs:
         # ⚠️ 这就是 RELEASE.md 里"示例仓 CI 验证"的落点：示例在仓内，验的就是它。
         run: pnpm verify:sdk
 
+      - name: 画布 MCP server（V5-4 4.5：外部客户端驱动画布）
+        # 起 server（stdio）→ 以 MCP 客户端握手 → tools/call 加节点 → **读磁盘上的画布文档**
+        # 确认真的改了。数据目录是临时目录，不碰用户那张画布；零出网。
+        run: pnpm verify:canvas-mcp
+
       # ── 以下**有意不做**（照手册 §7 的"不烧钱地验"）──
       #
       # · **全量** `pnpm verify:accept`（现在 60+ 条 Playwright 验收）：每条都要启一个真 Electron
