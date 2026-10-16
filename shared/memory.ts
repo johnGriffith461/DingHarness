@@ -10,6 +10,19 @@
  * 与本体那三条接口对应。
  */
 
+/**
+ * 记忆的**归属域**（C4，V5-1 3.8）。
+ *
+ * 两级起步（V5 §3.8：`private/team` 两级）：
+ *   · `private`：**只有主人能看见**（注入也只给他）；
+ *   · `team`：这个空间里的成员都能看见（V5-3 团队空间的共享记忆）。
+ *
+ * ⚠️ 兼容矩阵口径（V5 §3.1）：**旧记忆（没有归属域）→ 默认 private** ——
+ * "以前记的事"按最保守的域读，不因为加了字段就把它变成人人在看的共享记忆。
+ */
+export const MEMORY_DOMAINS = ["private", "team"] as const;
+export type MemoryDomain = (typeof MEMORY_DOMAINS)[number];
+
 /** 一条记忆。 */
 export type MemoryEntry = {
   /** 稳定 id。 */
@@ -22,6 +35,17 @@ export type MemoryEntry = {
   source: "manual" | "conversation";
   /** `source === "conversation"` 时的来源任务标题，便于回溯。 */
   fromTask?: string;
+  /**
+   * 归属域（C4）。缺省 = `private`（旧数据与手写文件的兼容口径）。
+   */
+  domain?: MemoryDomain;
+  /**
+   * **private 域归谁**（成员 id）。
+   *
+   * 缺省 = `"local"`（本机用户；与 C1 的会话归属、C5 的 actor 用同一个 id 空间）。
+   * `team` 域的条目不看这一格（它属于整个空间）。
+   */
+  owner?: string;
 };
 
 /** 记忆库。 */
@@ -45,6 +69,15 @@ export const EMPTY_MEMORY: MemoryLib = { entries: [] };
 
 /** 单条记忆的长度上限 —— 记忆是"要长期记住的短句"，不是文档。 */
 export const MEMORY_TEXT_LIMIT = 200;
+
+/**
+ * 本机用户那个 id（C4 的默认归属人）。
+ *
+ * 与 C1 的会话归属、C5 的 actor 用**同一个 id 空间**（都是 `local`）；
+ * 三处各写一个字面量是刻意的：它们住在不同的层（shared 不许 import engine），
+ * 而多写一份 id 的风险远小于把内核拖进 shared 的依赖里。三处的对照在 ADR-007 / 本文件头。
+ */
+export const LOCAL_MEMORY_OWNER = "local";
 
 /** 条数上限，防止无限堆积把系统提示词撑爆。 */
 export const MEMORY_MAX = 100;
@@ -84,6 +117,9 @@ export function normalizeMemory(raw: unknown): MemoryLib {
       createdAt: typeof e.createdAt === "string" && e.createdAt ? e.createdAt : new Date(0).toISOString(),
       source: e.source === "conversation" ? "conversation" : "manual",
       ...(typeof e.fromTask === "string" && e.fromTask ? { fromTask: e.fromTask } : {}),
+      /* C4：坏值一律落兼容口径（private + 本机用户），不因为一个字写错就丢掉这条记忆 */
+      domain: e.domain === "team" ? "team" : "private",
+      owner: typeof e.owner === "string" && e.owner.trim() ? e.owner.trim() : LOCAL_MEMORY_OWNER,
     });
     if (entries.length >= MEMORY_MAX) break;
   }
@@ -115,7 +151,7 @@ export function normalizeMemory(raw: unknown): MemoryLib {
 export function addMemory(
   lib: MemoryLib,
   text: string,
-  options: { source?: MemoryEntry["source"]; fromTask?: string } = {},
+  options: { source?: MemoryEntry["source"]; fromTask?: string; domain?: MemoryDomain; owner?: string } = {},
 ): MemoryLib {
   const trimmed = text.trim().slice(0, MEMORY_TEXT_LIMIT);
   if (!trimmed) return lib;
@@ -127,6 +163,9 @@ export function addMemory(
     createdAt: new Date().toISOString(),
     source: options.source === "conversation" ? "conversation" : "manual",
     ...(options.fromTask ? { fromTask: options.fromTask } : {}),
+    /* C4：新记忆的归属，缺省 = private + 本机用户（与兼容口径同一个默认） */
+    domain: options.domain === "team" ? "team" : "private",
+    owner: options.owner?.trim() || LOCAL_MEMORY_OWNER,
   };
 
   const entries = [entry, ...lib.entries].slice(0, MEMORY_MAX);
@@ -178,6 +217,26 @@ export function clearMemory(lib?: MemoryLib): MemoryLib {
 export const MEMORY_BLOCK_CHARS = 1500;
 
 /**
+ * 这条记忆**对谁可见**（C4 的判定，一处实现）。
+ *
+ * 规矩两条（V5 §3.8 的注入策略）：
+ *   · `team` 域：谁都能看；
+ *   · `private` 域：只有它的 `owner` 能看 —— **别人的 private 域看不见，也更不会进提示词**
+ *     （"跨域不可读"的第一道墙；第二道墙是读取接口本身，V5-3 才有客户）。
+ *
+ * 老条目（没有域/没有归属）走 normalize 时已经被补成 `private` + `local`，
+ * 所以这里不用再兜底一次（补两次迟早出现两套口径）。
+ *
+ * @param entry 一条记忆
+ * @param viewerId 现在是谁在看（成员 id）
+ * @returns 可见为 true
+ */
+export function memoryVisibleTo(entry: MemoryEntry, viewerId: string): boolean {
+  if (entry.domain === "team") return true;
+  return (entry.owner ?? LOCAL_MEMORY_OWNER) === viewerId;
+}
+
+/**
  * 记忆注入系统提示词的那一段。
  *
  * 与 `enabledPromptBlock` 同一个位置 —— 都是"这次对话开始前要先告诉模型的事"。
@@ -191,7 +250,11 @@ export const MEMORY_BLOCK_CHARS = 1500;
  * @param limitChars 注入的字数上限
  * @returns 可直接拼接的文本（可能为空串）
  */
-export function memoryPromptBlock(lib: MemoryLib, limitChars = MEMORY_BLOCK_CHARS): string {
+export function memoryPromptBlock(
+  lib: MemoryLib,
+  limitChars = MEMORY_BLOCK_CHARS,
+  viewerId: string = LOCAL_MEMORY_OWNER,
+): string {
   /*
    * ⚠️ 关掉了就不注入（§182）。
    *
@@ -199,12 +262,20 @@ export function memoryPromptBlock(lib: MemoryLib, limitChars = MEMORY_BLOCK_CHAR
    * 那个开关就只是「看着有、其实没用」。
    */
   if (lib?.enabled === false) return "";
-  if (lib.entries.length === 0) return "";
+  /*
+   * ⭐ C4（V5-1 3.8b）：**只注入这个域里看得到的**。
+   *
+   * `private` 只给它的主人；`team` 大家都能看（V5-3 团队空间落地之后才有别的值进来）。
+   * 本机单用户下 viewer 就是 `local`，与从前逐字相同 —— 这一层是给别人进来时准备的墙，
+   * 而不是"已经有人在越界"（那种说法会是假的）。
+   */
+  const visible = lib.entries.filter((e) => memoryVisibleTo(e, viewerId));
+  if (visible.length === 0) return "";
   const head = "【长期记忆】以下是用户希望你长期记住的事：";
   const lines: string[] = [];
   let used = head.length;
   let dropped = 0;
-  for (const e of lib.entries) {
+  for (const e of visible) {
     const line = `- ${e.text}`;
     // 至少展开一条（哪怕它超了上限）：一条都不给比多占点字更糟
     if (lines.length > 0 && used + line.length > limitChars) {

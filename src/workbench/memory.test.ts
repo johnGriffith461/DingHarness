@@ -7,6 +7,9 @@ import {
   MEMORY_BLOCK_CHARS,
   MEMORY_MAX,
   MEMORY_TEXT_LIMIT,
+  LOCAL_MEMORY_OWNER,
+  MEMORY_DOMAINS,
+  memoryVisibleTo,
   memoryPromptBlock,
   normalizeMemory,
   removeMemory,
@@ -208,5 +211,98 @@ describe("记忆开关（§182）", () => {
   it("坏文件（不是对象）当成开着（默认不该是「悄悄停掉记忆」）", () => {
     expect(normalizeMemory(null).enabled).toBeUndefined();
     expect(memoryPromptBlock(normalizeMemory(null))).toBe("");
+  });
+});
+
+/**
+ * 记忆归属域（C4，V5-1 3.8）。
+ *
+ * 两条要挡的事：① 旧记忆（没有域这一格）必须按最保守的域读 —— private；
+ * ② **别人的 private 记忆不许进我的提示词**（跨域不可读的注入侧那一半）。
+ */
+describe("C4：记忆归属域（private / team）", () => {
+  const entry = (over: Partial<Parameters<typeof normalizeMemory>[0] extends never ? never : Record<string, unknown>> = {}) => ({
+    id: "m1",
+    text: "记一句",
+    createdAt: "2026-10-17T00:00:00.000Z",
+    source: "manual" as const,
+    ...over,
+  });
+
+  it("两级就这两个（枚举，不是自由的字符串）", () => {
+    expect(MEMORY_DOMAINS).toEqual(["private", "team"]);
+  });
+
+  it("⭐ 旧记忆（没有域/没有归属）→ private + 本机用户（兼容矩阵口径，最保守的域）", () => {
+    const lib = normalizeMemory({ entries: [entry()] });
+    expect(lib.entries[0]?.domain).toBe("private");
+    expect(lib.entries[0]?.owner).toBe(LOCAL_MEMORY_OWNER);
+  });
+
+  it("坏值收窄：不认识的域落 private；空/非字符串归属落本机用户；归属两端空白去掉", () => {
+    const lib = normalizeMemory({
+      entries: [
+        entry({ id: "a", domain: "宇宙" }),
+        entry({ id: "b", owner: "   " }),
+        entry({ id: "c", owner: 42 }),
+        entry({ id: "d", owner: "  u-bob  " }),
+      ],
+    });
+    const byId = new Map(lib.entries.map((e) => [e.id, e]));
+    expect(byId.get("a")?.domain).toBe("private");
+    expect(byId.get("b")?.owner).toBe(LOCAL_MEMORY_OWNER);
+    expect(byId.get("c")?.owner).toBe(LOCAL_MEMORY_OWNER);
+    expect(byId.get("d")?.owner).toBe("u-bob");
+  });
+
+  it("团队域原样保留（它不看归属那一格）", () => {
+    const lib = normalizeMemory({ entries: [entry({ domain: "team", owner: "u-bob" })] });
+    expect(lib.entries[0]?.domain).toBe("team");
+  });
+
+  it("⭐ 可见性：team 谁都能看；private 只给它的主人", () => {
+    const mine = { ...entry({ id: "mine" }), domain: "private" as const, owner: "u-alice" };
+    const theirs = { ...entry({ id: "theirs" }), domain: "private" as const, owner: "u-bob" };
+    const shared = { ...entry({ id: "shared" }), domain: "team" as const, owner: "u-bob" };
+    expect(memoryVisibleTo(mine, "u-alice")).toBe(true);
+    expect(memoryVisibleTo(mine, "u-bob")).toBe(false);
+    expect(memoryVisibleTo(theirs, "u-alice")).toBe(false);
+    expect(memoryVisibleTo(shared, "u-alice")).toBe(true);
+    expect(memoryVisibleTo(shared, "u-carol")).toBe(true);
+  });
+
+  it("⭐ 注入侧：别人的 private 一行都不进提示词；team 与自己的 private 在", () => {
+    const lib: MemoryLib = {
+      entries: [
+        { ...entry({ id: "a", text: "我自己的私事" }), domain: "private", owner: "u-alice" },
+        { ...entry({ id: "b", text: "别人的私事" }), domain: "private", owner: "u-bob" },
+        { ...entry({ id: "c", text: "团队都知道的事" }), domain: "team", owner: "u-bob" },
+      ],
+    };
+    const block = memoryPromptBlock(lib, MEMORY_BLOCK_CHARS, "u-alice");
+    expect(block).toContain("我自己的私事");
+    expect(block).toContain("团队都知道的事");
+    expect(block, "别人的 private 记忆进了我的提示词").not.toContain("别人的私事");
+    /* 换个人看：看到的是另一批（同一份库里没有"谁都能看全部"这条路） */
+    const bob = memoryPromptBlock(lib, MEMORY_BLOCK_CHARS, "u-bob");
+    expect(bob).toContain("别人的私事");
+    expect(bob).not.toContain("我自己的私事");
+  });
+
+  it("本机单用户（缺省 viewer = local）：与从前逐字相同（老路径零变化）", () => {
+    const lib = normalizeMemory({ entries: [entry({ text: "老记忆" })] });
+    const withDefault = memoryPromptBlock(lib);
+    const withExplicit = memoryPromptBlock(lib, MEMORY_BLOCK_CHARS, LOCAL_MEMORY_OWNER);
+    expect(withDefault).toBe(withExplicit);
+    expect(withDefault).toContain("老记忆");
+  });
+
+  it("addMemory：新记忆缺省 private + 本机用户；可以指定 team/别人（将来团队空间用）", () => {
+    const added = addMemory(EMPTY_MEMORY, "记一句");
+    expect(added.entries[0]?.domain).toBe("private");
+    expect(added.entries[0]?.owner).toBe(LOCAL_MEMORY_OWNER);
+    const team = addMemory(EMPTY_MEMORY, "团队的事", { domain: "team", owner: "u-alice" });
+    expect(team.entries[0]?.domain).toBe("team");
+    expect(team.entries[0]?.owner).toBe("u-alice");
   });
 });
