@@ -83,9 +83,17 @@ export default function NodeContextMenu({
    * 所有项都走这一步：**对某个节点做了操作，它就应该是当前选中项**。
    * 不选中的话，操作完画布上看不出"动的是哪一个"（改完层级、隐藏完，
    * 用户还得回想刚才点的是哪个节点）。
+   *
+   * ⚠️ **每个动作前都打一个撤销点**（2026-10-16 审计 P25）。原来这 11 项一处历史都不打
+   * （删除、锁定、隐藏、四档层级、两个翻转全都没有），右键点错一下除了重来没有退路；
+   * 而图层面板里**同样的动作**是打的（`onOrder` / 翻转 / 删除那几处都调了 `commitHistory`）——
+   * 同一个操作两个入口一个能撤一个不能撤，本身就是缺陷。
+   * 打点放在 `selectNodes` 之后：撤销回去时连当时的选择也一起还原。
    */
   const on = (run: () => void) => () => {
-    store.getState().selectNodes([nodeId]);
+    const state = store.getState();
+    state.selectNodes([nodeId]);
+    state.commitHistory();
     run();
   };
 

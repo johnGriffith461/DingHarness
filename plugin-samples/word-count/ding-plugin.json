@@ -1,0 +1,10 @@
+{
+  "name": "word-count",
+  "version": "1.0.0",
+  "description": "数一数一段文本里有多少个非空白字符（PLUGIN.md 的最小可跑示例）",
+  "main": "index.mjs",
+  "tools": ["count"],
+  "hooks": ["tool:before"],
+  "permissions": ["tools:register", "hooks:register"],
+  "engines": { "ding": ">=0.5.0" }
+}

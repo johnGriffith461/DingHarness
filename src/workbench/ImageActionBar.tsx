@@ -73,7 +73,20 @@ export function ImageActionBar({
         return;
       }
       onDone({ name: got.name, url: got.url, prompt, model: got.model, size: got.size });
-      onNote?.(`${action.label}完成`);
+      /*
+       * ⚠️ **主进程那句"输入图尺寸不合规、已规整"要说出来**（2026-10-16 审计 P256）。
+       *
+       * `editImage` 的成功返回里带 `inputNote?`（主进程在输入图宽高不满足模型限制时填的，
+       * 例如「输入图 800×1200 不符合模型限制，已规整为 1024×1024」）。这里原来只把
+       * `onDone({name,url,prompt,model,size})` 交出去，**把它丢了** ——
+       * 于是抠图/变清晰/扩图产出的尺寸和源图（或用户选的目标尺寸）不一样时，
+       * 界面上只有一句"完成"，用户只能自己纳闷。
+       *
+       * 合成一句而不是连调两次 `onNote`：提示条是"后一条顶掉前一条"的，
+       * 连调两次的话第一句会被立刻擦掉（等于没说）。
+       */
+      const notes = [got.inputNote, `${action.label}完成`].filter(Boolean);
+      onNote?.(notes.join("；"));
     } finally {
       setBusy(null);
       setInstruction("");

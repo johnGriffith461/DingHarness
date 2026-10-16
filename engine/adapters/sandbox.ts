@@ -27,7 +27,16 @@ import { spawnSync } from "node:child_process";
 export type SandboxInfo = {
   /** 找到二进制了吗。 */
   found: boolean;
-  /** 真的有限制吗（`found` 且本平台有实现）。 */
+  /**
+   * 本平台**声明**支持隔离（`found` 且 `--probe` 这么答）。
+   *
+   * ⚠️ 口径要说清（2026-10-16，审计 P115）：这是**平台级声明**，不是"这一条命令
+   * 真的被限制住了"的执行事实。`--probe` 现在只答 `cfg!(windows)`（Rust 侧），
+   * 而作业创建失败 / `AssignProcessToJobObject` 失败时命令**不受限照跑**，
+   * 上层却仍会拿到 `bounded: true` → 结果里写成 `sandboxed: true`。
+   * 要变成执行事实得让 Rust 侧**逐次上报**（P115 的 Rust 那一半，不在这份工单里）。
+   * 所以调用方转述时不要把 `bounded` 说成"这条命令受限了"。
+   */
   bounded: boolean;
   /** 二进制路径（找不到时为空串）。 */
   binary: string;
@@ -57,8 +66,20 @@ function resourcesPathOf(): string {
 /**
  * 找 `ding-sandbox`。
  *
- * 顺序：显式配置（`DING_SANDBOX`）→ 仓库里的构建产物 → PATH。
- * 显式配置排第一：验收与打包产物要能指定一个确定的路径（PATH 上那份可能是旧的）。
+ * 顺序（2026-10-16，审计 P117 把这句**改成与代码一致**；原来是"→ PATH"而代码里
+ * 根本没有 PATH 查找，且有两条自述与实现不符）：
+ *
+ * 1. `DING_SANDBOX`（显式指定，排第一 —— 验收与打包产物要能钉住一个确定的路径）；
+ * 2. 打包态：`resources/`（`extraResources` 落点）与 exe 同级；
+ * 3. 开发态：`<cwd>/sandbox/target/{release,debug}/`；
+ * 4. `PATH`（**这条以前只写在注释里**：现在真的找了）。
+ *
+ * ⚠️ 两个如实记下的边界：
+ *   · `DING_SANDBOX` **写错（路径不存在）不再静默忽略** —— 那会让用户以为
+ *     "我指定了那份"，实际在用别的（或没有）。写错的路径进 `probeSandbox().note`；
+ *   · 第 2 条里的"exe 同级"用的是 `process.execPath`，**开发态那是 node.exe** ——
+ *     也就是"Node 安装目录里的 ding-sandbox 会被信任"。打包态它才是应用目录；
+ *     这一条保留是因为打包后确实需要它，但它的含义在这里写清。
  */
 export function findSandboxBinary(): string {
   const configured = process.env.DING_SANDBOX?.trim();
@@ -76,11 +97,13 @@ export function findSandboxBinary(): string {
   const candidates = [
     /* 打包态：`extraResources` 把 ding-sandbox 放在 resources/ 下（见 package.json 的 build） */
     ...(resourcesPathOf() ? [path.join(resourcesPathOf(), name)] : []),
-    /* 打包态：与 exe 同级 */
+    /* 打包态：与 exe 同级（⚠️ dev 态这里其实是 node.exe 所在目录，见上面说明） */
     path.join(path.dirname(process.execPath), name),
     /* 开发态：cargo 的产物（`pnpm sandbox:build` 编到这儿） */
     path.join(process.cwd(), "sandbox", "target", "release", name),
     path.join(process.cwd(), "sandbox", "target", "debug", name),
+    /* PATH（P117：注释一直写着这一条，代码里到这一刻才真的有） */
+    ...pathCandidates(name),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;
@@ -88,16 +111,64 @@ export function findSandboxBinary(): string {
   return "";
 }
 
-/** 问一次能力（跑 `--probe`）。**不缓存** —— 用户可能刚编出来就重跑 doctor。 */
-export function probeSandbox(): SandboxInfo {
+/**
+ * 在 `PATH` 里找那个可执行文件（审计 P117）。
+ *
+ * 最后才找它：PATH 上那份可能是别人装的旧版/别的什么，显式路径与仓库产物应当优先。
+ */
+function pathCandidates(name: string): string[] {
+  const sep = process.platform === "win32" ? ";" : ":";
+  return (process.env.PATH ?? "")
+    .split(sep)
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .map((d) => path.join(d, name));
+}
+
+/**
+ * 缓存上一次探测（2026-10-16，审计 P98）。
+ *
+ * `planSandboxed` 在**每条 `run_command`** 上被调用，而它每次都 `spawnSync(binary,
+ * ["--probe"], {timeout:10_000})` —— 沙箱二进制在但响应慢时，**主进程事件循环整段停住**
+ * （正在流式吐字的模型输出也跟着停）。原来的注释说"不缓存 —— 用户可能刚编出来就重跑 doctor"：
+ * 那是给 doctor 说的，而代价落在了热路径上。
+ *
+ * 现在的口径：**热路径用缓存**，需要立刻看到新情况的调用方传 `{refresh:true}`
+ * （doctor 就是这么用的）。
+ */
+let probeCache: SandboxInfo | null = null;
+
+/** 问一次能力（跑 `--probe`；`refresh` 跳过缓存）。 */
+export function probeSandbox(opts: { refresh?: boolean } = {}): SandboxInfo {
+  if (!opts.refresh && probeCache) return probeCache;
+  const info = probeSandboxNow();
+  probeCache = info;
+  return info;
+}
+
+/** 清掉探测缓存（测试与"用户刚编出来"的场合用）。 */
+export function resetSandboxProbeCache(): void {
+  probeCache = null;
+}
+
+/** 真的去问一次（不做缓存判断）。 */
+function probeSandboxNow(): SandboxInfo {
+  const configured = process.env.DING_SANDBOX?.trim();
   const binary = findSandboxBinary();
   if (!binary) {
+    /*
+     * P117：`DING_SANDBOX` 写了但不存在 —— **说出来**（原来静默往下找）。
+     * 用户以为自己指定了那份沙箱、实际可能一份都没有，这种"以为"必须被打破。
+     */
+    const misconfigured = configured
+      ? `（注意：DING_SANDBOX 指到了一个不存在的位置：${configured} —— 已忽略它）`
+      : "";
     return {
       found: false,
       bounded: false,
       binary: "",
       platform: process.platform,
-      note: "没有 ding-sandbox（编它：pnpm sandbox:build）；命令将不受限地跑",
+      note: `没有 ding-sandbox（编它：pnpm sandbox:build）；命令将不受限地跑${misconfigured}`,
     };
   }
   const got = spawnSync(binary, ["--probe"], { encoding: "utf8", timeout: 10_000 });
@@ -133,6 +204,14 @@ export type SandboxPlan = {
   args: string[];
   /** 有没有隔离（`false` = 直通；调用方应当如实转述）。 */
   bounded: boolean;
+  /**
+   * 这份计划**用的是不是沙箱那条路**（与 `bounded` 不是一回事）。
+   *
+   * `bounded` 回答"有没有真隔离"（非 Windows 上沙箱在、但没有隔离实现 → false）；
+   * 而"要不要走沙箱那个进程"是另一件事。审计 P116 的回落逻辑要按**这个**判断
+   * （沙箱起不来时，只有"本来打算走沙箱"才该退回直通）。
+   */
+  usedSandbox: boolean;
   /**
    * `args` **原样**拼成命令行（`windowsVerbatimArguments`），一个字符都不让 Node 转义。
    * 直通路要它（理由见 `planFor`），沙箱路不要（那边的参数由 CRT 规则解析）。
@@ -204,6 +283,7 @@ export function planFor(
       verbatimArgv: isWin,
       env: {},
       bounded: false,
+      usedSandbox: false,
       note: "没有沙箱（命令不受限）——编它：pnpm sandbox:build",
     };
   }
@@ -234,6 +314,7 @@ export function planFor(
     verbatimArgv: false,
     env: { DING_SANDBOX_COMMAND: command },
     bounded: info.bounded,
+    usedSandbox: true,
     note: info.note,
   };
 }

@@ -66,7 +66,16 @@ export default function TitleBar() {
     <div
       className="wb-titlebar"
       data-testid="wb-titlebar"
-      onDoubleClick={() => {
+      onDoubleClick={(event) => {
+        /*
+         * ⚠️ **窗口按钮区里不许再响应双击**（2026-10-16 审计 P109）。
+         *
+         * 这条原来挂在容器上、不判目标：在「最大化/还原」那颗键上快双击 =
+         * 手势本身的一次 + 按钮自己的 `onClick`（一次手势里点两下就是两次）+ 这里一次
+         * = **三次请求**，窗口走"最大化→还原→最大化"，`setMaximized` 还会闪一下。
+         * `.wb-winctl` 是 `no-drag`（不吞点击），所以这条判断只能写在代码里。
+         */
+        if ((event.target as HTMLElement | null)?.closest(".wb-winctl")) return;
         void bridge()?.win?.toggleMaximize();
       }}
     >

@@ -21,14 +21,29 @@ import type { SessionSummary } from "../../shared/ipc";
  *
  * ## 一条硬规矩：**恢复不删东西**
  *
- * `applyBackup` 只**追加**（会话按 `(session_id, seq)` 去重，已有的不覆盖）。
+ * `applyBackup` 只**追加**：
+ *   · 会话：**按内容**跳过本地已有（同一段内容不重复入库），新的追加在后面；
+ *   · 配置型 store：`readStore` 报"这台机器上已经有"的键一律**跳过**（不动用户现在的设置）。
+ *
  * 理由：备份文件可能是三天前的，而用户这三天又聊了一堆 —— 直接覆盖等于用旧数据
  * 抹掉新的。想"完全回到备份那一刻"是另一件事（用户手动把 sessions.db 挪走再恢复），
  * 不该是默认行为。
+ *
+ * ⚠️ 这条规矩以前**只是写在注释里**：`RestorePorts` 没有"读一条 store"的口子，
+ * 所以配置型 store 实际是**无条件覆盖**（P99/P123/P196，与 CLI 打印的"只补不覆盖"相反）。
+ * 现在 `readStore` 是真口子，跳过与计数都落在报告里。
  */
 
 /** 备份格式版本（将来改格式时靠它判断）。 */
 export const BACKUP_VERSION = 1;
+
+/**
+ * 恢复侧"这条键在本机用不了"的标记（跨机器带来的旧式绝对路径键）。
+ *
+ * `readStore` 返回它 → `applyBackup` 记进 `storesUnavailable` 并跳过，
+ * 而不是把值写到一串**没人会查**的键上、然后在报告里说"恢复了 N 项"（P100/P128）。
+ */
+export const UNMAPPABLE_STORE_KEY = Symbol("unmappable-store-key");
 
 /** 备份文件里的一份会话。 */
 export type BackupSession = {
@@ -42,8 +57,15 @@ export type BackupPayload = {
   kind: "ding-harness-backup";
   version: number;
   exportedAt: string;
-  /** 这台机器上的数据目录（**只是记个出处**，恢复时不用它 —— 备份该能跨机器用）。 */
+  /**
+   * 这台机器上的数据目录（**只是记个出处**，恢复时不用它 —— 备份该能跨机器用）。
+   *
+   * ⚠️ 默认只存**目录名**（`path.basename`）：完整路径里带用户名/机器名，
+   * 而这个文件是要拿去分享/传别的机器的（P145）。要完整路径就显式 `--keep-provenance`。
+   */
   fromDataDir: string;
+  /** 完整的数据目录（只在 `--keep-provenance` 时出现）。 */
+  fromDataDirFull?: string;
   /** 会话（含日志正文）。 */
   sessions: BackupSession[];
   /**
@@ -63,6 +85,17 @@ export type BackupPayload = {
   };
 };
 
+/**
+ * 取路径的最后一段（**纯字符串**：`engine/core/**` 不许 import 任何 `node:*`，见 `kernelBoundary.test.ts`）。
+ *
+ * 只为把完整数据目录脱敏成目录名，不做任何文件系统判断。
+ */
+function baseName(p: string): string {
+  const cleaned = String(p ?? "").replace(/[\\/]+$/, "");
+  const at = Math.max(cleaned.lastIndexOf("/"), cleaned.lastIndexOf("\\"));
+  return at >= 0 ? cleaned.slice(at + 1) : cleaned;
+}
+
 /** 建一份备份（纯函数：只整理，不落盘）。 */
 export function buildBackup(input: {
   fromDataDir: string;
@@ -70,13 +103,17 @@ export function buildBackup(input: {
   stores: Array<{ key: string; value: unknown }>;
   config?: unknown;
   now?: Date;
+  /** 把**完整**数据目录写进备份（默认只写目录名，见 `fromDataDir`）。 */
+  keepProvenance?: boolean;
 }): BackupPayload {
   const records = input.sessions.reduce((n, s) => n + s.records.length, 0);
+  const safeDir = baseName(input.fromDataDir) || input.fromDataDir;
   return {
     kind: "ding-harness-backup",
     version: BACKUP_VERSION,
     exportedAt: (input.now ?? new Date()).toISOString(),
-    fromDataDir: input.fromDataDir,
+    fromDataDir: safeDir,
+    ...(input.keepProvenance ? { fromDataDirFull: input.fromDataDir } : {}),
     sessions: input.sessions,
     stores: input.stores,
     ...(input.config === undefined ? {} : { config: input.config }),
@@ -84,27 +121,70 @@ export function buildBackup(input: {
   };
 }
 
+/** 备份里一条记录的最小形状校验（**不收窄形状**，只挡住"根本不是记录"那种）。 */
+function looksLikeRecord(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const type = (raw as { type?: unknown }).type;
+  return type === undefined || typeof type === "string";
+}
+
 /** 校验一份备份（**磁盘上的东西不可信**：手改过/拷坏了都要说清而不是崩）。 */
 export function validateBackup(raw: unknown): { ok: true; payload: BackupPayload } | { ok: false; reason: string } {
   if (!raw || typeof raw !== "object") return { ok: false, reason: "不是一个对象（文件可能拷坏了）" };
   const o = raw as Partial<BackupPayload>;
   if (o.kind !== "ding-harness-backup") return { ok: false, reason: "kind 不是 ding-harness-backup —— 这不是本程序的备份" };
-  if (typeof o.version !== "number") return { ok: false, reason: "缺少 version" };
-  if (o.version > BACKUP_VERSION) {
-    // 更高版本的备份**不要猜着恢复**：可能有不认识的字段，恢复出来是半截数据
-    return { ok: false, reason: `备份是第 ${o.version} 版，本程序只认到第 ${BACKUP_VERSION} 版（升级之后再恢复）` };
+  if (typeof o.version !== "number" || !Number.isInteger(o.version) || o.version < 1 || o.version > BACKUP_VERSION) {
+    /*
+     * ⚠️ P145：原来只挡 `version > BACKUP_VERSION` —— 于是 `0`、负数、`NaN`
+     * （`typeof NaN === "number"`，且 `NaN > 1` 为 false）全都"通过"，被当成第 1 版恢复。
+     * 版本号是格式契约的地基，读不懂就一律拒绝。
+     */
+    if (typeof o.version === "number" && o.version > BACKUP_VERSION) {
+      // 更高版本的备份**不要猜着恢复**：可能有不认识的字段，恢复出来是半截数据
+      return { ok: false, reason: `备份是第 ${o.version} 版，本程序只认到第 ${BACKUP_VERSION} 版（升级之后再恢复）` };
+    }
+    return { ok: false, reason: `version 必须是 1..${BACKUP_VERSION} 之间的整数，读到的却是 ${String(o.version)}` };
   }
   if (!Array.isArray(o.sessions)) return { ok: false, reason: "sessions 不是数组" };
   if (!Array.isArray(o.stores)) return { ok: false, reason: "stores 不是数组" };
+  for (const s of o.sessions) {
+    if (!s || typeof s !== "object" || Array.isArray(s)) return { ok: false, reason: "sessions 里有一条不是对象" };
+    const sess = s as { sessionId?: unknown; records?: unknown };
+    if (typeof sess.sessionId !== "string" || !sess.sessionId.trim()) {
+      return { ok: false, reason: "sessions 里有一条缺 sessionId" };
+    }
+    if (sess.sessionId.includes("..")) {
+      // 会话 id 会被当键写进库：`.`/`..` 这类不合法（与 JSONL 侧同一条规矩）
+      return { ok: false, reason: `会话 id 里有 ..（拒绝）：${sess.sessionId}` };
+    }
+    if (!Array.isArray(sess.records)) {
+      return { ok: false, reason: `会话 ${sess.sessionId} 的 records 不是数组` };
+    }
+    for (const r of sess.records) {
+      if (!looksLikeRecord(r)) return { ok: false, reason: `会话 ${sess.sessionId} 里有一条记录不是对象` };
+    }
+  }
+  for (const e of o.stores) {
+    if (!e || typeof e !== "object" || Array.isArray(e)) return { ok: false, reason: "stores 里有一条不是对象" };
+    if (typeof (e as { key?: unknown }).key !== "string" || !(e as { key: string }).key.trim()) {
+      return { ok: false, reason: "stores 里有一条缺 key" };
+    }
+  }
   return { ok: true, payload: o as BackupPayload };
 }
 
 /** 恢复时用到的写入口（宿主给：会话 store + KV）。 */
 export type RestorePorts = {
-  /** 读某个会话**已有**的记录（用来去重，见下面"只追加"）。 */
+  /** 读某个会话**已有**的记录（用来判重，见下面"只追加"）。 */
   loadSession: (sessionId: string) => Promise<{ records: LogRecord[] }>;
   /** 追加一批记录（返回落盘形态）。 */
   appendSession: (sessionId: string, records: readonly LogInput[]) => Promise<LogRecord[]>;
+  /**
+   * 读一条配置型 store 现在有没有。`null`/`undefined` = 没有；`UNMAPPABLE_STORE_KEY` = 这台机器上这条键用不了。
+   *
+   * ⚠️ 这个口子**必须**给：没有它，"已有的键跳过"在结构上就兑现不了（P99/P123/P196）。
+   */
+  readStore?: (key: string) => unknown | null;
   /** 写一条配置型 store 的值。 */
   writeStore: (key: string, value: unknown) => void;
   /** 写回 CLI 配置（可选：宿主不给就跳过）。 */
@@ -116,16 +196,43 @@ export type RestoreReport = {
   sessions: number;
   recordsAdded: number;
   recordsSkipped: number;
+  /** 真正写进去的配置型 store 项数（"补"的那部分）。 */
   stores: number;
+  /** 本机已有、按"只补不覆盖"跳过的项数。 */
+  storesSkipped: number;
+  /** 跨机器带来的键（旧式绝对路径）在本机用不了、没能恢复的项数。 */
+  storesUnavailable: number;
   configRestored: boolean;
 };
 
 /**
+ * 一条记录的**内容指纹**（去掉 `seq`/`at` —— 它们是存储自己编的，跨机器必然不同）。
+ *
+ * 键排序后序列化，所以同一段内容换个键序也是同一个指纹。
+ */
+function recordSignature(record: unknown): string {
+  const { seq: _seq, at: _at, ...rest } = (record ?? {}) as Record<string, unknown>;
+  return stableStringify(rest);
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
+    .join(",")}}`;
+}
+
+/**
  * 恢复一份备份。
  *
- * ⚠️ **只追加，不覆盖**（见文件头那条硬规矩）：
- *   · 会话：已有的 `(session_id, seq)` 跳过；新的追加在后面。
- *   · 配置型 store：已有的键跳过（不动用户现在的设置），只补**缺失**的键。
+ * **只补不覆盖**：
+ *   · 会话：按**内容指纹**判重（同一段内容不重复入库）；备份里本地没有的一律追加。
+ *     ⚠️ 原来按 `seq` 判重：`seq` 是每台机器自己的编号，跨机器同 id 会话会在
+ *     `seq` 上与本地撞车，于是备份的**前几轮被静默当"已存在"丢掉**（P210）。
+ *   · 配置型 store：`readStore` 说"本机已有"就跳过（不动用户现在的设置），只补缺失的键。
  *
  * @param payload 已通过 `validateBackup` 的备份
  * @param ports 写入口
@@ -138,10 +245,23 @@ export async function applyBackup(payload: BackupPayload, ports: RestorePorts): 
   for (const session of payload.sessions) {
     if (!session?.sessionId || !Array.isArray(session.records)) continue;
     const existing = await ports.loadSession(session.sessionId);
-    const have = new Set(existing.records.map((r) => r.seq));
-    /* 只追加**没有的** seq：备份比现在旧时，现在的那些记录不该被挤掉 */
-    const missing = session.records.filter((r) => !have.has(r.seq));
-    recordsSkipped += session.records.length - missing.length;
+    /* 内容指纹 → 本地已有条数（多重集：本地有两条一样的内容就只跳过两条） */
+    const have = new Map<string, number>();
+    for (const r of existing.records) {
+      const sig = recordSignature(r);
+      have.set(sig, (have.get(sig) ?? 0) + 1);
+    }
+    const missing: LogRecord[] = [];
+    for (const r of session.records) {
+      const sig = recordSignature(r);
+      const n = have.get(sig) ?? 0;
+      if (n > 0) {
+        have.set(sig, n - 1);
+        recordsSkipped += 1;
+        continue;
+      }
+      missing.push(r);
+    }
     if (!missing.length) continue;
     /* 走 `LogInput`（去掉 seq/at 让存储自己重新编号 —— 存储的编号才是权威） */
     const toWrite: LogInput[] = missing.map((r) => {
@@ -153,8 +273,26 @@ export async function applyBackup(payload: BackupPayload, ports: RestorePorts): 
   }
 
   let stores = 0;
+  let storesSkipped = 0;
+  let storesUnavailable = 0;
   for (const entry of payload.stores) {
     if (!entry?.key) continue;
+    if (ports.readStore) {
+      let existing: unknown;
+      try {
+        existing = ports.readStore(entry.key);
+      } catch {
+        existing = null; // 读不了就当没有（写入口自己还有一层判断）
+      }
+      if (existing === UNMAPPABLE_STORE_KEY) {
+        storesUnavailable += 1;
+        continue;
+      }
+      if (existing !== null && existing !== undefined) {
+        storesSkipped += 1;
+        continue;
+      }
+    }
     ports.writeStore(entry.key, entry.value);
     stores += 1;
   }
@@ -170,6 +308,8 @@ export async function applyBackup(payload: BackupPayload, ports: RestorePorts): 
     recordsAdded,
     recordsSkipped,
     stores,
+    storesSkipped,
+    storesUnavailable,
     configRestored,
   };
 }

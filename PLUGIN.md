@@ -4,6 +4,13 @@
 > **`tools:register` 与 `hooks:register` 是真的**（不批准就不接那根线），
 > 而 `fs:read` / `fs:write` / `net` / `exec` **只是声明，拦不住**（插件与宿主同进程）。
 > 也就是说：**装一个插件等于让它以你的身份在这台机器上跑**。请只装你读得懂的。
+>
+> ⚠️ 这份文档的**每一处形状都以代码为准**：`engine/runtime/plugins.ts` 的
+> `checkManifest` 与 `engine/runtime/pluginHost.ts` 的装载逻辑。
+> 照这份文档写出来的东西**真的能装、真的能跑** ——
+> 仓库里 `plugin-samples/word-count/` 就是照它写的一份最小插件，
+> 由 `src/pluginSamples.test.ts` 每次跑测试时真装一遍、真调一遍
+> （把示例改坏，那条测试就红）。抄它比抄文档快。
 
 ## 一个插件是什么
 
@@ -21,19 +28,28 @@ my-plugin/
 {
   "name": "word-count",
   "version": "1.0.0",
-  "description": "数一数文件里有多少字",
+  "description": "数一数一段文本里有多少个非空白字符",
   "main": "index.mjs",
-  "permissions": ["fs:read"]
+  "tools": ["count"],
+  "hooks": ["tool:before"],
+  "permissions": ["tools:register", "hooks:register"],
+  "engines": { "ding": ">=0.5.0" }
 }
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `name` | 插件的唯一名字（工具名会带上它：`plugin__<name>__<工具名>`） |
-| `version` | 语义化版本 |
-| `description` | **不能太短**（校验会拒），用户装之前靠它判断 |
-| `main` | 入口文件（相对 manifest） |
-| `permissions` | **必填**。允许的值见下 |
+| `name` | 插件的唯一名字（工具名会带上它：`plugin__<name>__<工具名>`）。小写字母开头，只含小写字母/数字/连字符，2–41 字符 |
+| `version` | 语义化版本（`1.0.0` 这种形状） |
+| `description` | **不能太短**（少于 8 个字符会被拒），用户装之前靠它判断 |
+| `main` | 入口文件（相对 manifest，默认 `index.mjs`）。**不许**绝对路径或 `../` |
+| `tools` | 它提供哪些工具（**名字**数组）。声明了却没导出 → 装载时报出来；导出了没声明 → **不接** |
+| `hooks` | 它挂在哪些生命周期点上（见下表的四个名字）。声明外的钩子**不会被调用** |
+| `permissions` | **必填**（可以是空数组 `[]`，表示什么权限都不要）。允许的值见下 |
+| `engines.ding` | **必填**。它兼容的宿主版本（例如 `">=0.5.0"`） |
+
+⚠️ `tools` / `hooks` 声明了，就**必须**同时申请对应的权限
+（`tools:register` / `hooks:register`）—— 两者不一致会被当成作者写错了，安装直接失败。
 
 **权限值**：
 
@@ -45,6 +61,9 @@ my-plugin/
 | `net` | **只是声明** |
 | `exec` | **只是声明** |
 
+前两条真的拦得住那件事由 `engine/runtime/plugins.test.ts` 的「权限与能力注入」那组用例钉着
+（清单声明 + 用户批准，两条都在才接上线；用户拒了某一项 → 那条线不接）。
+
 manifest 里声明了 `fs:read` 而实际不用它，用户会问"为什么要这个权限" ——
 所以**只声明你真需要的**（安装时用户看到的就是这张表）。
 
@@ -52,32 +71,37 @@ manifest 里声明了 `fs:read` 而实际不用它，用户会问"为什么要�
 
 ```js
 // index.mjs —— 导出 tools（工具）和/或 hooks（钩子）
-export const tools = [
-  {
-    name: "count",                       // 模型看到的是 plugin__word-count__count
-    description: "数一段文本里有多少个字符（不含空白）",
-    inputSchema: {                       // JSON Schema（不是 zod —— 插件不引我们的依赖）
+export const tools = {
+  count: {
+    description: "数一段文本里有多少个非空白字符",
+    inputSchema: {                      // 纯 JSON Schema（不是 zod —— 插件不引宿主依赖）
       type: "object",
       properties: { text: { type: "string", description: "要数的文本" } },
       required: ["text"],
     },
-    async run({ text }) {
-      const n = String(text ?? "").replace(/\s/g, "").length;
+    async run(input) {                  // (input, ctx) → 结果
+      const text = typeof input?.text === "string" ? input.text : "";
+      const n = text.replace(/\s/g, "").length;
       return { ok: true, output: { count: n, line: `数出来 ${n} 个字符` } };
     },
   },
-];
+};
 
 export const hooks = {
   /* 只在"工具真要执行"之前调用；**返回值被忽略**（v1 的钩子只看不改） */
-  "tool:before": async ({ name, input }) => {
+  "tool:before": async ({ name }) => {
     console.error(`[word-count] 即将执行 ${name}`);
   },
 };
 ```
 
+⚠️ **`tools` 是对象表，不是数组**：键就是工具名（清单里 `tools` 声明的那几个），
+装载端按 `Object.keys(mod.tools)` 与清单对账。
+
 **工具的返回值**：成功给 `{ ok: true, output: { line, ... } }` ——
-`line` 是界面上那一行留痕（不写的话留痕会退化成"已完成"，用户看不出结果）。
+`line` 是界面上那一行留痕（不写的话留痕会退化成"已完成"，用户看不出结果）；
+它由 `shared/agentTools.ts` 的 `describeToolResult` 取出来，最长显示 80 字
+（那条分支由 `src/pluginSamples.test.ts` ② 钉着：示例的 `line` 必须真的出现在留痕里）。
 失败给 `{ ok: false, error: "人话" }`（原文会回注给模型）。
 
 ## 四个钩子
@@ -98,12 +122,12 @@ export const hooks = {
 ## 装 / 试 / 卸
 
 ```bash
-ding plugins install ./my-plugin      # 本地目录
-ding plugins install npm:word-count   # npm 包（要 --yes 确认权限清单）
+ding plugins install ./my-plugin      # 本地目录（装之前会列出它要的权限，要加 --yes 才真装）
+ding plugins install npm:word-count   # npm 包（同上，两段式确认）
 ding plugins list                     # 看装了哪些、开着哪些
 ding plugins doctor                   # 查装载有没有问题
 ding plugins disable word-count        # 关掉（不删）
-ding plugins uninstall word-count      # 卸掉
+ding plugins remove word-count         # 卸掉（台账 + 拷进来的那份内容都清，你给的源目录不动）
 ```
 
 桌面端在「插件 · 技能 · 伙伴」页的「外部插件」段里做同样的事（含权限确认对话框）。
@@ -128,5 +152,10 @@ ding run "用 word-count 数一下这段话"
 
 ## 参考实现
 
-仓库里 `scripts/accept/` 的插件验收脚本会现场造一个最小插件（含工具与钩子），
-可以直接拿来当模板改。
+`plugin-samples/` 下有一份**真能跑**的最小插件（`word-count`：一个工具 + 一个钩子，
+manifest 与入口都对应本文档的形状）。可以直接 `cp -r` 出去改。
+
+它不是在文档里"应该有"而已：`src/pluginSamples.test.ts` 会真的
+`installFromDir` → `loadEnabledPlugins` → 调工具 → 跑钩子，
+并且对 `plugin-samples/` 下**每一个**目录都这么做 —— 把示例改坏（少一个导出、
+漏一项权限、入口写错形状），那条测试立刻红。

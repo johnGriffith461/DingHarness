@@ -39,6 +39,7 @@ import { describeWriteResult, writeFileForModel } from "../../engine/runtime/too
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { nothingFoundNote } from "../../engine/runtime/tools/searchTool";
+import { createSerialQueue } from "../../engine/runtime/serialQueue";
 import { callMcpTool, mcpToolBindings } from "./mcpStore";
 import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "../../engine/runtime/tools/searchTool";
 import { listDrive, ownedDirs } from "./driveStore";
@@ -62,6 +63,21 @@ import { runPluginTool } from "../../engine/runtime/pluginHost";
  */
 
 /**
+ * **读-改-写要排队**（2026-10-16，审计 P42）。
+ *
+ * 记忆与定时任务都是"读出整份 → 改 → 写回整份"的形状。两次调用**并发**时
+ * （模型在一轮里连发两条 `memory_save`、或按下允许时正好又有一轮在跑），
+ * 两边读到的是同一份旧快照，后写的把先写的整份盖掉 —— **丢一条，而且不报错**。
+ *
+ * 队列本体抽在 `engine/runtime/serialQueue.ts`（那里有单测钉"两段不交错"）——
+ * 本文件只把它接到这两条路上。
+ *
+ * 注意它只串行化**本进程内**的这几条路：外部进程同时改同一份文件不在此列
+ * （那是 jsonStore/后端该管的事，不在这里假装解决）。
+ */
+const serializeWrite = createSerialQueue();
+
+/**
  * 把一条内容存进记忆。
  *
  * 落盘走 `writeMemory`（与 IPC 同一条路径）—— 两处必须一致，
@@ -71,21 +87,25 @@ import { runPluginTool } from "../../engine/runtime/pluginHost";
  * 同步重试会把主进程连同界面一起卡住）。`EXECUTORS` 本来就允许返回 Promise，
  * 所以这里跟着改成 async 即可。
  *
+ * ⚠️ 读与写之间**不能有别的写插进来**：整段排在 `serializeWrite` 里（见上）。
+ *
  * @param text 要记住的内容
  * @returns 给模型看的结果（含当前条数，方便它判断要不要继续）
  */
-async function saveToMemory(text: string): Promise<{ ok: boolean; count: number; note?: string }> {
-  const before = await readMemory();
-  const next = addMemory(before, text, { source: "conversation" });
-  if (next === before) {
-    // addMemory 在"空文本"或"已经有一模一样的"时原样返回
-    return { ok: true, count: before.entries.length, note: "这条已经记过了，没有重复添加" };
-  }
-  if (before.entries.length >= MEMORY_MAX && next.entries.length >= MEMORY_MAX) {
-    return { ok: true, count: next.entries.length, note: `记忆已满（上限 ${MEMORY_MAX} 条），这条没有存进去` };
-  }
-  await writeMemory(next);
-  return { ok: true, count: next.entries.length };
+function saveToMemory(text: string): Promise<{ ok: boolean; count: number; note?: string }> {
+  return serializeWrite(async () => {
+    const before = await readMemory();
+    const next = addMemory(before, text, { source: "conversation" });
+    if (next === before) {
+      // addMemory 在"空文本"或"已经有一模一样的"时原样返回
+      return { ok: true, count: before.entries.length, note: "这条已经记过了，没有重复添加" };
+    }
+    if (before.entries.length >= MEMORY_MAX && next.entries.length >= MEMORY_MAX) {
+      return { ok: true, count: next.entries.length, note: `记忆已满（上限 ${MEMORY_MAX} 条），这条没有存进去` };
+    }
+    await writeMemory(next);
+    return { ok: true, count: next.entries.length };
+  });
 }
 
 /** 列出全部记忆条目。 */
@@ -139,12 +159,19 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const bad = validateJob(job);
     if (bad) return { ok: false, error: bad };
 
-    const jobs = await loadJobs();
-    const saved = await saveJobs([...jobs, job]);
-    if (!saved) return { ok: false, error: "写盘失败" };
+    /*
+     * ⚠️ 读出整份列表、追加、再整份写回 —— 三步必须**排队**（审计 P42 的另一半，
+     * 见上面 `serializeWrite`）：两条 `schedule_create` 并发时后写的会盖掉先写的。
+     */
+    const saved = await serializeWrite(async () => {
+      const jobs = await loadJobs();
+      const ok = await saveJobs([...jobs, job]);
+      return { ok, count: jobs.length + 1 };
+    });
+    if (!saved.ok) return { ok: false, error: "写盘失败" };
     broadcastScheduleChanged();
     return {
-      count: jobs.length + 1,
+      count: saved.count,
       title: job.title,
       next: describeNextRun(job.nextRunAt, now) ?? "",
     };
@@ -275,14 +302,33 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     };
   },
 
-  [RUN_COMMAND_TOOL]: async (input) => {
+  [RUN_COMMAND_TOOL]: async (input, env) => {
     const { command, workdir, timeout } = input as { command: string; workdir?: string; timeout?: number };
-    const result = await runCommandForModel({ command, workdir, timeout }, ownedDirs());
+    /*
+     * ⭐ **把中止信号传下去**（2026-10-16，审计 P35）。
+     *
+     * 在此之前这一行是 `runCommandForModel({command, workdir, timeout}, ownedDirs())` ——
+     * 于是用户点「停止」时，`run_command` 起的那条命令**连它的孙进程一起继续跑**，
+     * 一直跑到 30 分钟超时（`timeout:0` 时更久）。同一份信号 `env.signal` 早就
+     * 传给了 `search_files` 与子智能体，只有跑命令这一条漏了 —— 而它恰恰是
+     * "把 shell 交出去"的那条，最需要有刹车。
+     */
+    const result = await runCommandForModel(
+      { command, workdir, timeout, ...(env.signal ? { signal: env.signal } : {}) },
+      ownedDirs(),
+    );
     return {
       ok: result.ok,
       line: describeRunResult(result, command),
       ...(result.ok
-        ? { exitCode: result.exitCode, cwd: result.cwd, truncated: result.truncated, timedOut: result.timedOut, text: result.output }
+        ? {
+            exitCode: result.exitCode,
+            cwd: result.cwd,
+            truncated: result.truncated,
+            timedOut: result.timedOut,
+            ...(result.aborted ? { aborted: true } : {}),
+            text: result.output,
+          }
         : { error: result.error }),
     };
   },

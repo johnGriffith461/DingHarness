@@ -4,7 +4,7 @@
  * ⚠️（该依据未入库、本机也找不到 —— 决策链断在这里，无法复核；以本文件里的断言与实现为准）
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ShellBridge } from "@shared/ipc";
 import { SEARCH_LABELS, hitLabel, placeholderFor, searchItems } from "@shared/search";
 import { MCP_LABELS } from "@shared/mcp";
@@ -131,6 +131,10 @@ export function PluginsPage() {
     | null
   >(null);
   const [pluginNote, showPluginNote] = useTransientNote(3000);
+  /** 有插件动作在跑（P48）：它决定安装键禁不禁用。 */
+  const [pluginBusy, setPluginBusy] = useState(false);
+  /** 同一帧里的第二次点击靠这个拦（state 还没来得及更新）。 */
+  const pluginBusyRef = useRef(false);
   /** npm 包名输入（"发现"那一半：在 npm 上找到包名，粘进来装）。 */
   const [npmSpec, setNpmSpec] = useState("");
 
@@ -147,9 +151,51 @@ export function PluginsPage() {
     pullPlugins();
   }, [mode, manageTab, pullPlugins]);
 
+  /**
+   * 本机库写盘失败的提示要**说出来**（2026-10-16 审计 P262）。
+   *
+   * `libraryStore` 把失败写进 `note`（"改动已生效，但存盘失败（重启后可能丢失）"），
+   * 盯着这一条的判据是 `sweepTailStore.test.ts`（"本机库的 note 有人读了"那条）。
+   * 而全仓**没有任何组件读过它** —— 用户点了启用/置顶，盘上却没写下去，
+   * 界面上一点迹象都没有，重启之后才发现"我明明设过"。这里把它接到插件页已有的提示条上
+   * （插件/技能/伙伴这一页正是管理那个库的地方）。
+   */
+  const libNote = useLibraryStore((s) => s.note);
+  useEffect(() => {
+    if (libNote) showPluginNote(libNote);
+  }, [libNote, showPluginNote]);
+
+  /**
+   * 取插件通道（2026-10-16 审计 P10）。
+   *
+   * ⚠️ 调用点原来是 `shell!.plugins.install(...)` —— **非空断言**。没有桥的环境
+   * （纯浏览器 / vite 直开）里 `shell` 是 undefined，`shell!.plugins` 直接抛
+   * **TypeError**：点一下安装，界面什么都不发生、控制台一条红 —— 用户以为坏了，
+   * 而真正的原因（根本不在 Electron 里）一个字都没说。
+   * 现在如实说一句再返回 null（调用方 `if (!api) return;`）。
+   */
+  const pluginsApi = useCallback((): NonNullable<ShellBridge["plugins"]> | null => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    if (!shell?.plugins) {
+      showPluginNote("插件通道不可用：当前不在 Electron 里运行（用 pnpm dev:app 启动）");
+      return null;
+    }
+    return shell.plugins;
+  }, [showPluginNote]);
+
   /** 一次插件动作（安装/开关/卸载）：把结果里的清单接回来，失败的把原话显示出来。 */
   const doPluginAction = useCallback(
     (run: () => Promise<{ ok: boolean; errors?: string[]; list?: unknown }>, okNote: string) => {
+      /*
+       * ⚠️ **一次只跑一个插件动作**（2026-10-16 审计 P48）。
+       *
+       * 装插件在主进程是**真的执行用户代码**（`plugins.install` 会把它加载起来），
+       * 而两颗安装键原来都是裸 `onClick` —— 连点两下就装两遍、执行两遍。
+       * 判据用 ref：`setState` 要等下一次渲染，拦不住同一帧里的第二次点击。
+       */
+      if (pluginBusyRef.current) return;
+      pluginBusyRef.current = true;
+      setPluginBusy(true);
       void run()
         .then((r) => {
           if (!r.ok) {
@@ -160,7 +206,11 @@ export function PluginsPage() {
           showPluginNote(okNote);
 
         })
-        .catch((e: unknown) => showPluginNote(String(e).slice(0, 120)));
+        .catch((e: unknown) => showPluginNote(String(e).slice(0, 120)))
+        .finally(() => {
+          pluginBusyRef.current = false;
+          setPluginBusy(false);
+        });
     },
     [],
   );
@@ -380,18 +430,20 @@ export function PluginsPage() {
                   onChange={(e) => setNpmSpec(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter" || !npmSpec.trim()) return;
-                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
-                    doPluginAction(() => shell!.plugins.install(npmSpec.trim()), "装好了");
+                    const api = pluginsApi();
+                    if (!api) return;
+                    doPluginAction(() => api.install(npmSpec.trim()), "装好了");
                     setNpmSpec("");
                   }}
                 />
                 <button
                   className="wb-page-btn"
                   data-testid="wb-plugin-install-npm"
-                  disabled={!npmSpec.trim()}
+                  disabled={!npmSpec.trim() || pluginBusy}
                   onClick={() => {
-                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
-                    doPluginAction(() => shell!.plugins.install(npmSpec.trim()), "装好了");
+                    const api = pluginsApi();
+                    if (!api) return;
+                    doPluginAction(() => api.install(npmSpec.trim()), "装好了");
                     setNpmSpec("");
                   }}
                 >
@@ -400,9 +452,11 @@ export function PluginsPage() {
                 <button
                   className="wb-page-btn"
                   data-testid="wb-plugin-install"
+                  disabled={pluginBusy}
                   onClick={() => {
-                    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
-                    doPluginAction(() => shell!.plugins.install(), "装好了");
+                    const api = pluginsApi();
+                    if (!api) return;
+                    doPluginAction(() => api.install(), "装好了");
                   }}
                 >
                   <Plus size={14} /> 从目录安装
@@ -449,8 +503,9 @@ export function PluginsPage() {
                         className="wb-page-btn"
                         data-testid={`wb-plugin-toggle-${p.name}`}
                         onClick={() => {
-                          const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
-                          doPluginAction(() => shell!.plugins.setEnabled(p.name, !p.enabled), p.enabled ? "已关掉" : "已打开");
+                          const api = pluginsApi();
+                          if (!api) return;
+                          doPluginAction(() => api.setEnabled(p.name, !p.enabled), p.enabled ? "已关掉" : "已打开");
                         }}
                       >
                         {p.enabled ? "关掉" : "打开"}
@@ -459,8 +514,9 @@ export function PluginsPage() {
                         className="wb-page-btn"
                         data-testid={`wb-plugin-remove-${p.name}`}
                         onClick={() => {
-                          const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
-                          doPluginAction(() => shell!.plugins.uninstall(p.name), "卸载了");
+                          const api = pluginsApi();
+                          if (!api) return;
+                          doPluginAction(() => api.uninstall(p.name), "卸载了");
                         }}
                       >
                         卸载

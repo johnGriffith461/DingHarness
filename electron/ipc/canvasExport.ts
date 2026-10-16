@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { uniqueFilePath } from "../../engine/runtime/assetName";
 
 /**
  * 画布导出 PNG（阶段 8.6，对标原版 `data-canvas-export-host` / `data-canvas-export-scene`）。
@@ -72,10 +73,16 @@ export function registerCanvasExportIpc(): void {
       }
 
       const dir = exportsDir();
-      fs.mkdirSync(dir, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const file = path.join(dir, `${safeName(request.name ?? "画布")}-${stamp}.png`);
-      fs.writeFileSync(file, image.toPNG());
+      /*
+       * ⭐ 落盘改**异步**、名字走统一口径（2026-10-16，审计 P21）。
+       *
+       * 原来是 `mkdirSync` + `writeFileSync`，而时间戳只到**秒**：
+       * 同一个 tick 里导两次（连点两下、或脚本连着调）后者无声盖掉前者；
+       * 而同步写一张大图会把主进程的事件循环整段按住 —— 那期间模型流式吐字全停。
+       */
+      await fs.promises.mkdir(dir, { recursive: true });
+      const file = uniqueFilePath(dir, safeName(request.name ?? "画布"), ".png");
+      await fs.promises.writeFile(file, image.toPNG());
       return { ok: true, file, width: size.width, height: size.height } satisfies ExportResult;
     } catch (error) {
       return {
@@ -85,9 +92,10 @@ export function registerCanvasExportIpc(): void {
     }
   });
 
-  ipcMain.handle(CANVAS_EXPORT_CHANNEL.revealExports, () => {
+  ipcMain.handle(CANVAS_EXPORT_CHANNEL.revealExports, async () => {
     const dir = exportsDir();
-    fs.mkdirSync(dir, { recursive: true });
+    /* 同步 mkdir 换成异步（审计 P21）：打开目录不该按住主进程 */
+    await fs.promises.mkdir(dir, { recursive: true });
     void shell.openPath(dir);
     return { ok: true, dir };
   });

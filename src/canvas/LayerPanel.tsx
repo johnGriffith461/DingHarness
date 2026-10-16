@@ -147,6 +147,12 @@ export default function LayerPanel({
               title={row.locked ? "解锁这一层（恢复可拖动）" : "锁定这一层（防止误拖）"}
               onClick={(e) => {
                 e.stopPropagation();
+                /*
+                 * ⚠️ 打撤销点（2026-10-16 审计 P25）：锁定/隐藏原来一处历史都不打，
+                 * 而同一面板里调层级、翻转、复制、删除都是打的 —— 用户锁错一层只能手动解锁回去
+                 * （隐藏更糟：卡片从画布上消失，Ctrl+Z 也救不回来）。
+                 */
+                commitHistory();
                 setLayerLocked(row.id, !row.locked);
               }}
             >
@@ -158,6 +164,7 @@ export default function LayerPanel({
               title={row.hidden ? "显示这一层" : "隐藏这一层"}
               onClick={(e) => {
                 e.stopPropagation();
+                commitHistory();
                 setLayerHidden(row.id, !row.hidden);
               }}
             >

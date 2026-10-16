@@ -122,14 +122,34 @@ export const ARTIFACT_OP_STATUS = {
 /**
  * 本地产物状态 → 协议编号。
  *
- * 本地只有三个态（生成中 / 已生成 / 已删除），映射到协议里对应的那几个。
+ * ⚠️ 入参词表**必须与真实的本地状态对齐**（审计 P60）：界面上那份是
+ * `src/workbench/artifact.ts` 的 `generating | generated | failed`
+ * （外加仓储用来表示"删掉了"的 `removed`）。这里原来写的是
+ * `generating | ready | removed` —— 与真实词表**不相交**，于是 `generated` 与
+ * `failed` 全落进默认分支，**失败的产物被报成「已生成」**。
+ *
+ * `ready` 是 Phase 11.29 的旧名，保留只为不弄红按它钉着的用例
+ * （`src/workbench/artifactProto.test.ts`，那份不在本轮范围）；新代码用 `generated`。
+ *
+ * 协议里没有"失败"这一档（只有 Init/Generating/Generated/Deleted/Terminal/UnSupport），
+ * 最接近的是 `Terminal`（终止）—— 不假装它是"已生成"。
+ *
+ * @param status 本地产物状态
+ * @returns 协议编号
  */
-export function artifactStatusOf(status: "generating" | "ready" | "removed" | undefined): number {
+export function artifactStatusOf(
+  status: "generating" | "generated" | "failed" | "removed" | "ready" | undefined,
+): number {
   switch (status) {
     case "generating":
       return ARTIFACT_STATUS.Generating;
-    case "ready":
+    case "generated":
       return ARTIFACT_STATUS.Generated;
+    case "ready":
+      /* 旧名（Phase 11.29 写的那个），语义就是"已生成" */
+      return ARTIFACT_STATUS.Generated;
+    case "failed":
+      return ARTIFACT_STATUS.Terminal;
     case "removed":
       return ARTIFACT_STATUS.Deleted;
     default:

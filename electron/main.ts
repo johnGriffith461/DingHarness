@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { registerAiIpc } from "./ipc/ai";
 import { loadPluginsAtStartup, registerPluginIpc } from "./ipc/pluginHost";
-import { registerSessionIpc } from "./ipc/sessionStore";
+import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
@@ -27,6 +27,7 @@ import { registerDesktopSecretCipher, registerSecretsIpc } from "./ipc/secretSto
 import { registerClipboardIpc } from "./ipc/clipboard";
 import { registerCodingIpc } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL, loadAppSettings, saveAppSettings } from "./ipc/appSettings";
+import { closeKv } from "../engine/adapters/kvStore";
 
 /**
  * 渲染产物 `dist/index.html` 的绝对路径。
@@ -110,31 +111,60 @@ rawLog(`脚本已加载 argv=${JSON.stringify(process.argv.slice(1))} cwd=${proc
  * 旧身份的数据目录名（Phase 0.2）。
  *
  * 打包态的 userData 是 `%APPDATA%\<productName>`（Electron 的 `app.getName()`
- * 取 package.json 的 `productName`）。产品从 Dingwork 更名为 Ding Harness 之后
- * 这个名字就变了 —— 不搬的话，老用户升级上来会看到"数据全没了"。
+ * 取 package.json 的 `productName`）。产品更名过**两次**，所以有**两代**老名字：
+ *
+ * | 代 | 目录名 |
+ * |---|---|
+ * | 第一代 | `工作台`（那时 productName 就是中文） |
+ * | 第二代 | `Dingwork` |
+ * | 现在 | `Ding Harness`（见 package.json 的 `productName`） |
+ *
+ * ⚠️ 只认一个名字（原来只认 `Dingwork`）= 第一代用户升级上来看到"数据全没了"（D6）。
+ * 顺序是**从新到旧**：跨过两代升级的用户，第二代目录里的数据最新。
  */
-const LEGACY_PRODUCT_DIR = "Dingwork";
+const LEGACY_PRODUCT_DIRS = ["Dingwork", "工作台"];
+
+/**
+ * 一个目录里有没有"我们的数据"。
+ *
+ * 判据只认我们自己落的东西（会话库 / KV 库 / 画布目录 / 顶层 JSON）——
+ * Electron 自己会往 userData 里写一堆缓存目录，不能拿"目录非空"当"用过"。
+ */
+function hasOurData(dir: string): boolean {
+  if (fs.existsSync(path.join(dir, "canvas"))) return true;
+  try {
+    return fs.readdirSync(dir).some((f) => f === "sessions.db" || f === "stores.db" || f.endsWith(".json"));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * 把旧身份的数据目录整体搬到新身份名下（**一次性**）。
  *
- * ⚠️ 必须在**第一次写 userData 之前**跑。`bootLog` 会往 `userData/boot.log` 写，
- * 那一写就把新目录建出来了 —— 于是"新目录不存在"这个前置条件永远不成立，
- * 迁移静默退化成空操作。这正是迁移类代码最容易骗过自己的形状。
+ * ⚠️ **判据不能是"新目录不存在"**（这是 D6 点名的真 bug）：Electron 在启动早期就把
+ * userData 建出来了（Chromium 的缓存目录也会进去），那个前置条件**永远不成立** ——
+ * 迁移于是静默退化成空操作。改成看"新目录里有没有我们的数据"。
  *
  * 三条边界：
  *   · 只对**打包态**做（开发态的数据目录是工程根的 `data/`，与身份无关）；
- *   · 新目录**已经存在**就什么都不做（不合并、不覆盖 —— 用户可能已经在新版里用过了）；
- *   · 旧目录不存在就什么都不做（新装用户，压根没有"旧数据"）。
+ *   · 新目录**已经有我们的数据**就什么都不做（不合并、不覆盖 —— 用户可能已经在新版里用过了）；
+ *   · 旧目录不存在 / 里面没有我们的数据就什么都不做（新装用户，压根没有"旧数据"）。
  */
 function migrateLegacyUserData(): void {
   if (!app.isPackaged) return;
   try {
     const next = app.getPath("userData");
-    const prev = path.join(path.dirname(next), LEGACY_PRODUCT_DIR);
-    if (next === prev || !fs.existsSync(prev) || fs.existsSync(next)) return;
-    fs.cpSync(prev, next, { recursive: true });
-    bootLog(`已从旧数据目录迁移：${prev} → ${next}`);
+    if (hasOurData(next)) return;
+    for (const name of LEGACY_PRODUCT_DIRS) {
+      const prev = path.join(path.dirname(next), name);
+      if (next === prev || !fs.existsSync(prev) || !hasOurData(prev)) continue;
+      fs.mkdirSync(next, { recursive: true });
+      // force:false + errorOnExist:false → 只补新目录里缺的，**绝不覆盖**已有文件
+      fs.cpSync(prev, next, { recursive: true, force: false, errorOnExist: false });
+      bootLog(`已从旧数据目录迁移（${name}）：${prev} → ${next}`);
+      return;
+    }
   } catch (error) {
     // 迁不过去也**不动**旧目录：老数据原样留在原处，用户至少还找得到
     bootLog(`旧数据目录迁移失败（继续用新目录）：${error instanceof Error ? error.message : String(error)}`);
@@ -169,7 +199,7 @@ process.on("unhandledRejection", (reason) => {
  * 数据目录。
  *
  * 分两种情况，因为**打包后 `__dirname` 在 asar 里，是只读的**：
- *   · 打包后：用系统 userData（`%APPDATA%\工作台`）—— 安装目录不可写，写那里会直接失败
+ *   · 打包后：用系统 userData（`%APPDATA%\Ding Harness`）—— 安装目录不可写，写那里会直接失败
  *   · 开发期：用工程根的 `data/`（`.gitignore` 已排除）—— 能直接翻快照文件排查问题
  * 两种情况都可以用 `DSH_CANVAS_DATA_DIR` 覆盖（多份数据并行测试时用）。
  */
@@ -370,4 +400,22 @@ app.on("window-all-closed", () => {
 /* 退出前把连接器的子进程收掉，别在系统里留孤儿进程 */
 app.on("before-quit", () => {
   stopAllMcp();
+  /*
+   * ⚠️ P142：也要**关掉数据库句柄**。原来这里只 `stopAllMcp()`：
+   *   · `stores.db`（KV）的句柄在进程活着的整段时间里常开（缓存按目录存），
+   *     用户这时跑 `ding backup` / `ding resume` 就是同文件第二个连接 → `SQLITE_BUSY`
+   *     → 写回落文件（split-brain 的触发器）；
+   *   · Windows 上句柄没放掉，数据目录/库文件就删不掉（`closeKv` 的注释记过这条）。
+   * `closeKv()` 不给参数 = 关掉所有目录；失败了也不该拦住退出。
+   */
+  try {
+    closeKv();
+  } catch (error) {
+    console.error("[kv] 关句柄失败：", error instanceof Error ? error.message : error);
+  }
+  try {
+    desktopSessionStore().close();
+  } catch (error) {
+    console.error("[session] 关句柄失败：", error instanceof Error ? error.message : error);
+  }
 });

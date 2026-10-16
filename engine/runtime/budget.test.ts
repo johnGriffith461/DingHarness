@@ -57,9 +57,27 @@ describe("保留额度（keepTokensFor）", () => {
     });
   });
 
-  it("小到离谱也不低于下限（防止「额度小到等于没有」）", () => {
+  it("⭐ 小到离谱时**贴着模型自己的窗口**，不再用绝对下限顶爆它（2026-10-16，审计 P54）", () => {
+    /*
+     * ⚠️ 这一条原来断言 `=== KEEP_RECENT_TOKENS_MIN`（2000），而那是 **P54 的缺陷本身**：
+     * 窗口只有 100 token 的模型，"下限 2000"把历史额度顶到**超过它整个窗口** ——
+     * 额度比模型容量还大（等于没有预算），而那条硬下限是按大模型的经验定的。
+     *
+     * 现在：额度 = 窗口的一半（`KEEP_RATIO`），且**永不越过窗口**。
+     * 断言里不抄死数字：上限取自 `budgetOf`，比例取自实现里的口径一致性（窗口/2）。
+     */
     withModel(makeSpec("absurd-test", 100), () => {
-      expect(keepTokensFor("absurd-test")).toBe(KEEP_RECENT_TOKENS_MIN);
+      const window = budgetOf("absurd-test").contextWindow;
+      const got = keepTokensFor("absurd-test");
+      expect(got).toBe(Math.floor(window / 2));
+      expect(got, "额度不许超过模型窗口 —— 那正是 P54").toBeLessThanOrEqual(window);
+    });
+  });
+
+  it("⭐ 下限只在**放得下**的时候生效（窗口够大时行为与从前逐字一致）", () => {
+    /* 窗口 = 下限的两倍 → 一半正好等于下限：结果也是下限，与修正前同值 */
+    withModel(makeSpec("edge-test", KEEP_RECENT_TOKENS_MIN * 2), () => {
+      expect(keepTokensFor("edge-test")).toBe(KEEP_RECENT_TOKENS_MIN);
     });
   });
 

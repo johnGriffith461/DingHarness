@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness.mjs";
 
 /**
@@ -13,7 +14,15 @@ import { connectWithRetry, openCanvas, pickPort, shot, verdict } from "./harness
  *      Electron 会把自己当 Node 跑 —— 没有脚本、直接退出码 0，看起来像"应用秒退"。
  *   ② 数据目录用 DSH_CANVAS_DATA_DIR 指到临时位置，别污染真实 userData。
  */
-const DATA = ".verify/packaged-data";
+/*
+ * ⚠️ 数据目录必须是**绝对路径**（2026-10-16，收进批跑时逮到）。
+ *
+ * 原来写的是相对路径 `".verify/packaged-data"` —— 而应用是以 `cwd: release/win-unpacked`
+ * 启动的，`main.ts` 那句 `path.resolve(DSH_CANVAS_DATA_DIR)` 于是把数据落到
+ * `release/win-unpacked/.verify/packaged-data/`（实测撞到），脚本又去仓库根那份找 →
+ * 报「打包版没有把画布存到数据目录」，是个**假红**（自动保存其实写得好好的）。
+ */
+const DATA = path.resolve(".verify/packaged-data");
 fs.rmSync(DATA, { recursive: true, force: true });
 
 const env = { ...process.env };
@@ -24,14 +33,26 @@ env.DSH_CANVAS_DATA_DIR = DATA;
 const __port = await pickPort([9330]);
 env.DSH_DEBUG_PORT = String(__port);
 
-const exe = "release/win-unpacked/Ding Harness.exe";
+const exe = path.resolve("release/win-unpacked/Ding Harness.exe");
 if (!fs.existsSync(exe)) {
-  console.log("打包产物不存在：", exe);
+  /*
+   * ⚠️ 2026-10-16（审计 A21）：缺产物是**环境红**，不是产品坏了 ——
+   * 判词里写清"先打包"，`verify-acceptances.mjs` 的 `classify` 按这句把它归到环境红那一类。
+   */
+  console.error("打包产物不存在（先 pnpm package:win）：" + exe + " —— 这条按环境红记，不算通过。");
   process.exit(1);
 }
 
+/*
+ * ⚠️ exe 必须是**绝对路径**（2026-10-16，收进批跑时逮到）。
+ *
+ * 原来是 `spawn("release/win-unpacked/Ding Harness.exe", …, { cwd: "release/win-unpacked" })`：
+ * Windows 会把**相对的可执行文件路径按子进程的 cwd** 解析 → 变成
+ * `release/win-unpacked/release/win-unpacked/Ding Harness.exe` → `spawn … ENOENT` 直接崩。
+ * 这条以前没进批跑（=从没被跑到），所以一直没暴露。
+ */
 const child = spawn(exe, [], {
-  cwd: "release/win-unpacked",
+  cwd: path.dirname(exe),
   env,
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -71,12 +92,15 @@ report.providers = await page.evaluate(async () => {
   }
 });
 
-// 持久化：加个节点，等自动保存，看数据目录
+// 持久化：加个节点，**等自动保存真的落盘**（不是固定等 2.8 秒），再看数据目录
 await page.locator('[data-testid="add-node"]').click();
 await page.waitForTimeout(250);
 await page.locator('.canvas-menu button[data-kind="whiteboard"]').click();
-await page.waitForTimeout(2800);
 const snap = `${DATA}/canvas/document.json`;
+/* 落盘是防抖的，机器一忙固定等待就会读到"还没写"（那是假红）→ 等那个真条件 */
+for (let i = 0; i < 20 && !fs.existsSync(snap); i += 1) {
+  await page.waitForTimeout(700);
+}
 report.snapshotWritten = fs.existsSync(snap);
 if (report.snapshotWritten) {
   const doc = JSON.parse(fs.readFileSync(snap, "utf8"));

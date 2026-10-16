@@ -55,19 +55,90 @@ export type SnapshotDiff = {
   differences: string[];
 };
 
-/** 把一轮投影压成可比的短串（**比对的是内容，不是对象引用**）。 */
+/**
+ * 稳定序列化：**对象键排序**之后再 JSON。
+ *
+ * 为什么要它：指纹比对的是"内容一样不一样"。若直接 `JSON.stringify`，
+ * 两条内容相同的对象只因**键的插入顺序**不同就会给出不同的串 —— 那是假漂移，
+ * 而假漂移会让人开始不信这个设施（本仓反复踩过"守卫假红也是缺陷"）。
+ */
+function stable(value: unknown): string {
+  if (value === undefined) return "-";
+  try {
+    return JSON.stringify(value, (_key, v) => {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        return Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        );
+      }
+      return v;
+    });
+  } catch {
+    /* 循环引用之类：退化成 String（总比静默变成 "-" 强 —— 至少还能看出是同一份东西） */
+    return String(value);
+  }
+}
+
+/**
+ * 把一轮投影压成可比的短串（**比对的是内容，不是对象引用**）。
+ *
+ * ⚠️ 2026-10-16（审计 **P232**）：这条指纹原来**只取五个字段**
+ * （`toolCallId` / `name` / `ok` / `pending` / `line`），于是下面这些漂移**全都不被看见**：
+ *   · 工具留痕的 **`input` / `output` / `error`** 丢了 —— `events.test.ts` 记过一条真缺陷：
+ *     重放恢复出来的 `input` 是空的，重启后点「允许」报
+ *     `Cannot read properties of undefined`。**指纹照样判「零漂移」**；
+ *   · **委派（`delegations`）** 整体丢了（团队进展在重放后空掉）；
+ *   · **这一轮的 request 正文**（provider/model/policy/下发的工具/消息）变了。
+ *
+ * 而"零漂移"正是这套快照设施存在的全部理由 —— 它看不见的东西，等于没人验。
+ * 现在把上面三样一起纳入指纹（时间戳与 `requestId` 仍然**刻意排除**：
+ * 同一个行为发生在不同时刻不算漂移，这条口径没变）。
+ */
 function turnSignature(chunk: TurnChunk): string {
   const view = chunk.view;
   const traces = view.traces.map((t) =>
-    [t.toolCallId, t.name, t.ok ? "ok" : "fail", t.pending ? "pending" : "-", t.line].join("|"),
+    [
+      t.toolCallId,
+      t.name,
+      t.ok ? "ok" : "fail",
+      t.pending ? "pending" : "-",
+      t.error ?? "-",
+      `in=${stable(t.input)}`,
+      `out=${stable(t.output)}`,
+      t.line,
+    ].join("|"),
+  );
+  const delegations = (view.delegations ?? []).map((d) =>
+    [
+      d.delegationId,
+      d.agent,
+      d.status,
+      d.ok === undefined ? "-" : d.ok ? "ok" : "fail",
+      d.steps ?? "-",
+      d.error ?? "-",
+      d.summary ?? "-",
+      d.task,
+    ].join("|"),
   );
   const usage = view.usage ? `${view.usage.inputTokens ?? "-"}/${view.usage.outputTokens ?? "-"}` : "-";
+  const request = chunk.request
+    ? [
+        `${chunk.request.provider}/${chunk.request.model}`,
+        `policy=${chunk.request.toolPolicy ?? "-"}`,
+        `useTools=${chunk.request.useTools === undefined ? "-" : chunk.request.useTools}`,
+        `tools=${(chunk.request.tools ?? []).join(",")}`,
+        `system=${stable(chunk.request.system)}`,
+        `messages=${stable(chunk.request.messages)}`,
+      ].join(" ")
+    : "-";
   return [
+    `request=${request}`,
     `text=${JSON.stringify(view.text)}`,
     `done=${view.done}`,
     `error=${view.error ?? "-"}`,
     `usage=${usage}`,
     `traces=[${traces.join(" ; ")}]`,
+    `delegations=[${delegations.join(" ; ")}]`,
   ].join(" ");
 }
 

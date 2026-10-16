@@ -54,21 +54,70 @@ export async function listProviders(): Promise<ProviderInfo[]> {
   if (!shell?.ai) return BROWSER_PROVIDERS;
   try {
     return await shell.ai.listProviders();
-  } catch {
-    return BROWSER_PROVIDERS;
+  } catch (error) {
+    /*
+     * ⚠️ 2026-10-16（审计 P238）：这里原来**把主进程抛错也当成「没在 Electron 里跑」**，
+     * 于是界面告诉用户「请用 pnpm dev:app 从 Electron 启动」—— 指错方向：
+     * 他明明就在 Electron 里（甚至是打包版），真原因（凭据文件读失败、主进程 handler 抛）
+     * 既不显示也不落日志。
+     *
+     * 现在两条路分开：
+     *   · 没桥 → `BROWSER_PROVIDERS`（那句"请用 Electron 启动"是对的）；
+     *   · 有桥但读失败 → `BRIDGE_FAILED_PROVIDERS`（说"读不到"，原文只进日志）。
+     * 后者仍然是 `available:false`，所以路由那套不会挑中它（不会把故障伪装成可用通道）。
+     */
+    console.error("[ai] 通道列表读取失败：", error instanceof Error ? error.message : error);
+    return BRIDGE_FAILED_PROVIDERS;
   }
 }
 
-/** 主动探测各 provider 的真实连通性（较慢，只在用户需要时调）。 */
-export async function probeProviders(): Promise<
-  Array<{ id: string; ok: boolean; ms: number; error?: string }>
-> {
+/**
+ * 「有桥，但主进程读取失败」时的占位列表（审计 P238）。
+ *
+ * 与 `BROWSER_PROVIDERS` **必须分开**：那个代表"根本没有 Electron 环境"，
+ * 这个代表"在 Electron 里，但这次没读出来"。两者给用户的下一步完全不同
+ * （一个去起 Electron，一个去重试/看日志）。
+ *
+ * `available:false` 是刻意的 —— 故障不许被路由逻辑当成一条可用通道。
+ */
+const BRIDGE_FAILED_PROVIDERS: ProviderInfo[] = [
+  {
+    id: "list-failed",
+    label: "通道列表读不到",
+    models: [],
+    note: "主进程读取通道列表失败：重试一次；仍不行请看日志（原文不往界面上吐）",
+    available: false,
+    keyRef: "",
+  },
+];
+
+export type ProbeRow = { id: string; ok: boolean; ms: number; error?: string };
+
+/**
+ * 主动探测各 provider 的真实连通性（较慢，只在用户需要时调）。
+ *
+ * ⚠️ 2026-10-16（审计 P240）两条如实记：
+ *
+ * ① **返回值区分了「探测跑了、一条都没成」与「探测根本没跑成」。**
+ *    原来异常被吞成 `[]` —— 界面上与"没有任何结果"长得一模一样，
+ *    用户点了探测像没点，且原文既不显示也不落日志。现在失败带 `error`，原文进日志。
+ *
+ * ② **这份渲染层封装现在没有任何界面在调它**（别以为摘掉它就等于砍功能）：
+ *    设置·模型页上只有三颗按钮 —— 拉取模型清单 / 设为默认 / 保存密钥，
+ *    **没有探测按钮**；`src/styles/chat.css` 里那句「探测按钮 + 还没验证过提示」
+ *    是改版前的旧说法。真探测跑在主进程（`electron/ipc/aiProbe.ts` → `provider-probe.json`），
+ *    设置页只**读**它记下的「已验证」状态。
+ *    留着这个口子是因为它是"该有却断了"的那一端：谁把按钮接回来，返回值已经是诚实的。
+ */
+export async function probeProviders(): Promise<{ rows: ProbeRow[]; error?: string }> {
   const shell = bridge();
-  if (!shell?.ai) return [];
+  if (!shell?.ai) return { rows: [], error: "AI 通道不可用（当前不在 Electron 里）" };
   try {
-    return await shell.ai.probe();
-  } catch {
-    return [];
+    return { rows: await shell.ai.probe() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "探测调用失败";
+    console.error("[ai] 探测失败：", message);
+    return { rows: [], error: message };
   }
 }
 
@@ -100,15 +149,31 @@ export type StreamHandle = {
 };
 
 /**
+ * 一次流里**多久收不到任何事件就算卡住**（2026-10-16，审计 P239）。
+ *
+ * 为什么必须有：`streamChat` 只在收到 `done`/`error` 或用户点中止时才收尾，
+ * 而这条链上**一层超时都没有**（`electron/ipc/ai.ts` 只有 40ms 批量 flush 定时器、
+ * `engine/runtime/loop.ts` 的 `streamText` 只传 `abortSignal`）。
+ * 于是"TCP 连上了、provider 不再吐字节"（SSE 中途断、上游挂住）会让
+ * `completeOnce` 的四处调用（画布 / 文档 ×2 / 智能体 / 任务）**永久停在「生成中」**，
+ * 用户只能强杀应用；每卡一次还多留一个 `onStream` 监听器与一条 `liveStreams` 记录。
+ *
+ * 取值 60 秒：正常一轮的相邻事件间隔是毫秒级，60 秒静默只可能是断了。
+ */
+export const STREAM_IDLE_TIMEOUT_MS = 60_000;
+
+/**
  * 发起一次流式对话。
  *
  * @param request provider / model / messages
  * @param onEvent 每个流事件（text / done / error）
+ * @param opts.idleTimeoutMs 空闲看门狗（默认 `STREAM_IDLE_TIMEOUT_MS`；测试用小的值）
  * @returns 句柄：`requestId`、`abort`，以及**流结束才 resolve** 的 `done`
  */
 export async function streamChat(
   request: ChatRequest,
   onEvent: (event: AiStreamEvent) => void,
+  opts: { idleTimeoutMs?: number } = {},
 ): Promise<StreamHandle> {
   const shell = bridge();
   if (!shell?.ai) {
@@ -117,6 +182,7 @@ export async function streamChat(
     return { requestId: "no-bridge", abort: () => undefined, done: Promise.resolve({ aborted: false }) };
   }
 
+  const idleTimeoutMs = opts.idleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
   const buffered: AiStreamEvent[] = [];
   let requestId = "";
   let finished = false;
@@ -125,9 +191,32 @@ export async function streamChat(
     resolveDone = resolve;
   });
 
+  /*
+   * 空闲看门狗：每次有事件就重新计时；到点说明上游静默了 ——
+   * 尽力 `abort`（拿不到 requestId 就只收尾），并把"卡住"变成一个**读得懂的失败**。
+   * 不复位的话，一次卡住之后每 60 秒都会再响一次（`settle` 里有 `finished` 守卫，但它只挡一次收尾，不挡重复 `abort`）。
+   */
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  const armWatchdog = () => {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      if (finished) return;
+      if (requestId) void shell.ai!.abort(requestId);
+      settle(false, {
+        requestId: requestId || "idle-timeout",
+        type: "error",
+        message: `上游 ${idleTimeoutMs >= 1000 ? Math.round(idleTimeoutMs / 1000) : (idleTimeoutMs / 1000).toFixed(2)} 秒没有回任何数据（连接可能已断）—— 已中止这次生成`,
+      });
+    }, idleTimeoutMs);
+  };
+
   const settle = (aborted: boolean, event?: AiStreamEvent) => {
     if (finished) return;
     finished = true;
+    if (watchdog) {
+      clearTimeout(watchdog);
+      watchdog = undefined;
+    }
     if (event) onEvent(event);
     unsubscribe();
     resolveDone({ aborted });
@@ -135,6 +224,7 @@ export async function streamChat(
 
   const dispatch = (event: AiStreamEvent) => {
     if (finished) return;
+    armWatchdog();
     onEvent(event);
     if (event.type === "done") settle(false);
     else if (event.type === "error") settle(false);
@@ -150,6 +240,12 @@ export async function streamChat(
     if (event.requestId !== requestId) return;
     dispatch(event);
   });
+
+  /*
+   * ⚠️ 看门狗**在请求发出之前就装上**：这样"主进程收到请求却一直不回 `requestId`"
+   * 也会以超时收尾，而不是让调用方永远 await 下去。
+   */
+  armWatchdog();
 
   let started: ChatStartResult;
   try {

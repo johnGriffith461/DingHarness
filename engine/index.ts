@@ -75,6 +75,19 @@ export type EngineRunRequest = {
   model?: string;
   system?: string;
   messages: { role: "system" | "user" | "assistant"; content: string }[];
+  /**
+   * **这一轮之前的对话历史**（可选，2026-10-16，审计 P127）。
+   *
+   * 存在的理由：`ding resume <id> --continue` 承诺"接着跑完、新一轮看得见上次做到哪"，
+   * 而原来 `run()` 收的只有一条 user 消息、**也不读 `ports.store.load(...)`** ——
+   * 所谓"继续"就是**没有任何历史的凭空重跑**（同一句话再问一遍，模型当然从头来）。
+   * 现在宿主可以把还原出来的历史交进来，它排在 `messages` 前面，
+   * 并且**一起进 `request` 记录**（不变量 1：记下来的就是模型真看见的）。
+   *
+   * ⚠️ 只收"已经完成"的历史。被打断那一轮的半截输出**不在这里** ——
+   * 那是宿主的事（`cmdResume` 会如实说明带了什么、没带什么）。
+   */
+  history?: { role: "system" | "user" | "assistant"; content: string }[];
   temperature?: number;
   /** 思考强度（见 ）：不给 = 不发，与以前完全一致。 */
   reasoningEffort?: ReasoningEffort;
@@ -82,6 +95,15 @@ export type EngineRunRequest = {
   mode: ConfirmMode;
   /** 给不给工具（起标题、翻译这类附带请求不给 —— 它们拿到工具会真的动手）。 */
   useTools?: boolean;
+  /**
+   * 只要这些工具（**角色白名单**，可选；2026-10-16，审计 P126）。
+   *
+   * 与 `buildToolSet` / `offeredToolNames` 的 `only` 是同一个口径（一套东西一个词）。
+   * 谁在用：`ding recipe run` —— 模板 JSON 里声明了 `tools`，而那条白名单
+   * **原来一行都没接**（只出现在 `recipe show` 的文案里），于是"第二层防护"是自述。
+   * 省略 = 不限制（主对话就是这样）。
+   */
+  only?: readonly string[];
   /** 步数上限（父 4 / 子 6 是各自的经验值，作为参数传进来）。 */
   maxSteps?: number;
   abortSignal?: AbortSignal;
@@ -116,6 +138,15 @@ export type EngineRunResult = {
   records: LogRecord[];
   /** 这一次请求的 id（宿主按它归并流片段）。 */
   requestId: string;
+  /**
+   * 落盘失败的原因（**一条都不许静默丢**，2026-10-16，审计 P38）。
+   *
+   * 原来 `void record(...)` 的拒绝没人接：桌面侧 `unhandledRejection` 只写 boot.log
+   * （= 静默丢记录，直接违反文件头那条 INV-1「日志即真相」），CLI 侧没有 handler，
+   * Node 默认把进程打死。现在拒绝被接住、原因带回给宿主，且**不把整轮判失败**
+   * （记录写不进去是"记录"的事，不是这一轮的事）。
+   */
+  recordErrors?: string[];
 };
 
 export type Engine = {
@@ -154,29 +185,49 @@ export function createEngine(ports: EnginePorts): Engine {
     async run(request: EngineRunRequest): Promise<EngineRunResult> {
       const requestId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const records: LogRecord[] = [];
+      /** 落盘失败的原因（见 `EngineRunResult.recordErrors`）。 */
+      const recordErrors: string[] = [];
 
-      /** 落一条记录（**发事件与记日志是同一个出口** —— 两处各写一份必然漂移）。 */
+      /**
+       * 落一条记录（**发事件与记日志是同一个出口** —— 两处各写一份必然漂移）。
+       *
+       * ⭐ **拒绝在这里就被接住**（2026-10-16，审计 P38）：调用方一律 `void record(...)`
+       * （不等它，免得吐字被磁盘 IO 拖住），而原来那个 Promise 一旦拒绝就是
+       * **unhandled rejection** —— 桌面侧被 boot.log 吞掉（静默丢记录），
+       * CLI 侧直接按 Node 默认把进程打死。现在：原因记进 `recordErrors`，
+       * 本轮照跑（记录写不进去 ≠ 这一轮没发生），宿主拿到原因就能说话。
+       */
       const record = async (record: LogInput): Promise<void> => {
         if (!request.sessionId) return; // 不属于任何会话：不入库（见上面 sessionId 的说明）
-        const stored = await ports.store.append(request.sessionId, [record]);
-        records.push(...stored);
+        try {
+          const stored = await ports.store.append(request.sessionId, [record]);
+          records.push(...stored);
+        } catch (error) {
+          const why = error instanceof Error ? error.message : String(error);
+          recordErrors.push(why);
+          console.error(`[engine] 会话记录落盘失败（不影响本轮，但这段日志缺一条）：${why}`);
+        }
       };
 
       /*
        * 首行：这一轮**模型实际看见了什么**（不变量 1）。
        * `tools` 记的是"够得着什么" —— 只记"用没用工具"事后回答不了
        * "新加的工具到底有没有下发"。
+       *
+       * ⚠️ 历史与白名单都要照实：`history` 拼进消息（模型真看见了它），
+       * `only` 传给 `offeredToolNames`（不然日志会为"下发了全套"作证，而实际只下发了几件）。
        */
+      const messages = [...(request.history ?? []), ...request.messages];
       await record({
         requestId,
         type: "request",
         provider: request.provider,
         model: request.model ?? "",
         ...(request.system ? { system: request.system } : {}),
-        messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
         toolPolicy: request.mode,
         ...(request.useTools ? { useTools: true } : {}),
-        tools: request.useTools ? offeredToolNames(registry, request.mode, 0) : [],
+        tools: request.useTools ? offeredToolNames(registry, request.mode, 0, request.only) : [],
       });
 
       const events: TurnEvent[] = [];
@@ -209,14 +260,20 @@ export function createEngine(ports: EnginePorts): Engine {
           provider: request.provider,
           ...(request.model ? { model: request.model } : {}),
           ...(request.system ? { system: request.system } : {}),
-          messages: request.messages,
+          messages,
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
           ...(request.onRawError ? { onRawError: request.onRawError } : {}),
           ...(request.useTools
             ? {
-                tools: buildToolSet({ registry, mode: request.mode, executor: ports.executor, ctx }),
+                tools: buildToolSet({
+                  registry,
+                  mode: request.mode,
+                  executor: ports.executor,
+                  ctx,
+                  ...(request.only?.length ? { only: request.only } : {}),
+                }),
                 maxSteps: request.maxSteps ?? 4,
               }
             : {}),
@@ -242,10 +299,21 @@ export function createEngine(ports: EnginePorts): Engine {
       );
 
       /*
-       * 中止：**记一条终止记录，不发事件**（与桌面那边一致）——
-       * 否则读日志的人分不清"这一轮断了"还是"这一轮还在跑"。
+       * 中止：**记一条终止记录，并且把终态事件发给宿主**（2026-10-16，审计 P36）。
+       *
+       * 原来只 `await record(...)` 补日志 —— **不发事件**，于是宿主（界面/CLI）
+       * 看不到这一轮的终态：界面上那个"正在生成"的指示会一直转到下一次交互为止
+       * （读日志的人反而能看到"已中止"，两边说的不是一回事）。
+       * 两个新宿主各自绕开过这件事（ACP 那边直接读 `outcome.aborted` 自己造 stopReason）——
+       * 同一件事补两遍，说明缺的那条就在内核里。
+       *
+       * ⚠️ 事件仍走**已有的** `error` 类型 + 同一句话：新加一种 TurnEvent 会让
+       * `engine/core/events.ts` 的投影不认它（那会变成日志里的"坏行"，见上面 step-finish 的教训）。
        */
       if (outcome.aborted) {
+        const abortedEvent: TurnEvent = { type: "error", message: "已中止" };
+        events.push(abortedEvent);
+        request.onEvent?.(abortedEvent);
         await record({ requestId, type: "error", message: "已中止" });
       }
 
@@ -260,6 +328,7 @@ export function createEngine(ports: EnginePorts): Engine {
         events,
         records,
         requestId,
+        ...(recordErrors.length ? { recordErrors } : {}),
       };
     },
 

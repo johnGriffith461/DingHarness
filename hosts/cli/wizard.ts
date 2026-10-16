@@ -30,6 +30,17 @@ import { readConfig, writeConfig, type CliConfig } from "./config";
  * 2. 把 provider / model / dirs / mode 写进 `~/.ding/config.json`。
  *
  * 其余什么都不动（不装东西、不改 PATH、不写注册表）。
+ *
+ * ## ⚠️ 这份 key 是**明文**（审计 P114/P120，如实记）
+ *
+ * CLI 这台机器上没有系统钥匙串集成（`engine/adapters/secretStore.ts` 的 `secretsEncrypted()`
+ * 在 CLI 下恒 false），所以向导**没法**加密 —— 它写的就是明文。
+ * 桌面端（Electron）「设置里填一次」那条路才走 `safeStorage`（DPAPI/Keychain）加密。
+ * 真要减少明文面：用环境变量，或者去桌面端填。向导里那句提示就是照这个说的（不许写成"已加密"）。
+ *
+ * ⚠️ `writeFileSync(..., { mode: 0o600 })` **在 Windows 上不生效**（NTFS 走 ACL，
+ * Node 的 mode 只影响只读位）—— 所以那句"权限 600"已经从用户可见的话里删掉了：
+ * 平台做不到的事不当承诺念（审计 P120）。
  */
 
 /** 向导的 IO（测试里换成预设答案）。 */
@@ -171,8 +182,17 @@ export async function runWizard(
     io.say(`${def.id} 已经有 key 了（${def.keyRef}），跳过这一步。`);
     providerWithKey = def.id;
   } else {
-    io.say(`需要一个 ${def.id} 的 API key（会写进 ${credentialsPath()}，权限 600）。`);
-    io.say(`也可以跳过，改成自己设环境变量 ${def.keyRef}。`);
+    io.say(`需要一个 ${def.id} 的 API key。`);
+    /*
+     * ⚠️ 这两句是**用户可见的承诺**，必须与代码一致（审计 P120）：
+     *   · CLI 下 `secretsEncrypted()` 恒 false → 这里写进去的一定是明文，就得说明文；
+     *   · 不许再写"权限 600"：Windows 上不生效（NTFS ACL），念一遍等于骗人。
+     * 想走系统加密只有一条路：桌面端设置里填一次（那份进 safeStorage）。
+     */
+    io.say(
+      `会写进 ${credentialsPath()} 的 refs 段（**明文**：这台机器上 CLI 没有系统钥匙串集成；桌面端设置里填的那份才加密）。`,
+    );
+    io.say(`也可以跳过，改成自己设环境变量 ${def.keyRef}（更推荐 —— 不落盘）。`);
     const key = await io.ask("粘贴 key（留空则跳过）", { secret: true });
     if (key) {
       const wrote = writeSecret(def.keyRef, key);

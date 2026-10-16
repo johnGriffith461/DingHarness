@@ -72,6 +72,31 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   }, [loadMemory]);
 
   /*
+   * ⚠️⚠️ **设置弹窗自己处理 Esc**（2026-10-16 审计 P108）。
+   *
+   * 这一条原来是**注释与守卫在说、代码里没有**：`Workbench.tsx` 那段 Esc 写着
+   * 「设置那类对话框自己处理 Esc」（这也是它"让路"的前提），可全仓
+   * `grep keydown/Escape src/workbench/SettingsDialog.tsx` **命中 0 行** ——
+   * 设置页唯一的键盘出路是点遮罩或点 ✕，而它整页化之后连遮罩都没了。
+   *
+   * 现在真的接上：Esc = 返回（与顶栏那颗「‹ 返回」同一个动作）。
+   *
+   * ⚠️ 判据与工单 2 定的那三条边界**相反**的一处刻意差异：焦点在输入框里时
+   * Esc **照样关**。理由——设置页是一个"整页浮层"，用户在这里打字时按 Esc
+   * 的意思就是"我不改了、回去"（浏览器与原生对话框都是这个习惯）；
+   * 而摘要在输入框里让路是因为"侧栏一关就卸载、草稿会丢"——设置页的输入
+   * 都是**选好即落盘**的（模型/主题/记忆开关），不存在"没保存的草稿"。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  /*
    * 首屏卡片上那一格「主题」。
    * 只在渲染时读一次会**滞后**：用户在「通用」里换完主题、返回首屏，卡片还写着旧的。
    * 主题就是 `<html data-theme>` 这个属性（theme.ts:106 定的载体），所以直接听它。
@@ -147,7 +172,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
   ];
   return createPortal(
-    <div className="wb-setfull" data-testid="wb-settings">
+    <div
+      className="wb-setfull"
+      data-testid="wb-settings"
+      /*
+       * ⚠️ 无障碍语义（2026-10-16 审计 P108）：它原来只有一个 div ——
+       * 读屏软件不知道"这里进了一层"，也不知道"底下那些还能不能用"。
+       * 它确实是一个整页浮层（盖住工作台、Esc 可退），所以如实标成模态对话框。
+       */
+      role="dialog"
+      aria-modal="true"
+      aria-label="设置"
+    >
       {/* 整页顶部：返回 + 标题（ZCode 的设置也是一整页，顶部是它的层级区） */}
       <div className="wb-setfull-bar">
         <button className="wb-setfull-back" data-testid="wb-settings-back" onClick={onClose} aria-label="返回工作台" title="返回工作台">

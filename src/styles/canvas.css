@@ -1115,3 +1115,39 @@
 .canvas-reset-confirm-btn:hover { background: var(--surface-hover); }
 
 .canvas-reset-confirm-btn.is-danger { border-color: var(--danger); color: var(--danger); }
+
+/*
+ * ── 窄屏 / 小屏兜底（2026-10-16，审计 P63）──────────────────────────────
+ *
+ * ## 为什么要有这一段
+ *
+ * 这个文件原来只有两条断点（1560px 与 1280px，都在标记工具条那一片），
+ * 再往下（`minWidth: 1024` 那条线附近，以及 DPI 放大后等效宽度更小的时候）
+ * **没有任何兜底**：画布自己的菜单/工具条都是固定 `min-width`，
+ * 加起来比可用宽度还宽 —— 于是横向溢出的那部分被推出视口，
+ * 而窗口又不能再缩小（`electron/main.ts` 的 `minWidth/minHeight`），
+ * 用户没有任何办法把它弄回来。
+ *
+ * ⚠️ **这一半只解决画布自己的那些固定宽度**。"窗口比屏幕大""不可缩小"
+ * 那一半在主进程（`electron/main.ts` 的窗口参数与 `getPrimaryDisplay().workArea` 钳制）
+ * 与工作台三栏骨架（`src/styles/workbench.css`，那里一条 `@media` 都没有）——
+ * 那两处不在这个文件的归属里，别把这条修复当成 P63 全好了。
+ *
+ * 口径：**只收窄、只换行，不改配色与层级** —— 小屏上先保证"都还在屏幕里"。
+ */
+@media (max-width: 1024px) {
+  /* 菜单与浮层不许比视口还宽（原来固定 220 / 260px，窄屏上会顶出去） */
+  .canvas-menu { min-width: 180px; }
+  .canvas-menu-ai { min-width: 200px; }
+  .canvas-toast { max-width: calc(100% - 16px); }
+  /* 底部工具条允许换行 —— 它是"最后一条"（bottom: 30px），
+     横向溢出时被推出左边的就是它最右边那几个按钮，用户再也点不到 */
+  .bottom-toolbar {
+    flex-wrap: wrap;
+    white-space: normal;
+    max-width: calc(100% - 12px);
+    row-gap: 4px;
+  }
+  /* 标记工具条的滚动上限跟着视口走（原来固定 min(560px, 100% - 24px) 之外还有一层 100%） */
+  .marker-toolbar { max-width: calc(100% - 12px); }
+}

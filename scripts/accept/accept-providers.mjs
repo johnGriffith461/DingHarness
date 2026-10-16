@@ -1,104 +1,150 @@
-/*
- * ⚠️ **已退役（2026-10-16）—— 保留作墓碑，不要拿它证明任何事。**
- *
- * 它整条都建在**画布对话侧栏**上：`wb-canvas-chat-toggle` 开侧栏、点 `probe-providers` 触发真探测、
- * 再读 `.chat-provider select` 的选项与 `.chat-compose .side-input` / `.chat-send` 发一句真对话，
- * 验"探测之后界面把已验证的通道标出来"。那套界面（`src/chat/ChatSidebar.tsx`）后来被拆掉了 ——
- * 现在这些 testid 在源码里一个都不存在，脚本点哪儿都不响。
- *
- * 现状（如实记）：
- *   · 它**不在**批跑里（`verify-acceptances.mjs` 的 `NOT_IN_BATCH`，kind=`retired`）；
- *   · **它的覆盖面目前没有替代品**：「真探测 → 界面标出已验证」这条**没有别的验收在盯**。
- *     探测逻辑本身在 `electron/ipc/aiProbe.ts`（真发一次极短请求 + 记健康账本），
- *     界面上现在由设置里的模型页承担。要重新覆盖，按现界面重写一条（别复活这份）。
- */
+// provider 可用性**诚实度**（2026-10-16 按现界面重写）—— 常驻回归。
+//
+// ## 这一条的历史（先说清楚，免得又被人"复活"成旧样子）
+//
+// 它原来整条建在**画布对话侧栏**上（`wb-canvas-chat-toggle` → 点 `probe-providers` 真探测 →
+// 读 `.chat-provider select` 的标签）。那套界面（`src/chat/ChatSidebar.tsx`）后来被拆掉了，
+// 脚本点哪儿都不响 —— 于是竖了墓碑（kind=retired），并在墓碑里**如实注明一件事**：
+// 「真调用成功过 → 界面标出已验证」这条**没有别的验收在盯**。
+//
+// 2026-10-16 按**现在的界面**把它重写回来（设置 →「模型」页 —— 探测的结论就落在那一列状态上）。
+// 现在这条覆盖的是原意里最要紧的那半个：
+//
+//   ① **状态是真的**：配了密钥的那家写「有密钥」、没密钥的写「无密钥」——
+//      不许出现"全都能用"这种假话；
+//   ② ⭐ **真调用成功过才升级成「已验证」**：开跑时（全新数据目录、没调过任何模型）
+//      那一家**不许**已经写着「已验证」；真发一轮成功之后**必须**变成「已验证」。
+//      —— 这一条就是原来"没有替代品"的那个缺口。
+//
+// ## 为什么不点"探测"按钮了
+//
+// 现界面里**没有那颗按钮**了：探测结论（`electron/ipc/aiProbe.ts` → `provider-probe.json`）
+// 现在由「真实调用成功时刷新」（`health.markOk`）写入，没有"手动批量探测"的入口。
+// 所以触发方式从"点按钮"换成"真跑一轮" —— 判据（成功过才显示已验证）一字未改。
+//
+// ⚠️ 批跑自带本地假通道并把 `strata` 指过去（`DSH_NO_REAL_MODEL=1` 管着零出网），
+// 所以"真发一轮"在批跑里是**确定**的、不花钱。
 import { chromium } from "playwright";
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import { connectWithRetry, failOnMarks, openCanvas, pickPort, waitForPort } from "./harness.mjs";
+import {
+  bootApp,
+  connectWithRetry,
+  failOnMarks,
+  finishedTurns,
+  freshDir,
+  killTree,
+  pickPort,
+  verdict,
+  waitForPage,
+  waitTurnEnd,
+} from "./harness.mjs";
 
-/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
+/* ⚠️ 与全仓其它验收一致的"印了 ✗ 就真的红"收口（审计 G15） */
 failOnMarks();
 
-/**
- * provider 可用性诚实度验收。
- *
- * 背景：以前"有密钥"就显示可用，但本机实测 apihub 域名不可达、通义千问 400、
- * 本地服务没起 —— 用户点下去才发现用不了。现在拆成两级：
- *   有密钥但没验证 → 标签写「（未验证）」并提示"还没验证过这家能不能真调用"
- *   真调用成功过   → 标签写「（已验证）」
- *
- * 断言：
- *   1. 初始下拉里，有密钥的显示「（未验证）」，没密钥的显示「（无密钥）」
- *   2. 点「探测」真的跑一轮，结果落到下拉标签上
- *   3. 真发一次对话成功后，该 provider 变「（已验证）」
- */
-const DATA = ".verify/probe-data";
-fs.rmSync(DATA, { recursive: true, force: true });
-const env = { ...process.env };
-delete env.ELECTRON_RUN_AS_NODE;
-env.DSH_CANVAS_DATA_DIR = DATA;
+const DATA = ".verify/providers-data";
+if (!(await freshDir(DATA))) {
+  console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
+  process.exit(1);
+}
 
-/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
-const __port = await pickPort([12390]);
-const child = spawn(
-  "node_modules/electron/dist/electron.exe",
-  [".", "--remote-debugging-port=" + __port],
-  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
-);
-/* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
-await waitForPort(__port, 40000);
-
-const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
-const pages = browser.contexts()[0].pages();
-const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
+const booted = await bootApp({ port: await pickPort([12390]), dataDir: DATA, timeoutMs: 40_000 });
+if (!booted.ok) {
+  console.error("[诊断] 应用输出尾部：" + (booted.getLog() || "(空)").slice(-1200));
+  await killTree(booted.child);
+  process.exit(1);
+}
+const browser = await connectWithRetry(chromium, `http://127.0.0.1:${booted.port}`);
+const page = await waitForPage(browser);
+if (!page) throw new Error("应用起了但一个页面都没建（见 harness 的 NO_PAGE_HINT 说明）");
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
-await page.waitForTimeout(1800);
-  await openCanvas(page);
-  await page.waitForTimeout(1500);
+await page.waitForTimeout(1500);
 
-await page.waitForSelector(".react-flow__node", { state: "attached" });
-await page.waitForTimeout(2500);
+/** 打开 设置 →「模型」子页（入口与 accept-settings-models 同一套）。 */
+const openModelsPage = async () => {
+  if ((await page.locator('[data-testid="wb-setpage-models"]').count()) === 0) {
+    if ((await page.locator('[data-testid="wb-settings"]').count()) === 0) {
+      await page.locator('[data-testid="wb-account"]').click();
+      await page.waitForTimeout(500);
+      await page.locator('[data-testid="wb-acct-settings"]').click();
+      await page.waitForTimeout(900);
+    }
+    await page.locator('[data-testid="wb-set-模型"]').click();
+    await page.waitForTimeout(900);
+  }
+  return (await page.locator('[data-testid="wb-setpage-models"]').count()) > 0;
+};
 
-/*
- * `probe-providers` 与下面要读的 `.chat-provider select` 都在**画布对话侧栏**里
- * （src/chat/ChatSidebar.tsx），它挂在 `.wb-canvas` 内、条件是 canvasChatOpen。
- *
- * 所以**从这里开始就已经依赖侧栏已开** —— 导航必须补在这一行之前。
- * （§104：上一版补在点击那行之前，太晚 —— 那时侧栏还是空的。
- *   "同一个症状"不等于"同一个插入点"。）
- */
-await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
-await page.waitForTimeout(1800);
-  await openCanvas(page);
-  await page.waitForTimeout(1500);
-await page.locator('[data-testid="wb-canvas-chat-toggle"]').click();
-await page.waitForTimeout(2000);
+/** 读左列每一家的状态（文案是「有密钥 / 已验证 / 无密钥」之一）。 */
+const readStates = async () => {
+  const out = {};
+  for (const id of ["strata", "deepseek", "openai"]) {
+    const row = page.locator(`[data-testid="wb-modelset-provider-${id}"]`);
+    if ((await row.count()) === 0) continue;
+    const text = ((await row.first().innerText()) ?? "").replace(/\s+/g, " ").trim();
+    out[id] = text.includes("已验证")
+      ? "已验证"
+      : text.includes("无密钥")
+        ? "无密钥"
+        : text.includes("有密钥")
+          ? "有密钥"
+          : "其它(" + text.slice(0, 24) + ")";
+  }
+  return out;
+};
 
-const options = () =>
-  page.$$eval(".chat-provider select:first-of-type option", (els) =>
-    els.map((e) => e.textContent?.trim() ?? ""),
-  );
+const out = {};
+try {
+  /* ① 开跑时：设置·模型页打不开 / 列不出 provider 就直接红（下面两条判据都要读它） */
+  out.pageOpened = await openModelsPage();
+  out.rowCount = await page.locator('[data-testid^="wb-modelset-provider-"]').count();
+  out.before = await readStates();
+  /* 关掉设置，回首页发一轮真对话（批跑里走本地假通道） */
+  if ((await page.locator('[data-testid="wb-settings-close"]').count()) > 0) {
+    await page.locator('[data-testid="wb-settings-close"]').click();
+    await page.waitForTimeout(400);
+  }
+  await page.locator('[data-testid="wb-nav-home"]').click();
+  await page.waitForTimeout(700);
+  const before = await finishedTurns(page);
+  await page.locator('[data-testid="wb-composer-input"]').fill("只回复两个字：收到");
+  await page.locator('[data-testid="wb-send"]').click();
+  /* 等**这一轮真的结束**（会话记录里的 done），不是"气泡出现就读"（审计 G108 同族） */
+  await waitTurnEnd(page, before, 120_000);
+  out.turnDone = true;
 
-const report = {};
-report.initialOptions = await options();
-report.noteVisible = await page.locator(".chat-note").textContent().catch(() => null);
+  /* ② 跑过一轮之后再看那一列：成功调过的那家应当升成「已验证」 */
+  out.afterOpened = await openModelsPage();
+  out.after = await readStates();
+  await page.screenshot({ path: ".verify/shots-final/providers-status.png", timeout: 8000 }).catch(() => undefined);
 
-// 点探测（会对每个有密钥的 provider 真发一次极短请求）
-await page.locator('[data-testid="probe-providers"]').click();
-await page.waitForTimeout(25000);
-report.afterProbeOptions = await options();
+  await browser.close();
+} catch (e) {
+  out.error = String(e).slice(0, 400);
+} finally {
+  console.log(JSON.stringify(out, null, 2));
+  await killTree(booted.child);
 
-// 发一次真对话，验证成功后该 provider 应变「已验证」
-const ta = page.locator(".chat-compose .side-input");
-await ta.fill("只回复两个字：可以");
-await page.locator(".chat-send").click();
-await page.waitForTimeout(12000);
-report.afterChatOptions = await options();
-report.bubbles = await page.$$eval(".chat-bubble", (els) =>
-  els.map((e) => e.textContent?.trim().slice(0, 30)),
-);
+  const bad = [];
+  if (out.error) bad.push("异常: " + out.error);
+  if (!out.pageOpened) bad.push("设置里点「模型」没打开子页（wb-setpage-models 不在）—— 状态压根没地方看");
+  if (!(out.rowCount >= 2)) bad.push(`左列只列出 ${out.rowCount} 家 provider（不像真列表）`);
 
-console.log(JSON.stringify(report, null, 2));
-await browser.close();
-child.kill();
+  /* ① 状态是真的：没密钥的必须写「无密钥」（不许"全都能用"）*/
+  const beforeStates = out.before ?? {};
+  if (!beforeStates.strata) bad.push("左列里没有批跑那把唯一有密钥的通道（strata）");
+  else if (beforeStates.strata !== "有密钥") {
+    bad.push(`还没调过任何模型，strata 却不写「有密钥」而是「${beforeStates.strata}」—— 状态不是真的`);
+  }
+  if (beforeStates.deepseek && beforeStates.deepseek !== "无密钥") {
+    bad.push(`deepseek 这把没有密钥，界面却写「${beforeStates.deepseek}」—— 在假装可用`);
+  }
+
+  /* ② ⭐ 真调用成功过才升级（原来"没有替代品"的那半个）*/
+  const afterStates = out.after ?? {};
+  if (!out.turnDone) bad.push("那一轮没跑完（会话记录里没等到 done）—— 后面的判据无从谈起");
+  else if (afterStates.strata !== "已验证") {
+    bad.push(`真跑通一轮之后，strata 没有升成「已验证」而是「${afterStates.strata}」—— 成功没记到界面上`);
+  }
+
+  verdict(bad, "provider 状态诚实：没密钥的写「无密钥」/ 真跑通一轮之后那一家升成「已验证」");
+}

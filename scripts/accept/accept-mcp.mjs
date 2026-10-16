@@ -95,7 +95,8 @@ try {
   await page.waitForTimeout(1500);
 
   /* ── ①②⑦ 连接器页签 ── */
-  await openPluginsPage(page);
+  /* ⚠️ `wb-plugin-manage`（那颗「管理」按钮）在**市场页**上 —— 走 `{ market: true }` 进市场再点它。 */
+  await openPluginsPage(page, { market: true });
   await page.waitForTimeout(800);
   await page.locator('[data-testid="wb-plugin-manage"]').click();
   await page.waitForTimeout(500);
@@ -152,7 +153,7 @@ try {
   out.toolsOffered = toolsOffered;
 
   /* ── ⑧ 重新连接 ── */
-  await openPluginsPage(page);
+  await openPluginsPage(page, { market: true });
   await page.waitForTimeout(600);
   await page.locator('[data-testid="wb-plugin-manage"]').click();
   await page.waitForTimeout(400);
@@ -164,7 +165,9 @@ try {
 
   await b.close();
 } catch (e) {
-  out.error = String(e).split("\n")[0];
+  /* ⚠️ 只留第一行时"点不到哪个元素"这类信息的诊断价值为零（Playwright 的 call log 在后面）——
+     收进批跑时逮到过一次，所以留前 600 字。 */
+  out.error = String(e).slice(0, 600);
 } finally {
   console.log(JSON.stringify(out, null, 2));
   if (child) await killTree(child);

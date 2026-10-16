@@ -27,6 +27,7 @@
  * 这里管的是**策略**："这个档位下，这个工具该 run / ask / hide"。
  */
 import { MCP_TOOL_PREFIX } from "../../shared/mcp";
+import { isPluginTool } from "../runtime/plugins";
 import type { ConfirmMode } from "../../shared/ipc";
 
 /** 工具的读写性质 —— 决定"按需确认"档要不要拦它。 */
@@ -122,8 +123,18 @@ export function policyOf(name: string): ToolPolicy {
    * （见 `shared/agentTools.ts` 的 `toolArgsSummary`）。
    *
    * 「全部允许」档下它们照样直接跑 —— 那一档的定义就是"用户说他都同意"。
+   *
+   * ⭐ **插件来的工具同理**（2026-10-16，审计 P02）。
+   *
+   * 这里原来是**同一个洞的另一半**：`plugin__` 前缀的工具名不在 `TOOL_POLICY` 表里，
+   * 于是掉到本函数最后那行「默认只读」—— 同一份风险（别人写的代码、名字之下
+   * 可能是读也可能是删库）在 MCP 那侧被按「写」拦住，在插件这侧却直接放行。
+   * 两道闸对同一件事给出两种判定，弱的那个就是实际生效的那个。
+   *
+   * 前缀常量不在这里重抄一遍：`plugin__` 的拼法是 `plugins.ts` 的 `pluginToolName` 定的，
+   * 抄一份到策略层迟早漂 —— 直接问那个模块。
    */
-  if (name.startsWith(MCP_TOOL_PREFIX)) return { kind: "write" };
+  if (name.startsWith(MCP_TOOL_PREFIX) || isPluginTool(name)) return { kind: "write" };
   return TOOL_POLICY[name] ?? { kind: "read" };
 }
 

@@ -79,6 +79,8 @@ export function normalizeMcpConfig(raw: unknown): McpConfig {
       ? (raw as { servers: unknown[] }).servers
       : [];
   const seen = new Set<string>();
+  /** 塌缩之后的短名（`-` 与 `_` 会撞成同一个）——工具名的实际碰撞面。 */
+  const seenLocal = new Set<string>();
   const servers: McpServerConfig[] = [];
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
@@ -86,8 +88,20 @@ export function normalizeMcpConfig(raw: unknown): McpConfig {
     const name = typeof o.name === "string" ? o.name.trim() : "";
     const command = typeof o.command === "string" ? o.command.trim() : "";
     if (!isValidServerName(name) || !command) continue;
-    if (seen.has(name)) continue;
+    /*
+     * ⚠️ 去掉的是两种"重复"（审计 P07）：
+     *   · **同名**（原样重复）；
+     *   · **塌缩后同名** —— `sanitize` 把 `-` 换成 `_`，于是 `my-server` 与 `my_server`
+     *     会生成**同一个** `mcp__…__…` 工具名。工具名撞了之后的后果现在可钉死：
+     *     `engine/runtime/registry.ts` 的 `byName.set` 是后写覆盖（模型看到最后一个连接器的
+     *     schema），而 `electron/ipc/mcpStore.ts` 的调用路由取第一条 —— 名字一样、两边指向不同。
+     * （同一个连接器内部两个工具名塌缩后相同那一种还没收口：那要在装配工具表的地方按
+     *  `(server, tool)` 去重，属 `electron/ipc/mcpStore.ts`，不在本轮范围，如实记。）
+     */
+    const local = sanitize(name);
+    if (seen.has(name) || seenLocal.has(local)) continue;
     seen.add(name);
+    seenLocal.add(local);
     const args = Array.isArray(o.args) ? o.args.filter((a): a is string => typeof a === "string") : undefined;
     const env =
       o.env && typeof o.env === "object" && !Array.isArray(o.env)

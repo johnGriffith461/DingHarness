@@ -17,7 +17,11 @@ import { connectWithRetry, openCanvas, pickPort, shot } from "./harness.mjs";
 const UNPACKED = "release/win-unpacked";
 const EXE = path.join(UNPACKED, "Ding Harness.exe");
 if (!fs.existsSync(EXE)) {
-  console.log("没有解包产物，先 pnpm build");
+  /*
+   * ⚠️ 2026-10-16（审计 A21）：缺产物是**环境红**，判词里写清"先打包"
+   * （`verify-acceptances.mjs` 的 classify 按这句把它归到环境红那一类，不当产品坏了）。
+   */
+  console.error("没有解包产物（先 pnpm package:win）：" + EXE + " —— 这条按环境红记，不算通过。");
   process.exit(1);
 }
 

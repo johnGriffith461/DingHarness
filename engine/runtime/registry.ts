@@ -219,10 +219,23 @@ export function buildToolSet(input: {
  * @param registry 注册表
  * @param mode 档位
  * @param depth 嵌套深度
+ * @param only 角色白名单（与 `buildToolSet` 的 `only` 同一口径：省略 = 不限制）。
+ *   ⚠️ 2026-10-16（审计 P126）：`ding recipe run` 的模板 `tools` 白名单以前**一行都没接**，
+ *   而日志里那句"够得着什么"（`request.tools`）记的是全量 —— 记录与实际必须同一口径，
+ *   否则日志会为一件没发生的事作证（下发的是白名单那几件，记的却是全套）。
  * @returns 工具名（注入顺序）
  */
-export function offeredToolNames(registry: ToolRegistry, mode: ConfirmMode, depth = 0): string[] {
-  const names = injectableTools(mode, registry.list().map((e) => e.name));
+export function offeredToolNames(
+  registry: ToolRegistry,
+  mode: ConfirmMode,
+  depth = 0,
+  only?: readonly string[],
+): string[] {
+  let names = injectableTools(mode, registry.list().map((e) => e.name));
+  if (only) {
+    const allow = new Set(only);
+    names = names.filter((n) => allow.has(n));
+  }
   if (depth >= MAX_SUBAGENT_DEPTH) {
     return names.filter((n) => n !== SPAWN_AGENT_TOOL && n !== SPAWN_AGENTS_TOOL);
   }

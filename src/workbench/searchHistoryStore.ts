@@ -38,10 +38,21 @@ type State = {
 };
 
 export const useSearchHistoryStore = create<State>()((set, get) => {
+  /*
+   * 串行化写盘（2026-10-16 审计 P271）。
+   *
+   * 原来 `record` 每次都**立刻** `shell.searchHistory.save(...)`，而主进程那次写是 async
+   * 且带退避重试 —— 两次快速搜索（第二次在第一次还没写完时发生）的落盘顺序**不保证**
+   * 与调用顺序一致，于是旧快照可能后落地：历史里**少一条**（内存里还显示两条，
+   * 下次重启才发现）。同仓 `libraryStore.ts` 为这件事专门写了 `saveQueue`，这里照办。
+   */
+  let saveQueue: Promise<unknown> = Promise.resolve();
   const persist = (): void => {
     const shell = bridge();
     if (!shell?.searchHistory) return;
-    void Promise.resolve(shell.searchHistory.save(get().history)).catch(() => undefined);
+    saveQueue = saveQueue
+      .then(() => shell.searchHistory.save(get().history))
+      .catch(() => undefined);
   };
 
   return {

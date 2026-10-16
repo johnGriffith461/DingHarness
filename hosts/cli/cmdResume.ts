@@ -1,5 +1,7 @@
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
+import { splitTurns } from "../../engine/core/events";
 import { recoveryViewOf } from "../../engine/core/recovery";
+import { firstAvailableProvider } from "../../engine/runtime/providers";
 import { normalizeConfirmMode } from "../../shared/ipc";
 import { flag, type Parsed } from "./args";
 import { buildEngine } from "./assembly";
@@ -83,10 +85,21 @@ export async function cmdResume(p: Parsed, dataDir: string): Promise<number> {
       return 2;
     }
 
-    if (p.flags.has("json")) {
+    /*
+     * ⭐ `--json` 与 `--continue` 同时给：**stdout 只出 JSON**（2026-10-16，审计 P218）。
+     *
+     * 原来先打 JSON、再落到下面那段人类可读输出（"继续：把…重跑一轮"、"跑完了。"）——
+     * 而 `--json` 的承诺是"只把发生过什么结构化、不夹人话"（ding.ts 的口径），
+     * 脚本里 `JSON.parse(stdout)` 会当场炸。所以：带 `--continue` 时**不出**这份状态 JSON，
+     * 进度那些人话一律走 stderr，最后 stdout 上一个完整的 JSON。
+     */
+    const asJson = p.flags.has("json");
+    if (asJson && !p.flags.has("continue")) {
       process.stdout.write(JSON.stringify({ sessionId: wanted, ...view }, null, 2) + "\n");
-      if (!p.flags.has("continue")) return 0;
-    } else if (!p.flags.has("continue")) {
+      return 0;
+    }
+
+    if (!asJson && !p.flags.has("continue")) {
       if (!view.needsAttention) {
         process.stdout.write("这段会话没有需要恢复的东西（所有回合都收尾了）。\n");
         return 0;
@@ -121,25 +134,94 @@ export async function cmdResume(p: Parsed, dataDir: string): Promise<number> {
     }
 
     const { config } = effectiveConfig(dataDir);
+    /*
+     * ⭐ provider 的回落要与别的 CLI 入口**同一口径**（2026-10-16，审计 P208）。
+     *
+     * 机器上只有环境变量 key、config.json 没写 provider 时（doctor 与向导都允许这种状态，
+     * doctor 明说"没配就按第一个有密钥的选"）：`ding run` 与 REPL 有
+     * `firstAvailableProvider()` 兜底，而这里原来只有 `config.provider ?? ""` ——
+     * 于是同一台机器上 `ding run` 能跑、`ding resume --continue` 报"未知 provider：（空）"。
+     */
+    const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider()?.id ?? "";
+    /*
+     * ⭐ 把**已完成的历史**带上（2026-10-16，审计 P127）。
+     *
+     * 原来 `messages` 只有 `[{role:"user", content:target.userMessage}]`，
+     * 而 `engine.run` 也不读会话库 —— 所谓"继续"是**没有任何历史的重跑**：
+     * 上一轮做到哪、已经改过哪些文件，新一轮完全看不见（而命令的文案与
+     * 文件头的说明都承诺"历史与已有的工具结果都在日志里，所以新一轮会看见"）。
+     *
+     * 现在：从记录里还原出**目标那轮之前**的完整回合（user 原话 + 助手正文）交给引擎。
+     * ⚠️ 被重跑那一轮的半截输出**不带上** —— 它不是"已经发生的对话"，
+     * 塞进 assistant 消息等于替模型伪造一次它没说完的话。这一点下面如实打出来。
+     */
+    const priorTurns = splitTurns(records).filter((chunk) => chunk.request?.requestId !== target.requestId);
+    const history: { role: "user" | "assistant"; content: string }[] = [];
+    for (const chunk of priorTurns) {
+      const ask = [...(chunk.request?.messages ?? [])].reverse().find((m) => m.role === "user");
+      if (ask?.content?.trim()) history.push({ role: "user", content: ask.content });
+      const said = chunk.view.text.trim();
+      if (said) history.push({ role: "assistant", content: said });
+    }
+
     const { engine, close } = await buildEngine(config.dirs ?? [], dataDir);
+    const say = (line: string) => (asJson ? process.stderr.write(line) : process.stdout.write(line));
     try {
-      process.stdout.write(`继续：把「${target.userMessage.slice(0, 60)}」重跑一轮\n`);
-      process.stdout.write("（⚠️ 这是**重发**，不是「续写半句」—— 这一轮会重新计费）\n\n");
+      say(`继续：把「${target.userMessage.slice(0, 60)}」重跑一轮\n`);
+      say("（⚠️ 这是**重发**，不是「续写半句」—— 这一轮会重新计费）\n");
+      say(
+        history.length
+          ? `（带上 ${history.length} 条已完成的历史；被打断那一轮的半截输出不带上 —— 它不是完整的对话）\n\n`
+          : "（这一段之前没有完成的回合，所以这轮没有历史可带）\n\n",
+      );
       const out = await engine.run({
         sessionId: wanted,
-        provider: flag(p, "provider") ?? config.provider ?? "",
+        provider,
         ...((flag(p, "model") ?? config.model) ? { model: flag(p, "model") ?? config.model } : {}),
         messages: [{ role: "user", content: target.userMessage }],
+        ...(history.length ? { history } : {}),
         mode: normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认"),
         useTools: true,
         maxSteps: 8,
       });
-      if (out.ok) {
+      /*
+       * ⭐ 把**旧那一轮**销账（2026-10-16，审计 P141）。
+       *
+       * "被打断"的判据是"这条请求没有终止记录"（`recovery.ts` 的 `interruptedTurns`）。
+       * 原来 `--continue` 只是用**新的** requestId 重跑一轮，旧那条请求依旧没有终态 ——
+       * 于是 `ding resume` 每次都还报同一段会话"被打断"，用户以为继续失败，
+       * 再点一次又花一次钱（这个循环没有出口）。
+       * 现在补一条**指向旧 requestId** 的终止记录：它settle了，后面的 `ding resume` 就不再报。
+       */
+      await store.append(wanted, [
+        {
+          requestId: target.requestId,
+          type: "error",
+          message: "这一轮已由 `ding resume --continue` 重跑，不再算作被打断",
+        },
+      ]);
+      if (asJson) {
+        process.stdout.write(
+          JSON.stringify(
+            {
+              sessionId: wanted,
+              continued: true,
+              ok: out.ok,
+              ...(out.error ? { error: out.error } : {}),
+              historyTurns: history.length,
+            },
+            null,
+            2,
+          ) + "\n",
+        );
+      } else if (out.ok) {
         process.stdout.write("跑完了。`ding resume` 能再看一眼状态。\n");
-        return 0;
       }
-      process.stderr.write(`这一轮没成功：${out.error ?? "（没有错误信息）"}\n`);
-      return 1;
+      if (!out.ok) {
+        process.stderr.write(`这一轮没成功：${out.error ?? "（没有错误信息）"}\n`);
+        return 1;
+      }
+      return 0;
     } finally {
       close();
     }

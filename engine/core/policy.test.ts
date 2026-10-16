@@ -7,6 +7,7 @@ import {
   policyOf,
 } from "@engine/core/policy";
 import { pendingApprovalNotice } from "@engine/core/notices";
+import { pluginToolName } from "@engine/runtime/plugins";
 import { AGENT_TOOLS } from "@shared/agentTools";
 
 /**
@@ -44,6 +45,25 @@ describe("策略表", () => {
      */
     expect(policyOf("write_file").kind).toBe("write");
     expect(decide("按需确认", "write_file")).toBe("ask");
+  });
+
+  /*
+   * ⭐ 插件来的工具与 MCP 来的工具，**同一道闸**（2026-10-16，审计 P02）。
+   *
+   * 这两类都是「别人写的代码，名字之下可能是读也可能是删库」—— 判定必须一致。
+   * 原来只有 MCP 那一半被按「写」拦，插件工具掉到"未声明默认只读"，
+   * 于同一份风险在这里直接放行。这一条第一次让两种前缀都被检查：
+   * 用的名字也是**实现自己那份**（`pluginToolName`），不是在这里手抄前缀 ——
+   * 手抄的话前缀一改，判定与注册表就会各说各话。
+   */
+  it("⭐ 插件工具默认按**写**（与 MCP 同一口径），不是默认放行的只读", () => {
+    const name = pluginToolName("demo", "whatever");
+    expect(policyOf(name).kind).toBe("write");
+    expect(decide("按需确认", name)).toBe("ask");
+    // 与 MCP 的判定必须**逐字一致**，不许一严一松
+    expect(policyOf(name).kind).toBe(policyOf("mcp__srv__whatever").kind);
+    // 但「全部允许」档下照样直跑（那一档的定义就是用户说他都同意）
+    expect(decide("全部允许", name)).toBe("run");
   });
 });
 

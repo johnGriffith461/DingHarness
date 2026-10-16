@@ -15,7 +15,15 @@ import { useMemoryStore } from "./memoryStore";
  * 顶部有一句说明它到底会做什么 —— 记忆这东西"看不见效果"最容易让人以为它没用。
  */
 export default function MemoryPanel() {
-  const { lib, loaded, load, add, drop, clear } = useMemoryStore();
+  /**
+   * ⚠️ `note` 也要读（2026-10-16 审计 P251）。
+   *
+   * `memoryStore` 的 add/drop/clear/setEnabled 一律先乐观改内存、再把**落盘结果**
+   * 写进 `note`（"记下了，但存盘失败…"）—— 而全仓 `grep useMemoryStore((s) => s.note)`
+   * **零命中**：落盘失败在界面上完全隐形，用户以为记下了，重启后那一条没了。
+   * 这里把它显示出来（复用加载失败那句的样式，见下面的 `wb-memory-note`）。
+   */
+  const { lib, loaded, load, add, drop, clear, note } = useMemoryStore();
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
@@ -39,6 +47,13 @@ export default function MemoryPanel() {
       <div className="wb-memory-intro">
         这里记的东西会**随每次对话一起交给助手**。少而准最有用，写多了反而会分散注意力。
       </div>
+
+      {/* 落盘/读取的如实说明（P251）：原来它写进 store 却没人读，失败在界面上完全隐形 */}
+      {note ? (
+        <div className="wb-memory-note" data-testid="wb-memory-note" role="status">
+          {note}
+        </div>
+      ) : null}
 
       <form className="wb-memory-add" onSubmit={submit}>
         <input

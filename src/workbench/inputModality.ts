@@ -32,11 +32,16 @@ export function installInputModality(): void {
     "keydown",
     (e: KeyboardEvent) => {
       /*
-       * 只认"键盘在导航"的按键：Tab 与方向键。
-       * 打字（字母/中文）**不算** —— 不然"鼠标点进来然后打了几个字"
-       * 又会被算成键盘用户，边框照样亮起来，主人看到的还是那个描边。
+       * 只认**Tab 在导航**（2026-10-16 审计 P275）。
+       *
+       * 原来这里是 `e.key === "Tab" || e.key.startsWith("Arrow")`。而方向键在输入区里
+       * **有实义**（历史/选单导航、光标移动）：用户鼠标点进输入框（mousedown 已经把
+       * 属性清掉）之后按一下 ↑，属性又被置上 —— 文件头点名两次的「雷霆大描边」
+       * 就这样亮了回来。注释自己的口径是"只有键盘在导航才算"，而 Tab 才是那个信号。
+       *
+       * （打字本身也不置位：鼠标点进来再打几个字，同样不该算键盘用户。）
        */
-      if (e.key === "Tab" || e.key.startsWith("Arrow")) root.setAttribute(ATTR, "1");
+      if (e.key === "Tab") root.setAttribute(ATTR, "1");
     },
     true,
   );

@@ -142,21 +142,47 @@ export default function WhiteboardNodeView({ id, data, selected }: NodeProps<Whi
     setTool(data.tool ?? "pen");
   }, [data.color, data.penWidth, data.tool]);
 
+  /**
+   * 把本地笔迹交回 store（定时器到点、以及**卸载**都走这里）。
+   *
+   * 抽成一处是因为卸载那条路新加的时候最容易写成第二份实现 ——
+   * 而两份实现一开始一样、之后必然有一份忘了改（本仓反复清过这个形状）。
+   */
+  const commitStrokes = useCallback(() => {
+    dirtyRef.current = false;
+    const copy = strokesRef.current.map((s) => ({ ...s, points: [...s.points] }));
+    setStrokeCount(copy.length);
+    setData(id, { strokes: copy });
+  }, [id, setData]);
+
   const flush = useCallback(() => {
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      dirtyRef.current = false;
-      const copy = strokesRef.current.map((s) => ({ ...s, points: [...s.points] }));
-      setStrokeCount(copy.length);
-      setData(id, { strokes: copy });
+      syncTimer.current = null;
+      commitStrokes();
     }, SYNC_DEBOUNCE_MS);
-  }, [id, setData]);
+  }, [commitStrokes]);
 
+  /**
+   * ⚠️⚠️ **卸载时必须把本地笔迹交出去**（2026-10-16 审计 P28）。
+   *
+   * 原来这里只有 `clearTimeout` —— 于是"抬笔后 500ms 内卸载"的最后几笔**直接丢**：
+   * 抬笔时写的还只是本地 `strokesRef`，store 那份要等定时器到点才更新。
+   * 而节点卸载是**常态**而不是意外：`onlyRenderVisibleElements` 会把滚出视野的节点
+   * 卸下来，画布面板一关更是整块消失 —— 用户看到的是"我明明画了那几笔，回来没了"。
+   *
+   * 与 blur 那条路走的是**同一个** `commitStrokes()`：一处写、两处调，
+   * 不会出现"定时器那份带了某个字段、卸载那份没带"的漂移。
+   */
   useEffect(
     () => () => {
-      if (syncTimer.current) clearTimeout(syncTimer.current);
+      if (syncTimer.current) {
+        clearTimeout(syncTimer.current);
+        syncTimer.current = null;
+      }
+      if (dirtyRef.current) commitStrokes();
     },
-    [],
+    [commitStrokes],
   );
 
   /** 屏幕坐标 → 画布内坐标。 */

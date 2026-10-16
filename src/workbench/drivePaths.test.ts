@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { insideDirs } from "@engine/runtime/tools/drivePaths";
 
 /**
@@ -179,4 +181,95 @@ describe("driveStore 的接线：每个吃 filePath 的 handler 都必须带校�
       expect(handlerBlock(channel)).toContain("insideOwnedDirs(");
     }
   });
+
+  /**
+   * ⚠️ **G21 的后半句**：`download` 一手交两个路径 —— 源（必须过白名单）与**目标目录**。
+   *
+   * 上面那条"带路径校验"只盯住了**源**（块里出现 `sources().some(` 就算过），
+   * 于是 `targetDir` 那一半（渲染进程定目录 + 主进程写盘，**目录名不校验**）
+   * 被判成了"已加锁" —— 而它其实是"任意目录写文件"这个原语交到了不可信的一侧。
+   * 那段参数 2026-10-16 已整个删掉（唯一来源是系统「另存为」框），
+   * 这条判据的作用是**别让它偷偷长回来**：
+   *   · 块里不许出现 `targetDir`（或任何"目标目录"形状的东西）；
+   *   · 参数表**只许两个**：`_event` 与 `filePath`。
+   *
+   * 判据落在**参数表**上而不是"有没有某个字符串"：多一个位置参数、或者换个名字
+   * （`dest` / `outDir`）也一样会被数出来。
+   */
+  it("⭐ drive:download 的路径来源只能有一个：系统「另存为」框（G21 后半句）", () => {
+    const block = handlerBlock("download");
+    expect(block, "download 又收了渲染进程给的目标目录 —— 那是「任意目录写文件」这个原语").not.toMatch(
+      /targetDir|destDir|outDir/,
+    );
+    const sig = block.match(/DRIVE_CHANNEL\.download,\s*async\s*\(([^)]*)\)/);
+    expect(sig, "找不到 drive:download 的参数表").not.toBeNull();
+    const params = (sig?.[1] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(params.length, `drive:download 的参数表多了东西：${params.join(" | ")}`).toBe(2);
+    expect(params[0], "第一个参数应当是 event（这个 handler 不用它才写成 _event）").toMatch(/^_?event/);
+    expect(params[1], "第二个参数只该是源文件路径；目标目录只能来自系统对话框").toMatch(/^filePath/);
+  });
 });
+
+/**
+ * 符号链接 / junction 不能穿墙（**审计 P04**）。
+ *
+ * ## 缺陷形状
+ *
+ * 原来只比 `path.resolve` 的**字面**结果：`C:\owned\link\secret.txt` 字面在
+ * `C:\owned` 里就放行 —— 而 `link` 若是指向白名单外目录的 junction，
+ * 真正落点在外面。四类落点（读/写/改/跑命令）共用这一处判断，所以这是个
+ * 「一道闸被绕过，四个口子一起开」的形状。
+ *
+ * 这一条用**真实文件系统**造一个 junction 来钉它（不是读源码找 `realpath` 字样）——
+ * 因为把 `path.relative(realPathFor(dir), realPathFor(raw))` 改回字面比较，
+ * 这条会红；而只改注释/变量名不会。
+ */
+describe("insideDirs —— 符号链接 / junction 穿墙（P04）", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-drivepath-"));
+  const owned = path.join(tmp, "owned");
+  const outside = path.join(tmp, "outside");
+  fs.mkdirSync(owned, { recursive: true });
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "secret.txt"), "不该被读到");
+  const link = path.join(owned, "link");
+  let linked = false;
+  try {
+    /* Windows 上 "junction" 不需要管理员权限；POSIX 上这个 type 被忽略、当普通符号链接 */
+    fs.symlinkSync(outside, link, "junction");
+    linked = true;
+  } catch {
+    /*
+     * 建不出链接（受限环境）时**跳过而不是放过** —— 跳过会如实显示在测试报告里，
+     * 而"改判通过"会把这条守卫变成装饰（这正是 P04 当初没人发现的原因）。
+     */
+    linked = false;
+  }
+  afterAll(() => {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* Windows 上偶发 EBUSY，留个临时目录不算失败 */
+    }
+  });
+
+  it.skipIf(!linked)("junction 指向白名单外：里面的文件被拒（这是 P04 的主判据）", () => {
+    expect(insideDirs(path.join(link, "secret.txt"), [owned])).toBeNull();
+  });
+
+  it.skipIf(!linked)("junction 指向白名单外：链接自身也被拒", () => {
+    expect(insideDirs(link, [owned])).toBeNull();
+  });
+
+  it.skipIf(!linked)("junction 指向白名单内：其下的文件仍放行（不能矫枉过正）", () => {
+    const inner = path.join(owned, "inner");
+    fs.mkdirSync(inner, { recursive: true });
+    fs.writeFileSync(path.join(inner, "ok.txt"), "x");
+    const innerLink = path.join(owned, "inner-link");
+    fs.symlinkSync(inner, innerLink, "junction");
+    expect(insideDirs(path.join(innerLink, "ok.txt"), [owned])).toBe(path.resolve(innerLink, "ok.txt"));
+  });
+});
+

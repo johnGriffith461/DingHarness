@@ -64,6 +64,30 @@ export const INTENT_META: Record<GenerateIntent, { label: string; output: NodeKi
 
 
 /**
+ * 按**码点**截断（2026-10-16，审计 P255）。
+ *
+ * ## 为什么不能直接用 `slice`
+ *
+ * `String.prototype.slice` 数的是 **UTF-16 码元**，不是一个"字"。当第 `maxChars` 个码元
+ * 正好落在一个**代理对内部**时（emoji、CJK 扩展 B 的 `𠮷`、数学粗体字母…中英混排的 AI 正文里
+ * 很常见），切出来的串会以**孤立高位代理**结尾：
+ *   · `JSON.stringify` 会把它序列化成 `\udXXX` 字面量（多数上游直接报 malformed）；
+ *   · fetch 编码请求体时按 U+FFFD 替换；
+ *   · 跨引用边界时 token 计数也会算错。
+ * 也就是说**正文最后一个字与提示词形态都悄悄变了**，而且没有任何东西会报错。
+ *
+ * 按码点切（`Array.from`）就不会切出半个字符。返回值仍是普通字符串。
+ *
+ * @param text 原文
+ * @param maxChars 最多保留多少个**码点**
+ */
+export function truncateByCodePoint(text: string, maxChars: number): string {
+  /* 快路径：UTF-16 长度都没超，就一定没超码点数（码点数只会更少） */
+  if (text.length <= maxChars) return text;
+  return Array.from(text).slice(0, maxChars).join("");
+}
+
+/**
  * 把选中的节点读成给模型看的上下文块。
  * @param nodes 选中节点
  * @param maxChars 每个节点最多取多少字（防止一个巨型节点把 prompt 顶爆）
@@ -72,7 +96,7 @@ export function buildSelectionContext(nodes: CanvasNode[], maxChars = 4000): str
   if (nodes.length === 0) return "";
   const parts = nodes.map((node, i) => {
     const title = String((node.data as { title?: string }).title ?? node.type);
-    const text = nodeText(node).slice(0, maxChars);
+    const text = truncateByCodePoint(nodeText(node), maxChars);
     return `【素材 ${i + 1}｜${node.type}｜${title}】\n${text}`;
   });
   return `以下是我在画布上选中的素材：\n\n${parts.join("\n\n")}`;

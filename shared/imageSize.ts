@@ -1,7 +1,7 @@
 /**
  * Lunora 图像尺寸规格（机器可读实现）。
  *
- * 依据：`C:\Users\Administrator\WorkBuddy\2026-10-10-18-19-59\outputs\lunora\lunora-image-size-rules.md`  ⚠️（该依据未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
+ * 依据：仓外工作区里的一份《lunora-image-size-rules.md》（未入库、本机也找不到 —— 无法复核；判据以本文件里的断言为准）
  * （该文档标注 `status: authoritative`，来自真实浏览器逐项点击实测）。
  * **不要估算、不要自行推导近似值** —— 这张表是离散枚举 + 确定性规整，没有模型自由裁量。
  *
@@ -141,7 +141,13 @@ function searchBest(tier: Tier, d: number): { w: number; h: number; area: number
 export function resolveSize(tier: Tier, input: string): string | null {
   const n = parseSize(input);
   if (!n) return null;
-  const g = gcd(n.w, n.h) || 1;
+  /*
+   * 约分**只对整数有意义**（审计 P245）：`2.39:1` 这类小数比例在文件头 §4 里是支持的输入，
+   * 而浮点欧几里得 gcd 一路不归零 → key 会变成 `"14346448794755885:6002696537461680"`
+   * 那种巨值（每次调用还白花几十轮取模），档位表命中判断对小数输入永远失效。
+   * 小数就按原样当 key（内置表里本来也没有小数档，落进下面的面积搜索分支）。
+   */
+  const g = Number.isInteger(n.w) && Number.isInteger(n.h) ? gcd(n.w, n.h) || 1 : 1;
   const key = `${n.w / g}:${n.h / g}`;
 
   let rawW: number;
@@ -227,6 +233,12 @@ export function resolveChoice(choice: SizeChoice): { size: string; invalid: bool
 
   const n = parseSize(`${choice.width}x${choice.height}`);
   if (!n) return { size: "", invalid: true, normalized: false };
+  /*
+   * 0（清空宽/高输入框之后就是 0）**不是"有效但需要规整"**（审计 P244）：
+   * `normalize(0, 0)` 会把它悄悄放大到 816x816 并照样发出去一次真请求 ——
+   * 花钱、尺寸还不是用户要的，而界面上的置灰门（靠 `invalid`）压根不触发。
+   */
+  if (n.w <= 0 || n.h <= 0) return { size: "", invalid: true, normalized: false };
   const size = resolveWH(n.w, n.h);
   return { size, invalid: false, normalized: size !== `${Math.round(n.w)}x${Math.round(n.h)}` };
 }

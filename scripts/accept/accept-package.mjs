@@ -45,6 +45,16 @@ const R = "release";
 const report = {};
 
 /*
+ * ⚠️ 2026-10-16（审计 A21）：`release/` 整个不存在时，下面那句 `fs.readdirSync(R)` 会直接抛，
+ * 栈里只有一句 ENOENT —— 读的人分不清「还没打包」与「打包脚本坏了」。
+ * 所以先明确报一次环境红（判词里带「先打包」，`classify` 按它归到环境红那一类）。
+ */
+if (!exists(R)) {
+  console.error("还没打包：release/ 目录不存在（先 pnpm package:win）—— 这条按环境红记，不算通过。");
+  process.exit(1);
+}
+
+/*
  * ⚠️ 2026-10-16（审计 G11）：这里原来写死 `工作台-0.1.0-setup.exe` ——
  * 2026-10-14 改名之后盘上只有 `ding-harness-0.{3,4,5}.0-setup.exe`，
  * 于是"没产出 setup.exe"这条**永远红**（红的是脚本，不是产物）。

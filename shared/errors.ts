@@ -20,7 +20,12 @@
  * 由调用方决定 —— 图像那条要保留上游原文（用户要拿它去投诉/查账），文本那条不要
  * （那是协议细节，用户看不懂）。
  *
- * ## 三条写作规矩（`copy.test.ts` 会验）
+ * ## 三条写作规矩
+ *
+ * 守卫在**同目录的 `shared/errors.test.ts`**（`RAW_JARGON` 与 `NEXT_STEP` 两条）。
+ * ⚠️ 原来这里写的是 `copy.test.ts` —— `src/workbench/copy.test.ts` 里
+ * 这四个词（errors / 状态码 / 429 / humanFailure）零命中，它测的是别的东西：
+ * 改话术的人照注释去那边找守卫，会以为没人管（审计 P103）。
  *
  * 1. **每条都给出下一步**（"稍后重试" / "检查密钥" / "换个模型"）——
  *    只说"出错了"等于把问题丢回给用户；
@@ -51,17 +56,50 @@ export type FailureKind =
  * @param raw 上游给的原始文本（或整条错误消息）
  * @returns 归好的类别
  */
+/**
+ * 文本里有这个**独立的**状态码吗。
+ *
+ * ⚠️ 不能用裸子串（审计 P102）：`42913` 里也含 `429`，于是
+ * 「maximum context length is 8192 tokens, however you requested 42913 tokens」
+ * 会被判成「触发限流，稍后重试」—— 而真正的下一步是**缩短输入**。
+ * 判据：前后都不许紧挨着数字（不写 `\b`：状态码后面常紧跟`.`或`)`）。
+ *
+ * @param raw 上游原文
+ * @param code 三位状态码
+ */
+function hasStatus(raw: string, code: string): boolean {
+  return new RegExp(`(?:^|[^0-9])${code}(?:[^0-9]|$)`).test(raw);
+}
+
+/**
+ * 从一段上游错误里认出**原因**。
+ *
+ * ⚠️ 判定顺序有关系：「欠费」优先于「限流」——欠费时上游也常回 429，
+ * 但正确的下一步是"充值"而不是"稍后重试"。先后次序就是这里的语义。
+ *
+ * ⚠️ 审核那一档排在**最后**（审计 P102）：它认的词（`content` / `policy` / `safety`）
+ * 在 HTTP 报错里极常见（`content-type`、`content-length`），一旦排在前面，
+ * 一个 502 或一次连不上都会被报成「内容审核没通过」。所以收紧成复合词，
+ * 并且只在前面的具体原因都不是时才判它。
+ *
+ * @param raw 上游给的原始文本（或整条错误消息）
+ * @returns 归好的类别
+ */
 export function classifyFailure(raw: string): FailureKind {
   if (/abort/i.test(raw)) return "aborted";
   // 欠费**优先于**限流：两者都可能回 429，但下一步完全不同
   if (/insufficient|balance|quota|arrearage|overdue|good standing|欠费|余额不足|额度/i.test(raw)) return "quota";
-  if (/401|403|unauthorized|invalid api key|api key/i.test(raw)) return "auth";
-  if (/404|model.*not.*found|no such model/i.test(raw)) return "model";
-  if (/429|rate limit|too many requests|限流/i.test(raw)) return "rate";
-  if (/moderation|content|policy|safety|审核/i.test(raw)) return "moderation";
+  if (hasStatus(raw, "401") || hasStatus(raw, "403") || /unauthorized|invalid api key|api key/i.test(raw)) return "auth";
+  if (hasStatus(raw, "404") || /model.*not.*found|no such model/i.test(raw)) return "model";
+  if (hasStatus(raw, "429") || /rate limit|too many requests|限流/i.test(raw)) return "rate";
   if (/timeout|timed out|超时/i.test(raw)) return "timeout";
-  if (/502|503|504|unavailable|bad gateway|上游暂时/i.test(raw)) return "upstream";
+  if (hasStatus(raw, "502") || hasStatus(raw, "503") || hasStatus(raw, "504") || /unavailable|bad gateway|上游暂时/i.test(raw)) {
+    return "upstream";
+  }
   if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|fetch failed|network|连不上|socket/i.test(raw)) return "network";
+  if (/moderation|content[ _-]?polic|content[ _-]?filter|safety[ _-]?(system|polic|filter|violation)|审核/i.test(raw)) {
+    return "moderation";
+  }
   return "unknown";
 }
 
@@ -102,7 +140,7 @@ export function failureMessage(kind: FailureKind): string {
  * 把一段上游错误翻成人话。
  *
  * @param raw 上游原文（或整条错误消息）
- * @param options.keepDetail 是否把上游原文附在后面（图像那条要：用户拿它查账/投诉）
+ * @param options.keepDetail 是否把上游原文**一行、截断**地附在后面（图像那条要：用户拿它查账/投诉）
  * @param options.fallbackLimit 认不出来时截多长（文本那条截到 200 字，别把 SDK 的堆栈糊到界面上）
  * @returns 给人看的一句话
  */
@@ -115,6 +153,14 @@ export function humanFailure(
   if (!message) return raw.slice(0, options.fallbackLimit ?? 200);
   /*
    * `keepDetail` 的差别只在**附不附原文** —— 措辞本身两边一模一样（这就是收口的意义）。
+   *
+   * ⚠️ 附上去的那一段必须**收口**（审计 P189）：原文来自上游、可以有几百字，
+   * 整段直接拼上去，界面上就成了「触发限流，稍后重试：429 Too Many Requests {"error":{…}}」——
+   * 既违反本文件第 2 条规矩（面向用户的文案里不许出现裸状态码），
+   * 也把一坨协议细节糊到用户脸上。做法：压成一行、截到 300 字，并**标明这是上游原文**
+   * （用户拿它查账/投诉仍然够用；读的人也知道这一句不是我们说的话）。
    */
-  return options.keepDetail ? `${message}：${raw}` : message;
+  if (!options.keepDetail) return message;
+  const quoted = raw.replace(/\s+/g, " ").trim().slice(0, 300);
+  return `${message}（上游原文：${quoted}）`;
 }

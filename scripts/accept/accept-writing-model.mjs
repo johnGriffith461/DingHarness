@@ -1,21 +1,41 @@
 import { chromium } from "playwright";
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./harness.mjs";
+import {
+  bootApp,
+  connectWithRetry,
+  failOnMarks,
+  freshDir,
+  killTree,
+  openCanvas,
+  pickPort,
+  shot,
+  verdict,
+  waitForPage,
+} from "./harness.mjs";
+
+/* ⚠️ 2026-10-16（审计 G15）：这份脚本原来连 ✗ 都不印、也没有任何判定 —— 批跑里等于没测 */
+failOnMarks();
 
 /**
  * 写作助手**端到端**验收（对标原版 `canvas_writing_shortcuts_*`）。
  *
- * ⚠️ **这条真的连模型**（点「写短一点」然后等 15 秒）。
- * 文件名里的 `-model` 就是标记：**不要**把它塞进免模型批跑（`verify-acceptances.mjs`），
- * 也不要在没配通道的机器上指望它绿。原来它叫 `accept-writing.mjs`，
- * 名字看不出会调模型 —— 按名字挑脚本跑的人会踩这个坑。
+ * ⚠️ 这条**真的连模型**（点「写短一点」）。
  *
- * 真正连模型跑「润色/写短」，断言：
- *   1. 节点头部有「写作」入口，展开有 4 个动作
- *   2. 跑「写短一点」后**节点自身的文字变了**（不是新增节点）
- *   3. 节点数不变，且产生了新的生成版本
+ * ⭐ **2026-10-16 收进批跑**（原来的头部写着"不要把它塞进免模型批跑"）。
+ * 那句话成立的前提是"必须真模型才谈得上验"—— 而这一条真正要证的是
+ * **模型吐出来的东西有没有被写回节点**（不是像「AI 生成」那样落一个新节点），
+ * 假通道一样能驱动它（`bootApp` + 假通道 + 隔离数据目录）。
+ * 顺带把"改写真的发生了"从**观察项**升成**判据**：原来 `report.changed`
+ * 只打印不断言（理由是"等 15 秒再比"这种时序判据会假红）——
+ * 现在等的条件是**确定的**（假通道那 3 秒一定流完），所以它可判了。
+ *
+ * 断言：
+ *   1. 节点头部有「写作」入口，展开的菜单里**逐字**有「写短一点」
+ *   2. 跑「写短一点」后**节点自身的文字变了**（模型输出真的写回去了）
+ *   3. 节点数不变（就地改写，不是新增/删除节点）
  *   4. Ctrl+Z 能撤销回改写前
+ *
+ * ⚠️ 启动走 `bootApp`：原来自己 `spawn` + `waitForPort` + `connectOverCDP` ——
+ * 这台机器上有「TCP 通、Electron 的调试服务器却不答」的端口区间，裸写法会卡死在连 CDP 那一步。
  */
 
 /*
@@ -27,27 +47,23 @@ import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./har
  * 「DSH_CANVAS_DATA_DIR 必须指到隔离目录」那条规矩的漏网之鱼。
  */
 const DATA = ".verify/writing-data";
-fs.rmSync(DATA, { recursive: true, force: true });
-const env = { ...process.env };
-delete env.ELECTRON_RUN_AS_NODE;
-env.DSH_CANVAS_DATA_DIR = DATA;
+if (!(await freshDir(DATA))) {
+  console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
+  process.exit(1);
+}
 
-/* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
-const __port = await pickPort([12370]);
-const child = spawn(
-  "node_modules/electron/dist/electron.exe",
-  [".", "--remote-debugging-port=" + __port],
-  { cwd: ".", env, stdio: ["ignore", "ignore", "ignore"] },
-);
-/* 固定等 8 秒会在机器忙时不够（应用还没监听）→ 改成轮询端口：实测过的失败形态是 `ECONNREFUSED`（= 什么都没在听，不是端口坏）。 */
-await waitForPort(__port, 40000);
-
-const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
-const pages = browser.contexts()[0].pages();
-const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
+const booted = await bootApp({ port: await pickPort([12370]), dataDir: DATA, timeoutMs: 40_000 });
+if (!booted.ok) {
+  console.error("[诊断] 应用输出尾部：" + (booted.getLog() || "(空)").slice(-1200));
+  await killTree(booted.child);
+  process.exit(1);
+}
+const browser = await connectWithRetry(chromium, `http://127.0.0.1:${booted.port}`);
+const page = await waitForPage(browser);
+if (!page) throw new Error("应用起了但一个页面都没建（见 harness 的 NO_PAGE_HINT 说明）");
 await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
 await page.waitForTimeout(1800);
-  await openCanvas(page);
+await openCanvas(page);
   await page.waitForTimeout(1500);
 
 await page.waitForSelector(".react-flow__node", { state: "attached" });
@@ -113,22 +129,18 @@ await shot(page, ".verify/shots-p5/07-writing.png");
 console.log(JSON.stringify(report, null, 2));
 
 await browser.close();
-child.kill();
+await killTree(booted.child);
 
 /*
- * 判定（2026-10-13 补）：这条原来只有 `console.log(report)` —— 在批跑里等于"静默不测"。
+ * 判定（2026-10-13 补，2026-10-16 收进批跑时又加强了一档）。
  *
- * ⚠️ 这条脚本**真的连模型**（点「写短一点」然后等 15 秒），所以
- * 「文字真的被改写了」（`report.changed`）**故意不纳入判定** ——
- * 那是"等 N 毫秒后必须变"的时序判据，模型慢一点、机器忙一点、没配通道就会假红，
- * 属于本文件外面那条"判据要落在稳定后果上"的例外。
- * 它留下了一个**已知缺口**（改写本身没被钉住），如实记在这里，不拿别的断言凑数。
+ * ⚠️ 这条脚本**真的连模型**（点「写短一点」），所以原来把
+ * 「文字真的被改写了」（`report.changed`）**故意排除在判定之外** ——
+ * 那是"等 N 毫秒后必须变"的时序判据，模型慢一点、机器忙一点、没配通道就会假红。
  *
- * 只断**不依赖模型**的那部分：
- *   · 目标节点 n1 本来就有文字 —— 读取点没失效（否则整条脚本是在空跑，跑完还说"绿"）
- *   · 写作入口展开后有菜单项，且**逐字**含「写短一点」（脚本点的就是它）
- *   · 改写之后**节点数不变** —— 写作助手改的是这个节点自己的内容，
- *     不是像「AI 生成」那样落一个新节点（新增/删除都算错）
+ * ⭐ 2026-10-16：这条进了批跑（假通道那 3 秒一定流完，等待条件是确定的），
+ * 于是 `changed` 从观察项升成**判据** —— 它正是这条验收最核心的那件事
+ * （模型吐出来的东西有没有被写回这个节点）。剩下的断言照旧：
  */
 const bad = [];
 if (typeof report.textBefore !== "string" || report.textBefore.trim() === "") {
@@ -140,9 +152,15 @@ else if (!menuItems.includes("写短一点")) bad.push(`菜单里没有「写短
 if (report.nodesAfter !== report.nodesBefore) {
   bad.push(`写作把节点数改了（${report.nodesBefore} → ${report.nodesAfter}）—— 该就地改写，不是新增/删除节点`);
 }
-if (bad.length) {
-  console.error("✗ 写作产物：" + bad.join("；"));
-  process.exitCode = 1;
-} else {
-  console.log("✓ 写作产物：n1 有原文 / 菜单里有「写短一点」/ 改写前后节点数不变（模型是否改写成功不在此判定）");
+/* ⭐ 核心：改写真的落到节点文字上了（不是"点完什么都没发生还说通过"） */
+if (!report.changed) {
+  bad.push(
+    `点了「写短一点」之后 n1 的文字没变（改写没写回去；写错误=${JSON.stringify(report.n1Html?.writeError)}，` +
+      `生成条=${JSON.stringify(report.genbar)}）`,
+  );
 }
+/* 撤销能回到改写前（用户点错了要有退路） */
+if (!report.undoRestored) {
+  bad.push(`Ctrl+Z 没有撤销回改写前（撤销后=${JSON.stringify((report.textAfterUndo ?? "").slice(0, 40))}）`);
+}
+verdict(bad, "写作产物：n1 有原文 / 菜单里有「写短一点」/ 模型输出真的写回节点且节点数不变 / Ctrl+Z 能撤销");

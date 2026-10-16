@@ -241,9 +241,14 @@ CLI 有**两种装法**，验过的程度不一样 —— 分开说，别混成�
 - **插件 v1 的权限只是声明**：`fs:read` / `fs:write` / `net` / `exec` **拦不住**
   （插件与宿主同进程）。`tools:register` / `hooks:register` 是真的（不批就不接那根线）。
   隔离版（wasmtime + 签名）**未做**。
-- **密钥**：桌面端写的走系统保护（DPAPI / Keychain / libsecret）；
-  **CLI 侧没有钥匙串入口**，所以 CLI 不写加密存储（`ding doctor` 会这么说）。
-  备份里**不含密钥**。
+- **密钥**：桌面端「设置 → 密钥」里填的 key 走 `safeStorage`（DPAPI / Keychain / libsecret），
+  拿不到系统加密能力时**拒绝写**并说清原因（不退化成明文）；
+  **CLI 向导（`ding init`）写的是明文** —— 原因是 CLI 没有系统钥匙串入口
+  （`secretsEncrypted()` 恒为 false），不是因为"CLI 不落盘"；它写的是
+  `~/.dsh/.credentials.yaml` 里 `refs:` 段自己那一个键（那个文件**桌面与 CLI 共用**，
+  别人的键与注释原样保留）；`mode: 0o600` 只在 POSIX 成立，Windows 上没有这层保护。
+  「旧明文配置一次性迁移并提示」**没做**（列在 `SAFETY.md` 第五节）。
+  备份里**不含密钥**，而且加密是**本机绑定**的（换机器解不开，要重填一次）。
 ## 连到远端的 agent（Phase 17 的另一半）
 
 `ding serve` 把 agent 挂到 HTTP 上；`ding connect` 是**客户端**：

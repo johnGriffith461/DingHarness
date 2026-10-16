@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -116,7 +116,15 @@ describe("C2-3 连线守卫：一份循环 + 中止信号穿三层", () => {
      * 这条守卫全是"读源码"型的：它证明的是**接线写得对**，不是"真跑一轮时信号真到得了"。
      * 端到端那半在 `engine/eval/hostParity.test.ts`（直连 vs ACP 两条路）与桌面验收脚本里，
      * 桌面主进程本身在 vitest 里 import 不了 —— 这一点写在这里，免得有人把它当成已验。
+     *
+     * ⚠️ 2026-10-16（审计 D9）：这一条原来只有一句 `expect(true).toBe(true)` ——
+     * 一段**没有任何判定**的"测试"（注释却说得像验过）。注释里那句
+     * 「端到端那半在 hostParity.test.ts」是**可查的**，所以把它变成真断言：
+     * 谁把那份端到端验删了/掏空了，这里就红，而不是留下一句没人管的话。
+     * （边界本身仍然成立：**接线对 ≠ 真跑到**，这半件事本文件确实证明不了。）
      */
-    expect(true).toBe(true);
+    const e2e = path.join(ROOT, "engine/eval/hostParity.test.ts");
+    expect(existsSync(e2e), "注释说端到端那半在 engine/eval/hostParity.test.ts —— 它不在了").toBe(true);
+    expect(readFileSync(e2e, "utf8").length, "那份端到端验被掏空了").toBeGreaterThan(500);
   });
 });

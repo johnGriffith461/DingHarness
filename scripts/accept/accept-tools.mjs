@@ -57,6 +57,19 @@ try {
   await page.waitForTimeout(2000);
 
   /*
+   * ⚠️ 第一阶段的档位设成**全部允许**（2026-10-16，收进批跑时补）。
+   *
+   * 第一阶段断的是"模型调了工具 **且磁盘上真有结果**"—— 而默认档位（按需确认）会把
+   * 这个写动作拦成「等你确认（还没执行）」：工具没执行、memory.json 也就没生成，
+   * 于是那三条断言必然红，红的原因还与"工具协议通不通"无关。
+   * 闸门本身在第二~四阶段验（那里**故意**切到「每步确认」并走允许 / 拒绝两条路）。
+   */
+  await page.evaluate(() => localStorage.setItem("dsh-canvas.confirm-mode", "全部允许"));
+  await page.reload();
+  await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await page.waitForTimeout(1000);
+
+  /*
    * 话术刻意写得**明确指向工具**：这条验收测的是"工具通不通"，
    * 不是在测"模型能不能猜到该用工具"。后者是另一个问题（提示词工程），
    * 混在一起会让这条验收时红时绿。

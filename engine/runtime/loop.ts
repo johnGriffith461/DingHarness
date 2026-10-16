@@ -42,6 +42,19 @@ import { humanFailure } from "../../shared/errors";
 export type TurnUsage = StepUsage;
 
 /**
+ * 卡住看门狗默认多久（毫秒）—— 见 `TurnRequestInput.stallTimeoutMs`。
+ *
+ * 2 分钟"一块数据都没来"。正常模型首字节远快于此（本机实测个位数秒），
+ * 所以不会误杀正常模型；而它正好挡住"连接建了但一块都不吐"这种**没有出口**的等待。
+ */
+export const STALL_TIMEOUT_DEFAULT_MS = 2 * 60 * 1000;
+
+/** 看门狗触发时那句人话（界面与日志共用同一句）。 */
+export function stallMessage(ms: number): string {
+  return `provider 超过 ${Math.round(ms / 1000)} 秒没有任何输出（连接卡住了，已中止这一轮）`;
+}
+
+/**
  * 循环吐出的事件（**与 `AiStreamEvent` 分开**）。
  *
  * 为什么不让循环直接吐 `AiStreamEvent`：那个类型里有 `requestId`（IPC 归并用），
@@ -128,6 +141,19 @@ export type TurnRequestInput = {
    * 谁把它直接糊到用户面前，就是又造了一个"把 SDK 堆栈丢给用户"的问题。
    */
   onRawError?: (raw: string) => void;
+  /**
+   * **卡住看门狗**：多久没有任何一块流数据就判定"连接卡住了"（毫秒；`0` = 关掉）。
+   *
+   * 2026-10-16（审计 P37）：原来这一整轮**没有任何整体超时** —— provider 建了连接
+   * 但一块都不吐（网络黑洞、上游排队、代理挂住）时，`for await (result.fullStream)`
+   * 会一直等下去，界面上那个"正在生成"永远转圈（用户唯一的出路是点停止，
+   * 而停止按钮在某些状态里还不一定可用）。
+   *
+   * 默认 2 分钟没有任何一块：正常模型的首字节远快于此（本机实测个位数秒），
+   * 所以这个值不会误杀正常慢模型；真要跑长任务那是"每块之间"的间隔，不是总时长。
+   * 测试传小值（打桩 provider 卡住）。
+   */
+  stallTimeoutMs?: number;
 };
 
 /** 一次调用的结果（两条路都能用：IPC 那条主要靠 `onEvent`，子智能体主要靠它）。 */
@@ -287,6 +313,34 @@ export async function runTurn(
     return { ok: false, error: message, aborted: false, provider: provider.id, model: "" };
   }
 
+  /*
+   * ⭐ **卡住看门狗**（2026-10-16，审计 P37，见 `stallTimeoutMs` 的说明）。
+   *
+   * 做法：给这一轮一个**自己的** `AbortSignal`（用户的中止也接进来），
+   * 每收到一块流数据就把定时器往后推；定时器一响就 abort —— 于是那个
+   * "永远等不到"的 `for await` 会当场抛出，落进下面的 catch 变成一句人话。
+   * 与用户中止分开记（`stalled`）：前者是用户意图（不算 provider 失败），
+   * 后者是 provider 的锅（要 markFailed）。
+   */
+  const stallMs = input.stallTimeoutMs ?? STALL_TIMEOUT_DEFAULT_MS;
+  const watchdog = new AbortController();
+  let stalled = false;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  const armStall = () => {
+    if (stallMs <= 0) return;
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      stalled = true;
+      watchdog.abort();
+    }, stallMs);
+  };
+  const stopStall = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = null;
+  };
+  const onUserAbort = () => watchdog.abort();
+  input.abortSignal?.addEventListener("abort", onUserAbort, { once: true });
+
   try {
     /*
      * ⭐ **协议只在这里分一次**（Phase 5.2）。
@@ -314,7 +368,7 @@ export async function runTurn(
       ...(reasoningProviderOptions(protocolOf(provider.id), input.reasoningEffort) === undefined
         ? {}
         : { providerOptions: reasoningProviderOptions(protocolOf(provider.id), input.reasoningEffort) }),
-      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+      ...(input.abortSignal || watchdog ? { abortSignal: watchdog.signal } : {}),
       ...(input.tools
         ? { tools: input.tools, stopWhen: stepCountIs(effectiveMaxSteps(input.maxSteps)) }
         : {}),
@@ -325,7 +379,9 @@ export async function runTurn(
     /** 这一轮有没有见过"一步结束"（见下面 `finish-step` 那段）。 */
     let sawStepFinish = false;
 
+    armStall();
     for await (const part of result.fullStream) {
+      armStall(); // 每一块都把看门狗往后推（"卡住"= 两块之间太久，不是总时长）
       if (input.abortSignal?.aborted) break;
       if (part.type === "text-delta") {
         onEvent({ type: "text", text: part.text });
@@ -391,6 +447,18 @@ export async function runTurn(
       if (part.type === "error") throw part.error;
     }
 
+    /*
+     * ⭐ 看门狗响了（审计 P37）：**这是失败，不是用户中止** ——
+     * provider 那边的连接卡住了，要 markFailed 并在界面说清"没有数据进来"。
+     */
+    if (stalled) {
+      const message = stallMessage(stallMs);
+      input.onRawError?.(`no stream data for ${stallMs}ms`);
+      health.markFailed(provider.id, message);
+      onEvent({ type: "error", message });
+      return { ok: false, error: message, aborted: false, provider: provider.id, model };
+    }
+
     if (input.abortSignal?.aborted) {
       // 中止是用户意图：**不判 provider 失败**，也不当作错误结局
       return { ok: true, aborted: true, provider: provider.id, model };
@@ -422,6 +490,17 @@ export async function runTurn(
     health.markOk(provider.id);
     return { ok: true, aborted: false, provider: provider.id, model };
   } catch (error) {
+    /*
+     * 看门狗触发时 SDK 抛的是 AbortError（是我们自己 abort 的）——
+     * 同样要按"provider 卡住"报，不能落进下面那句"已中止"（那会让用户以为是自己点了停止）。
+     */
+    if (stalled) {
+      const message = stallMessage(stallMs);
+      input.onRawError?.(`no stream data for ${stallMs}ms`);
+      health.markFailed(provider.id, message);
+      onEvent({ type: "error", message });
+      return { ok: false, error: message, aborted: false, provider: provider.id, model };
+    }
     const message = humanError(error);
     /* 原文只喂给装置（见 `TurnRequestInput.onRawError` 的说明） */
     input.onRawError?.(error instanceof Error ? error.message : String(error));
@@ -429,5 +508,9 @@ export async function runTurn(
     if (!aborted) health.markFailed(provider.id, message);
     onEvent({ type: "error", message });
     return { ok: false, error: message, aborted, provider: provider.id, model };
+  } finally {
+    /* 两种出口（正常/异常）都要收拾定时器与监听，否则长会话里越堆越多 */
+    stopStall();
+    input.abortSignal?.removeEventListener("abort", onUserAbort);
   }
 }

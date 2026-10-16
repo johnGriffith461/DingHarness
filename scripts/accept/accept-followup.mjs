@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd } from "./harness.mjs";
 
 /**
  * 验收：**多轮对话（在同一段对话里接着聊）**（§147）。
@@ -12,16 +12,24 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * 应用会**新建一个任务**，之前那几轮**完全不在上下文里**。
  * 也就是说这个应用**根本没有多轮对话**（本体的「主对话」是多轮的）。
  *
- * ⚠️ **这条会真调模型**（约 1 分钟），所以不进无模型批跑，单独跑。
+ * ⚠️ **这条原来会真调模型**（约 1 分钟），所以放在"不进批跑"的名单里。
+ * 2026-10-16 收进批跑：假通道补了「复述:X」这条装置标记（见 `verify-acceptances.mjs`
+ * 的 `startLocalFakeModel`）—— **上下文里出现 `复述:X`，回复里就带上 X**。
+ * 第一轮把那个数字写成 `复述:42`，于是"第二轮还答得出 42"依旧等价于
+ * "第一轮说过的话真的送到了模型眼前"：历史没送到，请求里就没有那个标记，回复里也就没有 42。
  *
  * ## 断言（三条缺一不可）
  *
  * ① `after === before + 1` —— 新回复是**追加在同一段对话里**的。
  *    如果又新建了任务，视图会跳到那个新任务上、里面只有 1 条助手消息，这条立刻红。
  * ② 左栏「最近」的行数不变 —— 没有多出一段对话。
- * ③ **最后那条回复里有 `6`** —— 这是唯一能证明"历史真送到了"的证据：
+ * ③ **最后那条回复里有 `42`** —— 这是唯一能证明"历史真送到了"的证据：
  *    `那再乘以 3 呢？` 里的"那"指代上一轮的 `1 + 1 = 2`，
  *    **没有历史的话模型根本不知道要拿什么乘 3**。
+ *
+ * ## 变异实证（2026-10-16）
+ *   第二轮发之前**不点回首页**（等价于"第二条消息落进一段新对话、历史不在"）→
+ *   第二轮请求里没有 `复述:42` → 回复里没有 42 → ③ **当场变红**（`✗ 第二轮答不出 42`）。
  */
 const DATA = ".verify/followup-data";
 if (!(await freshDir(DATA))) {
@@ -48,6 +56,17 @@ try {
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
 
+  /*
+   * ⚠️ 闸门档位设成**全部允许**（2026-10-16，收进批跑时补）。
+   *
+   * 第一轮那句话是要**真的调一次工具**的（下面两条断言就压在这上面：留痕 + 记忆落盘）。
+   * 默认档位下写类动作会被拦成「等你确认（还没执行）」—— 工具没执行、盘上什么都没有，
+   * 那两条就必然红，而红的原因跟"多轮对话成不成立"没关系。
+   */
+  await page.evaluate(() => localStorage.setItem("dsh-canvas.confirm-mode", "全部允许"));
+  await page.reload();
+  await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+
   const assistantCount = () => page.locator(".wb-assistant-text").count();
   const lastAssistant = () =>
     page.evaluate(() => {
@@ -68,15 +87,22 @@ try {
   /* ── 第一轮：新开一段对话，并且**真的调一次工具** ── */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(800);
+  /*
+   * ⚠️ `复述:42` 是**装置标记**（见文件头那段）：它同时是"埋进第一轮的那个事实"。
+   * 真模型"看见了就会说出来"，假通道按这条标记照做 —— 判据（第二轮答得出 42）一个字没改。
+   */
   await page
     .locator('[data-testid="wb-composer-input"]')
-    .fill("请调用 memory_save 工具记住：我的幸运数字是 42。然后只回复「好」这一个字。");
+    .fill("请调用 memory_save 工具记住：我的幸运数字是 42（复述:42）。然后只回复「好」这一个字。");
+  const firstBefore = await finishedTurns(page);
   await page.locator('[data-testid="wb-send"]').click();
 
-  const firstDeadline = Date.now() + 90000;
-  while (Date.now() < firstDeadline && (await assistantCount()) === 0) {
-    await page.waitForTimeout(1500);
-  }
+  /*
+   * ⚠️ 等**回合真的结束**（会话记录里的 `done`），不要"气泡一出现就读"（审计 G108）：
+   * 那样读到的是**半截回复** —— 而这一条要断的那个 `42` 是**流到最后才吐出来**的
+   * （假通道把复述放在末片），半截读法会让它必然红，且看起来像产品没送历史。
+   */
+  await waitTurnEnd(page, firstBefore, 120_000);
   await clearQuestions();
   out.firstReply = await lastAssistant();
   out.firstToolLine = await page.evaluate(() => {
@@ -92,12 +118,10 @@ try {
 
   /* ── 第二轮：**不换页、不新建**，就在这段对话里接着说 ── */
   await page.locator('[data-testid="wb-composer-input"]').fill("我的幸运数字是多少？只回答数字。");
+  const secondBefore = await finishedTurns(page);
   await page.locator('[data-testid="wb-send"]').click();
 
-  const secondDeadline = Date.now() + 90000;
-  while (Date.now() < secondDeadline && (await assistantCount()) <= out.afterFirst) {
-    await page.waitForTimeout(1500);
-  }
+  await waitTurnEnd(page, secondBefore, 120_000);
   await clearQuestions();
   out.secondReply = await lastAssistant();
   out.afterSecond = await assistantCount();

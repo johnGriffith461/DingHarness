@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CanvasDocument, CanvasLoadResult, ShellBridge } from "@shared/ipc";
+import type { CanvasLoadResult, ShellBridge } from "@shared/ipc";
 import { useRuntimeStore } from "./runtimeStore";
 import type { Marker } from "./markers";
 import type { CanvasNode } from "./types";
 import { droppedCount, normalizeCanvasDoc } from "./normalizeDoc";
+import {
+  AUTOSAVE_DELAY_MS,
+  createCanvasSaver,
+  shouldApplyLoadedDoc,
+  type CanvasSink,
+  type SaveState,
+} from "./canvasSaver";
+import { markCanvasLoaded, resetCanvasLoadGate } from "./loadGate";
 
 /**
  * 持久化接线（PLAN 4.1 ~ 4.5）。
  *
- * 职责划分：本模块只管"什么时候把画布交出去、交出去之后怎么标状态"，
- * 磁盘上的原子写 / 确认 / 回退全在主进程（`electron/ipc/snapshotStore.ts`）。
+ * 职责划分：本模块只管**什么时候**把画布交出去（定时器 / 订阅 / 关窗前），
+ * 以及把载入结果放进 store；**写什么、写完记哪个数**在 `canvasSaver.ts`（纯逻辑、可单测），
+ * 磁盘上的原子写 / 版本迁移 / 确认 / 回退全在主进程（`electron/ipc/snapshotStore.ts`）。
  *
  * 三个时机：
  *   · 载入：启动时读一次，若发现上次异常退出就按主进程给的回退结果覆盖画布
@@ -19,12 +28,6 @@ import { droppedCount, normalizeCanvasDoc } from "./normalizeDoc";
 
 const bridge = (): ShellBridge | undefined =>
   (globalThis as unknown as { shell?: ShellBridge }).shell;
-
-/** 保存状态（状态栏显示）。 */
-export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
-
-/** 内容变动后多久落盘。 */
-const AUTOSAVE_DELAY_MS = 800;
 
 export type PersistenceApi = {
   saveState: SaveState;
@@ -37,115 +40,76 @@ export type PersistenceApi = {
   saveNow: () => Promise<void>;
 };
 
-/**
- * 仅提取可序列化的部分（节点里的函数、DOM 引用一律丢掉）。
- * 画布图必须可 JSON 序列化，否则宁可显式报错，也不要写出一份读不回来的快照。
- *
- * 注意 `revision` 用的是 store 的当前值：调用方（load 之后）负责让基线一致，
- * 否则会出现"存档号比磁盘上的小"从而被主进程拒绝写入。
- */
-export function serializeCanvas(input: {
-  nodes: CanvasNode[];
-  edges: unknown[];
-  viewport: { x: number; y: number; zoom: number };
-  revision: number;
-  confirmedRevision: number;
-  /** 标记层（阶段 5）：和节点一起进快照，否则重启后批注全丢。 */
-  markers?: Marker[];
-}): CanvasDocument {
-  return {
-    version: 2,
-    revision: input.revision,
-    confirmedRevision: input.confirmedRevision,
-    updatedAt: new Date().toISOString(),
-    viewport: { ...input.viewport },
-    nodes: JSON.parse(JSON.stringify(input.nodes)) as unknown[],
-    edges: JSON.parse(JSON.stringify(input.edges)) as unknown[],
-    markers: JSON.parse(JSON.stringify(input.markers ?? [])) as unknown[],
-  };
-}
-
-/**
- * 修订号合法性校验（PLAN 4.2）。
- * @param draft 待写入的修订号
- * @param persisted 已落盘的修订号
- * @returns 是否允许写入，以及被拒绝的原因
- */
-export function validateRevision(
-  draft: number,
-  persisted: number,
-): { ok: true } | { ok: false; reason: string } {
-  if (!Number.isInteger(draft) || draft < 0) {
-    return { ok: false, reason: `修订号必须是非负整数，收到 ${String(draft)}` };
-  }
-  if (draft < persisted) {
-    return { ok: false, reason: `修订号不能倒退：${draft} < ${persisted}` };
-  }
-  return { ok: true };
-}
+/* ⚠️ 序列化 / 修订号校验 / "载入的文档要不要覆盖" 都搬进了 `canvasSaver.ts`
+ *（P16/P17/P29 那三条要能被单测钉住）。这里原样再导出，调用方与既有测试一个字不用改。 */
+export { serializeCanvas, validateRevision, shouldApplyLoadedDoc, AUTOSAVE_DELAY_MS } from "./canvasSaver";
+/** `SaveState` 一并再导出：`CanvasStatusBar` 按这个名字从本文件取它。 */
+export type { SaveState } from "./canvasSaver";
 
 export function usePersistence(): PersistenceApi {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedRevision, setSavedRevision] = useState(0);
   const [recoveryNote, setRecoveryNote] = useState<string | null>(null);
-  const revisionRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savingRef = useRef(false);
 
-  /** 把当前画布落盘并确认。 */
-  const persist = useCallback(async () => {
-    const shell = bridge();
-    if (!shell?.canvas || savingRef.current) return;
-    const state = useRuntimeStore.getState();
-    const doc = serializeCanvas({
-      nodes: state.nodes,
-      edges: state.edges,
-      viewport: state.viewport,
-      revision: state.revision,
-      confirmedRevision: state.revision,
-      markers: state.markers,
+  /**
+   * 写盘器：跟着组件活一次（`useRef` 里那份）。
+   *
+   * ⚠️ 惰性建（不能每次渲染都建）：它持有"已落盘 / 已确认"两个数，重建就等于把基线忘了。
+   */
+  const saverRef = useRef<ReturnType<typeof createCanvasSaver> | null>(null);
+  if (saverRef.current === null) {
+    saverRef.current = createCanvasSaver({
+      api: (): CanvasSink | undefined => {
+        const canvas = bridge()?.canvas;
+        if (!canvas) return undefined;
+        return {
+          save: (doc) => canvas.save(doc),
+          ack: (revision) => canvas.ack(revision),
+        };
+      },
+      read: () => {
+        const state = useRuntimeStore.getState();
+        return {
+          nodes: state.nodes,
+          edges: state.edges,
+          viewport: state.viewport,
+          markers: state.markers,
+          revision: state.revision,
+        };
+      },
+      onState: setSaveState,
+      onError: (reason) => console.error("[persist]", reason),
     });
-    const check = validateRevision(doc.revision, revisionRef.current);
-    if (!check.ok) {
-      setSaveState("error");
-      console.error("[persist]", check.reason);
-      return;
-    }
-
-    savingRef.current = true;
-    setSaveState("saving");
-    try {
-      const result = await shell.canvas.save(doc);
-      if (!result.ok) {
-        setSaveState("error");
-        console.error("[persist] 保存失败：", result.error);
-        return;
-      }
-      revisionRef.current = doc.revision;
-      setSavedRevision(doc.revision);
-      // ack：告诉主进程"这一版确实写全了"，下次崩溃才不会把它当成未确认快照丢掉
-      await shell.canvas.ack(doc.revision);
-      setSaveState("saved");
-    } catch (error) {
-      setSaveState("error");
-      console.error("[persist] 保存异常：", error instanceof Error ? error.message : error);
-    } finally {
-      savingRef.current = false;
-    }
-  }, []);
+  }
+  const saver = saverRef.current;
 
   const saveNow = useCallback(async () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    await persist();
-  }, [persist]);
+    /*
+     * ⚠️ 手动保存要等**正在跑的那一次**写完，然后再落一次最新的（P17）：
+     * `saver.save()` 在忙时会排队（不会静默丢掉），所以这里只要等它做完。
+     */
+    await saver.save();
+    await saver.idle();
+    setSavedRevision(saver.persisted());
+  }, [saver]);
 
   /** 载入：读文档 → 覆盖画布 → 处理崩溃回退。 */
   useEffect(() => {
     const shell = bridge();
-    if (!shell?.canvas) return;
+    /*
+     * ⚠️ 载入闸（P74）：每次挂载都**重开一次**，然后在所有出口处放行 ——
+     * 「AI 往画布加节点」那条命令要靠它等到"载入真的回来了"，而不是赌 400ms。
+     */
+    resetCanvasLoadGate();
+    if (!shell?.canvas) {
+      markCanvasLoaded();
+      return;
+    }
     const load: () => Promise<CanvasLoadResult> = shell.canvas.load;
     void (async () => {
       try {
@@ -160,7 +124,16 @@ export function usePersistence(): PersistenceApi {
          * 取舍写在 `normalizeCanvasDoc` 里：**宁可挪位置，不可丢内容**。
          */
         const doc = normalizeCanvasDoc(result.doc);
-        if (doc.nodes.length > 0) {
+        /*
+         * ⚠️ **空画布也要照载**（2026-10-16 审计 P16）。
+         *
+         * 原来这里是 `if (doc.nodes.length > 0)` —— 于是"用户自己清空过"与
+         * "全新安装（磁盘上还没有存档）"被当成同一种：前者会被示例图盖回来，
+         * 而且基线（`revisionRef`）已经跟着磁盘走了，store 里的修订号还停在 0，
+         * **之后每一次保存都被"修订号不能倒退"拒掉**（状态栏永久停在保存失败）。
+         * 区分两种情形的判据写在 `shouldApplyLoadedDoc` 里（含理由）。
+         */
+        if (shouldApplyLoadedDoc(doc)) {
           useRuntimeStore.getState().loadDocument({
             nodes: doc.nodes,
             edges: doc.edges,
@@ -173,21 +146,28 @@ export function usePersistence(): PersistenceApi {
         if (droppedCount(doc) > 0) {
           setRecoveryNote(`有 ${droppedCount(doc)} 个元素读不进来（数据不完整或版本不对），已跳过`);
         }
-        /**
+        /*
          * 基线要做回退：崩溃恢复后主进程把 revision 降回了确认版，
          * 如果这里还留着崩溃前那个更大的数，下一次自动保存会因为
          * "修订号不能倒退"被主进程拒绝（实测表现为状态栏一直停在"保存失败"）。
+         *
+         * ⚠️ `confirmedRevision` 也要一起对齐（P29）：它是**主进程认的"写到哪儿了"**，
+         * 写盘时交给主进程的那个数从这里来（初始化为 0 是对的 —— 全新安装时
+         * 磁盘上那份是 `emptyDocument()`，本来就没有任何已确认的修订）。
          */
-        revisionRef.current = doc.revision;
+        saver.adopt(doc.revision, result.doc.confirmedRevision ?? 0);
         setSavedRevision(doc.revision);
         if (result.recovered && result.recoveryNote) setRecoveryNote(result.recoveryNote);
         setSaveState("saved");
       } catch (error) {
         setSaveState("error");
         console.error("[persist] 载入失败：", error instanceof Error ? error.message : error);
+      } finally {
+        /* 无论成没成都要放行：等待方可能是"AI 往画布加节点"那条命令，它只要知道"尘埃落定" */
+        markCanvasLoaded();
       }
     })();
-  }, []);
+  }, [saver]);
 
   /** 内容变化 → 延迟落盘。 */
   useEffect(() => {
@@ -197,14 +177,14 @@ export function usePersistence(): PersistenceApi {
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
-        void persist();
+        void saver.save();
       }, AUTOSAVE_DELAY_MS);
     });
     return () => {
       unsubscribe();
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [persist]);
+  }, [saver]);
 
   /** 关窗前再落一次，尽量保住最后一笔。 */
   useEffect(() => {
@@ -219,3 +199,6 @@ export function usePersistence(): PersistenceApi {
 
   return { saveState, savedRevision, recoveryNote, clearRecoveryNote, saveNow };
 }
+
+/** 标记类型在本文件里被 re-export 出去过（既有调用方按这个名字引）。 */
+export type { Marker, CanvasNode };

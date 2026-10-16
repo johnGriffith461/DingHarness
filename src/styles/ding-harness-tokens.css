@@ -2,7 +2,7 @@
    DING HARNESS — 设计令牌 v1.0
    ------------------------------------------------------------
    项目：DoubaoWorkClone → Ding Harness（Electron 44 + React 19）
-   来源：C:\Users\Administrator\WorkBuddy\2026-10-14-06-01-04\font-preview\dingwork\
+   来源：仓外工作区 font-preview/dingwork（未入库）
          （proposal.html §07 全文 + ding-harness-tokens.css）
    接入：整文件放在 src/styles/，在 styles.css 的 @import 串里
    加到 theme.css **之后**（后导入者覆盖先导入者）。
@@ -17,7 +17,7 @@
        日间  --fg-dim 4.9:1  --fg-faint 4.6:1  --accent 5.6:1
        黑夜  --fg-dim 5.5:1  --accent 5.0:1
 
-   ⚠️ 接入必读（提案 §08 对 D:\DoubaoWorkClone 的勘察实测）：
+   ⚠️ 接入必读（提案 §08 对接入前那版工程的勘察实测）：
      1. `.wb` 在 workbench.css 有一行**自带的 font 声明**
         （font: 13px/1.6 "Microsoft YaHei", …），它覆盖 body 继承 ——
         只改 body 的 font 不起作用，必须同时把 .wb 那行改为

@@ -180,7 +180,20 @@ export function parseAskReply(raw: string): { text: string; questions: TaskQuest
     return { text: stripMarkers(source).trim(), questions: [] };
   }
 
-  const text = stripMarkers(source.slice(0, start)).trim();
+  /*
+   * ⚠️⚠️ **`</ask>` 之后的正文不能丢**（2026-10-16 审计 P269）。
+   *
+   * 模型常写成"一句话 + 一张提问卡 + 一句补充"：
+   *
+   *     …</ask>
+   *     （不回也行，我按第一个选项开工）
+   *
+   * 原来 `text` 只取 `source.slice(0, start)` —— 结束标记**之后**那段
+   * 既不进正文也不进问题，**从界面上直接消失**；而对话历史里存的就是这个 `text`，
+   * 所以下一轮模型也看不见它。用户丢掉的往往是那句最关键的话（"不回就按甲做"）。
+   * 现在把前后两段拼起来（中间补一个换行，免得两句话粘成一句）。
+   */
+  const text = stripMarkers(source.slice(0, start) + "\n" + source.slice(end + ASK_CLOSE.length)).trim();
   const block = source.slice(start + ASK_OPEN.length, end);
 
   const questions: TaskQuestion[] = [];

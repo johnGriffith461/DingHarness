@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FILE_LIST_LIMIT, formatFileList } from "@shared/fileList";
 import type { DriveEntry } from "@shared/drive";
+import { ORIGIN_LABEL } from "@shared/drive";
 
 /**
  * 「列文件」工具要说的那段话（2026-10-14）。
@@ -33,7 +34,12 @@ describe("formatFileList", () => {
     expect(got).toContain("在云盘目录");
     expect(got).toContain("封面.png");
     expect(got).toContain("3.0MB");
-    expect(got).toContain("在生成图目录");
+    /*
+     * ⚠️ 来源名**按界面那张表**断言，不写死中文（审计 P104）：这里原来是
+     * `toContain("在生成图目录")` —— 它把"同一批文件在界面上叫素材、在留痕里叫生成图"
+     * 这个两份名钉成了"预期行为"。现在取 `ORIGIN_LABEL.asset`，两边只能同源。
+     */
+    expect(got).toContain(`在${ORIGIN_LABEL.asset}目录`);
   });
 
   it("开头报总数（模型据此判断要不要继续问）", () => {

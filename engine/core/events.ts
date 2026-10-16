@@ -285,11 +285,28 @@ export type TurnState = TurnView & {
   waiting: { toolCallId: string; name: string; input?: unknown }[];
   /** 内部：委派进度（按 `delegationId` 就地更新，不重复追加）。 */
   delegations: DelegationView[];
+  /**
+   * 内部：这一轮里出现过的**决策记录**（谁批的、批成什么样）。
+   *
+   * ⚠️ 为什么要留一份（审计 P51）：`traces` 只是"父级手上有的留痕"，
+   * 而**展开的子智能体待批项**（`finishTurn` 的 `expandBlocked`）要到收尾时才挂上去 ——
+   * 于是"给那条待批项的批准记录"在 `traces` 里**找不到对应留痕**，
+   * 原来那一支会直接把它当"日志被截过"忽略掉。后果：重放时那条留痕**永远停在
+   * 「等你确认」**（用户明明点过），并且它继续占着 `pending` 名单 —— INV-3/INV-2 同时破。
+   *
+   * 所以决策记录一律留住，由 `finishTurn` 在**展开之后**再套一遍
+   * （套法只有一份：`withApprovals`，两条路都从那里出）。
+   *
+   * ⚠️ 类型用 `ApprovalLike`（只要"改留痕要用的那几个字段"）：流式那一侧喂进来的
+   * 是**还没落盘**的决策记录（没有 `seq`/`at`），而落盘重放那一侧带 `seq`/`at` ——
+   * 两种都要能进来，内部也不需要更多字段。
+   */
+  approvals: ApprovalLike[];
 };
 
 /** 空白的一轮。 */
 export function emptyTurn(): TurnState {
-  return { text: "", traces: [], done: false, waiting: [], delegations: [] };
+  return { text: "", traces: [], done: false, waiting: [], delegations: [], approvals: [] };
 }
 
 /**
@@ -375,11 +392,18 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
      * ⚠️ 这同时是 F3 的关键一步 —— 聊天历史恢复时，"等确认"那条要能回到
      * **它真正的样子**（已批准 → 结果那行；已拒绝 → 你已拒绝），
      * 而不是重启后又冒出一个"允许/拒绝"按钮（用户会以为自己的决定丢了）。
+     *
+     * ⚠️ 两条都要做（审计 P51）：
+     *   ① 就地改（`traces` 里能找到的那条，例如被闸门拦下的普通调用）；
+     *   ② **一律记进 `approvals`** —— 展开的子智能体待批项**不在** `traces` 里
+     *      （它由 `finishTurn` 在收尾时挂上去），只做①的话这条决策会被静默吞掉。
+     *      两条路的结果由 `finishTurn` 收口成同一个（同一个 `withApprovals`）。
      */
+    const approvals = [...state.approvals, event];
     const idx = state.traces.findIndex((t) => t.toolCallId === event.toolCallId);
-    if (idx < 0) return state; // 没有对应留痕（日志被截过）：忽略，不凭空造一条
+    if (idx < 0) return { ...state, approvals };
     const traces = state.traces.map((t, i) => (i === idx ? resolvedTrace(t, event) : t));
-    return { ...state, traces };
+    return { ...state, traces, approvals };
   }
 
   if (event.type === "delegation") {
@@ -422,6 +446,14 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
 }
 
 /**
+ * 决策记录里"改留痕"要用的那几个字段。
+ *
+ * ⚠️ 故意**不用** `ApprovalRecord` 整个类型：投影要能吃"还没落盘的决策记录"
+ * （流式那一侧 `ApprovalRecord` 一定满足它），内部函数用这个子集就够。
+ */
+type ApprovalLike = { toolCallId: string; line: string; ok?: boolean; output?: unknown; error?: string };
+
+/**
  * 把"等确认"的那条留痕换成**结论**（用户批了/拒了之后的样子）。
  *
  * ⚠️ `pending` 要**摘掉**（不是置 false）：`pending: false` 与"没有这个字段"
@@ -432,7 +464,7 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
  * @param record 决策记录
  * @returns 结论留痕
  */
-function resolvedTrace(trace: ToolTrace, record: Extract<TurnInput, { type: "approval" }>): ToolTrace {
+function resolvedTrace(trace: ToolTrace, record: ApprovalLike): ToolTrace {
   const { pending: _pending, ...rest } = trace;
   return {
     ...rest,
@@ -441,6 +473,26 @@ function resolvedTrace(trace: ToolTrace, record: Extract<TurnInput, { type: "app
     ...(record.output === undefined ? {} : { output: record.output }),
     ...(record.error ? { error: record.error } : {}),
   };
+}
+
+/**
+ * 把留痕套上决策记录（**同一个 toolCallId 只有一份结论**）。
+ *
+ * 这是"决策被看见"的唯一收口点：`finishTurn` 拿到的 `traces` 可能包含
+ * **展开出来的子智能体待批项**（`expandBlocked`），而 `applyEvent` 那一支
+ * 只看得到父级自己的 `traces`（见 `TurnState.approvals` 的说明）——
+ * 于是这里必须再套一遍，否则子智能体那条的批准会被静默吞掉（审计 P51）。
+ *
+ * 幂等：套两次与套一次结果相同（`resolvedTrace` 只是覆盖那几个字段）。
+ */
+function withApprovals(traces: readonly ToolTrace[], approvals: readonly ApprovalLike[]): ToolTrace[] {
+  if (!approvals.length) return [...traces];
+  const byId = new Map<string, ApprovalLike>();
+  for (const a of approvals) byId.set(a.toolCallId, a); // 同一个 id 出现多次时以最后一条为准
+  return traces.map((t) => {
+    const record = byId.get(t.toolCallId);
+    return record ? resolvedTrace(t, record) : t;
+  });
 }
 
 /**
@@ -483,24 +535,31 @@ export type ProjectOptions = {
  */
 export function finishTurn(state: TurnState, opts: ProjectOptions = {}): TurnView {
   const { text, traces, usage, error, done, delegations } = state;
+  /*
+   * ⚠️ 展开与"套决策记录"的**顺序**有意义：先展开（子智能体上交的待批项进场），
+   * 再套决策记录 —— 反过来的话，给那些待批项的批准记录会找不到对应留痕（审计 P51）。
+   */
+  let final: readonly ToolTrace[] = traces;
+  if (opts.expandBlocked) {
+    const expanded: ToolTrace[] = [];
+    for (const trace of traces) {
+      expanded.push(trace);
+      if (trace.name !== SPAWN_AGENT_TOOL || !trace.ok) continue;
+      const report = trace.output as { blocked?: SubagentBlockedLike[] } | undefined;
+      expanded.push(...blockedToTraces(report?.blocked));
+    }
+    final = expanded;
+  }
   const base: TurnView = {
     text,
-    traces: [...traces],
+    traces: withApprovals(final, state.approvals),
     done,
     // 一条都没有就不出现这个字段（与 usage 同一个口径：没有 ≠ 空数组）
     ...(delegations.length ? { delegations: [...delegations] } : {}),
     ...(usage ? { usage } : {}),
     ...(error ? { error } : {}),
   };
-  if (!opts.expandBlocked) return base;
-  const expanded: ToolTrace[] = [];
-  for (const trace of traces) {
-    expanded.push(trace);
-    if (trace.name !== SPAWN_AGENT_TOOL || !trace.ok) continue;
-    const report = trace.output as { blocked?: SubagentBlockedLike[] } | undefined;
-    expanded.push(...blockedToTraces(report?.blocked));
-  }
-  return { ...base, traces: expanded };
+  return base;
 }
 
 /** `SubagentReport.blocked` 的形状（只取这里用得到的部分，避免多一处强类型耦合）。 */

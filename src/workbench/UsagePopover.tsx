@@ -1,5 +1,6 @@
 import { Gauge } from "lucide-react";
 import { usageRows, usageTotal, type StepUsage } from "@shared/cost";
+import { clockOf } from "./duration";
 
 /**
  * 输入区里的「用量」：一个按钮 + 一块明细（2026-10-14 主人点名要的）。
@@ -49,7 +50,7 @@ export function UsagePopover({
         <div className="wb-usage-pop" data-testid="wb-usage-pop">
           <div className="wb-usage-head">
             <b>Token 用量</b>
-            <span className="mono">{seconds === null ? "本次对话" : `时长 ${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`}</span>
+            <span className="mono">{seconds === null ? "本次对话" : `时长 ${clockOf(seconds)}`}</span>
           </div>
           {rows.length === 0 ? (
             <div className="wb-usage-empty" data-testid="wb-usage-empty">

@@ -99,6 +99,37 @@ export function seedGeneration(
 }
 
 /**
+ * 版本条数上限（2026-10-16，审计 **P259**）。
+ *
+ * ## 为什么必须有
+ *
+ * `appendVersion` 原来是无条件 `[...prev.versions, version]`，而每一版的 `content` 是
+ * **整份内容快照**（markdown 是整个正文、代码是整个 code、白板是整个 strokes）。
+ * 对同一个大节点反复「再来一次 / 润色」没有任何上限：
+ * 一个 500KB 的文本节点重生成 20 次，节点 data 里就躺着约 10MB 历史全文 ——
+ * 而它会跟着画布 JSON 落盘、进备份包、被每次 `commitHistory` 的整图快照引用。
+ *
+ * ## 口径（刻意保留首版）
+ *
+ * 超限时丢**最旧的中间版**，但**留下第一版**：第一版是"最初那个内容"，
+ * 是用户最常想退回去的那一版；中间那些"第 7 次润色"才是可以丢的。
+ *
+ * ⚠️ 边界如实记：这只治"条数无上限"，**没治**"每版存全文"。
+ * 20 版 × 单版体积仍然可能偏大；要再省就得让旧版只存 `{prompt, model, createdAt}`
+ * 或按 diff 展开 —— 那会让"退回某一版"变成"重放"，是另一件事，这一轮没做。
+ */
+export const GENERATION_VERSION_LIMIT = 20;
+
+/** 截到上限（保留首版 + 最近的若干版）。 */
+function capVersions(list: GenerationVersion[]): GenerationVersion[] {
+  if (list.length <= GENERATION_VERSION_LIMIT) return list;
+  const first = list[0];
+  if (!first) return list;
+  const rest = list.slice(1);
+  return [first, ...rest.slice(rest.length - (GENERATION_VERSION_LIMIT - 1))];
+}
+
+/**
  * 追加一个新版本并设为当前版。
  * @param node 目标节点（用来抽内容）
  * @param model 产出这一版的模型名（手工编辑传 `manual`）
@@ -111,7 +142,7 @@ export function appendVersion(node: GenerationNode, model: string): GenerationMe
     model,
     content: extractContent(node),
   };
-  const versions = [...(prev?.versions ?? []), version];
+  const versions = capVersions([...(prev?.versions ?? []), version]);
   return {
     contentKeys: CONTENT_KEYS[node.type] ?? [],
     status: "done",

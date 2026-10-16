@@ -40,6 +40,15 @@ export function AgentCreatePanel() {
     setting: [],
   });
   const [error, setError] = useState("");
+  /**
+   * 「开始使用」正在提交（2026-10-16 审计 P48）。
+   *
+   * 这颗键原来是裸的 `onClick={() => void doStart()}`：`create` 要写盘（一次往返），
+   * 用户等不及连点两下就是**两条一模一样的智能体**（`agentStore.create` 只
+   * `normalizeAgents([...s.agents, agent])`，不查重）。而 `oneClickFill`（起名那一路）
+   * 早就用 `filling` 禁用过了 —— 同一个面板两套口径。
+   */
+  const [starting, setStarting] = useState(false);
 
   const toggleTag = (group: AgentTagGroup, tag: string): void =>
     setTags((cur) => {
@@ -53,14 +62,20 @@ export function AgentCreatePanel() {
   };
 
   const doStart = async (): Promise<void> => {
+    if (starting) return; // 连点两下 = 建两个（P48）
     const verdict = validateAgent({ name, description });
     if (verdict) {
       setError(verdict);
       return;
     }
     setError("");
-    await create({ name, description, ...tags });
-    setView("home");
+    setStarting(true);
+    try {
+      await create({ name, description, ...tags });
+      setView("home");
+    } finally {
+      setStarting(false);
+    }
   };
 
   return (
@@ -124,7 +139,13 @@ export function AgentCreatePanel() {
           >
             <Sparkles size={13} /> {AGENT_LABELS.oneClickFill}
           </button>
-          <button className="wb-agent-start" data-testid="wb-agent-start" onClick={() => void doStart()}>
+          <button
+            className="wb-agent-start"
+            data-testid="wb-agent-start"
+            disabled={starting}
+            data-busy={starting ? "1" : undefined}
+            onClick={() => void doStart()}
+          >
             {AGENT_LABELS.start}
           </button>
           <button className="wb-agent-cancel" data-testid="wb-agent-cancel" onClick={() => setView("home")}>

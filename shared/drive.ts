@@ -108,6 +108,22 @@ export const ORIGIN_LABEL: Record<DriveEntry["origin"], string> = {
 };
 
 /**
+ * 给**工具留痕 / 模型**看的来源名。
+ *
+ * ⚠️ 与 `ORIGIN_LABEL` 是**同一处映射**，只补上 `drive` 的名字（审计 P104）：
+ * 界面上自己那一栏不用标来源，所以 `ORIGIN_LABEL.drive` 是空串；
+ * 而工具留痕里不能留空（否则模型看到「在目录」这种断句）。
+ * 原来 `shared/fileList.ts` 另抄了一份表，asset 在那边叫「生成图」——
+ * 同一批文件界面上叫素材、留痕里叫生成图，用户按界面名问、模型答另一个名。
+ * 「同一个来源两个名」这种事只会在加第四个来源时暴露，所以这里**只留这一处**：
+ * 改这个值就是改两边（`src/fileList.test.ts` 有一条同源断言盯着）。
+ */
+export const ORIGIN_LABEL_FOR_MODEL: Record<DriveEntry["origin"], string> = {
+  ...ORIGIN_LABEL,
+  drive: "云盘",
+};
+
+/**
  * 云盘的标签页（§157 按证据补齐）。
  *
  * 本体就是 **全部 / 我的 / 最近 / AI 文档** 这四个（`drive_tab_all|myFiles|recent|AIDocs`）；
@@ -138,7 +154,9 @@ export function selectEntries(entries: DriveEntry[], tab: DriveTab, starred: Set
  * 定义：**智能体产出**的文档与画布 —— 这些能回到对话里接着改；
  * 上传进来的文件不算（它的"前任"不在这台机器的对话里）。
  *
- * 判据与 `shared/driveOps.ts` 的 `isAiDoc` 保持一致（那边也导出一份给界面用）。
+ * ⚠️ 原来这里写着「判据与 `shared/driveOps.ts` 的 `isAiDoc` 保持一致」——
+ * 那个文件随云盘页一起拆掉了（2026-10-16），现在**只有这一份**判据
+ * （`isAiDocEntry` 就是它）。
  */
 export function isAiDocEntry(entry: DriveEntry): boolean {
   return entry.origin === "artifact" && (entry.kind === "doc" || entry.kind === "canvas");
@@ -202,5 +220,11 @@ export function countByKind(entries: DriveEntry[]): Record<string, number> {
  * 2026-10-16：原来住在 `shared/driveFiles.ts`（云盘的改名 + 读取那支）。
  * 云盘页拆掉之后，只剩这一个常量还有人用（`electron/ipc/driveStore.ts` 与读文件工具），
  * 所以并进这里 —— 一个常量不值得单独一支文件。
+ *
+ * ⚠️ 值与 `engine/runtime/tools/readTool.ts` 的 `READ_MAX_BYTES` **必须一样**
+ * （审计 P56：那边 200_000、这边原来是 200 * 1024 = 204800，两份值不同，
+ * 而 readTool 的注释自称"与 `drive:read` 一致"）。同值由
+ * `src/sharedContract.test.ts ②` 直接读两处源码对账；收成一处要 engine 那侧 import 这里
+ * （不在本轮范围，如实记）。
  */
-export const READ_MAX_BYTES = 200 * 1024;
+export const READ_MAX_BYTES = 200_000;

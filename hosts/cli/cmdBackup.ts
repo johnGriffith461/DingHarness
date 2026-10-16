@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
-import { kvList, kvWrite } from "../../engine/adapters/kvStore";
-import { applyBackup, buildBackup, describeBackup, validateBackup } from "../../engine/core/backup";
+import { kvList, kvReadByKey, kvWriteKey, looksLikeForeignPathKey } from "../../engine/adapters/kvStore";
+import { UNMAPPABLE_STORE_KEY, applyBackup, buildBackup, describeBackup, validateBackup } from "../../engine/core/backup";
 import { flag, type Parsed } from "./args";
 import { configPaths, readConfig, writeConfig } from "./config";
 
@@ -47,7 +47,28 @@ async function readAllSessions(storeDir: string) {
 }
 
 /**
- * `ding backup [--out <文件>]`。
+ * 把备份里的 store 键映射到**本机**的键。
+ *
+ * - 新格式：键是**相对数据目录**的路径（`tasks.json`，见 `engine/adapters/kvStore.ts`）→ 直接用。
+ * - 旧格式：键是本机绝对路径。只有它确实落在**本机**数据目录下才认得出（同机恢复）；
+ *   别的机器的绝对路径没有人会去查，返回 `UNMAPPABLE_STORE_KEY` 让报告如实说"这几项没能恢复"，
+ *   而不是把它们写进一串死键、然后在终端上说"恢复了 N 项"（P100/P128）。
+ */
+function mapStoreKey(dataDir: string, key: string): string | typeof UNMAPPABLE_STORE_KEY {
+  if (!looksLikeForeignPathKey(key)) return key; // 新格式：相对数据目录的键，直接用
+  /*
+   * 路径形状：只有它确实是绝对路径、且落在**本机**数据目录下才认得出（同机恢复）。
+   * `C:foo` 这种盘相对畸形一律不猜 —— 猜错的代价是把数据写进一串没人会查的键。
+   */
+  if (!path.isAbsolute(key)) return UNMAPPABLE_STORE_KEY;
+  const base = path.resolve(dataDir);
+  const rel = path.relative(base, path.resolve(key));
+  const inside = rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel);
+  return inside ? rel : UNMAPPABLE_STORE_KEY;
+}
+
+/**
+ * `ding backup [--out <文件>] [--keep-provenance]`。
  *
  * 默认写到**当前目录**下一个带时间戳的文件名 —— 备份不该悄悄覆盖上一个。
  */
@@ -61,6 +82,8 @@ export async function cmdBackup(p: Parsed, dataDir: string): Promise<number> {
     sessions,
     stores,
     config,
+    // 默认只记目录名：完整路径带用户名/机器名，而这个文件是要拿去分享的（P145）
+    keepProvenance: p.flags.has("keep-provenance"),
   });
 
   const out =
@@ -90,6 +113,10 @@ export async function cmdBackup(p: Parsed, dataDir: string): Promise<number> {
  * `ding restore <文件> [--list]`。
  *
  * `--list` 只**看**不恢复（先让人确认这是不是他要的那份）。
+ *
+ * ⚠️ 恢复是**只补不覆盖**（P99/P123/P196）：本机已有的键不动；备份里那些键若是
+ * **另一台机器**的绝对路径（旧格式备份），本机认不出来 —— 那种会**明确报**出来
+ * （`storesUnavailable`），而不是写进一串没人会查的键再报"恢复了 N 项"（P100/P128）。
  */
 export async function cmdRestore(p: Parsed, dataDir: string): Promise<number> {
   const file = p.args[0] ?? flag(p, "out");
@@ -126,13 +153,24 @@ export async function cmdRestore(p: Parsed, dataDir: string): Promise<number> {
   /*
    * ⚠️ 恢复**不删不覆盖**（见 `engine/core/backup.ts` 的硬规矩）：
    * 备份可能是三天前的，而这三天用户又聊了一堆 —— 直接覆盖等于用旧数据抹掉新的。
+   *
+   * `readStore` 是那条规矩的落点：本机已经有这个键 → 跳过（P99/P123/P196）。
+   * `writeStore` 按**本机**键写：备份里的键可能是导出机的绝对路径（P100/P128）。
    */
   const store = createSqliteSessionStore(dataDir);
   try {
     const report = await applyBackup(payload, {
       loadSession: (id) => store.load(id),
       appendSession: (id, recs) => store.append(id, recs),
-      writeStore: (key, value) => kvWrite(dataDir, key, value),
+      readStore: (key) => {
+        const mapped = mapStoreKey(dataDir, key);
+        return mapped === UNMAPPABLE_STORE_KEY ? UNMAPPABLE_STORE_KEY : kvReadByKey(dataDir, mapped);
+      },
+      writeStore: (key, value) => {
+        const mapped = mapStoreKey(dataDir, key);
+        if (mapped === UNMAPPABLE_STORE_KEY) return; // applyBackup 已把它记进 unavailable 并跳过
+        kvWriteKey(dataDir, mapped, value);
+      },
       writeConfig: (cfg) => {
         const paths = configPaths(dataDir);
         void paths;
@@ -145,14 +183,19 @@ export async function cmdRestore(p: Parsed, dataDir: string): Promise<number> {
       process.stdout.write(JSON.stringify({ ok: true, ...report }, null, 2) + "\n");
       return 0;
     }
+    const unavailableNote =
+      report.storesUnavailable > 0
+        ? `  ${report.storesUnavailable} 项没能恢复：它们的键是**另一台机器**的绝对路径（旧格式备份）；本机读不到那串键`
+        : null;
     process.stdout.write(
       [
         "恢复完成（**只补不覆盖**：已有的记录与设置都没动）。",
         `  会话：${report.sessions} 段`,
         `  新增记录：${report.recordsAdded} 条`,
-        `  跳过（本地已有）：${report.recordsSkipped} 条`,
-        `  配置型 store：${report.stores} 项`,
+        `  跳过（本地已有同样的内容）：${report.recordsSkipped} 条`,
+        `  配置型 store：补入 ${report.stores} 项 / 跳过（本机已有）${report.storesSkipped} 项`,
         report.configRestored ? "  CLI 配置：已写回（本机原本没有配置）" : "  CLI 配置：本机已有配置，未覆盖",
+        ...(unavailableNote ? [unavailableNote] : []),
         "",
         "  想完全回到备份那一刻：把数据目录里的 sessions.db / stores.db 挪走再恢复一次。",
         "",

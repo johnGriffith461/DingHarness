@@ -171,10 +171,58 @@ describe("pnpm build 的门禁链", () => {
     for (const name of ["typecheck", "lint", "test", "build:web", "electron:build", "cli:build", "cli:release"]) {
       expect(pkg.scripts[name], `package.json 里没有 ${name} 这个 script`).toBeTruthy();
     }
-    // lint 的规则集写在配置文件里，缺了它就退回默认那一大坨（B3 明确只开两条）
+    /*
+     * lint 的规则集写在配置文件里，缺了它就退回默认那一大坨。
+     *
+     * ⚠️ 2026-10-16（审计 P222）：这里原来断言"**恰好**只有 no-undef / no-unused-vars"
+     * （注释还写着「B3 明确只开两条」）。那两句话描述的是**缺陷**：
+     * `categories.correctness` 被整个关掉，于是所有 correctness 形状
+     * （no-dupe-keys / no-self-assign / no-const-assign / no-unreachable / valid-typeof…）
+     * 在 CI 里永远不会红 —— 一道看着像门禁的门，实际只挡两件事。
+     *
+     * 现在升级成**棘轮**（三条，任一被推翻都会红）：
+     *   ① 规则集必须等于下面这份**评审过的名单**（增删都要来改这里 = 一次显式决定）；
+     *   ② 名单必须包含原来那两条（删掉 no-undef / no-unused-vars 照样红）；
+     *   ③ `correctness` 分类必须是开着的（关掉它 = 退回缺陷形状）。
+     */
     const rc = JSON.parse(readFileSync(path.join(ROOT, ".oxlintrc.json"), "utf8")) as {
+      categories?: Record<string, string>;
       rules?: Record<string, string>;
     };
-    expect(Object.keys(rc.rules ?? {}).sort(), "lint 规则集被改动了").toEqual(["no-undef", "no-unused-vars"]);
+    /**
+     * 评审过的规则集 = **配置文件 `rules` 里逐条写出来的那几个**（`categories.correctness`
+     * 牵进来的那一大批不在这个名单里，它们由下面的"没被显式关掉"那条断言看着）。
+     *
+     * 增删一条都要来改这里，并说明它拦的是什么形状 —— 这是"改动可见"的落点。
+     */
+    const REVIEWED_RULES = [
+      "no-undef", // 原来就有：用了没定义的标识符
+      "no-unused-vars", // 原来就有：死变量 / 死导入
+      /* ↓ 这 9 条是**显式关掉**的风格类（豁免，理由见 `src/lintGate.test.ts` 的 ALLOWED_OFF） */
+      "no-control-regex",
+      "no-irregular-whitespace",
+      "no-unsafe-optional-chaining",
+      "no-constant-binary-expression",
+      "no-useless-escape",
+      "unicorn/no-useless-fallback-in-spread",
+      "unicorn/no-useless-length-check",
+      "unicorn/no-useless-spread",
+      "unicorn/prefer-string-starts-ends-with",
+    ];
+    const configured = Object.keys(rc.rules ?? {}).sort();
+    expect(configured, "lint 规则集与评审过的名单不一致（增删规则都要在同一次改动里改这里）").toEqual(
+      [...new Set(REVIEWED_RULES)].sort(),
+    );
+    for (const must of ["no-undef", "no-unused-vars"]) {
+      expect(configured, `lint 规则集里少了 ${must} —— 它是原来那两条之一`).toContain(must);
+    }
+    /*
+     * ⚠️ 这一批由 `categories.correctness` 提供（不写进 `rules`），所以按**没被显式关掉**判 ——
+     * 它们是 P222 点名的那几个形状，一条被 `off` 掉就等于那类缺陷重新变得看不见。
+     */
+    for (const key of ["no-dupe-keys", "no-self-assign", "no-const-assign", "no-unreachable", "valid-typeof"]) {
+      expect(rc.rules?.[key], `${key} 被显式关掉了 —— 它是 P222 点名的形状`).not.toBe("off");
+    }
+    expect(rc.categories?.correctness, "correctness 分类被关掉了：门禁又只剩两条规则（审计 P222）").toBe("error");
   });
 });

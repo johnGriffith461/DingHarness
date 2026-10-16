@@ -6,7 +6,10 @@ import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, ver
 /**
  * 验收：**真实用量到了步骤上，界面也如实说清了那个数是估的**（C5）。
  *
- * ⚠️ **这条会真调模型**（1 次），所以不进无模型批跑。
+ * ⚠️ 它原来写着「会真调模型（1 次），所以不进无模型批跑」——**那句已经过期**（2026-10-16）：
+ * 它要的其实只是一次**文本轮带 usage**，而批跑的假通道在 SSE 里本来就带 usage 帧，所以它**已经收进批跑**
+ * （`verify-acceptances.mjs` 的 CASES）。判据一字未改：步骤上有 provider 给的 tokens +
+ * 界面那句 hover 如实说清那个数是估的。
  *
  * ## 为什么这条必须有
  *

@@ -77,7 +77,21 @@ async function save(next: WorkspaceList): Promise<WorkspaceList> {
     return { dirs: workspaceDirsSync() };
   }
   const res = await store.write(next);
-  if (!res.ok) console.error("[workspace] 落盘失败（重试过）：", res.error);
+  if (!res.ok) {
+    /*
+     * ⚠️ 2026-10-16（审计 P231）：**落盘失败就不许改内存缓存**。
+     *
+     * 这里原来是无条件 `cache = next.dirs` —— 于是"用户刚授权一个目录"这个动作
+     * 即使一次都没写进磁盘，本会话里 `workspaceDirsSync()`（每个工具的 `ownedDirs()`
+     * 同步读它）**已经把那个目录当真授权了**：agent 立刻能往里写文件，
+     * 而重启后它又消失。授权只活在内存里，界面说的与实际生效的也不一致。
+     *
+     * 现在失败就保持原缓存（= 磁盘上真实的那份列表），返回的也是它 ——
+     * 让「工具能用什么」与「磁盘上记着什么」永远一致。
+     */
+    console.error("[workspace] 落盘失败（重试过）：", res.error);
+    return { dirs: workspaceDirsSync() };
+  }
   cache = next.dirs;
   return next;
 }
@@ -109,6 +123,18 @@ export async function addWorkspaceFromDialog(win: BrowserWindow | null): Promise
     return { dir: null, list: { dirs: current } };
   }
   const next = await save({ dirs: [...current, dir] });
+  /*
+   * ⚠️ 2026-10-16（P231 的另一半）：落盘失败的这一趟**不算授权成功**，`dir` 回 null。
+   * 渲染层（`Composer.tsx`）看到非空 `dir` 就会显示「已授权 …」那行回执 ——
+   * 而这次授权根本没进磁盘，回执就是在撒谎。列表那边（`list.dirs`）本来就是照实传的，
+   * 所以界面上"勾选框里没有它"是对的，这里只需把假回执咽掉。
+   *
+   * 边界如实记：这么做的代价是**用户看不到"没存上"的那句话**（契约里没有错误位，
+   * 加它要动 `shared/ipc.ts`）。选择"宁可少一句话，也不说一句假的"。
+   */
+  if (!next.dirs.some((d) => d.toLowerCase() === dir.toLowerCase())) {
+    return { dir: null, list: next };
+  }
   return { dir, list: next };
 }
 

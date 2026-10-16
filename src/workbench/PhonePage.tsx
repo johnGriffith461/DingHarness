@@ -16,8 +16,19 @@ export function PhonePage() {
    *   · 「可被同账号设备连接与控制」是**许可**，关掉后别的设备不该能连上 → 写盘；
    *   · 「让这台设备保持唤醒状态」是这台机器**当前的真实状态** → 主进程 powerSaveBlocker。
    * 原来两个都是本地 useState，重启就回到默认值，用户会以为"设了没用"。
+   *
+   * ⚠️⚠️ 但"读真实状态"这件事也做了一半（2026-10-16 审计 P09）：
+   *   · `allowConnect` 的初值是**写死的 true** —— 状态还不知道时界面就显示"允许连接"，
+   *     而它是**许可**类：用户打开这一页看到的可能是**与磁盘不符**的一句承诺；
+   *   · `status()` 那一串只有 `.finally` 没有 `.catch` —— 读失败时那个写死的 true
+   *     就留在界面上了（正好是最"松"的那一档）；
+   *   · `toggleConnect` 只 `setAllowConnect(next)`，**不看主进程回了什么**
+   *     （同一文件里的 `toggleAwake` 已经改成以返回值为准了 —— 两个开关两套口径）。
+   *
+   * 现在：初值 `null` = **未知**（界面如实显示"读取中"、按钮禁用），
+   * 读到才知道；读失败就保持未知（不假装成"允许连接"）；切换以主进程返回值为准。
    */
-  const [allowConnect, setAllowConnect] = useState(true);
+  const [allowConnect, setAllowConnect] = useState<boolean | null>(null);
   const [keepAwake, setKeepAwake] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -32,13 +43,20 @@ export function PhonePage() {
         setAllowConnect(status.allowConnect);
         setKeepAwake(status.keepAwake);
       })
+      .catch(() => {
+        /*
+         * 读不到就**保持未知**（`allowConnect` 仍是 null）——
+         * 这里原来没有 catch，于是"读失败"与"允许连接"在界面上长得一模一样。
+         */
+      })
       .finally(() => setLoaded(true));
   }, [bridge]);
 
   const toggleConnect = () => {
-    const next = !allowConnect;
-    setAllowConnect(next);
-    void bridge?.remote?.setAllowConnect(next);
+    if (!bridge?.remote?.setAllowConnect) return;
+    const next = !(allowConnect ?? false);
+    // 以主进程回给的真实状态为准 —— 与 toggleAwake 同一套口径
+    void bridge.remote.setAllowConnect(next).then((actual) => setAllowConnect(actual));
   };
 
   const toggleAwake = () => {
@@ -52,6 +70,12 @@ export function PhonePage() {
 <NavCollapseButton />
         <span className="wb-spacer" />
         {!loaded ? <em className="wb-phone-loading">读取本机状态…</em> : null}
+        {/* 读完了却还是未知（没有桥或读失败）——如实说，不把它显示成「允许连接」 */}
+        {loaded && allowConnect === null ? (
+          <em className="wb-phone-loading" data-testid="wb-phone-unknown">
+            读不到本机状态，开关保持未知（不猜一个值）
+          </em>
+        ) : null}
       </header>
 
       <div className="wb-page-body wb-phone-body">
@@ -71,8 +95,16 @@ export function PhonePage() {
               <button
                 className={`wb-switch${allowConnect ? " is-on" : ""}`}
                 data-testid="wb-switch-connect"
+                /*
+                 * 未知（正在读 / 读不到）时不许切：那一下会写一个"用户没看过"的**许可**值。
+                 * 注意这不是"本机版没有"那类借口式置灰（`deadControls` 守的就是那种）：
+                 * 它是一个**过渡中的真状态**，`title` 里把原因说清了（正在读，读到才能切）。
+                 */
+                disabled={allowConnect === null}
+                data-state={allowConnect === null ? "unknown" : allowConnect ? "on" : "off"}
+                title={allowConnect === null ? "正在读本机状态：读到之前不能切（读不到就保持未知，不替你猜一个值）" : undefined}
                 onClick={toggleConnect}
-                aria-pressed={allowConnect}
+                aria-pressed={allowConnect === true}
               >
                 <span />
               </button>

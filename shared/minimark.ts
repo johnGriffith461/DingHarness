@@ -41,7 +41,15 @@ export function splitRow(line: string): string[] {
 /** 表格的分隔行：`|---|:--:|` 这种。 */
 export function isTableDivider(line: string): boolean {
   const cells = splitRow(line);
-  return cells.length > 0 && cells.every((c) => /^:?-{2,}:?$/.test(c) || /^:-*$/.test(c) || /^-*:$/.test(c));
+  /*
+   * ⚠️ 两条收紧（审计 P241）：
+   * ① **至少两个单元** —— 单个 `---` 是 setext 标题下划线（或水平分割线），不是表格分隔行；
+   *    原来 `^:?-{2,}:?$` 把 `--` 也认成真的，于是「含竖线的句子 + 一条 `---`」被当成表格；
+   * ② 原行里得有 `|` —— 一个竖线都没有的行不可能属于表格。
+   */
+  if (cells.length < 2) return false;
+  if (!line.includes("|")) return false;
+  return cells.every((c) => /^:?-{2,}:?$/.test(c) || /^:-*$/.test(c) || /^-*:$/.test(c));
 }
 
 /** 去掉行内的 Markdown 强调标记（`**粗**` → `粗`），留给各格式自己决定样式。 */
@@ -115,10 +123,23 @@ export function parseMarkdown(markdown: string): MdBlock[] {
       continue;
     }
 
-    // 表格：当前行有 `|` 且下一行是分隔行
-    if (trimmed.includes("|") && i + 1 < lines.length && isTableDivider(lines[i + 1])) {
+    /*
+     * 表格：当前行有 `|`、下一行是分隔行，而且**列数对得上**（审计 P241）。
+     *
+     * 只判"有竖线 + 下一行是分隔行"是不够的：`营收 | 成本` 后面跟一条 setext 下划线
+     * （或 `方案 A | B` 这样的二级标题）会被做成"一张 2 列表头"——
+     * 真标题消失、`---` 之后的正文被当数据行吞进表里。那是**内容结构错位而不是报错**，
+     * 比报错难查得多。列数不等同样不是表格。
+     */
+    const headerCells = splitRow(trimmed);
+    if (
+      headerCells.length >= 2 &&
+      i + 1 < lines.length &&
+      isTableDivider(lines[i + 1]) &&
+      splitRow(lines[i + 1]).length === headerCells.length
+    ) {
       flushParagraph(paragraph);
-      const header = splitRow(trimmed).map(stripInline);
+      const header = headerCells.map(stripInline);
       const rows: string[][] = [];
       i += 2;
       while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {

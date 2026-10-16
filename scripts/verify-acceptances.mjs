@@ -24,6 +24,15 @@ import { killLeftovers } from "./accept/harness.mjs";
  * 只收**完全不需要模型**的脚本：跑得快、不受网络与上游波动影响，
  * 所以适合频繁跑。需要模型的（出图、写文档、问答）不在这里。
  *
+ * ## ⚠️ 单独跑它时会有几条**环境红**（2026-10-16，审计 A21）
+ *
+ * 打包类那三条（`accept-p6` / `accept-package` / `accept-installed`）在 `CASES` 里：
+ * `pnpm build` 链的尾巴就是本批跑，而那时 `package:win` 刚跑过、产物就在眼前。
+ * 但**单独 `pnpm verify:accept`**（没打过包、没装过）时，它们会**明确报「环境红」** ——
+ * 缺产物不等于通过，也不假装是产品坏了（判词里写着「先 pnpm package:win」）。
+ * 所以：**要全绿得先 `pnpm package:win`**（`accept-installed` 还要先静默安装到 `.verify/instA`）；
+ * 只有这三条红、其余全绿时，那是"还没打包"，不是"产品坏了"。
+ *
  * 用法：node scripts/verify-acceptances.mjs
  */
 
@@ -41,7 +50,7 @@ import { killLeftovers } from "./accept/harness.mjs";
  *
  * ⚠️ 搬迁是安全的，三条实测依据（不是推断）：
  *   ① 51 条脚本 import 的是**同级** `./harness.mjs`，`harness.mjs` **一起搬了**，所以路径仍对；
- *   ② 192 条 .mjs 里**179 条硬编码项目绝对路径**（当时是 `D:/DoubaoWorkClone`），与脚本自身位置无关；
+ *   ② 192 条 .mjs 里**179 条硬编码项目绝对路径**（当时那版工程的工作目录，与脚本自身位置无关）；
  *      ⚠️ 2026-10-14 项目迁到 `C:\DingHarness` 之后那批硬编码**全部失效**（脚本一跑就找不到
  *      electron.exe 与它自己的数据目录）。已改成**相对仓库根**的路径 ——
  *      批跑器不传 `cwd`，所以子进程的 cwd 就是仓库根，相对路径解析到同一处，
@@ -120,36 +129,30 @@ const RECORDS_DIR = ".verify";
  */
 const NOT_IN_BATCH = {
   /* ── 真调模型（烧钱）── */
-  "accept-agent-persona.mjs": { kind: "needs-model", why: "§156：用带暗号的智能体提问，断言回复真的带上了暗号" },
-  "accept-checkpoint.mjs": { kind: "needs-model", why: "§151：验分叉不动原对话、回退重答、且不撤销已发生的动作" },
-  "accept-compaction.mjs": { kind: "needs-model", why: "§149：把上下文额度调小，断言真压了 + 关键数字穿过摘要" },
-  "accept-doctone.mjs": { kind: "needs-model", why: "§168：口语化原文点「更学术」，断言真的被重写" },
-  "accept-followup.mjs": { kind: "needs-model", why: "§147：第二轮要答出只在第一轮出现过的信息" },
-  "accept-image-actions.mjs": { kind: "needs-model", why: "先真生成一张图，再验图片动作条（真调图像模型）" },
-  "accept-imageedit.mjs": { kind: "needs-model", why: "§167：真生成一张 → 点「变清晰」→ 新图落进 assets（真调图像模型 2 次）" },
-  "accept-imagegen.mjs": { kind: "needs-model", why: "图片生成端到端：必须真出一张图，否则一条都断不了" },
-  "accept-mcp.mjs": { kind: "needs-model", why: "连接器：断言的是模型看见了什么（请求体里有没有资料块 / 下发了哪些工具）" },
-  "accept-memoryinject.mjs": { kind: "needs-model", why: "§164：不许调工具，问只存在于记忆库里的称呼" },
-  "accept-providers.mjs": { kind: "retired", why: "整条建在画布对话侧栏上（那套界面已拆），点哪儿都不响；墓碑写在脚本头部。⚠️ 它覆盖的「真探测 → 界面标出已验证」目前没有替代品" },
-  "accept-subagent.mjs": { kind: "needs-model", why: "§150：两段分别验子智能体的汇合与审批穿透" },
-  "accept-toolargs.mjs": { kind: "needs-model", why: "§175：断言留痕里出现只有工具参数里才有的内容" },
-  "accept-toolfeed.mjs": { kind: "needs-model", why: "§163：第 2 轮要说出只存在于上一步工具输出里的内容" },
-  "accept-tools.mjs": { kind: "needs-model", why: "§141：断言模型真的调了工具 + 磁盘上真有结果" },
-  "accept-usage.mjs": { kind: "needs-model", why: "C5：真实用量要到步骤上（头部自述「这条会真调模型 1 次」）" },
-  "accept-writing-model.mjs": { kind: "needs-model", why: "写作助手：点「写短一点」然后等真模型回（文件名里的 -model 就是标记）" },
+  "accept-image-actions.mjs": { kind: "needs-model", why: "先真生成一张图，再验图片动作条（真调图像模型）。⚠️ 2026-10-16 判过：**只改脚本 + 给假通道加一条假图像通道做不到** —— 图像通道那张表（electron/ipc/imageGen.ts 的 IMAGE_PROVIDERS）没有 baseURL 的环境变量覆盖口（文本通道都有 baseURLEnv），假服务指不进去，零出网闸又不放行远程地址。要收进批跑得产品侧给一个 baseURL 覆盖口" },
+  "accept-imageedit.mjs": { kind: "needs-model", why: "§167：真生成一张 → 点「变清晰」→ 新图落进 assets（真调图像模型 2 次）。⚠️ 同上：图像通道没有 baseURL 覆盖口，假通道指不进去（见 accept-image-actions 那条的说明）" },
+  "accept-imagegen.mjs": { kind: "needs-model", why: "图片生成端到端：必须真出一张图，否则一条都断不了 —— 假通道指不进去，图像通道那张表（electron/ipc/imageGen.ts 的 IMAGE_PROVIDERS）没有 baseURL 的环境变量覆盖口，零出网闸也不放行远程地址。要收进批跑得产品侧给一个 baseURL 覆盖口（见汇报 A20 那段）。⚠️ 2026-10-16 补：这条脚本原来**只打报告、一处判定都没有**（跑通等于没测），现已补上真判定（出图 / 能显示 / 文档只存文件名 / 文件名不含大写 T / 重启还在），并**真调图像模型跑过一次绿**、也做过变异实证（改坏一条断言即 ✗ 退 1）。所以它现在是「能红的报告」，只是仍要真模型、不进免模型批跑" },
+  /*
+   * ⚠️ 2026-10-16（A22）：`accept-providers` **已按现界面重写并收进 CASES**（见上面的登记），
+   * `accept-p5-prompt` 与 `accept-theme` **两条墓碑已删**（判据分别由
+   * `src/canvas/markers.test.ts` 与 `accept-accountmenu.mjs` 接住，git 里留着历史）。
+   * 于是这一类的棘轮（`src/acceptRegistry.test.ts` 的 MAX_RETIRED）也跟着清零。
+   */
+  /*
+   * ⚠️ 这一条的 `why` 是**单行**的 —— `src/acceptRegistry.test.ts` 按单行的正则解析名单
+   * （写成多行它就"看不见"，于是这条脚本会被记成"两头都不在"的孤儿，实测撞过一次）。
+   */
 
   /* ── 要先有打包 / 安装产物 ── */
-  "accept-p6.mjs": { kind: "needs-package", why: "跑的是 release/win-unpacked 里的 exe，先得 package:win" },
-  "accept-package.mjs": { kind: "needs-package", why: "验 setup.exe 存在、体积、图标嵌没嵌进 PE 资源" },
-  "accept-installed.mjs": { kind: "needs-package", why: "验静默安装出来的那份应用能起来并渲染" },
-  "accept-packaged-run.mjs": { kind: "needs-package", why: "打包版端到端（asar 内的入口、打包版真出图）——既要产物又要图像模型" },
+  /*
+   * ⚠️ 2026-10-16（A21）：`accept-p6` / `accept-package` / `accept-installed` **已进 CASES**
+   * （见上面那三条与它们的说明）。只剩这一条留在名单里，理由是它**另有两处硬依赖** ——
+   * 不是"要产物"这么简单，见 why。
+   */
+  "accept-packaged-run.mjs": { kind: "needs-model", why: "打包版端到端。它**不能**进批跑，两处硬依赖：① 第 4 项要求打包版**真的生成一张图**（`img[src^=dshasset://]` + naturalWidth）—— 而图像通道那张表（electron/ipc/imageGen.ts 的 IMAGE_PROVIDERS）**没有 baseURL 的环境变量覆盖口**，假通道指不进去（见汇报里 A20 那段），所以必须真调图像模型；② 它整条**没有任何判定**（只有 console.log(report)）—— 现在收进批跑只会多一条 envRed/no-judge。要收得先补判定 + 给图像通道加一个 baseURL 覆盖口" },
 
 
-  "accept-size-spec.mjs": { kind: "needs-model", why: "图像尺寸规格：三档模式与规格表对不上就得真出图来验（它原来在 CASES 里被注释掉，理由写着「其实会出图」）" },
-
-  /* ── 退役 ── */
-  "accept-p5-prompt.mjs": { kind: "retired", why: "脚本头部自带退役声明（2026-10-14）：读的是 DEV-only 探针 window.__lastAiPrompt，打包产物里没有" },
-  "accept-theme.mjs": { kind: "retired", why: "脚本头部自带退役声明（2026-10-14）：它点的「外观」行早已挪到账号菜单，导航是死的；判据已由 accept-accountmenu.mjs 接住，留文件是当墓碑" },
+  "accept-size-spec.mjs": { kind: "needs-model", why: "图像尺寸规格：三档模式与规格表对不上就得真出图来验（它原来在 CASES 里被注释掉，理由写着「其实会出图」）。它前 5 段是纯计算、**只有第 6 段**要真图（等 `img[src^=dshasset://]`）—— 与上面三条同一个图像通道依赖，缺 baseURL 覆盖口（见 accept-image-actions 那条）。要收进批跑可以把第 6 段摘成独立一条、前 5 段单独跑" },
 
 };
 
@@ -215,6 +218,13 @@ const CASES = [
   ["accept-sessionlog.mjs", "会话日志（走 IPC：request 带用户内容 / 工具成对 / done 收尾 / 正文对得上界面）"],
   ["accept-abort.mjs", "停止与流式（正文实时在长 / 停止键 / 点了真收 / 步骤说已中止 / 日志有终止记录）"],
   ["accept-modelchip.mjs", "输入区的「模型 · 思考」chip（真列模型 / 真落盘 / 默认不发字段）"],
+  /*
+   * ⭐ 2026-10-16（A22）：`accept-providers` **按现界面重写并收回批跑**。
+   * 它原来是墓碑（整条建在已拆掉的画布对话侧栏上），而墓碑自己也承认
+   * 「真调用成功过 → 界面标出已验证」这条**没有替代品** —— 那是要还给清单的东西。
+   * 重写后不点"探测"按钮（现界面没有它了），改成**真跑通一轮**再看设置·模型页那一列。
+   */
+  ["accept-providers.mjs", "provider 状态诚实（没密钥的写无密钥 / 真跑通一轮之后那一家升成已验证）"],
   ["accept-settings-models.mjs", "设置·模型页（左列 provider / 状态是真的 / 拉取要么出清单要么给人话 / 勾选与默认落盘）"],
   /*
    * ⚠️ `accept-theme.mjs` **2026-10-14 退役**（从这份清单摘掉，脚本本体留在原地并加了墓碑说明）：
@@ -299,6 +309,58 @@ const CASES = [
   ["accept-float.mjs", "对话流产物卡片 + 悬浮助手窗（可拖拽 / 自带输入区 / 问答不建任务）"],
   ["accept-rowmenu.mjs", "左栏行悬停 ⋯ 菜单 + 任务标题点击重命名"],
   ["accept-workbench.mjs", "工作台外壳三栏（左导航 / 中任务 / 右摘要）"],
+  /*
+   * ── 2026-10-16（A17/A18/A19）：把"要真模型"那一类收进批跑 ──
+   *
+   * 这十二条原来都在 `NOT_IN_BATCH` 的 `needs-model` 里，理由都是同一句：
+   * "断言的是**模型看见了什么**，没真模型跑一轮就不成立"。
+   * 假通道补了第三条装置标记（**「复述:X」**，见 `startLocalFakeModel` 的说明）之后，
+   * 那句理由就不再成立了 —— 真模型"看见了就会说出来"，假通道现在也会：
+   * 凡是上下文里出现 `复述:X`，回复里就带上 X，而 X 只有真的走通了那条链路才会出现在请求里。
+   *
+   * ⭐ 判据一个字都没放宽：token 从哪来、落在哪一处提示词里、链路断在哪一节，
+   * 每条脚本下面的注释与断言都写着（并且逐条做过变异实证，见各脚本头部的记载）。
+   */
+  ["accept-agent-persona.mjs", "AI 智能体人设（一键完善真写出描述 / 人设真的进了系统提示词）"],
+  ["accept-doctone.mjs", "调整语气（点「更学术」真改写正文 / 历史记由来 / 磁盘跟上）"],
+  ["accept-writing-model.mjs", "写作助手（写作菜单 4 档 / 「写短一点」真把模型输出写回节点 / 节点数不变）"],
+  ["accept-followup.mjs", "多轮对话（追加在同一段对话里 / 不新建任务 / 上一轮的信息真送到了模型）"],
+  ["accept-compaction.mjs", "上下文压缩（真压了 / 关键数字穿过摘要 / 本地历史一条没少）"],
+  ["accept-checkpoint.mjs", "会话检查点（分叉产出新对话且不动原对话 / 回退重答且**不撤销已发生的动作**）"],
+  ["accept-memoryinject.mjs", "记忆注入（不调工具却答得出只存在于记忆库里的称呼）"],
+  ["accept-toolargs.mjs", "工具参数进留痕（那一行出现只有工具参数里才有的内容）"],
+  ["accept-toolfeed.mjs", "工具输出进历史（第 1 轮只说个数，第 2 轮却答得出只存在于上一步工具输出里的文件名）"],
+  ["accept-tools.mjs", "工具协议端到端（六个阶段：记忆工具 / 每步确认拦下 / 允许真执行 / 拒绝不动盘 / 定时任务工具 / 画布节点工具）"],
+  ["accept-mcp.mjs", "连接器（装上自动连 / 工具带前缀交给模型 / 调用真回到服务端 / 能重连）"],
+  /*
+   * 2026-10-16：从 `NOT_IN_BATCH` 收进来。它原来卡在**产品侧**（不是脚本）：
+   * 放行那条路 `ai:runTool` 用的是「第一个可用通道」，不沿用这段对话自己的 provider ——
+   * 于是子智能体被换到别家、在零出网闸下当场被拦，断言「子智能体办完了」必然红。
+   * 那一处已修（`electron/ipc/ai.ts` 改成按会话日志取这一轮真正的 provider），
+   * 修完这条能在假通道下跑绿 —— 所以它不再是 needs-model。
+   */
+  ["accept-subagent.mjs", "子智能体（汇合：两段活都回来 / 审批穿透：按需确认下点「允许」后真的办完）"],
+  /*
+   * `accept-usage`（C5 真实用量）**不是图像类** —— 它要的是一次**文本轮**带 usage
+   * （`tasks.json` 的步骤上要有 provider 给的 tokens）+ 界面那句 hover 如实说清"这是估的"。
+   * 假通道的 SSE 里本来就带 usage 帧，所以它能跑；2026-10-16 从 A20 那一组里挪进来。
+   */
+  ["accept-usage.mjs", "真实用量（步骤上带 provider 的 tokens / 界面如实说清那个数是估的、本机没有额度体系）"],
+  /*
+   * ── 2026-10-16（A21）：打包类三条进清单 ──
+   *
+   * 它们要的是 `pnpm package:win` 之后的产物。收进 CASES 的理由：
+   * `pnpm build` 链的**尾巴**就是本批跑，而那时 `package:win` 刚跑过、产物就在眼前 ——
+   * 不进清单等于"那条链上一次都没验过打包产物"。
+   *
+   * ⚠️ 单独 `pnpm verify:accept`（没打过包）时这三条会**报环境红**：
+   * 它们的判词是「打包产物不存在 / 还没打包 / 装出来的那份不存在」，`classify` 按这些词
+   * 归到 `environment` 那一类（**不静默通过**，也不假装是产品坏了）。
+   * 要全绿得先 `pnpm package:win`（`accept-installed` 还要先静默安装到 `.verify/instA`）。
+   */
+  ["accept-p6.mjs", "打包产物能起来（release/win-unpacked 的 exe：画布/工具条/标注/自动保存，且没漏 DEV 出口）"],
+  ["accept-package.mjs", "打包产物齐不齐（setup.exe 在 + 体积 + 两处图标真的嵌进 PE + app.asar 里有主进程入口）"],
+  ["accept-installed.mjs", "装出来的那份能跑（静默安装到 .verify/instA 之后：外壳渲染 / 导航齐 / 两处交互能动 / 有写用户数据）"],
   /*
    * §135/§136 新增的三条。它们比上面那批**更抗环境干扰**：开头用 `.verify/harness.mjs`
    * 的 `freshDir()` —— 先杀掉上一轮的残留 Electron 再删数据目录，而不是直接 `rmSync`。
@@ -513,20 +575,152 @@ function startLocalFakeModel() {
         res.end(JSON.stringify({ data: [{ id: "deepseek-flash" }, { id: "accept-fake" }] }));
         return;
       }
-      /* 最后一条 user 消息（决定"要不要回工具调用"用） */
-      let lastUserText = "";
+      /*
+       * ── 把这次请求读成四样东西（2026-10-16，收 A17~A19 时补全）──
+       *
+       * ① `lastUser`：最后一条 user 消息 —— 老装置标记（`请调用 …` / `请产出 …`）认它；
+       * ② `ctxText`：**整份请求的文本**（含 system）—— 新标记「复述:X」在整个上下文里找。
+       *    这样它既能落在系统提示词里（人设 / 长期记忆那块），
+       *    也能落在历史里（上一轮说过的话、折进历史里的工具留痕）；
+       * ③ `historyHasTool`：这份请求里已经出现过工具调用或工具结果 ——
+       *    真 provider 在工具回来之后是**接着把话说成正文**，不会把同一个工具再调一遍；
+       *    缺这条行为的后果实测过：`请调用 … 工具` 那一支会一路复发到步数上限
+       *    （脚本读到的留痕是 4 条，而真模型那一轮只有 1 条）。
+       * ④ `echoTokens`：见下面「复述」那段说明。
+       */
+      let msgs = [];
       try {
-        const msgs = JSON.parse(raw)?.messages ?? [];
-        for (let i = msgs.length - 1; i >= 0; i -= 1) {
-          const m = msgs[i];
-          if (m?.role === "user" && typeof m.content === "string") {
-            lastUserText = m.content;
-            break;
-          }
-        }
+        msgs = JSON.parse(raw)?.messages ?? [];
       } catch {
-        /* 体不合法就当没有用户消息 */
+        /* 体不合法就当没有消息 */
       }
+      const textOf = (m) => {
+        const c = m?.content;
+        if (typeof c === "string") return c;
+        if (Array.isArray(c)) return c.map((p) => (typeof p?.text === "string" ? p.text : "")).join("");
+        return "";
+      };
+      let lastUserIndex = -1;
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        if (msgs[i]?.role === "user") {
+          lastUserIndex = i;
+          break;
+        }
+      }
+      const lastUserText = lastUserIndex >= 0 ? textOf(msgs[lastUserIndex]) : "";
+      const ctxText = msgs.map(textOf).join("\n");
+      const historyHasTool = msgs.some(
+        (m) => m?.role === "tool" || (Array.isArray(m?.tool_calls) && m.tool_calls.length > 0),
+      );
+
+      /*
+       * ⭐ 装置标记「复述:<token>」（2026-10-16，收 A17/A18 时新增）。
+       *
+       * ## 为什么必须有它
+       *
+       * 那十几条脚本要证的都不是"回复里有某段固定文字"，而是**"某样东西真的到了模型眼前"**：
+       * 智能体人设进没进系统提示词（§156）、长期记忆有没有注入（§164）、
+       * 上一轮说过的话与工具留痕有没有进历史（§147/§163）、
+       * 压缩出来的摘要有没有把关键信息带过来（§149）。
+       * 真模型"看见了就会说出来"，假模型不会 —— 于是这些断言在批跑里只能永远红。
+       *
+       * 所以补这一条：**上下文里出现 `复述:<token>`，回复里就原样带上那个 token**；
+       * 并且把 `复述:<token>` 这一段**也写回去**，于是它穿过摘要、记忆、工具留痕、
+       * 子智能体汇合之后仍然触发同一条规则。
+       *
+       * ⚠️ 它**不削弱任何断言**，反而让它们可判：token 只有真的走通了那条链路
+       * 才会出现在请求里 —— 链路断了（人设没进提示词、记忆没注入、历史被丢）
+       * token 就不在，回复里也就没有它，脚本照旧红（收每一条时都做过这个变异实证）。
+       *
+       * ⚠️ 写法上的一个约定：token 后面要跟空白或中文标点（`复述:42。` / `复述:【喵】 `），
+       * 否则标点会被一起吃进 token（正则的终止符只有空白与 `，。；、,;）)`）。
+       *
+       * ⚠️ **一条位置上的例外**（2026-10-16，为 `accept-toolfeed` / `accept-subagent` 而加）：
+       * 当**最后一条消息就是工具结果**（role=tool）时，**只复述那些在更早的消息里也出现过**的 token。
+       *
+       * 为什么要有这条：AI SDK 在**同一轮里**会把工具结果立刻回灌给模型 ——
+       * 也就是说"工具刚返回的原文"那一刻正躺在请求的末尾。若照样复述，模型"当场把它念出来"，
+       * 于是**同一轮的正文里就已经有了那个 token**，下一轮"有没有从历史里读到它"就分辨不出来了
+       * （`accept-toolfeed` 的前置断言「第 1 轮不许泄底」直接失去意义 —— 实测撞到过）。
+       *
+       * 而这个例外**不能一刀切**：`accept-subagent` 的"汇合"要的正是
+       * "子智能体的要点经由**工具结果**回到父级，父级把它转告出来" ——
+       * 那一份 token 本来就**只**在末尾的工具结果里。所以判据做成**逐 token**：
+       * 早期上下文里出现过的照旧复述，只在末尾那一份里的不复述。
+       *
+       * 这两条合起来也顺手把假通道变得更像真模型：真模型不会把**刚拿到的工具结果原样念一遍**
+       * 当回答，但它会**接着把刚拿到的结果讲下去**（那些内容此刻也在更早的上下文里）。
+       */
+      const earlierText = msgs.slice(0, Math.max(0, msgs.length - 1)).map(textOf).join("\n");
+      const tokensIn = (text) => [...new Set([...text.matchAll(/复述[:：]([^\s，。；、,;）)]+)/g)].map((m) => m[1]))];
+      const lastIsToolResult = msgs[msgs.length - 1]?.role === "tool";
+      const seenEarlier = new Set(tokensIn(earlierText));
+      const echoTokens = tokensIn(ctxText).filter((t) => !lastIsToolResult || seenEarlier.has(t));
+      const echoLine = echoTokens.length ? `复述:${echoTokens.join(" / ")}` : "";
+
+      /*
+       * ⭐ 装置标记「算出:A×B」（2026-10-16，为 `accept-subagent` 而加）：
+       * 上下文里出现 `算出:12×13`，回复里就带上 `156`。
+       *
+       * ## 为什么需要它
+       *
+       * 子智能体那一条要证的"汇合"是：**子智能体把 12×13 算出来 → 要点回给父级 → 父级转告用户**。
+       * 真模型当然会算乘法，假通道不会 —— 没有这条，`accept-subagent` 的
+       * "父级正文里有 156"就只能永远红。
+       *
+       * ⚠️ 关键是这个标记**只出现在子智能体那一轮的上下文里**：
+       * 父级那边的一句人话是「派一个子智能体去把 12×13 算出来」（**不带这个标记**），
+       * 标记是**假通道在给 `spawn_agent` 填参数时**写进那个自包含任务里的
+       * （真模型给的 task 也是自包含的，这一条与它同形）。
+       * 于是 156 只能经由"子智能体那一轮的回复 → 工具结果 → 父级"这条路到达父级正文：
+       * 子智能体没真的跑（或要点没汇合回来），父级请求里就没有这个标记，父级正文里也就没有 156。
+       *
+       * ⚠️ 吐回去写成 `算出:12×13=156`（**带上原式**）而不是光 `156` ——
+       * 这样它和「复述」那条一样**自我传播**：子智能体的回复里带着 `算出:12×13`，
+       * 折进工具结果回到父级时又能触发同一条规则。只吐 156 的话父级那边认不出来
+       * （实测：A 段"汇合"会假红）。
+       */
+      const calcTokens = [...ctxText.matchAll(/算出[:：]\s*(\d+)\s*[×x*]\s*(\d+)/g)].map(
+        (m) => `算出:${m[1]}×${m[2]}=${Number(m[1]) * Number(m[2])}`,
+      );
+      const calcLine = calcTokens.length ? calcTokens.join(" / ") : "";
+
+      /*
+       * ⭐ **按工具名给参数**（2026-10-16，收 A19 时补全）。
+       *
+       * 原来无论点了哪个工具都回 `{ text: … }`。那对 `memory_save` 成立（它就只有 text），
+       * 但对 `schedule_create`（要 title/prompt/repeat）与 `canvas_add_node`（要 kind/text）
+       * 就是**参数校验不过** —— 执行体如实回一句"参数不对"，
+       * 于是脚本读到的是另一个故事（看起来像产品坏了）。所以按工具名给各自的形状；
+       * 默认仍然回 `{ text: … }`（`accept-sessionlog` 那类只断"成对"的脚本靠它）。
+       */
+      const toolArgsFor = (name, userText) => {
+        const cut = (n) => userText.slice(0, n);
+        if (["memory_list", "schedule_list", "list_files", "list_dir"].includes(name)) return "{}";
+        if (name === "schedule_create") {
+          const title = /标题就叫「([^」]+)」/.exec(userText)?.[1] ?? "假通道任务";
+          return JSON.stringify({ title: title.slice(0, 30), prompt: cut(200), repeat: "daily", atHour: 9 });
+        }
+        if (name === "canvas_add_node") {
+          const text = /内容写「([^」]+)」/.exec(userText)?.[1] ?? cut(200);
+          return JSON.stringify({ kind: "markdown", text: text.slice(0, 2000) });
+        }
+        /*
+         * `spawn_agent` 的参数只有 `task`（+可选 `context`）—— 派谁由 coordinator 按 task 挑。
+         *
+         * ⭐ task 要**自包含**（工具说明里就是这么要求的），所以这里把用户那句人话里
+         * 的算式翻成一句"子智能体看得懂"的任务 —— **并顺手带上「算出:A×B」标记**：
+         * 它是子智能体那一轮唯一的线索来源，也是"要点真的汇合回来"这条断言的支点
+         * （见上面「算出」那段说明）。
+         */
+        if (name === "spawn_agent") {
+          const calc = /(\d+)\s*[×x*]\s*(\d+)/.exec(userText);
+          if (!calc) return JSON.stringify({ task: cut(300) });
+          const save = /memory_save/.test(userText) ? "，并调用 memory_save 把这个结果记进长期记忆" : "";
+          return JSON.stringify({ task: `把 ${calc[1]}×${calc[2]} 算出来（回报时必须原样带上 算出:${calc[1]}×${calc[2]}）${save}。` });
+        }
+        return JSON.stringify({ text: cut(120) });
+      };
 
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const frame = (delta, finish) =>
@@ -545,9 +739,9 @@ function startLocalFakeModel() {
        *  ③ 否则**分片 + 间隔**地吐正文（约 3 秒）：`accept-abort` 要验的正是
        *     "流式过程中正文在长、停止键在"，一次性吐完那一轮会瞬间结束，它什么都看不到。
        */
-      const askTool = /请调用\s*([a-z_]+)\s*工具/.exec(lastUserText);
+      const askTool = historyHasTool ? null : /请调用\s*([a-z_]+)\s*工具/.exec(lastUserText);
       if (askTool) {
-        const args = JSON.stringify({ text: lastUserText.slice(0, 120) });
+        const args = toolArgsFor(askTool[1], lastUserText);
         const half = Math.ceil(args.length / 2);
         const callFrame = (first, delta, finish) =>
           `data: ${JSON.stringify({
@@ -568,7 +762,14 @@ function startLocalFakeModel() {
               },
             ],
           })}\n\n`;
-        /* 真 provider 调工具时通常也带一句正文 —— 脚本要断"正文能从日志重建" */
+        /*
+         * 真 provider 调工具时通常也带一句正文 —— 脚本要断"正文能从日志重建"。
+         *
+         * ⚠️ 这一支**故意不复述**（不吐 `echoLine`，见上面「复述」那段）：
+         * 工具那一支的正文是"好，安排上了"，它不该替工具说话。
+         * 而且正因为第一轮不复述，「工具输出真的进了历史」才验得出来
+         * （第二轮还答得出那个 token，只可能来自上一轮的工具留痕）。
+         */
         res.write(frame({ role: "assistant", content: "（本地假通道）好，安排上了。" }));
         res.write(callFrame(true, args.slice(0, half)));
         res.write(callFrame(false, args.slice(half), "tool_calls"));
@@ -594,7 +795,7 @@ function startLocalFakeModel() {
       const askArtifact = /请产出\s*(?:一个)?\s*([a-z]+)\s*产物/.exec(lastUserText);
       if (askArtifact) {
         const kind = askArtifact[1];
-        const body = `# 本地假通道产出的 ${kind}\n\n${lastUserText.slice(0, 80)}\n`;
+        const body = `# 本地假通道产出的 ${kind}\n\n${lastUserText.slice(0, 80)}\n${echoLine}\n`;
         const block = `<artifact type="${kind}" title="假通道产物">${body}</artifact>`;
         const chunks = [block.slice(0, Math.ceil(block.length / 2)), block.slice(Math.ceil(block.length / 2))];
         let k = 0;
@@ -627,6 +828,9 @@ function startLocalFakeModel() {
         "与",
         "中止",
         "。",
+        /* 「复述」与「算出」两条标记找到的东西跟着正文一起流出去（见上面两段说明） */
+        ...(echoLine ? [echoLine] : []),
+        ...(calcLine ? [calcLine] : []),
       ];
       let i = 0;
       const tick = () => {
@@ -815,7 +1019,16 @@ function isolationProblem(file) {
 function classify(result, source) {
   if (result.timeout) return "timeout";
   if (result.code !== 0) {
-    const envRed = /ECONNREFUSED|connectOverCDP|connect ETIMEDOUT|code=1006|换了三个端口都起不来|一个页面都没建|ports? .*不通|EPERM|EBUSY|EISDIR/i;
+    /*
+     * ⭐ **"产物还没打"也要归到环境红**（2026-10-16，审计 A21）。
+     *
+     * 打包类那几条（`accept-p6` / `accept-package` / `accept-installed`）在缺产物时会明确退出非零 ——
+     * 但它们的判词是"打包产物不存在 / 还没打包 / 装出来的那份不存在"，**不在原来那张模式表里**，
+     * 于是会被归成「断言红」（看起来像产品坏了），而真相是"这条还没轮到跑"。
+     * 分类错了，读报告的人就会去查错方向 —— 与"把环境问题当产品问题"是同一个坑。
+     */
+    const envRed =
+      /ECONNREFUSED|connectOverCDP|connect ETIMEDOUT|code=1006|换了三个端口都起不来|一个页面都没建|ports? .*不通|EPERM|EBUSY|EISDIR|打包产物不存在|没有解包产物|还没打包|装出来的那份不存在/i;
     return envRed.test(result.out ?? "") ? "environment" : "assert";
   }
   const hasJudge = /process\.exitCode\s*=\s*1|verdict\(|bad\.push|failures\.push|failed\s*\+=\s*1|process\.exit\(1\)|throw new Error/.test(source ?? "");

@@ -17,7 +17,16 @@ import { bootApp, connectWithRetry, finishedTurns, freshDir, readStoreFile, kill
  * ④ 是这一条最要紧的断言 —— 它是这个功能的**边界**，
  * 也是用户最容易误解的地方（以为"回退"= 时光倒流）。
  *
- * ⚠️ **这条会真调模型**（约 2~3 分钟），不进无模型批跑。
+ * ⚠️ **这条原来会真调模型**（约 2~3 分钟），不进无模型批跑。
+ * 2026-10-16 收进批跑：假通道（`verify-acceptances.mjs` 的 `startLocalFakeModel`）
+ * 能按「请调用 <工具> 工具」回一个工具调用、并按分片流式吐正文 ——
+ * 而这一条的五条断言**没有一条**依赖回复的措辞：分叉/回退是**结构**
+ * （气泡数、左栏行数、标题），④ 是**磁盘**（记忆里那条 42 还在）。
+ * 所以假通道够用，判据一个字没放宽。
+ *
+ * ⚠️ 档位设成**全部允许**：第一轮那个写动作要真的执行 —— ④ 压的正是
+ * "它写进去了，回退也不撤销"。默认档位会把它拦成「等你确认（还没执行）」，
+ * 于是 ④ 失去意义（而红的原因还与 checkpoint 无关）。
  */
 const DATA = ".verify/checkpoint-data";
 if (!(await freshDir(DATA))) {
@@ -42,6 +51,11 @@ try {
   const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
+  await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+
+  /* ⚠️ 闸门设成全部允许（见文件头那段说明）：第一轮那个写动作必须真的执行 */
+  await page.evaluate(() => localStorage.setItem("dsh-canvas.confirm-mode", "全部允许"));
+  await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
 
   const users = () => page.locator(".wb-bubble-user").count();

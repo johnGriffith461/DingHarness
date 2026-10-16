@@ -365,20 +365,23 @@ export function registerDriveIpc(
   /*
    * 下载 / 另存为（§169，`drive_menuOption_download`）。
    *
-   * 两种用法：
-   * - **给了目标目录** → 静默复制过去（批量下载、以及验收里能确定性验的那条路）；
-   * - **没给** → 弹系统"另存为"框，让用户挑地方。
+   * 只有一种用法：**弹系统「另存为」框，让用户挑地方**。
    *
-   * ⚠️ 源文件**必须落在白名单目录里**（与 `dshasset://file/<origin>/<名字>` 同一条边界）——
-   * 渲染进程给的东西一律按不可信处理，否则这里就成了"任意文件读出"。
+   * ⚠️ 2026-10-16（审计 G21 里那条"被判已加锁"的漏项）：这里原来还有一个
+   * `targetDir?: string` 参数 ——「给了就静默复制到这个目录」。
+   * 那条路是**渲染进程定目录 + 主进程写盘**，而目录名不校验（只有源做过白名单判断），
+   * 也就是把"任意目录写文件"这个原语交给了不可信的一侧，与紧挨着的
+   * 「渲染进程给的东西一律按不可信处理」自相矛盾。
+   *
+   * 已经**整个删掉**了：全仓（含验收脚本）零调用方，注释里那句"验收里能确定性验的那条路"
+   * 是过期的不实说法。要存到别处，用户自己在另存为框里挑 —— 那也是唯一天然可信的目录来源。
+   *
+   * ⚠️ 源文件仍**必须落在白名单目录里**（与 `dshasset://file/<origin>/<名字>` 同一条边界），
+   * 否则这里就成了"任意文件读出"。
    */
   ipcMain.handle(
     DRIVE_CHANNEL.download,
-    async (
-      _event,
-      filePath: string,
-      targetDir?: string,
-    ): Promise<{ ok: boolean; savedTo?: string; canceled?: boolean }> => {
+    async (_event, filePath: string): Promise<{ ok: boolean; savedTo?: string; canceled?: boolean }> => {
       try {
         const src = path.resolve(String(filePath ?? ""));
         const inside = sources().some((s) => {
@@ -389,20 +392,15 @@ export function registerDriveIpc(
         const stat = await fs.stat(src);
         if (!stat.isFile()) return { ok: false };
 
-        let dest = String(targetDir ?? "").trim();
-        if (dest) {
-          await fs.mkdir(dest, { recursive: true });
-          dest = path.join(dest, path.basename(src));
-        } else {
-          const picked = await dialog.showSaveDialog({
-            title: "另存为",
-            defaultPath: path.basename(src),
-            buttonLabel: "保存",
-          });
-          // 用户点了取消：这不是失败，界面上要说"下载已取消"
-          if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
-          dest = picked.filePath;
-        }
+        const picked = await dialog.showSaveDialog({
+          title: "另存为",
+          defaultPath: path.basename(src),
+          buttonLabel: "保存",
+        });
+        // 用户点了取消：这不是失败，界面上要说"下载已取消"
+        if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+        const dest = picked.filePath;
+
         await fs.copyFile(src, dest);
         return { ok: true, savedTo: dest };
       } catch {

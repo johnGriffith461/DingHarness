@@ -44,6 +44,15 @@ export type SqliteStatement = {
   run: (...params: unknown[]) => { changes?: number | bigint; lastInsertRowid?: number | bigint };
   get: (...params: unknown[]) => unknown;
   all: (...params: unknown[]) => unknown[];
+  /**
+   * 释放这条语句（可选：**两家不一样**）。
+   *
+   * `bun:sqlite` 的 `Statement` 有 `finalize()`，`node:sqlite` 的 `StatementSync`
+   * **没有**（靠 GC 回收）。所以类型里是可选的，调用方用 `stmt.finalize?.()`。
+   * 审计 P144 的要求就是"别只 prepare 不释放"：长命语句（会话库那十几条）在
+   * `close()` 时逐个释放。
+   */
+  finalize?: () => void;
 };
 
 /** 一个同步数据库句柄（两家共有的那部分）。 */

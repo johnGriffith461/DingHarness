@@ -14,6 +14,12 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * > 工具描述里一直写着「之后每次对话都会自动带上」，而 `memoryPromptBlock`
  * > **从来没被调用过** —— 描述与现状不一致。这一轮补上，并把它钉住。
  *
+ * ⚠️ **这条原来会真调模型**（1 次），不进无模型批跑。
+ * 2026-10-16 收进批跑：假通道补了「复述:X」这条装置标记（见 `verify-acceptances.mjs`
+ * 的 `startLocalFakeModel`）—— **上下文里出现 `复述:X`，回复里就带上 X**。
+ * 记忆那条事实写成 `用户的称呼是阿岩（复述:阿岩）`，于是"回答里有「阿岩」"依旧等价于
+ * **"这条记忆真的进了系统提示词"**：没注入的话请求里就没有那个标记，回复里也没有「阿岩」。
+ *
  * ## 设计
  *
  * 1. 直接往记忆库里塞一条**模型不可能从别处知道**的事实（「我叫阿岩」）；
@@ -22,7 +28,9 @@ import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, wait
  * 4. **前置断言**：这一轮**没有工具留痕** —— 否则可能是它自己调 `memory_list` 查出来的，
  *    那样就证明不了"注入"。
  *
- * ⚠️ 会真调模型（1 次）。
+ * ## 变异实证（2026-10-16）
+ *   把记忆库的 `enabled` 关掉（用户自己那颗「记忆」开关关掉时 `memoryPromptBlock` 返回空串）→
+ *   这条记忆不进系统提示词 → 回复里没有「阿岩」→ 这一条**当场变红**。
  */
 const DATA = ".verify/memoryinject-data";
 if (!(await freshDir(DATA))) {
@@ -32,7 +40,11 @@ if (!(await freshDir(DATA))) {
 fs.mkdirSync(DATA, { recursive: true });
 
 /** 只有注入才可能被模型知道的记忆（形状按 `MemoryEntry`：id/text/createdAt/source）。 */
-const FACT = "用户的称呼是阿岩";
+/*
+ * ⚠️ `（复述:阿岩）` 是**装置标记**（见文件头那段）：它必须跟这条事实一起进系统提示词，
+ * 假通道才会把「阿岩」吐回正文。字符串的其余部分与判据都没动。
+ */
+const FACT = "用户的称呼是阿岩（复述:阿岩）";
 fs.writeFileSync(
   path.join(DATA, "memory.json"),
   JSON.stringify(

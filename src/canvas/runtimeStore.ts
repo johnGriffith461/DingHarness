@@ -7,7 +7,7 @@ import type { Marker, MarkerStyle } from "./markers";
 import { DEFAULT_MARKER_COLOR, DEFAULT_MARKER_WIDTH } from "./markers";
 import type { FlipAxis, LayerOrderOp } from "./layers";
 import { applyOrder, flipState, reorderLayers } from "./layers";
-import { planAdoption } from "./frames";
+import { planAdoption, toAbsolute } from "./frames";
 import { supportsTextStyle, type TextStyle } from "./textStyle";
 
 /**
@@ -120,6 +120,21 @@ export type RuntimeState = {
   /** 删除选中的节点（连带挂在它们上面的连线）。 */
   removeSelected: () => void;
 
+  /**
+   * 把"父节点即将消失"的子节点救回顶层（清 `parentId` 并换成绝对坐标）。
+   *
+   * ⚠️ 2026-10-16 审计 P106：React Flow 自带的删除（Delete/Backspace）会把
+   * `parentId` 命中被删节点的**子节点一起收进删除集**，与 `removeSelected` 里
+   * 明示的取舍（"删画框不该带走框里的卡片"）正好相反。那条路走的是
+   * `onNodesDelete` → 这里，于是两条删除路径共用同一处实现。
+   *
+   * 不这么做的后果是：卡片还留在数组里但 `parentId` 指向一个不存在的节点，
+   * React Flow 会警告 `Parent node ... not found` 并把它按相对坐标乱放。
+   *
+   * @param doomedIds 即将被删掉的节点 id
+   */
+  adoptOrphans: (doomedIds: Iterable<string>) => void;
+
   /* ---------- 图层（阶段 8.1 / 8.2） ---------- */
 
   /** 调整某一层的顺序（置顶/上移/下移/置底）。 */
@@ -192,6 +207,27 @@ function orderParentsFirst(nodes: CanvasNode[]): CanvasNode[] {
   return [...parents, ...rest];
 }
 
+/**
+ * 把"父节点在被删之列"的子节点救回顶层（清 `parentId`、位置换成绝对坐标）。
+ *
+ * 必须在**真的把父节点从数组里去掉之前**算：`toAbsolute` 要顺着父链取偏移，
+ * 父已经不在表里就只能拿到子节点那份相对坐标（那正是画布上"卡片突然跑到左上角"的来源）。
+ *
+ * @param nodes 当前节点（含即将被删的那些）
+ * @param doomed 即将被删的节点 id
+ * @returns 救过的节点数组；一个都不用救时**返回原数组**（免得白造一份引用）
+ */
+function rescueOrphansOf(nodes: CanvasNode[], doomed: ReadonlySet<string>): CanvasNode[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  let changed = false;
+  const out = nodes.map((n) => {
+    if (!n.parentId || !doomed.has(n.parentId)) return n;
+    changed = true;
+    return { ...n, parentId: undefined, position: toAbsolute(n, byId) } as CanvasNode;
+  });
+  return changed ? out : nodes;
+}
+
 export const useRuntimeStore = create<RuntimeState>()((set, get) => ({
   nodes: sample.nodes,
   edges: sample.edges,
@@ -262,6 +298,16 @@ export const useRuntimeStore = create<RuntimeState>()((set, get) => ({
         ({
           ...source,
           id: idMap.get(source.id) as string,
+          /*
+           * ⚠️ `parentId` 要**跟着 id 映射走**（2026-10-16 审计 P24）：
+           * 复制"画框 + 框里的卡片"时，原来复制体的 `parentId` 原样指着**原来那个画框**——
+           * 于是复制出来的卡片挂回原框（新框是空的），而它按"相对原框"的坐标摆，
+           * 视觉上是"复制了一份画框，卡片却没跟着进新框"。
+           *
+           * 父**不在**复制集里时保留原父：那是"在同一个画框里原地复制一张卡片"，语义正确
+           * （`position` 本来就是相对同一个父的，偏移量直接加就对）。
+           */
+          parentId: source.parentId && idMap.has(source.parentId) ? idMap.get(source.parentId) : source.parentId,
           position: { x: source.position.x + offset, y: source.position.y + offset },
           selected: true,
           data: JSON.parse(JSON.stringify(source.data ?? {})) as CanvasNode["data"],
@@ -280,7 +326,13 @@ export const useRuntimeStore = create<RuntimeState>()((set, get) => ({
       }));
 
     set({
-      nodes: [...state.nodes.map((n) => ({ ...n, selected: false })), ...copies],
+      /*
+       * ⚠️ 过一遍 `orderParentsFirst`（2026-10-16 审计 P24）：
+       * 复制出来的画框可能被追加在它的卡片后面（源数组里卡片在前时就是这样），
+       * 而 React Flow **要求父节点排在子节点之前**，否则会报
+       * `Parent node ... not found` 并把子节点按孤立节点渲染。
+       */
+      nodes: orderParentsFirst([...state.nodes.map((n) => ({ ...n, selected: false })), ...copies]),
       edges: [...state.edges, ...innerEdges],
       revision: state.revision + 1,
     });
@@ -375,28 +427,26 @@ export const useRuntimeStore = create<RuntimeState>()((set, get) => ({
      * 只是"曾经放在这一屏里"。把它们的坐标从相对换回绝对，然后放回顶层。
      * 不这么做的后果是：节点还留在数组里但 `parentId` 指向一个不存在的节点，
      * React Flow 会直接不渲染它们（画布上凭空少东西，用户以为被删了）。
+     *
+     * ⚠️ 2026-10-16 审计 P106：这段与 React Flow 自带删除那条路（`adoptOrphans`）
+     * 共用**同一处实现** —— 两条删除路径的取舍必须一致，否则"按 Delete 删画框"
+     * 与"右键删除画框"会给出两种结果。
      */
-    const orphanFix = new Map<string, { x: number; y: number }>();
-    for (const node of state.nodes) {
-      if (!node.parentId || !doomed.has(node.parentId)) continue;
-      const parent = state.nodes.find((n) => n.id === node.parentId);
-      if (!parent) continue;
-      orphanFix.set(node.id, {
-        x: node.position.x + parent.position.x,
-        y: node.position.y + parent.position.y,
-      });
-    }
-
     set({
-      nodes: state.nodes
-        .filter((n) => !doomed.has(n.id))
-        .map((n) => {
-          const abs = orphanFix.get(n.id);
-          return abs ? ({ ...n, parentId: undefined, position: abs } as CanvasNode) : n;
-        }),
+      nodes: rescueOrphansOf(state.nodes, doomed).filter((n) => !doomed.has(n.id)),
       // 两端有一端没了，这条线也留不住
       edges: state.edges.filter((e) => !doomed.has(e.source) && !doomed.has(e.target)),
       revision: state.revision + 1,
+    });
+  },
+
+  adoptOrphans: (doomedIds) => {
+    const doomed = new Set(doomedIds);
+    if (doomed.size === 0) return;
+    set((state) => {
+      const nodes = rescueOrphansOf(state.nodes, doomed);
+      if (nodes === state.nodes) return {};
+      return { nodes, revision: state.revision + 1 };
     });
   },
 
@@ -480,15 +530,32 @@ export const useRuntimeStore = create<RuntimeState>()((set, get) => ({
       const frame = state.nodes.find((n) => n.id === frameId);
       if (!frame) return {};
 
+      /**
+       * ⚠️⚠️ **换算必须走绝对坐标**（2026-10-16 审计 P248）。
+       *
+       * 原来这四处都是拿 `n.position` 直接加减 `frame.position` —— 而 `n.position`
+       * 对**子节点**来说是**相对它自己那个父节点**的（React Flow 的约定）。
+       * 于是"把一张卡片从画框 B 拖进画框 A"这条最常见的动作会**瞬移**：
+       * 卡片这一刻还挂在 B 上（`planAdoption` 判的是绝对位置，所以它确实算"该进 A"），
+       * 而写回时按"相对 B 的坐标 − A 的坐标"算，漏掉了 B 的偏移 ——
+       * 松手瞬间卡片飞出去，用户以为画布坏了。
+       *
+       * `toAbsolute` 正是为此而写（它会沿父链累加）。换算一律走它：
+       *   · 收成 A 的子节点 → 绝对位置 − A 的绝对位置
+       *   · 放回顶层 → 就是绝对位置
+       */
+      const byId = new Map(state.nodes.map((n) => [n.id, n]));
+      const frameAbs = toAbsolute(frame, byId);
       const adoptSet = new Set(plan.adopt);
       const releaseSet = new Set(plan.release);
       const nodes = state.nodes.map((n) => {
         if (adoptSet.has(n.id)) {
-          // 变成子节点：存相对位移
+          // 变成子节点：存相对**画框**的位移（不管这一步之前挂在谁下面）
+          const abs = toAbsolute(n, byId);
           return {
             ...n,
             parentId: frameId,
-            position: { x: n.position.x - frame.position.x, y: n.position.y - frame.position.y },
+            position: { x: abs.x - frameAbs.x, y: abs.y - frameAbs.y },
           } as CanvasNode;
         }
         if (releaseSet.has(n.id)) {
@@ -496,7 +563,7 @@ export const useRuntimeStore = create<RuntimeState>()((set, get) => ({
           return {
             ...n,
             parentId: undefined,
-            position: { x: n.position.x + frame.position.x, y: n.position.y + frame.position.y },
+            position: toAbsolute(n, byId),
           } as CanvasNode;
         }
         return n;

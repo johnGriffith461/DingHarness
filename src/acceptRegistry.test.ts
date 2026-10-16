@@ -57,10 +57,54 @@ const MAX_FOSSIL = 0;
 /**
  * `retired`（墓碑）的上限。
  *
- * 退役是正当处置（界面拆了、判据被别处接住），但它**不能变成**"这条跑了太麻烦、标退役算了"的出口 ——
- * 所以同样给个数字：只许少不许多。`accept-providers` 2026-10-16 退役时是 3 条（另两条：`accept-p5-prompt`、`accept-theme`）。
+ * 退役是正当处置（界面拆了、判据被别处接住），但它**不能变成**「这条跑了太麻烦、标退役算了」的出口 ——
+ * 所以同样给个数字：只许少不许多。
+ *
+ * ⚠️ 2026-10-16 从 3 降到 **0**（A22 收口）：三条墓碑各归其位 ——
+ *   · `accept-providers` **按现界面重写并收进批跑**（原来它覆盖的「真探测 → 界面标出已验证」
+ *     是墓碑自己都承认"没有替代品"的那半个，所以重写比删掉更对）；
+ *   · `accept-p5-prompt` 与 `accept-theme` **删掉**（判据分别由 `src/canvas/markers.test.ts`
+ *     与 `accept-accountmenu.mjs` 接住，git 里留着历史）。
  */
-const MAX_RETIRED = 3;
+const MAX_RETIRED = 0;
+
+/**
+ * `scripts/accept/` 里**裸写业务数据**的夹具清单（不走 C1 信封）—— 只许少不许多。
+ *
+ * ## 这条守的是什么（2026-10-16，审计 G130）
+ *
+ * 落盘实体的**正典格式**是 C1 的信封 `{ __schema: 1, data: … }`（`electron/ipc/jsonStore.ts`），
+ * 而同一个目录里两种写法同时存在：`accept-mcp` / `accept-workspace` 写信封，
+ * 另外一批夹具**裸写**（直接写业务对象或数组），靠 jsonStore 的「兼容旧格式」读兜着。
+ *
+ * 风险是**双向**的：
+ *   · 兼容读哪天收紧，这些夹具会**静默失效**（应用读到空库，脚本红得莫名其妙 ——
+ *     与 §56 那次"存储换 SQLite 之后脚本还在读 jsonl"同一个形状）；
+ *   · 反过来，它们是「裸格式仍然被支持」这条承诺的**唯一固化点**，而现在没人知道有几条。
+ *
+ * 所以：**裸写要登记**，新增一条当场红；改造完（改成信封写法）也要把名字划掉 ——
+ * 两个方向都查，与 `NOT_IN_BATCH` 那张名单同一个口径。
+ *
+ * ⚠️ 如实记两条边界：
+ *   ① 检测是**扫源码形状**的（`writeFileSync(path.join(DATA, "x.json"), JSON.stringify(` 之后
+ *      紧跟的是不是 `{ __schema`）—— 把对象先放进变量再 stringify 的那种**看不出来**，
+ *      会算成"裸写"（保守方向：宁可多报，也不放过一条不登记的）；
+ *   ② 画布快照（`canvas/*.json`）**不算**业务实体：它没有信封，那个 `version` 是画布文档
+ *      自己的格式版本（见 `harness.mjs` 的 `readStoreFile` 那段说明），不在这一条射程里。
+ */
+const BARE_FIXTURES = [
+  "accept-approve.mjs",
+  "accept-artifacts.mjs",
+  "accept-createdoc.mjs",
+  "accept-memoryinject.mjs",
+  "accept-pinneddead.mjs",
+  "accept-proto.mjs",
+  "accept-restore.mjs",
+  "accept-schedbad.mjs",
+  "accept-scheddraft.mjs",
+  "accept-taskcenter.mjs",
+  "accept-threads.mjs",
+];
 
 function parseRegistry(): Record<string, { kind: string; why: string }> {
   const text = readFileSync(RUNNER, "utf8");
@@ -161,5 +205,47 @@ describe("验收脚本的「在册」对账（DEFECT-PROTOCOL 第 4/5 步的机�
       ["化石比上限多（这些早就不是本产品的验收了）：", ...fossils.map((f) => `  ${f}`)].join("\n"),
     ).toBeLessThanOrEqual(MAX_FOSSIL);
     expect(fossils.length, "棘轮只许往下调：化石少了就把 MAX_FOSSIL 也调小").toBe(MAX_FOSSIL);
+  });
+
+  it("⑦ 裸写业务 JSON 的夹具必须登记（G130：只许少不许多）", () => {
+    /*
+     * 扫的是**形状**：`writeFileSync(path.join(DATA, "x.json"), JSON.stringify(` 之后
+     * 紧跟的是不是 `{ __schema`。看不出来的（先放变量再 stringify）算成裸写 ——
+     * 保守方向：宁可多报一条让人来登记，也不放过一条悄悄固化裸格式的。
+     */
+    const found: string[] = [];
+    for (const file of onDisk) {
+      const text = readFileSync(path.join(SCRIPT_DIR, file), "utf8");
+      const re =
+        /writeFileSync\(\s*path\.join\(\s*DATA\s*,\s*"([^"]+\.json)"\s*\)\s*,\s*JSON\.stringify\(\s*([\s\S]{0,60})/g;
+      for (const m of text.matchAll(re)) {
+        const head = (m[2] ?? "").trimStart();
+        if (!/^\{\s*__schema/.test(head)) found.push(file);
+      }
+    }
+    const bare = [...new Set(found)].sort();
+    const declared = [...BARE_FIXTURES].sort();
+
+    const extra = bare.filter((f) => !declared.includes(f));
+    expect(
+      extra,
+      [
+        "这些夹具**裸写**业务数据（没走 C1 信封），而且没登记：",
+        extra.map((f) => `  scripts/accept/${f}`).join("\n"),
+        "两条路二选一：① 改成信封写法 `JSON.stringify({ __schema: 1, data: … })`（与 accept-mcp 一致）；",
+        "② 明确登记进 src/acceptRegistry.test.ts 的 BARE_FIXTURES 并写清理由。",
+        "为什么要有这一条：兼容读一旦收紧，这些夹具会静默失效；而它们又是「裸格式仍被支持」的唯一固化点。",
+      ].join("\n"),
+    ).toEqual([]);
+
+    const gone = declared.filter((f) => !bare.includes(f));
+    expect(
+      gone,
+      [
+        "这些登记在 BARE_FIXTURES 里，但现在**已经不是裸写**了（改造成信封 / 删了夹具）：",
+        gone.map((f) => `  scripts/accept/${f}`).join("\n"),
+        "把名字从 BARE_FIXTURES 里划掉 —— 这份名单的条数与现实必须一致（只许少不许多）。",
+      ].join("\n"),
+    ).toEqual([]);
   });
 });

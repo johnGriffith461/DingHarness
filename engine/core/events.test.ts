@@ -365,6 +365,85 @@ describe("决策记录（INV-3）：谁批的、批了之后是什么结果", ()
   });
 });
 
+describe("⭐ 展开出来的子智能体待批项：它的决策记录不许被吞（审计 P51 / INV-2·INV-3）", () => {
+  /*
+   * ## 这条缺陷的形状
+   *
+   * 子智能体上交的调用**不在**父级 `traces` 里 —— 它是 `finishTurn(expandBlocked)`
+   * 收尾时**展开**出来的。而 `applyEvent` 处理决策记录时只翻 `state.traces`，
+   * 于是"给那条展开项的批准"找不到对应留痕 → 被当成"日志被截过"静默忽略。
+   *
+   * 后果两件（都是用户能撞上的）：① 重启后那条留痕**永远停在「等你确认」**，
+   * 用户以为自己的决定丢了；② 它还占着待办名单，界面又给一次按钮。
+   *
+   * ⚠️ 判据必须是"**重放之后那条留痕的样子**"与"待办名单里还有没有它"，
+   * 而不是"函数被调用过" —— 后者在修复前也成立（吞掉也是调用过）。
+   */
+  const spawn = [
+    ev({ type: "tool-call", toolCallId: "s1", toolName: "spawn_agent", input: { task: "查一下" } }),
+    ev({
+      type: "tool-result",
+      toolCallId: "s1",
+      toolName: "spawn_agent",
+      output: {
+        ok: true,
+        summary: "查完了",
+        blocked: [{ toolCallId: "b1", name: "memory_save", input: { text: "它想存的" } }],
+      },
+    }),
+  ];
+  const approved = appr({
+    type: "approval",
+    toolCallId: "b1",
+    name: "memory_save",
+    approved: true,
+    ok: true,
+    line: "⚙ 记忆：已保存，当前 1 条",
+  });
+
+  it("对照：没批过时它确实是待批项（装置先自证在判）", () => {
+    const view = projectTurn(spawn, { expandBlocked: true });
+    expect(view.traces.find((t) => t.toolCallId === "b1")?.pending).toBe(true);
+  });
+
+  it("单轮投影：批过之后那条展开出的留痕是**结论**", () => {
+    const view = projectTurn([...spawn, approved], { expandBlocked: true });
+    const b1 = view.traces.find((t) => t.toolCallId === "b1");
+    expect(b1?.pending).toBeUndefined();
+    expect(b1?.line).toContain("已保存");
+  });
+
+  it("⭐⭐ 整段重放（splitTurns）：决策落在它那一轮，留痕不再是「等你确认」", () => {
+    // 真实形状：用户在那一轮结束很久之后才点「允许」→ 决策记录落在日志末尾
+    const records = [
+      { seq: 1, at: T(1), type: "request", requestId: "r1", provider: "p", model: "m", messages: [{ role: "user", content: "查一下" }] },
+      { seq: 2, at: T(2), requestId: "r1", type: "tool-call", toolCallId: "s1", toolName: "spawn_agent", input: { task: "查一下" } },
+      {
+        seq: 3,
+        at: T(3),
+        requestId: "r1",
+        type: "tool-result",
+        toolCallId: "s1",
+        toolName: "spawn_agent",
+        output: { ok: true, summary: "查完了", blocked: [{ toolCallId: "b1", name: "memory_save", input: { text: "它想存的" } }] },
+      },
+      { seq: 4, at: T(4), requestId: "r1", type: "done" },
+      { seq: 5, at: T(5), type: "approval", toolCallId: "b1", name: "memory_save", approved: true, ok: true, line: "⚙ 记忆：已保存，当前 1 条" },
+    ] as unknown as LogRecord[];
+
+    const resumed = resumeSession(records, { expandBlocked: true });
+    expect(resumed.turns).toHaveLength(1);
+    const b1 = resumed.turns[0]!.view.traces.find((t) => t.toolCallId === "b1");
+    expect(b1, "展开出来的留痕丢了").toBeTruthy();
+    expect(b1?.pending, "批过的留痕又停在「等你确认」").toBeUndefined();
+    expect(b1?.line).toContain("已保存");
+    // 参数照旧活着（放行时要用它原样执行）
+    expect(b1?.input).toEqual({ text: "它想存的" });
+    // ⭐ 决策没丢的另一面：待办名单里不该再有它
+    expect(resumed.pending, "用户点过的决定又冒出一个待办").toEqual([]);
+  });
+});
+
 describe("splitTurns（F3：聊天历史按轮恢复）", () => {
   const conv = [
     { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "第一句" }] },

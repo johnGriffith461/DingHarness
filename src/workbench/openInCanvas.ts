@@ -1,4 +1,8 @@
+import type { Edge } from "@xyflow/react";
 import type { Artifact } from "./artifact";
+import { normalizeCanvasDoc } from "@/canvas/normalizeDoc";
+import type { CanvasNode } from "@/canvas/types";
+import { CLIPBOARD_MARK, planPaste } from "@/canvas/clipboard";
 
 /**
  * 把产物**在画布里打开**（阶段 11.21）。
@@ -56,6 +60,37 @@ export async function openInCanvas(artifact: Artifact): Promise<string> {
     return Math.max(max, x);
   }, 0);
   const at = canvas.nodes.length === 0 ? { x: 260, y: 180 } : { x: right + 120, y: 140 };
+
+  /*
+   * ⚠️⚠️ `kind === "canvas"` 的产物要**真的进画布**（2026-10-16 审计 P267）。
+   *
+   * `CANVAS_KINDS` 一直把 `canvas` 算作"能在画布里显示"，而下面的类型映射只有
+   * html / code / image 三档、其余一律落到 `markdown` —— 于是这类产物被建成一个
+   * **文本节点，正文是那段 JSON 原文**：用户点了 ↗ 看到一坨 JSON，还以为是哪里弄错了。
+   *
+   * 现在：解析成画布文档（`normalizeCanvasDoc` 洗一遍，与载入/版本恢复同一条口径），
+   * 用 `planPaste`（剪贴板那条已测的路）重排 id 后**追加**进当前画布 ——
+   * **追加而不是覆盖**：整张覆盖是 P23 那条缺陷的形状，这里不该重犯。
+   * 解析不出来就如实说（不编内容，也不静默降级成一段 JSON）。
+   */
+  if (artifact.kind === "canvas") {
+    let payload: { nodes: CanvasNode[]; edges: Edge[] };
+    try {
+      const doc = normalizeCanvasDoc(JSON.parse(content));
+      if (doc.nodes.length === 0) return "这段产物的内容是空画布（没有可以显示的节点）";
+      payload = { nodes: doc.nodes, edges: doc.edges };
+    } catch {
+      return "这段产物的内容不是合法的画布 JSON，没法放进画布";
+    }
+    const plan = planPaste({ mark: CLIPBOARD_MARK, nodes: payload.nodes, edges: payload.edges }, canvas.nodes, at);
+    if (plan.nodes.length === 0) return "";
+    canvas.commitHistory();
+    store.useRuntimeStore.getState().appendNodes(plan.nodes, plan.edges);
+    /* 落到画布上之后把它显示出来（与下面那条路同一个收尾） */
+    const wb = await import("./store");
+    if (!wb.useWorkbenchStore.getState().canvasOpen) wb.useWorkbenchStore.getState().toggleCanvas();
+    return "";
+  }
 
   const kind = (
     artifact.kind === "html" ? "html" : artifact.kind === "code" ? "code" : artifact.kind === "image" ? "image" : "markdown"

@@ -130,7 +130,23 @@ describe("ding doctor（Phase 11.4）", () => {
     expect(left, "doctor 在数据目录里留下了东西").toEqual([]);
   });
 
-  it("⑦ `--json` 的形状：ok / failed / checks 三件都在", () => {
+  it("⑦ 「凭据保护」那一格：报的是**现状**，且能答出三种状态（审计 P119：这一格原来零测试）", () => {
+    /*
+     * 审计点名的形状是"结构上只会答『我们自己的密钥：还没有存过』" —— 因为它依赖
+     * `writeSecret` 写过，而当时那条路没人调。现在桌面「设置里填 key」真的调它，
+     * 所以这一格必须能答：还没有存过 / 已加密（哪一层）/ 有文件但解不开。
+     * 这里钉住"它是个现状报告而不是错误"，以及"它真的读了密钥库那两份东西"。
+     */
+    const checks = doctorWith(freshDir());
+    const cred = checks.find((c) => c.name === "凭据保护");
+    expect(cred, "没有「凭据保护」这一格").toBeTruthy();
+    expect(cred!.ok, "这一格是现状报告，不该判成失败").toBe(true);
+    expect(cred!.detail).toContain("我们自己的加密库");
+    expect(cred!.next.trim().length).toBeGreaterThan(0);
+    expect(cred!.detail, "没提那条明文文件（它是这一格要说清的第三件事）").toContain("credentials.yaml");
+  });
+
+  it("⑧ `--json` 的形状：ok / failed / checks 三件都在", () => {
     const checks = doctorWith(freshDir());
     const parsed = JSON.parse(formatDoctor(checks, { json: true })) as {
       ok: boolean;

@@ -402,7 +402,7 @@
 .wb-composer-input {
   width: 100%;
   border: 0;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
   resize: none;
   font: inherit;
   font-size: 13.5px;
@@ -853,28 +853,24 @@
    */
 }
 .wb-canvas-stage { flex: 1; position: relative; min-width: 0; }
-.wb-canvas-chat-toggle {
-  position: absolute;
-  left: 0; top: 50%;
-  z-index: 30;
-  width: 16px; height: 46px;
-  border: 1px solid #e6e8ec; border-left: 0;
-  border-radius: 0 8px 8px 0;
-  background: #fff; color: #9aa1ab;
-  cursor: pointer; font-size: 12px;
-}
-.wb-canvas-chat-toggle:hover { color: #1b1d21; }
 
-.wb-canvas-toggle {
-  position: fixed;
-  right: 233px; bottom: 12px;
-  z-index: 40;
-  height: 26px; padding: 0 10px;
-  border: 1px solid #e6e8ec; border-radius: 8px;
-  background: #fff; font-size: 11.5px; color: #6b7280;
-  cursor: pointer;
-}
-.wb-canvas-toggle:hover { background: #f6f7f9; }
+/*
+ * ⚠️ 2026-10-16（审计 P67 / K03 / P64）：这里删掉了两段**死 CSS**。
+ *
+ *   · `.wb-canvas-chat-toggle` —— 画布自带那条「对话」侧栏整条拆了（主人的话：
+ *     「为什么你还有个聊天」），那颗 `‹/›` 把手随之消失：全仓（含验收脚本）
+ *     再没有任何元素带这个类。它留下的最后记录是 K03「把手热区只有 16px、
+ *     没有 aria-label、缺 `translateY(-50%)`」与 P64 那四条硬编码浅色 ——
+ *     现在连元素都没有了，那些判据自然不成立（改法不是修样式，而是删）。
+ *   · `.wb-canvas-toggle` —— 右下角那颗浮动「打开画布」，2026-10-14 就撤掉了
+ *     （入口改到技能面板的「创建画布」）。技能面板那颗用的是
+ *     `data-testid="wb-canvas-toggle"`（**testid 不是类名**，harness 认的是它），
+ *     所以这里删掉不影响任何验收脚本。
+ *
+ * 留着的代价不是说笑：这两块里写着 6 处硬编码浅色（`#fff` / `#e6e8ec` / `#9aa1ab`），
+ * 下一轮做深色主题体检时它们会被当成"活规则里的硬编码"逐条解释 —— 而实际上
+ * **没有任何界面元素会用到它们**。
+ */
 
 /* ---------- 对话产物（阶段 11.1） ---------- */
 
@@ -1159,7 +1155,7 @@
   color: var(--fg-2);
   background: var(--bg);
   padding: 1px 2px;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
   flex: 0 0 auto;
 }
 
@@ -1172,7 +1168,7 @@
   padding: 5px 8px;
   font: inherit;
   font-size: 12.5px;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 
 .wb-nav-input:focus { border-color: var(--accent); }
@@ -1342,7 +1338,7 @@
 .wb-float-input {
   width: 100%;
   border: 0;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
   resize: none;
   font: inherit;
   font-size: 12.5px;

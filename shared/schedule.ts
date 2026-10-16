@@ -223,7 +223,7 @@ export function afterRun(job: CronJob, now: number, ok: boolean, error?: string,
     nextRunAt: next,
     // 不重复的任务跑一次就结束
     status: next === null ? "finished" : job.status,
-    runs: [{ at: now, ok, ...(error ? { error } : {}), ...(taskId ? { taskId } : {}) }, ...job.runs].slice(0, 20),
+    runs: [{ at: now, ok, ...(error ? { error } : {}), ...(taskId ? { taskId } : {}) }, ...job.runs].slice(0, RUNS_IN_MEMORY),
   };
 }
 
@@ -285,6 +285,18 @@ export function makeJob(
 }
 
 /* ────────────────────── 从磁盘恢复任务（§178） ────────────────────── */
+
+/**
+ * 每条任务在内存里保留的**执行历史**条数（`afterRun` 每跑一次就剪一次）。
+ *
+ * ⚠️ 它与下面那个 `RUNS_KEPT` **不是一回事**，所以是两个数（审计 P58：
+ * 原来是裸写的 `20`，看着像随手写的、也看不出与 `RUNS_KEPT` 什么关系）：
+ *   · 这里 20 —— **运行期**的上限：跑一次往前面插一条，超出就丢最旧的；
+ *   · `RUNS_KEPT` 50 —— **从磁盘收回来**时容忍的上限（旧版本落过更长的一串，
+ *     别因为"现在的上限是 20"就把用户已有的历史当场砍掉）。
+ * 有测试按 20 钉着（`src/workbench/schedule.test.ts:157`），改它要一起改那边。
+ */
+export const RUNS_IN_MEMORY = 20;
 
 /** 执行历史最多留几条（界面上只显示几条，多的没必要一直带着）。 */
 export const RUNS_KEPT = 50;

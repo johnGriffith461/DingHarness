@@ -117,6 +117,18 @@ export async function runSubagent(input: {
   if (!outcome.ok) {
     return { ok: false, summary: "", ...base, error: outcome.error ?? "子智能体没有跑完" };
   }
+  /*
+   * ⭐ **被中止要如实说"被中止"**（2026-10-16，审计 P36）。
+   *
+   * `runTurn` 在中止时返回 `{ok:true, aborted:true}` 且**一句话都没有**，
+   * 而这里原来只看 `!outcome.ok` 与 `!summary` —— 于是用户点停止之后，
+   * 父级收到的报告是「子智能体没有给出报告」（听起来像它坏了/偷懒），
+   * 而它其实是**按你的意思停的**。同一件事在 ACP 宿主那边被单独补过一次，
+   * 说明缺的这条就在内核里。
+   */
+  if (outcome.aborted) {
+    return { ok: false, summary: "", ...base, error: "子智能体被中止了（这一轮是用户停的，不是它没给出报告）" };
+  }
   if (!summary) {
     return { ok: false, summary: "", ...base, error: "子智能体没有给出报告" };
   }

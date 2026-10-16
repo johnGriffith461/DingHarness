@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ToolTrace } from "@shared/agentTools";
 
 /**
@@ -33,7 +34,39 @@ export function ToolTraceList({
   actionPrefix?: string;
   id: string;
 }) {
+  /**
+   * 已经点下去、还在等的那些调用（2026-10-16 审计 P48）。
+   *
+   * ⚠️ 这两颗键原来是**裸的** `onClick`：点一下跑一次，连点两下就是**两遍副作用**
+   *（`runToolOnce` 是真在主进程干活的：写文件、跑命令）。而"重新生成"那类操作的
+   * 反馈要等一次往返，用户等不及就会再点一下 —— 那不是误操作，是界面没给反馈。
+   * 现在点下去立刻禁用并改成「执行中…」，等到那条 trace 不再是 `pending` 才复位。
+   * （store 侧另有一道同键守卫，见 `store.resolveTool` —— 界面禁用只是第一层。）
+   */
+  const [busy, setBusy] = useState<Record<string, true>>({});
+
+  /** 那条 trace 不再是 `pending` 了（store 已经落了结果）→ 解除本地的"执行中"。 */
+  useEffect(() => {
+    setBusy((current) => {
+      const stillPending = new Set(traces.filter((t) => t.pending).map((t) => t.toolCallId));
+      const next: Record<string, true> = {};
+      let changed = false;
+      for (const key of Object.keys(current)) {
+        if (stillPending.has(key)) next[key] = true;
+        else changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [traces]);
+
   if (traces.length === 0) return null;
+
+  /** 点一下：先登记"执行中"，再交出去（重复点击直接吞掉）。 */
+  const decide = (toolCallId: string, approve: boolean): void => {
+    if (busy[toolCallId]) return;
+    setBusy((current) => ({ ...current, [toolCallId]: true }));
+    onResolve(toolCallId, approve);
+  };
 
   return (
     <div className="wb-assistant-tools" data-testid={`${testIdPrefix}-${id}`}>
@@ -71,14 +104,17 @@ export function ToolTraceList({
               <button
                 className="wb-tool-btn is-primary"
                 data-testid={`${actionPrefix}-allow-${t.toolCallId}`}
-                onClick={() => onResolve(t.toolCallId, true)}
+                data-busy={busy[t.toolCallId] ? "1" : undefined}
+                disabled={Boolean(busy[t.toolCallId])}
+                onClick={() => decide(t.toolCallId, true)}
               >
-                允许
+                {busy[t.toolCallId] ? "执行中…" : "允许"}
               </button>
               <button
                 className="wb-tool-btn"
                 data-testid={`${actionPrefix}-deny-${t.toolCallId}`}
-                onClick={() => onResolve(t.toolCallId, false)}
+                disabled={Boolean(busy[t.toolCallId])}
+                onClick={() => decide(t.toolCallId, false)}
               >
                 拒绝
               </button>

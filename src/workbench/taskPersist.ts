@@ -78,6 +78,8 @@ export function normalizeTask(raw: unknown): WorkTask | null {
     questionIndex: typeof t.questionIndex === "number" ? t.questionIndex : 0,
     activity: wasRunning ? "上次关闭时被中断" : typeof t.activity === "string" ? t.activity : "",
     artifacts,
+    /* 最近访问的时刻（P266）：它是真值，恢复时照收（老数据没这个字段就不带） */
+    ...(typeof t.openedAt === "number" ? { openedAt: t.openedAt } : {}),
   };
 }
 

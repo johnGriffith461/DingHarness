@@ -78,6 +78,17 @@ describe("isUnsupported（**拒绝清单**，不是白名单）", () => {
     expect(UNSUPPORTED_EXT).not.toContain("docx");
     expect(UNSUPPORTED_EXT).not.toContain("png");
   });
+
+  it("⭐ P08：脚本宿主与安装包那一族**一个都不许漏**（漏掉一个 = 云盘成了分发程序的地方）", () => {
+    /*
+     * 原来这份清单只有 13 个，缺 `hta/wsf/cpl/pif/jar/msix/appx` ——
+     * 而 `hta` 是 mshta.exe 的入口、`jar` 有 JRE 就能跑，与 `.exe` 同级。
+     * 这条把"必须挡住的那些"逐字钉死：删任何一个都变红。
+     */
+    for (const ext of ["hta", "wsf", "cpl", "pif", "jar", "msix", "appx"]) {
+      expect(isUnsupported(`某个东西.${ext}`), `${ext} 没在拒绝清单里`).toBe(true);
+    }
+  });
 });
 
 describe("toTasks", () => {

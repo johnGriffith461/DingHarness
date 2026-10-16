@@ -20,4 +20,11 @@ design-backup/
 # 内部施工笔记（HANDOFF / PLAN / REFERENCE / evidence 等，开发过程用，不公开）
 # 文件本地保留，只是不入库；历史里也已连同这条一起清掉
 docs/
+# ⚠️ 上面那行只排掉了 docs/，而施工笔记实际写在**仓库根**（如 HANDOFF-*.md）——
+# 审计 D7：那些文件带着本机绝对路径与仓外工作区路径，不该出现在公开仓里。
+# 这里补上模式，并把已入库的那份 `git rm --cached` 掉（本地文件保留）。
+HANDOFF*.md
+PLAN*.md
+REFERENCE*.md
+evidence/
 sandbox/target/

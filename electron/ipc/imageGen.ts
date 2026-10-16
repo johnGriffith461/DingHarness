@@ -4,6 +4,7 @@ import { app, ipcMain, nativeImage, net, protocol } from "electron";
 import { normalize } from "../../shared/imageSize";
 import { humanFailure } from "../../shared/errors";
 import { fetchRemote } from "../../engine/runtime/modelGate";
+import { safeLowerHint, uniqueFilePath } from "../../engine/runtime/assetName";
 
 /**
  * 图像生成（对标原版画布的核心用途：`aiCreation_canvas_toolbar_imageGenerator`）。
@@ -178,12 +179,19 @@ export function serveAssets(): void {
 function saveBuffer(buf: Buffer, hint: string): { name: string; bytes: number } {
   const dir = assetsDir();
   fs.mkdirSync(dir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  // 文件名只用小写安全字符：standard 协议会把 host 小写化，大小写混用会取不到
-  const safeHint = hint.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 28) || "gen";
-  const name = `${safeHint}-${stamp}.png`;
-  fs.writeFileSync(path.join(dir, name), buf);
-  return { name, bytes: buf.length };
+  /*
+   * ⭐ 文件名统一由 `assetName.ts` 造（2026-10-16，审计 P11）。
+   *
+   * 原来这里（与下面 url 那条各一份）是
+   * `new Date().toISOString().replace(/[:.]/g,"").slice(0,15)` —— 两个毛病：
+   * ① 带**大写 `T`**（`2026-10-16T0145`），而生成图靠 `dshasset://<名字>` 的
+   * **host** 传名字、standard 协议会把 host 小写化 → 盘上那份取不回来；
+   * ② 截到**分钟**，同一分钟两次生成互相覆盖（后写的无声盖掉前者）。
+   * 现在：全数字时间戳（到毫秒）+ 撞名递增，且**只有这一份实现**。
+   */
+  const file = uniqueFilePath(dir, safeLowerHint(hint), ".png");
+  fs.writeFileSync(file, buf);
+  return { name: path.basename(file), bytes: buf.length };
 }
 
 /** 把 base64 图落盘，返回文件名。 */
@@ -343,16 +351,13 @@ export function registerImageIpc(): void {
       if (item?.url) {
         const imgRes = await fetchRemote(item.url, "下载生成的图片", { signal: AbortSignal.timeout(120_000) });
         const buf = Buffer.from(await imgRes.arrayBuffer());
-        const dir = assetsDir();
-        fs.mkdirSync(dir, { recursive: true });
-        const stamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-        const name = `${model.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 24)}-${stamp}.png`;
-        fs.writeFileSync(path.join(dir, name), buf);
+        /* 与 `saveBuffer` 同一个名字口径（原来这里另抄了一份，见那边说明） */
+        const { name, bytes } = saveBuffer(buf, model);
         return {
           ok: true,
           name,
           url: `${ASSET_SCHEME}://${name}`,
-          bytes: buf.length,
+          bytes,
           ms: Date.now() - started,
           model,
           size,

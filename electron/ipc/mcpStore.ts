@@ -97,11 +97,38 @@ export async function startAllMcp(): Promise<void> {
   );
 }
 
-/** 重新连接（用户点了「重新连接」，或配置改完）。 */
-export async function reloadMcp(): Promise<McpServerView[]> {
-  stopAllMcp();
-  await startAllMcp();
-  return mcpServerViews();
+/**
+ * 重新连接（用户点了「重新连接」，或配置改完）。
+ *
+ * ⭐ **重入保护**（2026-10-16，审计 P40）：原来是 `stopAllMcp(); await startAllMcp();`
+ * 直接排开。两次快速重载（连点两下按钮、或"改完配置自动重连"与手点同时发生）时：
+ * 第二轮 `clients.set(name, client)` 会把**还在 `await client.start()` 的第一轮那个
+ * client 对象**从台账里换掉 —— 它已经 spawn 了子进程，却再也不在 `clients` 里，
+ * `stopAllMcp()` 永远收不到它，那个 `node <server>` 就成了孤儿（还占着管道）。
+ *
+ * 做法：整段重载排在一条队列上（后到的等前一次做完），并且**每次重载先收尸**。
+ * 队列只保留"完成"这个事实，一次失败不堵住后面的人。
+ */
+let reloadChain: Promise<unknown> = Promise.resolve();
+
+export function reloadMcp(): Promise<McpServerView[]> {
+  const run = reloadChain.then(
+    async () => {
+      stopAllMcp();
+      await startAllMcp();
+      return mcpServerViews();
+    },
+    async () => {
+      stopAllMcp();
+      await startAllMcp();
+      return mcpServerViews();
+    },
+  );
+  reloadChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 /** 收尸。 */

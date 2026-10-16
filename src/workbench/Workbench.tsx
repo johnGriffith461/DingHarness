@@ -20,6 +20,7 @@ import CanvasRuntime from "@/canvas/CanvasRuntime";
 import { startScheduler } from "./scheduleStore";
 import { useLibraryStore } from "./libraryStore";
 import { matchShortcut } from "./shortcuts";
+import { escYieldsToOverlay } from "./escOverlays";
 import { useAppSettings } from "./appSettings";
 import { DocPanel } from "./DocPanel";
 import { TaskCenterPage } from "./TaskCenterPage";
@@ -136,15 +137,18 @@ export default function Workbench() {
    * 两个面板**都要键盘可达** —— 用户报过"打开了然后怎么关呢"，而关的入口本来只有一颗
    * 贴在边缘的小把手。Esc 是泛用约定，但有三条边界必须让开，否则修 bug 会修出新 bug：
    *
-   *   ① 弹窗开着时不动面板：设置那类对话框自己处理 Esc，两头一起关会让人莫名其妙；
+   *   ① 浮层开着时不动面板：那些浮层**自己处理 Esc**，两头一起关会让人莫名其妙
+   *      （2026-10-16 审计 P107：这一条原来只认 `.wb-modal-mask` 那一个死选择器，
+   *      于是技能面板 / 各类右键菜单 / 账号菜单开着时，Esc **两头一起关**。
+   *      名单见 `escOverlays.ts`，那里也说明了为什么留 `.wb-modal-mask`）；
    *   ② 焦点在输入框里时不动面板：画布对话侧栏一关就**卸载**，正在写的草稿会直接没了；
-   *   ③ 一次只关一个（画布对话优先，它是"更近"的那一层）—— 所以状态都提在上面，
-   *      这里只有一处判定，不会两个监听器抢同一次按键。
+   *   ③ 一次只关一个 —— 所以状态都提在上面，这里只有一处判定，
+   *      不会两个监听器抢同一次按键。
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (document.querySelector(".wb-modal-mask")) return;
+      if (escYieldsToOverlay((selector) => Boolean(document.querySelector(selector)))) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;

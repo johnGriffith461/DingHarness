@@ -12,6 +12,7 @@
  * **import 的正确性由 `tsc` 兜底** —— 这一步就是被 tsc 抓出来的。
  */
 import { CONFIRM_MODES as PERMISSION_MODES } from "@shared/ipc";
+import { formatBytes as driveFormatBytes } from "@shared/drive";
 
 export function setNoteIfAny(message: string): void {
   const el = document.querySelector('[data-testid="wb-project-name"]') as HTMLInputElement | null;
@@ -77,10 +78,20 @@ export async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
+/**
+ * 体积那几档（2026-10-16 审计 P265）。
+ *
+ * ⚠️ 这里原来**自己又写了一份**，与 `@shared/drive` 那份对不上：
+ *   · 单位档数不同 —— 这份到 MB 就停了，1.5GB 会显示成「1536.0 MB」，
+ *     而同一个文件在云盘行/产物卡上（走 `@shared/drive`）显示「1.50 GB」；
+ *   · 非法值口径不同 —— 这份对 `NaN` 直接输出 `NaN B`。
+ * 同一个文件在两个界面显示两种体积，用户没法不怀疑那一栏。
+ *
+ * 现在只留**一处实现**（`@shared/drive` 那份），这里转出去别名 ——
+ * 调用方（MediaTab / SummaryPanel 等）一个字不用改，值从此与云盘那一侧一致。
+ */
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return driveFormatBytes(bytes);
 }
 
 /**

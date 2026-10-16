@@ -119,8 +119,13 @@ jobs:
       #   ⚠️ 2026-10-16 更正（审计 G44）：下面那个 `accept` job 现在**每次 push 都跑一个子集**
       #   （12 条、约 10 分钟）—— 全量仍不进 CI，但"CI 完全不碰验收"这句已经不对了。
       # · `electron-builder` 打包：CI 不出安装包（出包在 `pnpm build` 里做）。
-      # · 任何真调模型的脚本（`.verify/ai-smoke.mjs`、`accept-chatartifact.mjs` 等）：
-      #   **一条都不跑**。真调模型的能力单独手动跑，见 `.verify/ATTACH-ONLY.md` 的三问。
+      # · 任何真调模型的脚本（`.verify/ai-smoke.mjs`、`accept-writing-model.mjs` 等）：
+      #   **一条都不跑**。真调模型的能力单独手动跑，见 `scripts/accept/ATTACH-ONLY.md` 的三问。
+      #   ⚠️ 2026-10-16（审计第 6 单）：这里原来举例 `accept-chatartifact.mjs` —— 那个脚本
+      #   随聊天子系统一起删了，仓里根本没有它（`src/docClaims.test.ts` ③ 就是逮这一类的守卫）。
+      #   ⚠️ 2026-10-16（审计 P94 同类）：这里原来写的是 `.verify/ATTACH-ONLY.md` ——
+      #   那个路径**不存在**（`.verify/` 是本地记录目录，整目录不入库），
+      #   真文件在 `scripts/accept/` 下、跟着版本库走。顺着注释找不到东西＝决策链断在注释里。
       #   验收批跑自带**本地假通道** + `DSH_NO_REAL_MODEL=1`，所以它里面跑的条目
       #   一条真调用都不会发（这一点由 `scripts/verify-acceptances.mjs` 的
       #   `startLocalFakeModel` + 凭据文件固定，不靠"记得别配 key"）。

@@ -77,7 +77,17 @@
   opacity: 0;
   cursor: pointer;
 }
-.wb-threads-rowwrap:hover .wb-threads-rowmore { opacity: 1; }
+/*
+ * ⚠️ 键盘焦点也要让它显形（2026-10-16 审计 P257）。
+ *
+ * 原来只有 `:hover` 一条显形规则，而 `opacity: 0` 的按钮**照样能被 Tab 聚焦、照样能回车触发** ——
+ * 于是键盘用户走到每一行的「⋯」时屏幕上什么都没有：要么以为只有"重命名"一条路，
+ * 要么在完全看不见的情况下按下了重命名/删除。
+ * `:focus-within` 管"焦点落在这一行里面那颗按钮上"，`:focus-visible` 管按钮自己拿到键盘焦点。
+ */
+.wb-threads-rowwrap:hover .wb-threads-rowmore,
+.wb-threads-rowwrap:focus-within .wb-threads-rowmore,
+.wb-threads-rowmore:focus-visible { opacity: 1; }
 .wb-threads-rowmore:hover { background: var(--bg-2); }
 
 .wb-threads-rename {
@@ -89,7 +99,7 @@
   background: var(--bg-2);
   border: 1px solid var(--line-soft);
   border-radius: 6px;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 
 
@@ -237,7 +247,7 @@
   color: var(--fg);
   font-size: 17px;
   font-weight: 600;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 .wb-doc-status { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-3); font-size: 11.5px; }
 .wb-doc-actions { display: inline-flex; gap: 2px; }
@@ -266,7 +276,7 @@
   font-size: 14px;
   line-height: 1.75;
   resize: none;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 
 .wb-doc-bar { display: flex; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
@@ -488,7 +498,7 @@
   font-size: 13px;
   line-height: 1.7;
   resize: none;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 .wb-reader-enter {
   align-self: flex-start;
@@ -538,7 +548,7 @@
   background: var(--bg);
   color: var(--fg);
   font-size: 12.5px;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 .wb-reader-recent { margin-top: 18px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
 .wb-reader-recent-head { display: flex; align-items: baseline; gap: 6px; color: var(--fg-3); font-size: 12px; }

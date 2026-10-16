@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd } from "./harness.mjs";
 
 /**
  * 验收：**AI 智能体的人设真的生效**（§156）。
@@ -13,11 +13,19 @@ import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.m
  * ## 断言
  *
  * ① **一键完善**真的写出了设定描述（不是把标签原样抄回来）
- * ② ⭐ 用一个"必须在开头原样输出【喵】"的智能体问一句普通问题，
- *    回复里**真的有【喵】** —— 这是唯一能证明
+ * ② ⭐ 用一个"必须在开头原样输出暗号"的智能体问一句普通问题，
+ *    回复里**真的有那个暗号** —— 这是唯一能证明
  *    "智能体的设定描述进了系统提示词"的证据
  *
- * ⚠️ 会真调模型（约 1~2 分钟）。
+ * ⚠️ 原来这条会真调模型（约 1~2 分钟），所以一直待在"不进批跑"的名单里。
+ *    2026-10-16 收进批跑：假通道补了「复述:X」这条装置标记（见 `verify-acceptances.mjs`
+ *    的 `startLocalFakeModel`）—— **上下文里出现 `复述:X`，回复里就带上 X**。
+ *    于是「暗号」写成 `复述:【喵】` 之后，人设没进系统提示词就必然答不出暗号（照旧红），
+ *    进了就答得出。判据一个字没放宽，换掉的只是"谁来照做"。
+ *
+ * ## 变异实证（2026-10-16）
+ *   把人设描述里的 `复述:【喵】` 去掉（等于"人设没进提示词"的那一侧）→ 回复里没有【喵】→
+ *   这一条**当场变红**（`✗ 回复里没有 【喵】`）。
  */
 const DATA = ".verify/agent-persona-data";
 if (!(await freshDir(DATA))) {
@@ -25,8 +33,14 @@ if (!(await freshDir(DATA))) {
   process.exit(1);
 }
 
-/** 人设里的「暗号」：只要它进了系统提示词，回复就必然带这个词。 */
-const MARK = "【喵】";
+/**
+ * 人设里的「暗号」。
+ *
+ * ⚠️ 形状是**装置标记**（`复述:X`）：假通道按它决定"回复里要不要带上这个词"。
+ * 它只有真的进了系统提示词才会出现在请求里，所以「回复里有它」这句话
+ * 仍然等价于「人设真的到了模型眼前」。
+ */
+const MARK = "复述:【喵】";
 
 /* ⚠️ 2026-10-16（审计 G06/G07）：bootApp 会换端口重试 —— 下面用的是它返回的实际端口，不再假设给哪个就用哪个 */
 let PORT = 9306;
@@ -81,19 +95,24 @@ try {
 
   /* ── 用这个智能体问一句普通问题 ── */
   await page.locator('[data-testid="wb-composer-input"]').fill("1 加 1 等于几？只回答数字。");
+  /*
+   * ⚠️ 等**这一轮真的结束**（会话记录里的 `done`），不要"气泡一出现就读"（审计 G108 同族）。
+   * 原来这里是"读到非空就 break" —— 读到的是**首片正文**：
+   * 实测拿到的是「（本地假通道第 5 轮）正在逐段返回，用来验证流式」这种半截回复，
+   * 于是"暗号在没在回复里"这件事被一个**还没流完**的字符串判死（假红）。
+   */
+  const before = await finishedTurns(page);
   await page.locator('[data-testid="wb-send"]').click();
-
-  const deadline = Date.now() + 90000;
+  await waitTurnEnd(page, before, 120_000);
   let reply = "";
-  while (Date.now() < deadline) {
-    await page.waitForTimeout(2000);
+  for (let i = 0; i < 10 && !reply; i += 1) {
+    await page.waitForTimeout(600);
     reply = await page.evaluate(() => {
       const all = Array.from(document.querySelectorAll(".wb-assistant-text"));
       return all.length ? (all[all.length - 1].textContent ?? "").trim() : "";
     });
-    if (reply) break;
   }
-  out.reply = reply.slice(0, 80);
+  out.reply = reply.slice(0, 120);
   out.shot = await shot(page, "agent-persona.png");
 
   await b.close();

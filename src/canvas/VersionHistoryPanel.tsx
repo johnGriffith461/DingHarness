@@ -2,8 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { History, RotateCcw, X } from "lucide-react";
 import type { CanvasDocument, ShellBridge } from "@shared/ipc";
 import { useRuntimeStore } from "./runtimeStore";
-import type { Marker } from "./markers";
-import type { CanvasNode } from "./types";
+import { droppedCount, normalizeCanvasDoc } from "./normalizeDoc";
 
 /**
  * 版本历史面板（对标原版 `canvas_versions_*`）。
@@ -78,17 +77,31 @@ export default function VersionHistoryPanel({
           return;
         }
         const doc = result.doc;
+        /*
+         * ⚠️⚠️ **恢复也要过一遍清洗**（2026-10-16 审计 P26）。
+         *
+         * 原来这里是三句裸断言（`doc.nodes as CanvasNode[]` / `as never[]` / `as Marker[]`）——
+         * 与 `usePersistence` 载入时**必须洗**的理由完全一样（§181）：历史快照是
+         * **更早的代码**写出来的，节点缺 `position`、连线指向不存在的节点、标记用旧字段
+         * 都会在这里直接进 react-flow。而恢复恰恰是用户"东西看着不对了"才做的动作 ——
+         * 这时候给他一屏烂节点，等于把唯一一条退路也堵了。
+         */
+        const clean = normalizeCanvasDoc(doc);
         const store = useRuntimeStore.getState();
         store.loadDocument({
-          nodes: doc.nodes as CanvasNode[],
-          edges: doc.edges as never[],
-          viewport: doc.viewport,
+          nodes: clean.nodes,
+          edges: clean.edges,
+          viewport: clean.viewport,
           revision: doc.revision,
-          markers: (doc.markers ?? []) as Marker[],
+          markers: clean.markers,
         });
         setPreview(null);
         await refresh();
-        setNote(`已恢复到第 ${revision} 次修订的内容（记为新的第 ${doc.revision} 次修订）`);
+        const dropped = droppedCount(clean);
+        setNote(
+          `已恢复到第 ${revision} 次修订的内容（记为新的第 ${doc.revision} 次修订）` +
+            (dropped > 0 ? `；有 ${dropped} 个元素读不进来（版本不对或数据不完整），已跳过` : ""),
+        );
       } catch (error) {
         setNote(error instanceof Error ? error.message : "恢复失败");
       } finally {

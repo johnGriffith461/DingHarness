@@ -914,18 +914,20 @@
   background: transparent;
   color: var(--fg);
   font-size: 13px;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 
 
 /* 记忆面板（设置里点「记忆」展开）—— 对应本体 chat/memory/list|clear|delete */
 .wb-memory { padding: 12px 16px 14px; border-top: 1px solid var(--line-soft); background: var(--surface-soft); }
 .wb-memory-intro { margin-bottom: 10px; color: var(--fg-dim); font-size: 12.5px; line-height: 1.6; }
+/* 落盘失败的如实说明（P251）：它原来只写进 store 的 note，界面上一个字都没有 */
+.wb-memory-note { margin-bottom: 10px; color: var(--danger); font-size: 12px; line-height: 1.6; }
 .wb-memory-add { display: flex; gap: 8px; margin-bottom: 10px; }
 .wb-memory-add input {
   flex: 1; height: 32px; padding: 0 10px;
   border: 1px solid var(--line); border-radius: 8px;
-  background: var(--surface); color: var(--fg); font-size: 13px; outline: none;
+  background: var(--surface); color: var(--fg); font-size: 13px; /* P252：删掉 outline:none（见 theme.css 的输入模态那一组） */
 }
 .wb-memory-add input:focus { border-color: var(--accent); }
 .wb-memory-empty { padding: 14px 0; color: var(--fg-dim); font-size: 12.5px; }
@@ -976,6 +978,55 @@
   border-radius: 6px;
 }
 
+/*
+ * 文本输入类控件的焦点环：**按输入模态分档**（2026-10-16 审计 P252）。
+ *
+ * ## 原来错在哪
+ *
+ * 这些控件各自写着 `outline: none`（16 处，散布在 features / panels / theme / workbench
+ * 四个文件里），把上面那条全局 `:focus-visible` **整条压掉** —— 键盘用户 Tab 进
+ * 「文档标题」「阅读页输入」「模型搜索」这些地方时**屏幕上一点提示都没有**
+ *（鼠标用户看不出来，键盘用户直接迷路）。
+ *
+ * ## 为什么不能直接把那些 `outline: none` 全删掉
+ *
+ * 因为主人点名过两次的「雷霆大描边」正是从这里来的：**文本输入框被鼠标点中时，
+ * 浏览器也算它 `:focus-visible`**（`inputModality.ts` 里有完整说明），
+ * 全删的话鼠标一点进去就描一圈 —— 那是把修 bug 修成另一个 bug。
+ *
+ * ## 所以按「这一次交互是键盘还是鼠标」分档
+ *
+ * 判据是 `<html data-kb="1">`（Tab / 方向键置位，鼠标与触摸清掉，见 `inputModality.ts`）：
+ *   · 鼠标点进来 → 下面这条命中 → 不描圈（用户自己知道刚点了哪儿）；
+ *   · 键盘进来 → 下面这条不命中 → 上面那条全局环生效。
+ *
+ * ⚠️ 名单要跟着改：新加一个「会吃掉焦点环」的输入控件时，把它的选择器加进下面的 `:is(...)`，
+ * 而不是在它自己的规则里再写一句 `outline: none`（那 16 处分散就是这么来的）。
+ * 两个**刻意不在名单里**的：`.wb-composer-input` 与 `.wb-cmd-search input` ——
+ * 它们有容器级的替代指示（`craft.css` 里 `html[data-kb="1"] ... :focus-within`），
+ * 所以是「容器亮、控件不再描第二圈」。
+ */
+html:not([data-kb="1"])
+  :is(
+    .wb-agent-desc,
+    .wb-coding-search input,
+    .wb-coding-tools select,
+    .wb-imageaction-ask input,
+    .wb-threads-rename,
+    .wb-doc-title,
+    .wb-doc-body,
+    .wb-reader-input,
+    .wb-reader-search,
+    .wb-memory-add input,
+    .wb-model-search input,
+    .wb-set-search input,
+    .wb-nav-assign,
+    .wb-nav-input,
+    .wb-float-input
+  ):focus-visible {
+  outline: none;
+}
+
 /* ---------- 模型选择器（2026-10-16 第二版：搜索 + 分组 + 就地拉取） ---------- */
 .wb-model-search {
   display: flex;
@@ -994,7 +1045,7 @@
   background: transparent;
   color: var(--fg);
   font-size: 12.5px;
-  outline: none;
+  /* 2026-10-16（审计 P252）：删掉 outline:none —— 它把全局 :focus-visible 焦点环压掉了；鼠标点进来的那一圈由 theme.css 里按输入模态分档的那一组收住 */
 }
 /* 组名占满一行，右边的「拉取」贴边 —— 与列表项左对齐 */
 /* 组名 + 无密钥徽标 + 拉取按钮**挤在一行**里（徽标换行会把组头撑成两行） */
@@ -1086,7 +1137,7 @@
   border: 1px solid var(--line); border-radius: 8px; color: var(--fg-dim);
 }
 .wb-set-search input {
-  flex: 1; min-width: 0; border: none; background: transparent; color: var(--fg); font-size: 12.5px; outline: none;
+  flex: 1; min-width: 0; border: none; background: transparent; color: var(--fg); font-size: 12.5px; /* P252：删掉 outline:none（见 theme.css 的输入模态那一组） */
 }
 .wb-set-crumb {
   display: flex; align-items: center; gap: 6px; margin: 0 0 10px;

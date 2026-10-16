@@ -55,6 +55,19 @@ type LiveStream = { controller: AbortController };
 
 const liveStreams = new Map<string, LiveStream>();
 
+/**
+ * **这一轮刚用过的路由**（provider / model），记最后一次。
+ *
+ * ⚠️ 2026-10-16（审计插单）：放行被拦下的工具调用时（`ai:runTool`），主进程原先
+ * **只知道"第一个可用通道"**，不知道这段对话刚才用的是谁 —— 于是子智能体被换到别家
+ * （零出网环境下更是当场被闸拦下，"子智能体办不完"）。会话日志那条路只能覆盖
+ * **带 sessionId** 的调用（工作台任务有，聊天没有，见渲染层 `store.ts` 只在有 taskId 时传）。
+ *
+ * 所以这里再补一层"最后用过的路由"：聊天会话里放行必然紧跟在这一轮之后，
+ * 它就是"这段对话自己的 provider"。优先级见 `turnTarget()`：日志 → 这个 → 第一个可用的。
+ */
+let lastTurnRoute: { provider: string; model?: string } | null = null;
+
 /*
  * 会话存储从**端口**拿（`electron/ipc/sessionStore.ts`）。Phase 4.3 起它是 SQLite；
  * 换实现时这里一行都不用改 —— 这正是端口存在的理由。
@@ -143,15 +156,46 @@ export function registerAiIpc(): void {
     }
 
     /*
-     * 放行时给一个**默认 provider**（§150）：父请求的上下文早就结束了。
-     * 对子智能体来说这不影响语义（它用自己的上下文跑），
-     * 所以取当前第一个可用 provider 就够 —— 拿不到就空着，交给执行体报错。
+     * 放行时给执行体一个 provider / model（§150）。
+     *
+     * ⚠️ 2026-10-16 更正（审计插单 · 组一实测逮到）：这里原来**只取"当前第一个可用通道"**
+     * （`listProvidersWithProbe()[0]`），注释写的理由是「对子智能体来说这不影响语义
+     * （它用自己的上下文跑）」—— **那句是错的**：`spawn_agent` 的子智能体正是拿
+     * 这里 env 里的 provider 去建模型的。于是"用户放行的那一次"会跑在
+     * **跟这段对话不是同一家**的通道上：账单与行为都换了家，既不提示也不留痕；
+     * 在零出网环境（验收批跑 / `DSH_NO_REAL_MODEL`）里更是当场被闸拦下 ——
+     * 表现为「子智能体永远办不完」。这正是审计反复点的那类形状：
+     * **同一件事的回落规则在两处各写了一遍**。
+     *
+     * 现在改成按**这段会话自己的日志**取：最后一条 `request` 记录里就是这一轮真正用的
+     * provider / model。取不到（没有 sessionId、日志读不出来、那条记录也没 provider）
+     * 才退回"第一个可用的"—— 也就是原来的唯一行为，所以不会比从前更差。
      */
-    const first = (await listProvidersWithProbe())?.[0];
+    const turnTarget = async (): Promise<{ provider: string; model?: string }> => {
+      if (request.sessionId) {
+        try {
+          const { records } = await desktopSessionStore().load(request.sessionId);
+          for (let i = records.length - 1; i >= 0; i -= 1) {
+            const rec = records[i] as { type?: string; provider?: string; model?: string };
+            if (rec?.type === "request" && rec.provider) {
+              return { provider: rec.provider, ...(rec.model ? { model: rec.model } : {}) };
+            }
+          }
+        } catch {
+          /* 日志读不出来就继续往下退 */
+        }
+      }
+      /* ② 这段对话刚刚用过的路由 —— 聊天的放行请求**不带 sessionId**，只有这一层管得着 */
+      if (lastTurnRoute) return lastTurnRoute;
+      /* ③ 再退一步：第一个可用的（旧行为，只在①②都拿不到时才用） */
+      const first = (await listProvidersWithProbe())?.[0];
+      return { provider: first?.id ?? "", ...(first?.models?.[0] ? { model: first.models[0] } : {}) };
+    };
+    const target = await turnTarget();
     const env: ToolEnv = {
       mode: request.toolPolicy ?? "按需确认",
-      provider: first?.id ?? "",
-      ...(first?.models?.[0] ? { model: first.models[0] } : {}),
+      provider: target.provider,
+      ...(target.model ? { model: target.model } : {}),
       depth: 0,
     };
     const res = await runToolOnce(request.name, request.input, env);
@@ -207,6 +251,9 @@ export function registerAiIpc(): void {
 
     const controller = new AbortController();
     liveStreams.set(requestId, { controller });
+
+    /* 记下这一轮真正用的路由：放行被拦下的调用时要沿用同一家（见 `lastTurnRoute`） */
+    lastTurnRoute = { provider: target.provider.id, ...(target.model ? { model: target.model } : {}) };
 
     // 流式转发在后台跑：调用方立刻拿到 requestId 用于订阅与中止
     void (async () => {

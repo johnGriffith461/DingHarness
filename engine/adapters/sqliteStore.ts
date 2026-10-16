@@ -1,4 +1,4 @@
-import { openSqlite } from "./sqliteDriver";
+import { openSqlite, type SqliteDatabase, type SqliteStatement } from "./sqliteDriver";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -37,15 +37,38 @@ import type { SessionSummary } from "../../shared/ipc";
  *
  * ```sql
  * sessions(id, kind, title, updated_at, bytes)   -- 列举用；title 在写入时算好
- * events(session_id, seq, at, type, payload)     -- payload 是**整行 JSON**（与 .jsonl 同形）
+ * events(session_id, seq, at, type, payload, body) -- payload 是**整行 JSON**（与 .jsonl 同形）
  * ```
  *
  * ⚠️ `payload` 存整行 JSON（含 `seq`/`at`）而不是"只存正文"：读回时直接喂给
  * `parseLogLine` —— **校验只有一份**。若拆开存字段，读回路径就会长出第二套校验，
  * 而两套校验迟早对不齐（`parseLogLine` 的规矩：决定一条记录算不算数）。
+ *
+ * ⚠️ `body` 是**给检索用的那一列**（审计 P136）：它是记录里"该被搜到的那些正文"
+ * 的拼接（见 `searchBodyOf`），**不含字段名 / provider / 档位 / 元数据** ——
+ * 原来检索是拿整行 JSON 去 LIKE/MATCH，于是搜 `provider`、`按需确认` 这类
+ * 出现在字段名与策略值里的词会**假命中**，摘要也会摘出一段 JSON 噪声。
+ * 正文那一列是**写的时候算好**的（读的时候不再解析，也就不会有两套口径）。
  */
 
-/** 建表语句（幂等；每次打开都跑一遍，代价可忽略）。 */
+/**
+ * 会话库的**表结构版本**（审计 P101）。
+ *
+ * 为什么要有它：这次表变更（加 `body` 列、把全文索引从整行 JSON 改成正文）**必须自己搬旧数据** ——
+ * external-content 的 FTS 表**不会**自动索引既有行，老库里的行不加处理就永远搜不到。
+ * 有了版本号，"搬过一次"与"还没搬过"才分得开（`PRAGMA user_version` 是本库私有的，
+ * 与 `kvStore` 那份 `stores.db` 互不影响）。
+ */
+const SCHEMA_VERSION = 2;
+
+/**
+ * 建表语句（幂等；每次打开都跑一遍，代价可忽略）。
+ *
+ * ⚠️ **FTS5 那一套刻意不在这里**（审计 P140）：`CREATE VIRTUAL TABLE ... USING fts5`
+ * 一放进这条串里，任何没编 FTS5 的 SQLite 构建上 `db.exec(SCHEMA)` 就直接抛 ——
+ * 会话库**整个打不开**，而不是"检索退化"。现在它在 `FTS_SCHEMA` 里，
+ * 由 `prepareSearchIndex` 先探测能力再决定建不建。
+ */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
@@ -60,42 +83,56 @@ CREATE TABLE IF NOT EXISTS events (
   at         INTEGER NOT NULL,
   type       TEXT NOT NULL,
   payload    TEXT NOT NULL,
+  body       TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
+`;
 
-/*
- * 全文索引（Phase 12.4）。
+/**
+ * 全文索引（Phase 12.4；审计 P136 把索引的列从 `payload` 改成 `body`）。
  *
- * ## 为什么用 FTS5 而不是 LIKE
+ * 为什么用 FTS5、为什么要 external-content、中文为什么不按词搜 —— 见 `search()` 那段说明
+ * （同一个理由不在两处各写一遍）。
  *
- * "三个月前的会话里提过什么"要在**事件正文**里找。「LIKE '%词%'」 会全表扫，
- * 而且不认分词 —— 中文里 「LIKE」 更是几乎只能整串匹配。FTS5 有倒排索引与分词器，
- * 这两个问题一次解决。
- *
- * ## 为什么是 external-content 表
- *
- * 正文**已经在 「events.payload」 里**了，再存一份副本既费空间又会出现"两处不一致"。
- * external-content 表（「content='events'」）只存倒排索引，正文仍从 events 读 ——
- * 代价是**必须自己用触发器把增删同步过去**（下面三条就是干这个的）。
- *
- * ⚠️ 中文分词：内置 unicode61 把它当一个长词处理，所以 MATCH 对中文不适合按词搜。
- * 这里的做法是**查询侧兜底**（见 search()）：FTS 命中 + LIKE 兜底，
- * 两者并集。宁可多一次扫描，也不要"搜不到"（那是用户最能感知的坏）。
+ * ⚠️ external-content 的代价有两条，都得自己收拾：**增删同步**（下面三条触发器）
+ * 与**既有行不会自动进索引**（要 `'rebuild'`，见 `prepareSearchIndex`）。
  */
-CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(payload, content='events', content_rowid='rowid');
+const FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(body, content='events', content_rowid='rowid');
 
 CREATE TRIGGER IF NOT EXISTS events_fts_ai AFTER INSERT ON events BEGIN
-  INSERT INTO events_fts(rowid, payload) VALUES (new.rowid, new.payload);
+  INSERT INTO events_fts(rowid, body) VALUES (new.rowid, new.body);
 END;
 CREATE TRIGGER IF NOT EXISTS events_fts_ad AFTER DELETE ON events BEGIN
-  INSERT INTO events_fts(events_fts, rowid, payload) VALUES ('delete', old.rowid, old.payload);
+  INSERT INTO events_fts(events_fts, rowid, body) VALUES ('delete', old.rowid, old.body);
 END;
 CREATE TRIGGER IF NOT EXISTS events_fts_au AFTER UPDATE ON events BEGIN
-  INSERT INTO events_fts(events_fts, rowid, payload) VALUES ('delete', old.rowid, old.payload);
-  INSERT INTO events_fts(rowid, payload) VALUES (new.rowid, new.payload);
+  INSERT INTO events_fts(events_fts, rowid, body) VALUES ('delete', old.rowid, old.body);
+  INSERT INTO events_fts(rowid, body) VALUES (new.rowid, new.body);
 END;
 `;
+
+/** 撤掉全文索引那一套（触发器先走：表被删掉之后它们会变成会报错的孤儿）。 */
+const FTS_DROP = `
+DROP TRIGGER IF EXISTS events_fts_ai;
+DROP TRIGGER IF EXISTS events_fts_ad;
+DROP TRIGGER IF EXISTS events_fts_au;
+DROP TABLE IF EXISTS events_fts;
+`;
+
+/** 只撤触发器（没有 FTS5 时用：虚拟表可能连 DROP 都打不开）。 */
+const FTS_TRIGGERS_DROP = `
+DROP TRIGGER IF EXISTS events_fts_ai;
+DROP TRIGGER IF EXISTS events_fts_ad;
+DROP TRIGGER IF EXISTS events_fts_au;
+`;
+
+/** 让 FTS5 按 `events` 当前内容**重建**整个索引（external-content 表的唯一回填手段）。 */
+const FTS_REBUILD = "INSERT INTO events_fts(events_fts) VALUES('rebuild')";
+
+/** 现存 FTS 表是不是"按正文索引"那一版（认不出来就重建）。 */
+const FTS_BODY_MARK = /fts5\s*\(\s*body\b/i;
 
 /** 会话种类 → 前缀。写成表而不是 `if`：加第三种会话时只改这里。 */
 const KIND_PREFIX: Record<SessionKind, string> = {
@@ -143,6 +180,205 @@ function lineBytes(payload: string): number {
   return Buffer.byteLength(payload, "utf8") + 1;
 }
 
+/**
+ * 把值里的**字符串叶子**收进数组（**不含字段名**）。
+ *
+ * ⚠️ 只收值、不收键是刻意的（审计 P136）：工具参数 `{"path":"a.md"}` 里
+ * `path` 是**契约的一部分**，不是"用户说过的话"；把它也当正文，搜 `path`
+ * 就会命中一大片。深度封顶是防病态嵌套，不是性能优化。
+ */
+function collectStrings(value: unknown, out: string[], depth = 0): void {
+  if (depth > 6 || value === null || value === undefined) return;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) out.push(trimmed);
+    return;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectStrings(item, out, depth + 1);
+    return;
+  }
+  if (typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) collectStrings(item, out, depth + 1);
+  }
+}
+
+/**
+ * 一条记录**该被搜到的正文**（写的时候算好，存进 `events.body`）。
+ *
+ * ## 为什么要有这个函数（审计 P136）
+ *
+ * 原来检索把**整行 JSON**（`JSON.stringify({seq,at,...record})`）当正文匹配，
+ * 于是搜 `request`、`text`、`seq`、`provider`、`按需确认`、`strata` 这类
+ * 出现在**字段名或策略值**里的词会假命中；摘要也会摘出一段 JSON 噪声
+ * （"为什么这条被搜出来"答非所问）。
+ *
+ * ## 取哪些
+ *
+ * - `request`：**只有消息正文** —— 用户说过的话在这里。provider / model /
+ *   toolPolicy / tools / system 都是元数据（搜 `deepseek` 不该把整段会话捞出来）。
+ * - 其余事件：正文、错误、工具名与**工具参数/结果里的字符串**、委派的任务与结论、
+ *   决策记录那一行。都是"用户看得见的内容"。
+ *
+ * @param record 一条记录（含 `seq`/`at` 也没关系：它们不在取值名单里）
+ * @returns 拼好的正文（可能是空串 —— 那就搜不到它，这是对的）
+ */
+function searchBodyOf(record: Record<string, unknown>): string {
+  const out: string[] = [];
+  if (record.type === "request") {
+    const messages = Array.isArray(record.messages) ? record.messages : [];
+    for (const message of messages) {
+      const content = (message as { content?: unknown } | null | undefined)?.content;
+      if (typeof content === "string") {
+        if (content.trim()) out.push(content);
+      } else {
+        collectStrings(content, out);
+      }
+    }
+    return out.join("\n");
+  }
+  collectStrings(record.text, out);
+  collectStrings(record.message, out); // error 那一句
+  collectStrings(record.toolName, out);
+  collectStrings(record.name, out);
+  collectStrings(record.line, out); // approval 那一行（用户看得见）
+  collectStrings(record.agent, out); // delegation
+  collectStrings(record.task, out);
+  collectStrings(record.summary, out);
+  collectStrings(record.error, out);
+  collectStrings(record.input, out); // 工具参数（只取字符串叶子）
+  collectStrings(record.output, out); // 工具结果（含工具留痕里的正文）
+  return out.join("\n");
+}
+
+/** 一次性的 `all` 查询：**用完就释放**（审计 P144 的口径：别只 prepare 不释放）。 */
+function queryAll(db: SqliteDatabase, sql: string, ...params: unknown[]): unknown[] {
+  const statement = db.prepare(sql);
+  try {
+    return statement.all(...params);
+  } finally {
+    statement.finalize?.();
+  }
+}
+
+/** 一次性的 `get` 查询（同上）。 */
+function queryGet(db: SqliteDatabase, sql: string, ...params: unknown[]): unknown {
+  const statement = db.prepare(sql);
+  try {
+    return statement.get(...params);
+  } finally {
+    statement.finalize?.();
+  }
+}
+
+/** 建表之后、用之前要做的迁移与探测（P101 回填 / P136 列 / P140 降级）。 */
+function tableSql(db: SqliteDatabase, name: string): string | null {
+  const row = queryGet(db, "SELECT sql FROM sqlite_master WHERE name = ?", name) as
+    | { sql?: string | null }
+    | undefined;
+  return typeof row?.sql === "string" ? row.sql : null;
+}
+
+/** 老库（12.4 之前）没有 `body` 列：补上。@returns 这次是不是真加了 */
+function ensureBodyColumn(db: SqliteDatabase): boolean {
+  const cols = queryAll(db, "PRAGMA table_info(events)") as { name?: string }[];
+  if (cols.some((c) => c.name === "body")) return false;
+  db.exec("ALTER TABLE events ADD COLUMN body TEXT NOT NULL DEFAULT ''");
+  return true;
+}
+
+/** 当前库的 schema 版本（`PRAGMA user_version` 是本库私有的）。 */
+function userVersion(db: SqliteDatabase): number {
+  const row = queryGet(db, "PRAGMA user_version") as { user_version?: number } | undefined;
+  return Number(row?.user_version ?? 0);
+}
+
+/**
+ * 这个 SQLite 构建**有没有 FTS5**（审计 P140）。
+ *
+ * 用 `temp.` 里的一次探测，而不是"看 `CREATE VIRTUAL TABLE` 成不成功"：
+ * 探针表建在 temp schema 里，失败也不会在库里留下半张表。
+ */
+function fts5Available(db: SqliteDatabase): boolean {
+  try {
+    db.exec("CREATE VIRTUAL TABLE temp.__fts_probe USING fts5(x)");
+    db.exec("DROP TABLE temp.__fts_probe");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 老库的 `body` 空白行回填（**只补空串**，反复跑无副作用）。@returns 回填了几行 */
+function backfillBodies(db: SqliteDatabase): number {
+  const rows = queryAll(db, "SELECT rowid AS rid, payload FROM events WHERE body = ''") as {
+    rid: number | bigint;
+    payload: string;
+  }[];
+  if (!rows.length) return 0;
+  const update = db.prepare("UPDATE events SET body = ? WHERE rowid = ?");
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      let record: Record<string, unknown> | null = null;
+      try {
+        record = JSON.parse(row.payload) as Record<string, unknown>;
+      } catch {
+        record = null; // 坏行：正文留空（它本来就解析不出来）
+      }
+      update.run(record ? searchBodyOf(record) : "", row.rid);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  update.finalize?.(); // 局部语句用完就放（Bun 有 finalize，node:sqlite 靠 GC）
+  return rows.length;
+}
+
+/**
+ * 把"检索那一套"准备好，并如实返回**能不能走 FTS**。
+ *
+ * 三件事，顺序有意义（审计 P101 · P136 · P140）：
+ *   ① 老库补 `body` 列并**回填**（不补的话那些行在新索引里永远不存在 ——
+ *      external-content 表不会自动索引既有行）；
+ *   ② 探测 FTS5 能力：**没有就降级**（撤掉触发器、只走 LIKE），
+ *      而不是让整个会话库打不开；
+ *   ③ 现存索引若不是"按正文索引"那一版（老库是 `fts5(payload)`，或索引丢了），
+ *      重建 + `'rebuild'` 回填 —— 版本迁移与"索引被删掉"两种情况一起兜住。
+ */
+function prepareSearchIndex(db: SqliteDatabase): boolean {
+  const addedBody = ensureBodyColumn(db);
+  if (addedBody || userVersion(db) < SCHEMA_VERSION) {
+    backfillBodies(db);
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  }
+
+  if (!fts5Available(db)) {
+    /*
+     * 没有 FTS5：触发器必须撤掉。留着它们的话，每次 append 都要去写那张表 ——
+     * 轻则写进一张没人读的表（索引永远不同步），重则直接报 "no such module: fts5"。
+     * ⚠️ 虚拟表**不**在这里 DROP：模块都不在，DROP 可能自己就报错。
+     */
+    try {
+      db.exec(FTS_TRIGGERS_DROP);
+    } catch {
+      /* 触发器都不存在时也算成功 */
+    }
+    return false;
+  }
+
+  const existing = tableSql(db, "events_fts");
+  if (!existing || !FTS_BODY_MARK.test(existing)) {
+    db.exec(FTS_DROP);
+    db.exec(FTS_SCHEMA);
+    db.exec(FTS_REBUILD);
+  }
+  return true;
+}
+
 /** 打开时的额外选项。 */
 export type OpenOptions = {
   /**
@@ -164,6 +400,15 @@ export type OpenOptions = {
    * 而这里的威胁是"外部流量 vs 用户存量"，用服务启动时刻当分界线已经完整覆盖它。
    */
   protectBefore?: number;
+
+  /**
+   * **驱动替换**（只有测试会传）。
+   *
+   * 审计 P140/P144 的那两条判据都需要"这台机器上编的 SQLite 没有 FTS5"、
+   * "语句最后有没有被释放"这类**在真机上造不出来的环境**。所以留这个口子：
+   * 测试包一层真驱动，就能构造出这些环境（生产永远不传，走 `openSqlite`）。
+   */
+  driver?: (file: string) => SqliteDatabase;
 };
 
 /**
@@ -185,60 +430,102 @@ export function createSqliteSessionStore(
   /*
    * ⚠️ 驱动是**运行时选的**（Phase 11.1）：Node/Electron 用 `node:sqlite`，
    * Bun（单二进制那条路）用 `bun:sqlite` —— 见 `./sqliteDriver.ts` 的说明与实测证据。
+   * `open.driver` 是测试留的口子（见 `OpenOptions.driver`），生产不传。
    */
-  const db = openSqlite(path.join(dir, file));
+  const db = open.driver ? open.driver(path.join(dir, file)) : openSqlite(path.join(dir, file));
   db.exec(SCHEMA);
+  /*
+   * 检索那一套（老库回填 / 索引列 / FTS5 能力）由它负责，并**如实回报**能不能走 FTS：
+   * 不能就只走 LIKE（审计 P140 要的"降级而不是打不开"）。
+   */
+  const ftsReady = prepareSearchIndex(db);
 
-  const insertEvent = db.prepare(
-    "INSERT OR REPLACE INTO events(session_id, seq, at, type, payload) VALUES(?, ?, ?, ?, ?)",
+  /*
+   * 所有语句都从这里出去并记下来：`close()` 时逐个 `finalize()`（审计 P144 ——
+   * 长命语句不该只 prepare 不释放；`node:sqlite` 没有 finalize 时是可选项，
+   * 见 `sqliteDriver.ts` 的 `SqliteStatement.finalize`）。
+   */
+  const statements: SqliteStatement[] = [];
+  const prep = (sql: string): SqliteStatement => {
+    const statement = db.prepare(sql);
+    statements.push(statement);
+    return statement;
+  };
+
+  const insertEvent = prep(
+    "INSERT OR REPLACE INTO events(session_id, seq, at, type, payload, body) VALUES(?, ?, ?, ?, ?, ?)",
   );
-  const maxSeq = db.prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?");
-  const upsertSession = db.prepare(
+  const maxSeq = prep("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?");
+  const upsertSession = prep(
     `INSERT INTO sessions(id, kind, title, updated_at, bytes) VALUES(?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET updated_at = ?, bytes = bytes + ?,
        title = CASE WHEN sessions.title = '' THEN excluded.title ELSE sessions.title END`,
   );
-  const selectEvents = db.prepare(
-    "SELECT payload FROM events WHERE session_id = ? ORDER BY seq ASC",
-  );
+  const selectEvents = prep("SELECT payload FROM events WHERE session_id = ? ORDER BY seq ASC");
   /*
    * 检索的两条路（见 search() 的说明）：
    *   · FTS：走倒排索引（英文/词形），`bm25` 让更相关的排前面；
    *   · LIKE：中文与任意子串的兜底。
    * 并集之后按"命中最多的会话"优先、同数量按时间倒序 —— 与 list 的口径一致（最近的在前面）。
+   *
+   * ⚠️ FTS 那条**按能力准备**（审计 P140）：这台机器的 SQLite 没编 FTS5 时这里是 null，
+   * 检索整体退化到 LIKE；`MATCH` 在不支持的表上会在 prepare 阶段就抛，所以那一步也要兜住。
    */
-  const searchFts = db.prepare(
-    "SELECT e.session_id AS session_id, e.payload AS payload, bm25(events_fts) AS rank " +
-      "FROM events_fts JOIN events e ON e.rowid = events_fts.rowid " +
-      "WHERE events_fts MATCH ? LIMIT ?",
+  let searchFts: SqliteStatement | null = null;
+  if (ftsReady) {
+    try {
+      searchFts = prep(
+        "SELECT e.session_id AS session_id, e.body AS body, bm25(events_fts) AS rank " +
+          "FROM events_fts JOIN events e ON e.rowid = events_fts.rowid " +
+          "WHERE events_fts MATCH ? LIMIT ?",
+      );
+    } catch {
+      searchFts = null;
+    }
+  }
+  /*
+   * LIKE 那条路（审计 P135）：命中数必须是**这个会话真有多少条事件命中**，
+   * 不能写死成 `1 AS n` —— 写死之后"命中最多的会话排前面"就名存实亡
+   * （任何只被 LIKE 命中的会话都是 1，排序退化成按 updated_at）。
+   * 所以这里 `GROUP BY session_id` + `COUNT(*)`，并顺手取最新那条命中的正文当摘要。
+   */
+  const searchLike = prep(
+    `SELECT e.session_id AS session_id,
+            COUNT(*) AS n,
+            MAX(e.at) AS last_at,
+            (SELECT e2.body FROM events e2
+              WHERE e2.session_id = e.session_id AND e2.body LIKE ? ESCAPE '\\'
+              ORDER BY e2.at DESC LIMIT 1) AS body
+     FROM events e
+     WHERE e.body LIKE ? ESCAPE '\\'
+     GROUP BY e.session_id
+     ORDER BY last_at DESC
+     LIMIT ?`,
   );
-  const searchLike = db.prepare(
-    "SELECT session_id, payload, 1 AS n FROM events WHERE payload LIKE ? ESCAPE '\\' ORDER BY at DESC LIMIT ?",
-  );
-  const sessionById = db.prepare("SELECT id, title, updated_at, bytes FROM sessions WHERE id = ?");
-  const selectSessions = db.prepare(
+  const sessionById = prep("SELECT id, title, updated_at, bytes FROM sessions WHERE id = ?");
+  const selectSessions = prep(
     "SELECT id, title, updated_at, bytes FROM sessions ORDER BY updated_at DESC",
   );
-  const countSessions = db.prepare("SELECT COUNT(*) AS n FROM sessions");
-  const totalBytes = db.prepare("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions");
-  const oldestSessions = db.prepare("SELECT id FROM sessions ORDER BY updated_at ASC LIMIT ?");
-  const deleteSessionRow = db.prepare("DELETE FROM sessions WHERE id = ?");
-  const deleteSessionEvents = db.prepare("DELETE FROM events WHERE session_id = ?");
-  const staleSessions = db.prepare("SELECT id FROM sessions WHERE updated_at < ? ORDER BY updated_at ASC");
+  const countSessions = prep("SELECT COUNT(*) AS n FROM sessions");
+  const totalBytes = prep("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions");
+  const oldestSessions = prep("SELECT id FROM sessions ORDER BY updated_at ASC LIMIT ?");
+  const deleteSessionRow = prep("DELETE FROM sessions WHERE id = ?");
+  const deleteSessionEvents = prep("DELETE FROM events WHERE session_id = ?");
+  const staleSessions = prep("SELECT id FROM sessions WHERE updated_at < ? ORDER BY updated_at ASC");
   /*
    * 收口保护线那一侧的查询（见 `OpenOptions.protectBefore`）：
    * "受保护" = `updated_at < protectBefore`，三道收口都只看**未受保护**的那批。
    */
-  const countUnprotected = db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE updated_at >= ?");
-  const unprotectedBytes = db.prepare("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions WHERE updated_at >= ?");
-  const oldestUnprotected = db.prepare(
+  const countUnprotected = prep("SELECT COUNT(*) AS n FROM sessions WHERE updated_at >= ?");
+  const unprotectedBytes = prep("SELECT COALESCE(SUM(bytes), 0) AS n FROM sessions WHERE updated_at >= ?");
+  const oldestUnprotected = prep(
     "SELECT id FROM sessions WHERE updated_at >= ? ORDER BY updated_at ASC LIMIT ?",
   );
-  const oldestUnprotectedRow = db.prepare(
+  const oldestUnprotectedRow = prep(
     "SELECT id, bytes FROM sessions WHERE updated_at >= ? ORDER BY updated_at ASC LIMIT 1",
   );
-  const oldestRow = db.prepare("SELECT id, bytes FROM sessions ORDER BY updated_at ASC LIMIT 1");
-  const staleUnprotected = db.prepare(
+  const oldestRow = prep("SELECT id, bytes FROM sessions ORDER BY updated_at ASC LIMIT 1");
+  const staleUnprotected = prep(
     "SELECT id FROM sessions WHERE updated_at < ? AND updated_at >= ? ORDER BY updated_at ASC",
   );
 
@@ -306,15 +593,20 @@ export function createSqliteSessionStore(
     const totalNow = Number((totalBytes.get() as { n: number }).n);
     const protectedNow = protectBefore === undefined ? 0 : totalNow - freeBytes;
     const budget = Math.max(0, policy.maxBytes - protectedNow);
-    while (freeBytes > budget) {
-      const row = (
-        protectBefore === undefined ? oldestRow.get() : oldestUnprotectedRow.get(protectBefore)
-      ) as { id: string; bytes: number } | undefined;
-      if (!row) break;
-      dropSession(row.id);
-      deleted.push(row.id);
-      freeBytes -= Number(row.bytes ?? 0);
-    }
+      while (freeBytes > budget) {
+        /*
+         * ⚠️ 这两条语句**提到循环外**（审计 P144）：原来是在循环里 prepare 的 ——
+         * 淘汰量大时（上限被调小、或长期没跑收口）一次打开造出几百条 `StatementSync`，
+         * 靠 GC 回收。现在用打开时准备好的那两条，`close()` 时统一释放。
+         */
+        const row = (
+          protectBefore === undefined ? oldestRow.get() : oldestUnprotectedRow.get(protectBefore)
+        ) as { id: string; bytes: number } | undefined;
+        if (!row) break;
+        dropSession(row.id);
+        deleted.push(row.id);
+        freeBytes -= Number(row.bytes ?? 0);
+      }
 
     const kept = Number((countSessions.get() as { n: number }).n);
     return { deleted, kept };
@@ -351,7 +643,8 @@ export function createSqliteSessionStore(
           const at = Date.now();
           // 落盘形态与 .jsonl 的一行**同形**（读回时喂同一个 parseLogLine）
           const payload = JSON.stringify({ seq, at, ...record });
-          insertEvent.run(sessionId, seq, at, record.type, payload);
+          // 检索用的正文**写的时候算好**（只算一次，读的时候不再解析 —— 审计 P136）
+          insertEvent.run(sessionId, seq, at, record.type, payload, searchBodyOf(record as Record<string, unknown>));
           bytes += lineBytes(payload);
           if (!title && record.type === "request") title = conversationTitle([{ seq, at, ...record } as LogRecord]);
           stored.push(JSON.parse(payload) as LogRecord);
@@ -397,6 +690,15 @@ export function createSqliteSessionStore(
      *
      * 宁可多扫一次也不要"搜不到"：对用户来说，"我以前明明聊过"是最能感知的坏。
      *
+     * ## 匹配的是**正文那一列**（审计 P136）
+     *
+     * 两条路都在 `events.body` 上匹配（见 `searchBodyOf`）—— 不碰字段名/provider/档位/元数据。
+     *
+     * ## 命中数是**真的数出来的**（审计 P135）
+     *
+     * LIKE 那条 `GROUP BY session_id` + `COUNT(*)`：写死 `1 AS n` 的话，
+     * "命中最多的会话排前面"对中文（只有 LIKE 命中）完全失效。
+     *
      * ## 摘要是**原文里的一小段**，不是生成的
      *
      * 用户点开检索结果前要能看到"为什么这条被搜出来"，所以摘一段命中的上下文
@@ -415,27 +717,37 @@ export function createSqliteSessionStore(
 
       /*
        * 两条路并集（口径见上面那段说明）：
-       *   · FTS 那条：文本/词形，走倒排索引，快；
+       *   · FTS 那条：文本/词形，走倒排索引，快（**没有 FTS5 时它是 null：只走 LIKE**）；
        *   · LIKE 那条：中文与任意子串的兜底，慢但搜得到。
        * 合并规则：同一个会话取两者里**命中最多的那个数**；排序按"命中多的优先、
        * 同数量按时间倒序"（与 `list` 的口径一致：最近的在前面）。
        */
-      const byId = new Map<string, { n: number; payload: string }>();
+      const byId = new Map<string, { n: number; body: string }>();
 
-      try {
-        const ftsRows = searchFts.all(ftsQuery, limit) as { session_id: string; payload: string }[];
-        for (const r of ftsRows) {
-          const prev = byId.get(r.session_id);
-          byId.set(r.session_id, { n: (prev?.n ?? 0) + 1, payload: prev?.payload ?? r.payload });
+      if (searchFts) {
+        try {
+          const ftsRows = searchFts.all(ftsQuery, limit) as { session_id: string; body: string }[];
+          for (const r of ftsRows) {
+            const prev = byId.get(r.session_id);
+            byId.set(r.session_id, { n: (prev?.n ?? 0) + 1, body: prev?.body ?? r.body });
+          }
+        } catch {
+          /* FTS 查询串不合法（极端输入）/ 索引坏了 → 只靠 LIKE；不因为语法问题让整个检索失败 */
         }
-      } catch {
-        /* FTS 查询串不合法（极端输入）→ 只靠 LIKE；不因为语法问题让整个检索失败 */
       }
 
-      const likeRows = searchLike.all(like, limit) as { session_id: string; payload: string; n: number }[];
+      const likeRows = searchLike.all(like, like, limit) as {
+        session_id: string;
+        n: number;
+        body: string;
+      }[];
       for (const r of likeRows) {
         const prev = byId.get(r.session_id);
-        byId.set(r.session_id, { n: Math.max(prev?.n ?? 0, r.n), payload: prev?.payload ?? r.payload });
+        byId.set(r.session_id, {
+          // `r.n` 是这个会话真命中多少条（COUNT），FTS 那条只数了"取回来的行" —— 取大的
+          n: Math.max(prev?.n ?? 0, Number(r.n)),
+          body: prev?.body ?? r.body,
+        });
       }
 
       const rows = [...byId.entries()]
@@ -462,7 +774,7 @@ export function createSqliteSessionStore(
           title: summary.title,
           updatedAt: summary.updated_at,
           bytes: summary.bytes,
-          excerpt: excerptOf(row.payload, q),
+          excerpt: excerptOf(row.body ?? "", q),
           hits: row.n,
         });
       }
@@ -470,6 +782,15 @@ export function createSqliteSessionStore(
     },
 
     close(): void {
+      // 长命语句逐个释放（Bun 有 `finalize`；node:sqlite 没有 → 可选调用）
+      for (const statement of [...statements].reverse()) {
+        try {
+          statement.finalize?.();
+        } catch {
+          /* 释放失败不该盖住真正的错误（关库才是要紧的那一步） */
+        }
+      }
+      statements.length = 0;
       db.close();
     },
 
@@ -540,26 +861,15 @@ export async function migrateJsonlSessions(
 }
 
 /**
- * 从一条记录里摘一小段命中上下文（前后各留一点）。
+ * 从一段**正文**里摘一小段命中上下文（前后各留一点）。
  *
  * ⚠️ 摘的是**原文**，不生成任何字 —— 生成的东西没法保证与原文一致，
  * 而用户点开之前就是靠这一小段判断这条是不是我要找的。
+ *
+ * ⚠️ 参数是 `events.body`（`searchBodyOf` 算好的正文），不是整行 JSON
+ * （审计 P136：原来摘到的是 `{"seq":3,"requestId":…}` 这种噪声，"答非所问的摘要"）。
  */
-function excerptOf(payload: string, query: string): string {
-  /*
-   * 先剥掉记录的外壳，摘**正文**：日志行是 JSON，直接摘会带一堆
-   * requestId / type / text 这些字段噪声 —— 用户要看的是「那句话是什么」，
-   * 不是「它存在哪个字段里」。剥不出来（工具结果那种嵌套的）就退回整行，
-   * 那样照样能看出上下文。
-   */
-  let text = payload;
-  try {
-    const parsed = JSON.parse(payload) as { text?: unknown; message?: unknown; title?: unknown };
-    const cand = parsed.text ?? parsed.message ?? parsed.title;
-    if (typeof cand === "string" && cand.trim()) text = cand;
-  } catch {
-    /* 不是 JSON 就用原样 */
-  }
+function excerptOf(text: string, query: string): string {
   const at = text.toLowerCase().indexOf(query.toLowerCase());
   if (at < 0) return text.slice(0, 120);
   const from = Math.max(0, at - 40);

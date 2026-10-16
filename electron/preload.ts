@@ -295,8 +295,8 @@ const api = {
     rename: (filePath: string, newName: string): Promise<string | null> =>
       ipcRenderer.invoke(DRIVE_CHANNEL.rename, filePath, newName),
     read: (filePath: string): Promise<string | null> => ipcRenderer.invoke(DRIVE_CHANNEL.read, filePath),
-    download: (filePath: string, targetDir?: string) =>
-      ipcRenderer.invoke(DRIVE_CHANNEL.download, filePath, targetDir),
+    /* 另存为：目标目录只有一个来源 —— 用户在系统对话框里挑的那个（见 driveStore 那段注释）。 */
+    download: (filePath: string) => ipcRenderer.invoke(DRIVE_CHANNEL.download, filePath),
   },
   /*
    * 会话日志（C2/F3）。

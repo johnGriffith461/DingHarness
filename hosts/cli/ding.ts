@@ -16,13 +16,14 @@ import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../sha
 import { formatCount, usageTotal } from "../../shared/cost";
 import { buildEngine as buildEngineIn } from "./assembly";
 import { cmdEval } from "./cmdEval";
-import { cmdInit, cmdDoctor } from "./cmdSetup";
+import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore } from "./cmdBackup";
 import { cmdResume } from "./cmdResume";
 import { cmdAcp, cmdServe } from "./cmdServe";
 import { cmdRecipe } from "./cmdRecipe";
 import { cmdConnect } from "./cmdConnect";
+import { cmdHelp } from "./help";
 import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
@@ -75,9 +76,44 @@ import { AGENT_SPECS } from "../../engine/runtime/agents";
  * `engine/runtime/tools/` 拿的，不是从 `electron/ipc/`。
  */
 
-/** 数据目录：默认 `~/.ding`，可用 `DH_DATA_DIR` 覆盖（多份数据并行跑时用）。 */
+/**
+ * 数据目录：默认 `~/.ding`，可用 `DH_DATA_DIR` 覆盖（多份数据并行跑时用）。
+ *
+ * ⭐ **顺带认桌面的那个覆盖变量**（2026-10-16，审计 P129）。
+ *
+ * 桌面把数据放在 `app.getPath("userData")`（可用 `DSH_CANVAS_DATA_DIR` 覆盖，
+ * 见 `electron/main.ts`），CLI 放在 `~/.ding` —— 两个根**互不相干**。
+ * 后果：`ding backup` 备份的永远是 CLI 那一份，桌面那 14 个 store 与 `sessions.db`
+ * **一行都没进备份**，而命令的输出让用户以为"备份好了"。
+ *
+ * 这里能做的（不越界改别人的 cmdBackup/backup.ts）：**同一台机器上给出同一个开关** ——
+ * 你只要用同一个 `DSH_CANVAS_DATA_DIR` 启动桌面、再跑 CLI，两者就落在同一个根上，
+ * 备份与恢复覆盖的才是同一批数据。`DH_DATA_DIR` 仍然优先（它更具体）。
+ *
+ * ⚠️ 另一半（备份/恢复时**显式说出**根在哪、以及桌面的那份在不在里面）要改
+ * `hosts/cli/cmdBackup.ts` —— 那不在本工单的文件范围里。
+ */
 function dataDir(): string {
-  return process.env.DH_DATA_DIR?.trim() || path.join(os.homedir(), ".ding");
+  return (
+    process.env.DH_DATA_DIR?.trim() ||
+    process.env.DSH_CANVAS_DATA_DIR?.trim() ||
+    path.join(os.homedir(), ".ding")
+  );
+}
+
+/**
+ * 桌面应用的数据根（本机存在才返回）。
+ *
+ * 用来在 `backup` / `restore` 时**提醒**"你桌面的那份不在这里面"——
+ * `impact` 正是"用户以为备份覆盖了桌面数据，其实一行都没有"。
+ */
+function desktopDataDir(): string | null {
+  const override = process.env.DSH_CANVAS_DATA_DIR?.trim();
+  if (override) return path.resolve(override);
+  const appData = process.env.APPDATA;
+  if (!appData) return null;
+  const guess = path.join(appData, "Ding Harness");
+  return existsSync(guess) ? guess : null;
 }
 
 /** 授权目录：默认当前目录，`--dir` 可重复给（与桌面的"工作区授权"是同一个概念）。 */
@@ -145,6 +181,27 @@ async function buildEngine(dirs: readonly string[]): Promise<{ engine: Engine; c
    * 自己拼一套端口就等于绕开产品那条路。这里只负责把本宿主的数据目录传进去。
    */
   return buildEngineIn(dirs, dataDir());
+}
+
+/**
+ * 备份/恢复要用的根，并**在根与桌面不一致时当场说清**（审计 P129）。
+ *
+ * 不说的话，这条命令的输出会让人以为"已经备份好了"—— 而桌面那份数据
+ * （`stores.db` / `sessions.db` / 画布快照）根本没进这个文件。
+ * 给出可照做的下一步（用同一个 `DSH_CANVAS_DATA_DIR` 指过去）。
+ */
+function warnDesktopRoot(p: Parsed): string {
+  const root = dataDir();
+  const desktop = desktopDataDir();
+  if (!p.flags.has("json") && desktop && path.resolve(desktop) !== path.resolve(root)) {
+    process.stderr.write(
+      `⚠️ 桌面应用的数据在：${desktop}\n` +
+        `   这次只动 CLI 的根：${root} —— 桌面那份**不在里面**。\n` +
+        `   要一起备份/恢复：用同一个目录跑两边，例如 ` +
+        `DSH_CANVAS_DATA_DIR="${desktop}" ding ${p.command} …\n`,
+    );
+  }
+  return root;
 }
 
 /* ────────────────────── 命令 ────────────────────── */
@@ -615,52 +672,15 @@ function cmdAgents(p: Parsed = { command: "", args: [], flags: new Map() }): num
   return 0;
 }
 
-function cmdHelp(devMode = false): number {
-  process.stdout.write(
-    [
-      "ding —— Ding Harness 的命令行宿主",
-      "",
-      '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
-      "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
-      "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
-      "  ding doctor [--json]                           # 一键自检（每项失败都给下一步）",
-      "  ding recipe list|show|run|export|import            # 任务模板（可分享的「提示词 + 工具范围 + 档位」）",
-      "  ding serve [--port 8787] [--bind <地址> --token <口令>]  # Agent Server（默认只绑回环）",
-      "  ding connect <url> [任务] [--token <口令>]           # 连到远端 agent 跑一轮（Phase 17 的另一半）",
-      "  ding acp                                       # 作为 ACP agent 跑在标准输入输出上（被外部宿主驱动）",
-      "  ding resume [<会话 id>] [--continue]           # 崩溃恢复（列出被打断的回合；--continue 重跑那一轮）",
-      "  ding backup [--out <文件>]                     # 全量备份（会话 + 配置型 store + CLI 配置，单个 JSON）",
-      "  ding restore <文件> [--list]                   # 从备份恢复（--list 只看不恢复；只补不覆盖）",
-      "  ding init                                      # 首次配置向导（配 key / 选模型 / 选目录）",
-      "  ding eval [类别] [--json] [--update-baseline]  # 离线评测集（不烧 token，可进 CI）",
-      "  ding models",
-      "  ding agents                                    # 内置专家（AgentSpec）",
-      "  ding plugins [list|install <目录|npm:包名> --yes|enable|disable|remove|doctor]",
-      "  ding config [show|set <键> <值>|unset <键>]    # 默认 provider / 模型 / 档位 / 目录",
-      "  ding --json <命令>                             # 给脚本/CI 的 JSON 输出",
-      ...(devMode
-        ? [
-            "",
-            "工程模式（--dev，验收驱动器，不属于产品表面）：",
-            "  ding record <会话 id> [--out <文件>]",
-            "  ding replay <快照文件>",
-          ]
-        : ["", "（`--dev` 会多出两个工程模式命令：record / replay —— 那是验收驱动用的。）"]),
-      "",
-      `数据目录：${dataDir()}（DH_DATA_DIR 可覆盖）`,
-      "",
-    ].join("\n"),
-  );
-  return 0;
-}
-
 /**
- * 不给参数（或给了不认识的命令）：**进交互模式**（Phase 9）。
+ * 不给参数时：**进交互模式**（Phase 9）。
  *
- * ⚠️ 为什么"不认识的命令"也走这里而不是报错：终端里 `ding 你好` 这种写法很自然
- * （人不会先想"我要不要加 run"）。进交互模式并把这句当成任务，比报
- * "未知命令：你好"更贴近人的预期。而**真**打错的子命令（如 `ding sessionss`）
- * 会被当成任务发给模型 —— 它会说"我不确定你想干什么"，这也不比报错差。
+ * ⚠️ 口径在 2026-10-16（审计 P212）**收窄过一次**，这段说明跟着改了：
+ *   · 命令位置是一个 **ASCII 小写单词**（能对上 `[a-z][a-z-]*`）而**不是**已知命令
+ *     → 在 `main()` 里当场报错退出 2：`ding restor …` 这种拼错不再静默进 REPL、
+ *     也不再在脚本/CI 里把 stdin 吃干；
+ *   · 其余的自由文本（中文、带空格的一整句）**照旧**当任务 —— 终端里 `ding 你好`
+ *     这种写法很自然，进交互模式并把它当成任务，比报"未知命令"更贴近人的预期。
  * 唯一要避免的是"静默什么都不做"，所以交互模式一定会有可见的回显。
  */
 async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
@@ -670,8 +690,21 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
    * 向导要临时借 stdin 问几句话；REPL 起来之后由它自己接管。
    * 所以这个 `rl` 在进 REPL 之前关掉（两个 readline 抢同一路输入会丢行）。
    */
-  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
-  if (p.command === "help" || p.flags.has("help") || p.flags.has("h")) return cmdHelp(devMode);
+  /*
+   * 向导要临时借 stdin 问几句话；REPL 起来之后由它自己接管。
+   * 所以这个 `rl` 在进 REPL 之前关掉（两个 readline 抢同一路输入会丢行）。
+   *
+   * ⚠️ 用**可变引用**（不是裸 const）：要是哪一问是"密钥"（`{secret:true}`），
+   * `askMasked` 会把它关掉重建（遮蔽输入只能这么做），裸 const 之后就会
+   * "关掉的是旧那个、真正在用的是新的" —— 两个 readline 抢输入，正是上面那句要避开的。
+   */
+  const rlRef = { current: createInterface({ input: process.stdin, output: process.stdout, terminal: false }) };
+  const plainAsk = (q: string, opts?: { default?: string }) =>
+    new Promise<string>((resolve) => {
+      const suffix = opts?.default ? ` [${opts.default}]` : "";
+      rlRef.current.question(`${q}${suffix} `, (answer) => resolve(answer.trim() || opts?.default || ""));
+    });
+  if (p.command === "help" || p.flags.has("help") || p.flags.has("h")) return cmdHelp(devMode, dataDir());
 
   /*
    * ⚠️ 先过**首次配置**这道门（Phase 11.3）。
@@ -686,11 +719,13 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
   const configured = await ensureConfigured(
     process.stdin.isTTY
       ? {
+          /*
+           * ⚠️ 这一份 `ask` 原来**也**忽略 `opts.secret`（审计 P199 点名的第二处：
+           * 首次 `ding` 走的就是这条路）。现在与 `ding init` 共用同一个遮蔽实现 ——
+           * 两处各写一遍正是这条缺陷能同时存在两次的原因。
+           */
           ask: (q, opts) =>
-            new Promise((resolve) => {
-              const suffix = opts?.default ? ` [${opts.default}]` : "";
-              rl.question(`${q}${suffix} `, (answer) => resolve(answer.trim() || opts?.default || ""));
-            }),
+            opts?.secret ? askMasked(rlRef, `${q} `, () => plainAsk(q, opts)) : plainAsk(q, opts),
           say: (line) => process.stdout.write(line + "\n"),
         }
       : null,
@@ -700,7 +735,7 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
     process.stderr.write(`${configured.reason ?? "还没配好"}\n`);
     return 3;
   }
-  rl.close();
+  rlRef.current.close();
 
   const ready = replPrecondition();
   if (!ready.ok) {
@@ -775,6 +810,46 @@ async function main(): Promise<void> {
    * 这样"给人看的命令面"与"给工程用的命令面"分得开，而两者还在同一个二进制里。 */
   const devMode = parsed.flags.has("dev");
 
+  /*
+   * ⭐ **不认识的子命令要报错，不能静默进 REPL**（2026-10-16，审计 P212）。
+   *
+   * 缺陷形状：这条三元链落到底就是 `cmdDefault`（进交互模式），只有 `help` 被特判。
+   * 于是 `ding restore backup.json` 打成 `ding restor backup.json` 时：
+   * 交互终端里"进了 REPL"（用户以为自己命令写对了），脚本/CI 里进程**吃掉 stdin 等输入** ——
+   * 一个拼写错误被静默执行成了完全不同的事。
+   *
+   * 口径（不用新旗标、不改 args.ts）：命令位置是一个**ASCII 小写单词**（`[a-z][a-z-]*`）
+   * 且不在已知命令表里 → 报错退出 2，并告诉他想跑一句话该用 `ding run "…"`。
+   * 中文/带空格的自由文本**照旧**当任务（`ding 你好` 这条自然写法不受影响）。
+   */
+  const knownCommands = new Set([
+    "run",
+    "sessions",
+    "record",
+    "replay",
+    "models",
+    "plugins",
+    "recipe",
+    "serve",
+    "connect",
+    "acp",
+    "resume",
+    "backup",
+    "restore",
+    "doctor",
+    "init",
+    "eval",
+    "config",
+    "agents",
+  ]);
+  if (parsed.command && !knownCommands.has(parsed.command) && /^[a-z][a-z-]*$/.test(parsed.command)) {
+    process.stderr.write(
+      `不认识的命令：${parsed.command}（可用：${[...knownCommands].join(" / ")}）\n` +
+        `要跑一句话当任务，用：ding run "${parsed.args.join(" ") || "…"}"\n`,
+    );
+    process.exit(2);
+  }
+
   const code =
     parsed.command === "run"
       ? await cmdRun(parsed)
@@ -799,9 +874,9 @@ async function main(): Promise<void> {
                     : parsed.command === "resume"
                   ? await cmdResume(parsed, dataDir())
                   : parsed.command === "backup"
-                  ? await cmdBackup(parsed, dataDir())
+                  ? await cmdBackup(parsed, warnDesktopRoot(parsed))
                   : parsed.command === "restore"
-                    ? await cmdRestore(parsed, dataDir())
+                    ? await cmdRestore(parsed, warnDesktopRoot(parsed))
                     : parsed.command === "doctor"
                   ? cmdDoctor(parsed, dataDir())
                   : parsed.command === "init"
@@ -815,7 +890,6 @@ async function main(): Promise<void> {
                     : await cmdDefault(parsed, devMode);
   process.exit(code);
 }
-
 void main().catch((error: unknown) => {
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
   process.stderr.write(`[31m出错了：${detail}[0m\n`);

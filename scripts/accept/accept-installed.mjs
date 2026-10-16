@@ -16,8 +16,18 @@ const EXE = ".verify/instA/Ding Harness.exe";
 const DATA = ".verify/instA-data";
 
 if (!fs.existsSync(EXE)) {
-  console.log(JSON.stringify({ launched: false, reason: "安装目录里没有 Ding Harness.exe" }));
-  process.exit(0);
+  /*
+   * ⚠️ 2026-10-16（审计 A21）：这里原来是 `process.exit(0)` —— 那在批跑里是**静默通过**：
+   * 退出码 0、又没有任何判定，而它恰好是"这条根本没被测"的情形（最该有人喊一声的时候）。
+   * 现在明确说清还差哪一步，并**按环境红报**（退出码 1 + 这句可辨认的话，
+   * `verify-acceptances.mjs` 的 `classify` 把它归到「环境红」那一类，不当产品断言红）。
+   */
+  console.error(
+    "装出来的那份不存在（" +
+      EXE +
+      "）—— 先 pnpm package:win 出包 + 静默安装到 .verify/instA；这条按环境红记，不算通过。",
+  );
+  process.exit(1);
 }
 
 fs.rmSync(DATA, { recursive: true, force: true });
@@ -75,7 +85,9 @@ try {
    * 而这三种恰恰是打包最容易出的问题（asar 里少文件、路径写死开发目录）。
    *
    * ⚠️ 安装目录不存在时**是跳过不是失败**（上面已经 case 掉了）：本机没装过
-   *    就该说"没装过"，不能说"装出来的坏了"。
+   *    就该说「没装过」，不能说「装出来的坏了」——但**跳过要报环境红**（2026-10-16 改）：
+   *    原来那句 `process.exit(0)` 在批跑里等于「静默通过」，而「这条根本没被测」
+   *    恰恰是最该有人喊一声的情形。
    */
   const bad = [];
   if (report.error) bad.push(`装出来的那份起不来或渲染失败：${report.error}`);

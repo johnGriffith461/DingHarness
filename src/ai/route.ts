@@ -78,9 +78,21 @@ export async function resolveChatRoute(
   try {
     const { listProviders } = await import("./aiClient");
     const providers = await listProviders();
-    const usable = providers.filter((p) => p.available);
+    /*
+     * ⚠️ 2026-10-16（审计 P254）：**必须排掉"可用但没有模型"的通道**。
+     *
+     * 原来只判 `p.available`，于是"provider 可用但 `models` 为空"（自定义中转、
+     * 模型清单没配、或拉取失败）也会被选中 → 返回 `{provider, model:""}`。
+     * 而调用方一律只判 `if (!provider)`（agentStore / docStore ×2 / taskRuntime），
+     * 这条守卫直接被绕过：请求带着空 model 发出去，用户看到的是上游 400/502，
+     * 手里却没有"该通道没有可选模型"这条线索 —— 排障方向被完全带偏。
+     *
+     * 这也正是本文件头第 ③ 条的承诺："都拿不到就返回空 —— 调用方给明确报错，
+     * 而不是静默发一个空请求"。空 `models` 就属于"拿不到"。
+     */
+    const usable = providers.filter((p) => p.available && (p.models?.length ?? 0) > 0);
     const pick = usable.find((p) => p.verified) ?? usable[0];
-    if (pick) return { provider: pick.id, model: pick.models[0] ?? "" };
+    if (pick) return { provider: pick.id, model: pick.models[0] };
   } catch {
     /* 列不出来就让下面按空值走，主进程会给出明确报错 */
   }

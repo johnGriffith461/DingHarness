@@ -86,7 +86,7 @@ export function isOngoing(task: Pick<WorkTask, "stage">): boolean {
  *
  * @param tasks 全部任务
  * @param limit 最近访问最多显示几条
- * @returns `ongoing` 进行中；`recent` 其余（新的在前）；`more` 被「查看更多」挡住的条数
+ * @returns `ongoing` 进行中；`recent` 其余（**最近访问**在前）；`more` 被「查看更多」挡住的条数
  */
 export function centerSections(
   tasks: readonly WorkTask[],
@@ -98,14 +98,33 @@ export function centerSections(
     if (isOngoing(t)) ongoing.push(t);
     else rest.push(t);
   }
-  // 新的在前：同一段对话刚访问过就该排前面（本体也是这个口径）
-  ongoing.sort((a, b) => b.createdAt - a.createdAt);
-  rest.sort((a, b) => b.createdAt - a.createdAt);
+  /*
+   * ⚠️ 「最近访问」按**访问时刻**排（2026-10-16 审计 P266）。
+   *
+   * 原来两边都按 `createdAt` —— 而这一栏的注释写的是"刚访问过就该排前面"：
+   * 昨天建的、今天又聊了几轮的对话会排在今天新建的**后面**，
+   * 用户看到的是「最近创建」而不是「最近访问」。
+   *
+   * 次序：`openedAt`（点开或接着说一句时更新）→ 最后一步的时刻（老数据没记访问时刻，
+   * 但它什么时候说过话是知道的）→ `createdAt`。三级回落都不编数。
+   */
+  const when = (t: WorkTask): number => t.openedAt ?? latestStepAt(t) ?? t.createdAt;
+  ongoing.sort((a, b) => when(b) - when(a));
+  rest.sort((a, b) => when(b) - when(a));
   return {
     ongoing,
     recent: rest.slice(0, limit),
     more: Math.max(0, rest.length - limit),
   };
+}
+
+/** 最后一步的时刻（没有任何步骤时 null）。 */
+function latestStepAt(task: WorkTask): number | null {
+  let latest: number | null = null;
+  for (const step of task.steps) {
+    if (typeof step.at === "number" && (latest === null || step.at > latest)) latest = step.at;
+  }
+  return latest;
 }
 
 /**

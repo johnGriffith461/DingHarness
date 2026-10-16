@@ -97,21 +97,67 @@ export function planPaste(
     pool = [...pool, { ...source, id }];
   }
 
-  // 整体位移：让复制体的外接框左上角落在锚点
-  const minX = Math.min(...sources.map((n) => n.position.x));
-  const minY = Math.min(...sources.map((n) => n.position.y));
+  /**
+   * ⚠️⚠️ **落点一律按绝对坐标算**（2026-10-16 审计 P24）。
+   *
+   * 子节点的 `position` 是**相对父节点**的（React Flow 的约定，见 `frames.ts` 的 `toAbsolute`），
+   * 而原来这里 `Math.min(...sources.map((n) => n.position.x))` 把两种坐标**混在一起**取最小：
+   * 粘贴一张"画框 + 框里的卡片"时，卡片那份相对坐标（很小）会把最小值的基准拉到框里去，
+   * 于是整批落点算错 —— 而且框移了、卡片没跟着同比例移，父子关系看着就"错位"了。
+   *
+   * 现在先在**粘贴集内部**换算成绝对坐标（父不在集内时它本来就该是绝对坐标），
+   * 再整体平移到锚点。
+   */
+  const inPayload = new Map(sources.map((n) => [n.id, n]));
+  const absoluteOf = (node: CanvasNode): { x: number; y: number } => {
+    let x = node.position.x;
+    let y = node.position.y;
+    let parentId = node.parentId;
+    let guard = 0;
+    while (parentId && guard < 8) {
+      const parent = inPayload.get(parentId);
+      if (!parent) break; // 父不在粘贴集里 → 这份坐标本来就是绝对的
+      x += parent.position.x;
+      y += parent.position.y;
+      parentId = parent.parentId;
+      guard += 1;
+    }
+    return { x, y };
+  };
+  const absolutes = sources.map(absoluteOf);
+  const minX = Math.min(...absolutes.map((p) => p.x));
+  const minY = Math.min(...absolutes.map((p) => p.y));
   const dx = at.x - minX;
   const dy = at.y - minY;
 
-  const nodes = sources.map(
-    (source) =>
-      ({
-        ...source,
-        id: idMap.get(source.id) as string,
-        position: { x: source.position.x + dx, y: source.position.y + dy },
-        selected: true,
-      }) as CanvasNode,
-  );
+  /* 先算每个复制体的**绝对**落点，再按"父在不在粘贴集里"换算成相对坐标 */
+  const landing = new Map<string, { x: number; y: number }>();
+  sources.forEach((source, index) => {
+    const id = idMap.get(source.id) as string;
+    const abs = absolutes[index] as { x: number; y: number };
+    landing.set(id, { x: abs.x + dx, y: abs.y + dy });
+  });
+
+  const nodes = sources.map((source) => {
+    const id = idMap.get(source.id) as string;
+    /*
+     * ⚠️ `parentId` **不能靠对象展开原样带走**（P24 的另一半）：
+     * 原样带走意味着"从画框里复制一张卡片、粘到别处"之后，新卡片仍然挂在**原来那个画框**上
+     * （画框不在粘贴集里，也没有跟着过来）—— 于是它在别人的框里、按相对坐标乱放。
+     * 判据：父也在粘贴集里 → 指到复制出来的那个父；不在 → 粘贴成顶层节点。
+     */
+    const parentId = source.parentId ? idMap.get(source.parentId) : undefined;
+    const abs = landing.get(id) as { x: number; y: number };
+    const parentAbs = parentId ? landing.get(parentId) : undefined;
+    const position = parentAbs ? { x: abs.x - parentAbs.x, y: abs.y - parentAbs.y } : abs;
+    return {
+      ...source,
+      id,
+      parentId,
+      position,
+      selected: true,
+    } as CanvasNode;
+  });
 
   const edges = payload.edges
     .filter((e) => idMap.has(e.source) && idMap.has(e.target))

@@ -4,8 +4,11 @@
 > 写了但没实现、或者实现得比写的弱，都是缺陷 —— 拿它当营销材料会直接伤害用户
 > （他会在"以为有保护"的前提下把不该交的东西交出来）。
 >
-> 最后核对：2026-10-15（`pnpm test` 里的 `engine/adapters/sandbox.test.ts`、
-> `shared/errors.test.ts` 与 `hosts/cli/doctor.test.ts` 会盯着其中几条）。
+> 最后核对：2026-10-16（`pnpm test` 里的 `engine/adapters/sandbox.test.ts`、
+> `shared/errors.test.ts`、`hosts/cli/doctor.test.ts` 会盯着其中几条；
+> **第二节（密钥）由 `engine/adapters/secretStore.test.ts` 盯着** ——
+> 它钉住"桌面加密 / CLI 那条是明文 / 向导不许承诺 600 权限 /
+> 没有做的迁移必须列在第五节"这几句与实现一致）
 
 ## 一、命令执行（`run_command`）
 
@@ -41,17 +44,23 @@ Phase 14.5（opt-in 高档位）—— **现在没做，这里就写"没做"**�
 
 | 项 | 现状 | 依据 |
 |---|---|---|
-| **我们自己写的 key**（`ding init` 向导 / 桌面里填的） | ⚠️ **桌面**：进 `safeStorage`（Windows DPAPI / macOS Keychain / Linux secret-service）加密后落 `secrets.dat`；**CLI**：没有 safeStorage，于是**拒绝写**并说清原因（不退化成明文） | `engine/adapters/secretStore.ts` |
-| **别人写的 key**（`~/.dsh/.credentials.yaml`） | 只读，**不动它**（那是另一个程序的文件，加密它等于把人家的文件改坏） | 同上 |
+| **桌面里填的 key**（设置 → 密钥） | ✅ 进 `safeStorage`（Windows DPAPI / macOS Keychain / Linux secret-service）加密后落 `secrets.dat`；拿不到系统加密能力时**拒绝写**并说清原因（不退化成明文） | `engine/adapters/secretStore.ts` + `electron/ipc/secretStore.ts` |
+| **`ding init` 向导写的 key** | ⚠️ **明文**：CLI 这台机器上没有系统钥匙串集成（`secretsEncrypted()` 恒 false），所以向导只能写明文 —— 它写进 `~/.dsh/.credentials.yaml` 的 `refs:` 段，**并在用户面前如实说明文**。想不落盘就用环境变量 | `hosts/cli/wizard.ts` |
+| **`~/.dsh/.credentials.yaml` 这个文件** | **明文**。它是**共用的**：可能由别的程序（用户的启动器）写，也由我们的 `ding init` 向导写。我们**只碰 `refs:` 段里自己那一个键**（注释、别人的键、别的段原样保留），**不加密它** —— 加密别人的文件等于把人家的文件改坏 | `hosts/cli/wizard.ts`、`engine/runtime/credentials.ts` |
 | **环境变量里的 key** | 原样读（那是你自己设的，我们不改环境） | `engine/runtime/credentials.ts` |
 | **加密的范围** | ⚠️ **本机绑定**：换机器/换用户解不开。所以**备份里不含密钥**，换机器要重新填一次 | `engine/core/backup.ts` |
 | **key 会不会进日志** | ❌ 不会。会话日志记的是"用了哪家/哪个模型"，不含密钥 | `engine/index.ts` 的 `request` 记录 |
 | **key 会不会进备份** | ❌ 不会（见上） | 同上 |
 | **key 会不会发给渲染进程** | ❌ 不会。密钥只在主进程里用来发请求 | `electron/preload.ts` 的说明 |
 
-⚠️ **如实说明一处**：CLI（包括 Bun 单二进制）**没有**系统钥匙串集成，
-所以它不写加密存储。你用环境变量或那个别家的明文文件时，保护程度取决于你怎么管它们 ——
-`ding doctor` 的「凭据保护」那一格会把这个状态报出来。
+⚠️ **如实说明两处**（审计 P114/P120 之后改的，之前这两句写反了）：
+
+1. **CLI（包括 Bun 单二进制）没有系统钥匙串集成**，所以 `secretStore` 那层加密在 CLI 下用不上：
+   那时 `writeSecret` **拒绝写**（不写明文），而向导写的是它自己那条**明文**文件（见上表第二、三行）。
+   `ding doctor` 的「凭据保护」那一格会把"现在到底哪一层在保护"报出来。
+2. **`mode: 0o600` 只在 Linux/macOS 上成立**：Windows 的 NTFS 不走 POSIX 权限位
+   （Node 的 `mode` 只影响只读位）。所以向导**不再**对用户说"权限 600" ——
+   做不到的事不当承诺念。真正的保护是"加密那层"，不是文件权限。
 
 ## 三、会话数据
 
@@ -87,6 +96,7 @@ Phase 14.5（opt-in 高档位）—— **现在没做，这里就写"没做"**�
 | 容器 / micro-VM 隔离档（opt-in） | **未做**（方案 14.5） | 要额外运行时（Docker/Firecracker），与本机版"装完就能用"的定位冲突，所以排在最后且要显式开 |
 | 插件沙箱（wasmtime） | **未做**（方案 18） | 同上，且还没到那一阶段 |
 | 密钥的 CLI 钥匙串集成 | **未做**（见第二节） | 要额外依赖或平台 FFI；现在的做法是"拒绝写明文"而不是假装加密 |
+| **旧明文配置一次性迁移并提示**（方案 Phase 14.2 的后半句） | **未做** | 要有地方能"先解出来再加密写回去"，而 CLI 没有钥匙串集成（迁移等于明文转明文），桌面端目前也只在"设置里重新填一次"时写加密库。现状能做到的是**如实报出来**：`ding doctor` 的「凭据保护」会说那条明文文件在不在 |
 | 端到端加密的云同步 | **不做** | 本机版没有云同步（local-first 是定位，不是省事） |
 | 代码签名的自动更新 | **未做**（方案 15） | 要有证书与更新服务器；Windows/macOS 上未签名的自动更新不可靠 |
 

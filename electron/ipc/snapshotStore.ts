@@ -36,13 +36,45 @@ function writeJsonAtomic(file: string, value: unknown): void {
   fs.renameSync(tmp, file);
 }
 
-/** 读 JSON，坏文件当作不存在。 */
-function readJson<T>(file: string): T | null {
+/**
+ * 一次带状态的读（P15）。
+ *
+ * ⚠️ 原来"坏文件当作不存在"，于是**文件在但读不动**与**本来就没有**混成同一个结果：
+ * 紧接着的自动保存就把一份空文档覆盖上去 —— 用户那份手改到一半的快照就这样没了。
+ * 现在两者分开：`missing` 才当新装用户，`corrupt` 一律不当空库。
+ */
+type ReadOutcome<T> = { status: "missing" } | { status: "ok"; value: T } | { status: "corrupt"; error: string };
+
+/** 读 JSON：区分「真没有」与「读坏了」。 */
+function readJsonStrict<T>(file: string): ReadOutcome<T> {
+  let text: string;
   try {
-    if (!fs.existsSync(file)) return null;
-    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+    text = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "missing" };
+    return { status: "corrupt", error: error instanceof Error ? error.message : String(error) };
+  }
+  try {
+    return { status: "ok", value: JSON.parse(text) as T };
+  } catch (error) {
+    return { status: "corrupt", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** 读 JSON，坏文件当作不存在（只在"历史快照/状态"这类**不写回**的只读路径上用）。 */
+function readJson<T>(file: string): T | null {
+  const got = readJsonStrict<T>(file);
+  return got.status === "ok" ? got.value : null;
+}
+
+/** 坏文件挪开：`document.corrupt-<时间戳>.json`（一个字节都不丢，用户还能人工救）。 */
+function quarantineCorrupt(file: string): string {
+  const target = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  try {
+    fs.renameSync(file, target);
+    return target;
   } catch {
-    return null;
+    return file;
   }
 }
 
@@ -68,7 +100,18 @@ export type SaveResult = { ok: true; savedAt: string } | { ok: false; error: str
  */
 export function saveDocument(doc: CanvasDocument): SaveResult {
   try {
-    const current = readJson<CanvasDocument>(docPath());
+    const currentRead = readJsonStrict<CanvasDocument>(docPath());
+    /*
+     * ⚠️ P15：文件**在**但读不动时**拒绝覆盖**。原来这里把坏文件读成 `null`（=新装用户），
+     * 于是紧接着的自动保存就把一份空/半截文档写回去，把用户那份快照永久盖掉。
+     */
+    if (currentRead.status === "corrupt") {
+      return {
+        ok: false,
+        error: `磁盘上的画布文件读不动（${currentRead.error}）—— 已拒绝覆盖，请人工处理后再试`,
+      };
+    }
+    const current = currentRead.status === "ok" ? currentRead.value : null;
     // 单调性：拒绝倒退的 revision（除非是恢复流程显式回退，那种情况 revision 已经被下调）
     if (current && doc.revision < current.revision && doc.revision !== 0) {
       return { ok: false, error: `revision 倒退被拒绝：${doc.revision} < ${current.revision}` };
@@ -138,8 +181,22 @@ export type LoadResult = {
  * 界面卡在"保存失败"。回写之后就地和磁盘对齐了。
  */
 export function loadDocument(): LoadResult {
-  const loaded = readJson<CanvasDocument>(docPath());
-  if (!loaded) return { doc: emptyDocument(), recovered: false };
+  const loadedRead = readJsonStrict<CanvasDocument>(docPath());
+  /*
+   * ⚠️ P15：坏文件**不是**"没有文件"。挪开它（一个字节都不丢）再从空画布开始，
+   * 并且把这件事**说出来**（`recovered`）—— 静默当成新装用户就等于"数据全没了"。
+   */
+  if (loadedRead.status === "corrupt") {
+    const moved = quarantineCorrupt(docPath());
+    console.error(`[canvas] 画布文件读不动（${loadedRead.error}），已另存为 ${moved}`);
+    return {
+      doc: emptyDocument(),
+      recovered: true,
+      recoveryNote: `画布文件读不动，已另存为 ${moved}，本次从空画布开始（原文件没有被覆盖）`,
+    };
+  }
+  if (loadedRead.status === "missing") return { doc: emptyDocument(), recovered: false };
+  const loaded = loadedRead.value;
 
   /*
    * ⚠️ C1：**先过前向迁移**，再谈别的。

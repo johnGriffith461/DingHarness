@@ -30,11 +30,18 @@ import type { CliConfig } from "./config";
  * |---|---|
  * | 任意一句话 | 当成任务跑一轮（走与 `ding run` 完全相同的引擎路径） |
  * | `/model <名>` | 换模型（只影响后面几轮） |
+ * | `/provider [家名]` | 换 provider（不给参数就列可选的） |
  * | `/mode <档位>` | 换闸门档位 |
  * | `/agents` | 列可用的专家（`spawn_agents` 派活用的那几个） |
  * | `/sessions` | 这次交互的会话 id（配合 `ding record` / `ding sessions` 用） |
  * | `/help` | 这一屏 |
  * | `/exit` 或 Ctrl-D | 退出 |
+ *
+ * ⚠️ 这张表是**手写的说明**（注释渲染不了东西，别把它当成自动同步的）。
+ * 真正被结构保证的是**运行时的帮助那一屏**：它由下面的 `REPL_COMMANDS` 渲染，
+ * 而 `repl.test.ts` 有一条守卫盯着"派发里出现的每个命令都在表里" ——
+ * 那一条正是冲 P235 来的（`/provider` 曾加进派发、而这张表和 `/help` 都没跟上，
+ * 于是它成了"活命令却不可发现"）。改派发时**两处都要动**：`REPL_COMMANDS` 与这段注释。
  *
  * ⚠️ 不做的事：不做自动补全、不做多行、不做 ANSI 全屏。
  * 那些是"好看"，而这一步要的是"能用且**行为与一次性命令一模一样**"。
@@ -64,17 +71,50 @@ export function parseReplLine(line: string): { command: string; args: string[] }
   return { command: (head ?? "").toLowerCase(), args: rest };
 }
 
-/** 帮助那一屏（**只列真的有的**）。 */
+/**
+ * REPL 的命令表 —— **唯一一份**，`replHelp` 就是照它渲染的。
+ *
+ * ⚠️ 2026-10-16（审计 P235）：这份清单原来有**三处手抄本**（文件头那张表、`replHelp` 里的字面量、
+ * 以及派发处的 `if` 串）。`/provider` 加进派发之后另外两处都没跟上 ——
+ * 于是它是**活命令却不可发现**（那是唯一能在会话中换 provider 的入口，`/help` 里找不到），
+ * 而 `replHelp` 头上那句"只列真的有的"就成了不实自述。
+ *
+ * 现在帮助从这张表渲染，`repl.test.ts` 另有一条**从源码反查**的守卫：
+ * 派发里出现的每个命令都必须登记在这张表里，否则红。
+ */
+export const REPL_COMMANDS: ReadonlyArray<{
+  /** 派发处 `parsed.command === "<这个>"` 的值 */
+  name: string;
+  /** 别名（同样被认下，但不单独占一行） */
+  aliases?: readonly string[];
+  /** 帮助里那一列（含参数占位） */
+  usage: string;
+  /** 一句话说明；`{MODES}` / `{MODE}` 在渲染时替换成档位表与当前档位 */
+  what: string;
+}> = [
+  { name: "model", usage: "/model <名>", what: "换模型（只影响后面几轮）" },
+  {
+    name: "provider",
+    usage: "/provider [家名]",
+    what: "换 provider（不给参数就列可选的；换家之后模型回到该家默认）",
+  },
+  { name: "mode", usage: "/mode <档位>", what: "换闸门档位（{MODES}，当前「{MODE}」）" },
+  { name: "agents", usage: "/agents", what: "列可用的专家" },
+  { name: "sessions", usage: "/sessions", what: "这次交互的会话 id（配合 ding sessions / ding record）" },
+  { name: "help", usage: "/help", what: "这一屏" },
+  { name: "exit", aliases: ["quit"], usage: "/exit", what: "退出（Ctrl-D 也行）" },
+];
+
+/** 帮助那一屏。**只列真的有的** —— 这句话现在由结构保证，不再靠人抄。 */
 export function replHelp(sessionId: string, mode: ConfirmMode): string {
+  const rows = REPL_COMMANDS.map(
+    ({ usage, what }) =>
+      `  ${usage.padEnd(16)}${what.replace("{MODES}", CONFIRM_MODES.join(" / ")).replace("{MODE}", mode)}`,
+  );
   return [
     "直接输入一句话 = 跑一轮（上下文接着上面）",
     "",
-    "  /model <名>     换模型（只影响后面几轮）",
-    `  /mode <档位>    换闸门档位（${CONFIRM_MODES.join(" / ")}，当前「${mode}」）`,
-    "  /agents         列可用的专家",
-    "  /sessions       这次交互的会话 id（配合 ding sessions / ding record）",
-    "  /help           这一屏",
-    "  /exit          退出（Ctrl-D 也行）",
+    ...rows,
     "",
     `这次交互的会话：${sessionId}（存在数据库里，退出后还能用 ding sessions 查到）`,
   ].join("\n");

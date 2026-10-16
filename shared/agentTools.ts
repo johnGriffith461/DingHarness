@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isMcpTool, parseMcpToolName } from "./mcp";
 import { MEMORY_TEXT_LIMIT } from "./memory";
+import { MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_VALUES } from "./schedule";
 
 /**
  * **工具协议**的规格层（§141）。
@@ -28,8 +29,10 @@ export type AgentToolSpec = {
 /**
  * 一次读文件最多给模型多少字。
  *
- * 与其它工具输出的口径一致（400 → 8000，见 §"工具输出该给多少"）：
- * 给太少模型看不到关键段，给太多会把上下文顶爆。
+ * ⚠️ **真身**在 `engine/runtime/tools/readTool.ts` 的 `MODEL_MAX_CHARS`（那里才截断）；
+ * 这里这份是**写进工具说明给模型看**的。两处必须同值（审计 P57），由
+ * `src/sharedContract.test.ts ①` 读两处源码对账 —— 收成一处要 engine 那侧 import 这里
+ * （不在本轮范围，如实记）。
  */
 export const READ_FILE_MODEL_CHARS = 8000;
 /**
@@ -87,7 +90,8 @@ export const SCHEDULE_CREATE_DESC = [
   "标题写短（像任务名），prompt 写清到时候要做什么。",
 ].join("");
 
-export const REPEAT_VALUES = ["noRepeat", "hourly", "daily", "weekly", "custom"] as const;
+/** 重复方式的值表 —— **从 `./schedule` 转出**（审计 P58：原来这里另有一份同名数组，迟早漏改一处）。 */
+export { REPEAT_VALUES };
 
 export const SCHEDULE_CREATE_INPUT = z.object({
   title: z.string().trim().min(1).max(30).describe("任务标题，短一些，例如「每日行业新闻」"),
@@ -96,10 +100,11 @@ export const SCHEDULE_CREATE_INPUT = z.object({
   customMinutes: z
     .number()
     .int()
-    .min(5)
-    .max(60 * 24 * 30)
+    /* 边界从 `./schedule` 来（审计 P58：原来是这里裸写的 5 与 60*24*30） */
+    .min(MIN_CUSTOM_MINUTES)
+    .max(MAX_CUSTOM_MINUTES)
     .optional()
-    .describe("repeat=custom 时的间隔分钟数（5 ~ 43200）"),
+    .describe(`repeat=custom 时的间隔分钟数（${MIN_CUSTOM_MINUTES} ~ ${MAX_CUSTOM_MINUTES}）`),
   /*
    * 钟点（Phase 16）。用户说「每天早上 8 点汇总」时，模型该填这两个 ——
    * 在这之前 `repeat=daily` 只能表达"从现在起每 24 小时"，配不出"每晚几点"。
@@ -619,6 +624,14 @@ export function toolLabel(name: string): string {
     const parsed = parseMcpToolName(name);
     return parsed ? `连接器·${parsed.server}` : "连接器";
   }
+  /* 插件工具（`plugin__<插件名>__<工具名>`）：标签带上**哪个插件**，否则看不出留痕是谁干的。
+     前缀与 `engine/runtime/plugins.ts` 的 `pluginToolName` 一致（那边生名、这边认名）。 */
+  if (name.startsWith("plugin__")) {
+    const rest = name.slice("plugin__".length);
+    const at = rest.indexOf("__");
+    const plugin = at > 0 ? rest.slice(0, at) : rest;
+    return plugin ? `插件·${plugin}` : "插件";
+  }
   return name;
 }
 
@@ -686,7 +699,9 @@ export function toolArgsSummary(name: string, input: unknown): string {
   }
   if (name === CANVAS_ADD_NODE_TOOL) {
     const kind = obj.kind === "code" ? "代码节点" : obj.kind === "markdown" ? "文本节点" : "";
-    const what = cut(obj.title ?? obj.content, 24);
+    /* 真入参是 `text`（`CANVAS_ADD_NODE_INPUT`）；原来读的是不存在的 `title`，审批卡片只剩四个字（P55）。
+       `title`/`content` 只作旧名兼容（有份按旧名钉着的用例在 src/workbench，不在本轮范围）。 */
+    const what = cut(obj.text ?? obj.title ?? obj.content, 24);
     if (kind && what) return `${kind}「${what}」`;
     return kind;
   }
@@ -806,6 +821,18 @@ export function describeToolResult(
     const o = output as { kind?: string; opened?: boolean } | undefined;
     const what = o?.kind === "code" ? "代码节点" : "文本节点";
     return withArgs(toolLine(name, true, `已在画布上放了一个${what}${o?.opened ? "（并打开了画布）" : ""}`));
+  }
+  if (name.startsWith("plugin__")) {
+    /*
+     * 插件工具：文档一直承诺「`output.line` 就是界面上那一行留痕」，而这里原来没有分支，
+     * 界面永远只显示「已完成」（审计 P205）。落进来的是插件自己那份 `{ ok, output: { line } }`
+     * （宿主套信封、registry 剥外层两跳）。用前缀判而不 import `isPluginTool`：那个在 engine，
+     * shared 不许依赖 engine。由 `src/pluginSamples.test.ts ③` 钉着。
+     */
+    const o = output as { ok?: boolean; output?: { line?: unknown }; error?: unknown } | undefined;
+    if (o?.ok === false) return withArgs(toolLine(name, false, typeof o.error === "string" ? o.error.slice(0, 60) : undefined));
+    const line = typeof o?.output?.line === "string" ? o.output.line.trim().slice(0, 80) : "";
+    return withArgs(toolLine(name, true, line || undefined));
   }
   if (name === SPAWN_AGENT_TOOL) {
     const o = output as Partial<SubagentReport> | undefined;

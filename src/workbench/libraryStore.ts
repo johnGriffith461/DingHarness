@@ -70,12 +70,28 @@ let saveQueue: Promise<unknown> = Promise.resolve();
 /**
  * 落盘。
  *
+ * ⚠️⚠️ **载入完成之前不许写盘**（2026-10-16 审计 P263）。
+ *
+ * 这批 store 都维护一个 `loaded`，但**一处都没检查它**：开机后 `load()` 的 IPC 还在飞，
+ * 用户这时点一下「启用」/「置顶」，`update()` 会拿着内存里那份**空的（或旧的）**库去写盘
+ * —— 一次点击就把磁盘上完好的库盖成空的。这不是"丢了刚点的那一下"，
+ * 而是**把整份数据抹掉**（载入完成之后也不会再重读磁盘）。
+ * 现在：载入完成前只改内存，并记一个标记；载入完成时如果有过改动，**再写一次**。
+ */
+let changedBeforeLoad = false;
+
+/**
+ * 落盘。
+ *
  * @param lib 要写的库
- * @returns 写完的 Promise（串在上一次之后）
  */
 function persist(lib: Library): void {
   const shell = bridge();
   if (!shell?.library) return;
+  if (!useLibraryStore.getState().loaded) {
+    changedBeforeLoad = true;
+    return;
+  }
   saveQueue = saveQueue
     .then(() => shell.library.save(lib))
     .then((ok) => {
@@ -102,7 +118,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       set({ loaded: true });
       return;
     }
-    const raw = await shell.library.load();
+    /*
+     * ⚠️ 载入本身也要兜住异常（2026-10-16 审计 P264）：`load()` 是这批 store 里
+     * **唯一没有 try/catch 的载入**，而 `PluginsPage` 是用 `void` 调它的 ——
+     * 主进程 `library:load` 一旦拒绝（文件版本比本代码新、被占用、userData 不可写），
+     * 就是一条**未处理的拒绝**，且 `loaded` 永远是 false（后面每次操作都落在"没载入"那一档）。
+     */
+    let raw: unknown = null;
+    try {
+      raw = await shell.library.load();
+    } catch (error) {
+      set({ loaded: true, note: `本机库没读出来：${error instanceof Error ? error.message : String(error)}` });
+      return;
+    }
     /*
      * 任务集合**已知**时才剔悬空项。
      *
@@ -114,6 +142,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const lib = normalizeLibrary(raw, CATALOG_IDS, taskIds ? new Set(taskIds) : null);
     set({ lib, loaded: true });
     persist(lib);
+    /* 载入期间用户动过手（P263）：现在载入完了，把最新那份真正写出去 */
+    if (changedBeforeLoad) {
+      changedBeforeLoad = false;
+      persist(useLibraryStore.getState().lib);
+    }
   },
 
   install: (id) => update((lib) => toggleInstalled(lib, id)),

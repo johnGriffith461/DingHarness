@@ -81,17 +81,28 @@ export type UploadTask = ImportItem & { status: UploadStatus };
  * 这里只挡**可执行与安装包**那一类：云盘是放内容的地方，不是分发程序的地方。
  */
 export const UNSUPPORTED_EXT = [
+  // 可执行 / 动态库
   "exe",
   "dll",
-  "msi",
-  "msp",
   "com",
   "scr",
+  "cpl", // 控制面板项：双击即执行
+  "pif", // 16 位程序的信息文件：在旧壳里就是可执行入口
+  "jar", // Java 程序包（有 JRE 的机器双击就跑）
+  // 安装包
+  "msi",
+  "msp",
+  "msix",
+  "appx",
+  // 脚本宿主（Windows Script Host / HTML 应用）
   "bat",
   "cmd",
   "ps1",
   "vbs",
   "vbe",
+  "wsf",
+  "hta", // HTML Application：由 mshta.exe 执行，与 .exe 同级
+  // 快捷方式与注册表
   "lnk",
   "reg",
 ] as const;

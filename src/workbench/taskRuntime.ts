@@ -73,8 +73,61 @@ import type { StorePort } from "./store";
  * ⚠️ 只放内存：系数是"这台机器 + 这个 provider"的当期口径，重启后重新学即可 ——
  * 落盘反而要担心"换了模型还在用旧系数"。
  */
-/** 当前这条流（补完⑤）：中止要调它的本地 `abort()`，否则这一步永远不落盘。 */
-let activeHandle: { abort: () => void } | null = null;
+/**
+ * 当前在跑的流（补完⑤ + 2026-10-16 审计 P46）：中止要调它的本地 `abort()`，
+ * 否则这一步永远不落盘。
+ *
+ * ⚠️⚠️ **按会话/轮次持有，不能是一个单值**（审计 P46 的真形状）。
+ *
+ * 原来这里是 `let activeHandle: {abort} | null` —— 一条流结束就把它置 null。
+ * 而**同一段对话完全可能同时跑两轮**（`Composer.tsx` 的 Enter 分支不看 `running`，
+ * `HomeView` 的按钮也不 disable）：第二条流一注册就把第一条顶掉，于是
+ *   ① 点「停止」停的是**后开的那条**（用户想停的可能是前一条）；
+ *   ② 前一条收尾时 `runningRequestId = null` 会把**还在跑的那条**的活动状态抹掉
+ *      （界面上"正在回复"没了，而请求还在飞）。
+ *
+ * 键是**每一轮自己的编号**（不是会话 id）：同一会话并发两轮时键也不会撞，
+ * 这正是上面那个场景。会话 id 记在值里，供"停这一段对话"按会话筛。
+ */
+type TurnHandle = {
+  /** 这一轮的本地中止（`handle.abort()`，它会同时断主进程连接并 settle `done`）。 */
+  abort: () => void;
+  /** 主进程给的请求号（进度显示与兜底中止用）。 */
+  requestId: string;
+  /** 这一轮属于哪段对话（空串 = 没标会话）。 */
+  sessionId: string;
+};
+
+/** 轮次键 → 句柄。一轮结束（或异常）就删掉**自己那一份**。 */
+const activeHandles = new Map<string, TurnHandle>();
+/** 轮次编号：只用于给上面那张表分配不撞的键。 */
+let turnSeq = 0;
+
+/**
+ * 现在还有几轮在跑（`runningRequestId` 与"这段对话在跑吗"都从这一处算）。
+ */
+function liveTurns(sessionId?: string): TurnHandle[] {
+  const all = [...activeHandles.values()];
+  return sessionId === undefined ? all : all.filter((h) => h.sessionId === sessionId);
+}
+
+/**
+ * 这段对话现在有流在跑吗（P46：入口守卫用它，避免同会话并发两轮互插日志）。
+ *
+ * @param sessionId 会话 id（工作台里就是任务 id）
+ */
+export function isSessionRunning(sessionId: string): boolean {
+  return sessionId !== "" && liveTurns(sessionId).length > 0;
+}
+
+/**
+ * 把「正在跑」的标志同步成**真实**的在跑轮数（P46）。
+ *
+ * 收尾时不能无条件写 null：那只说明**这一轮**结束了，别的轮可能还在跑。
+ */
+function syncRunningFlag(port: StorePort): void {
+  port.setState({ runningRequestId: liveTurns()[0]?.requestId ?? null });
+}
 
 let calibrationFactor = 1;
 /** 上一轮"发出去的东西"的估算量（收尾时与真实 usage 一起算系数）。 */
@@ -336,6 +389,11 @@ export async function runStream(
   sessionId = "",
 ): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string }> {
   const messages: ChatMessage[] = [...history, { role: "user", content: user }];
+  /**
+   * 这一轮的登记键（P46）：**每轮一个**，同一会话并发两轮也不会互相顶掉。
+   * 用后固定顺序（编号 + 会话）便于排查："这是哪段对话的第几轮"。
+   */
+  const turnKey = `${sessionId || "anon"}#${(turnSeq += 1)}`;
   /*
    * ⚠️ 「新对话默认模型」（§183）只在这种时候生效：
    * **这条对话还没有任何历史**（`history` 为空 = 这就是第一句）。
@@ -456,6 +514,14 @@ export async function runStream(
            * 也不知道花了多少。有了步号与 token，他至少能判断"还要不要等"。
            * 拿不到用量就不显示数字（**不编**）。
            */
+          /*
+           * ⚠️ 兜底形态（**没有** `step` 字段）要与 CLI 说**同一句话**（2026-10-16 审计 P163）。
+           *
+           * `loop.ts` 在没收到 `finish-step` 时会发一条不带 step/usage 的 `step-finish`：
+           * 桌面这里原来 `event.step ?? liveSteps + 1` 于是显示「第 1 步」，
+           * 而 CLI（`ding.ts`）对同一个事件写的是「一步」—— 同一个事件两种说法。
+           * 现在两边同一条判据：有步号说步号，没有就说「一步」。
+           */
           liveSteps = event.step ?? liveSteps + 1;
           /*
            * ⚠️ **要累加**（2026-10-16，审计 P150）：`step-finish` 每次只带**这一步**的用量，
@@ -465,9 +531,10 @@ export async function runStream(
            */
           const stepTokens = usageTotal(event.usage);
           if (stepTokens !== null) liveTokens += stepTokens;
-          const n = liveSteps;
+          /* 有步号说步号；兜底形态（没有 step）说「一步」—— 与 CLI 逐字一致（P163） */
+          const n = event.step === undefined ? "一步" : `第 ${liveSteps} 步`;
           const tk = liveTokens ? `，累计已用 ${formatCount(liveTokens)} token` : "";
-          onPatch({ activity: `第 ${n} 步${tk}` });
+          onPatch({ activity: `${n}${tk}` });
         }
         if (event.type === "delegation") {
           /*
@@ -481,15 +548,27 @@ export async function runStream(
         // error 不在这里处理：投影里记着，收尾时统一取（见下）
       },
     );
+    /*
+     * 登记**这一轮**（P46）：键按轮次分配，值里记着会话 id。
+     * 别写成模块级单值 —— 那正是"第二条流顶掉第一条"的来源。
+     */
     port.setState({ runningRequestId: handle.requestId });
-    // 记下这条流：`abort()` 要能调它的本地 settle（见那里关于两个 abort 的说明）
-    activeHandle = handle;
-    await handle.done;
-    activeHandle = null;
+    activeHandles.set(turnKey, { abort: handle.abort, requestId: handle.requestId, sessionId });
+    try {
+      await handle.done;
+    } finally {
+      // 只删自己那一份：同时跑的别人还在表里
+      activeHandles.delete(turnKey);
+    }
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
+    activeHandles.delete(turnKey);
   }
-  port.setState({ runningRequestId: null });
+  /*
+   * ⚠️ 收尾**不能**无条件 `runningRequestId = null`（P46）：那只代表**这一轮**结束了，
+   * 别的会话/别的轮可能还在跑。按表里还剩几轮来写。
+   */
+  syncRunningFlag(port);
   /* 收尾清掉流式草稿（正文已经落成那一步了，再留着会出现两份）。 */
   onPatch({ draft: undefined });
 
@@ -657,12 +736,21 @@ export async function persistArtifacts(port: StorePort, taskId: string, artifact
 }
 
 /**
- * 中止当前这条流（`store.ts` 的 `abort` action 整段搬过来的）。
+ * 中止正在跑的流（`store.ts` 的 `abort` action 整段搬过来的）。
  *
- * 放在 `taskRuntime.ts` 里是因为 `activeHandle` 只由 `runStream` 写：
+ * 放在 `taskRuntime.ts` 里是因为句柄只由 `runStream` 写：
  * "怎么中止这条流"必须和"谁持有它"待在一起，分两处迟早对不上。
+ *
+ * ⚠️ **按会话/轮次中止**（2026-10-16 审计 P46）：原来只有一个 `activeHandle`，
+ * 同会话并发两轮时它指向后开的那条 —— 点「停止」停的是**错的那一条**（用户以为停的是
+ * 他在看的那一段）。现在：
+ *   · 给了 `sessionId` → 只停**这一段对话**的轮次（界面上的「停止」就该是这个语义）；
+ *   · 没给 → 停掉所有在跑的轮次（全局那一颗「停止」的语义）。
+ *
+ * @param port store 端口
+ * @param sessionId 只停这段对话的轮次；不给就全停
  */
-export function abortRunning(port: StorePort): void {
+export function abortRunning(port: StorePort, sessionId?: string): void {
   /*
    * ⚠️ 走**流自己的** `abort()`，不是只发 `abortStream(id)`（补完⑤时逮到的真 bug）。
    *
@@ -675,10 +763,15 @@ export function abortRunning(port: StorePort): void {
    * `handle.abort()` 一次做两件：断主进程的连接 + **本地 settle**（抛一条「已中止」事件），
    * 于是收尾逻辑照常跑，那一步照常落盘并如实写着「已中止」。
    */
-  activeHandle?.abort();
-  if (!activeHandle) {
+  const targets = liveTurns(sessionId);
+  for (const handle of targets) handle.abort();
+  if (targets.length === 0) {
     const id = port.getState().runningRequestId;
     if (id) void import("../ai/aiClient").then((m) => m.abortStream(id));
   }
-  port.setState({ runningRequestId: null });
+  /* 被中止的那些会在自己的 `finally` 里出表；这里先把标志按真实剩余轮数写上 */
+  for (const [key, handle] of [...activeHandles.entries()]) {
+    if (sessionId === undefined || handle.sessionId === sessionId) activeHandles.delete(key);
+  }
+  syncRunningFlag(port);
 }

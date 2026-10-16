@@ -82,6 +82,7 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "list",
   "cost",
   "sessions",
+  "keep-provenance",
   "h",
   "help",
 ]);

@@ -148,7 +148,12 @@ export function filterApps(
   const q = (opts.query ?? "").trim().toLowerCase();
   const category = opts.category ?? "all";
   const days = opts.days ?? 0;
-  const now = opts.now ?? 0;
+  /*
+   * ⚠️ 默认取**现在**（审计 P246）：原来是 `?? 0`，而时间范围那条条件是 `days > 0 && now > 0` ——
+   * 于是"只传 `{days: 7}` 不传 now"的调用把时间筛选整个关掉：界面写着「近 7 天」，
+   * 列出来的是全部。调用方想固定时间基准（测试、回放）照样可以显式传 `now`。
+   */
+  const now = opts.now ?? Date.now();
   return apps.filter((app) => {
     if (category !== "all" && app.category !== category) return false;
     if (q && !app.name.toLowerCase().includes(q)) return false;

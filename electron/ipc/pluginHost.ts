@@ -1,17 +1,22 @@
+import { rmSync } from "node:fs";
 import { app, dialog, type BrowserWindow } from "electron";
 
 import {
   auditLedger,
   installFromDir,
-  installFromNpm,
+  installFromTarball,
+  makePackDir,
+  packNpm,
   pluginPaths,
   readLedger,
+  readManifestFromDir,
+  readManifestFromTarball,
   setEnabled,
   uninstall,
   type InstalledPlugin,
 } from "../../engine/adapters/pluginStore";
 import { loadEnabledPlugins, loadedPlugins, withheldCapabilities } from "../../engine/runtime/pluginHost";
-import { ENFORCED_PERMISSIONS, type PluginPermission } from "../../engine/runtime/plugins";
+import { checkManifest, ENFORCED_PERMISSIONS, type PluginManifest, type PluginPermission } from "../../engine/runtime/plugins";
 
 /**
  * 桌面的插件 IPC（Phase 8.4）。
@@ -127,6 +132,65 @@ export async function loadPluginsAtStartup(): Promise<void> {
 }
 
 /**
+ * **装之前先把"它要什么权限"给用户看，点头才装**（2026-10-16，审计 P01）。
+ *
+ * ## 缺陷形状（这是"装即全量授权"的正面判据）
+ *
+ * 原来桌面这条路 `installFromNpm({paths, spec})` **不传 `granted`** ——
+ * 而 `pluginStore.installFromDir` 的规则是"不传 = 全部批准"，
+ * 于是桌面上装一个 npm 插件 = **装完就把它申请的权限全批了**，而且
+ * 下一行 `loadPluginsAtStartup()` 立刻在主进程里 import 执行它的代码。
+ * CLI 侧早就是两段式（先取包读清单给用户看，`--yes` 才装，`--grant` 挑权限）——
+ * 同一台机器上，命令行装插件有确认，界面点一下就全量授权。
+ *
+ * 这里补上缺的那一段：**弹原生确认框列出它申请的每一项**，用户点了才装，
+ * 并且只把他在框里看到的那一组 `granted` 传下去（不是"默认全批"）。
+ *
+ * ⚠️ **fail-closed**：没有窗口可挂（`getWindow()` 为 null）时不问也不装 ——
+ * "问不了就默认同意"是这类缺陷的另一种写法。
+ *
+ * @param win 主窗口（挂对话框用）
+ * @param manifest 已校验过的清单
+ * @returns 用户是否同意安装
+ */
+async function confirmInstall(win: BrowserWindow | null, manifest: PluginManifest): Promise<boolean> {
+  if (!win) return false;
+  const enforced = manifest.permissions.filter((p) => ENFORCED_PERMISSIONS.includes(p));
+  const declaredOnly = manifest.permissions.filter((p) => !ENFORCED_PERMISSIONS.includes(p));
+  const detail = [
+    manifest.description,
+    "",
+    `它申请的权限：${manifest.permissions.length ? manifest.permissions.join(" / ") : "（无）"}`,
+    enforced.length ? `· 这几项**会真的生效**（不批它就不接那根线）：${enforced.join(" / ")}` : "",
+    declaredOnly.length
+      ? `· 这几项 v1 **拦不住**（插件与宿主同进程同权限）—— 是"知情"，不是"限制"：${declaredOnly.join(" / ")}`
+      : "",
+    "",
+    "插件代码会在主进程里执行。只装你信得过的。",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    buttons: ["安装", "取消"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    title: "装这个插件？",
+    message: `${manifest.name}@${manifest.version}`,
+    detail,
+  });
+  return response === 0;
+}
+
+/** 读清单 + 校验；两条安装渠道共用（失败时给能直接给用户看的错误）。 */
+function checkedManifestOf(peek: { raw?: unknown; note?: string }): { ok: true; manifest: PluginManifest } | { ok: false; errors: string[] } {
+  if (!peek.raw) return { ok: false, errors: [peek.note ?? "读不到清单"] };
+  const checked = checkManifest(peek.raw);
+  return checked.ok ? { ok: true, manifest: checked.manifest } : { ok: false, errors: checked.errors };
+}
+
+/**
  * 注册插件的 IPC。
  *
  * @param ipcMain Electron 的 ipcMain
@@ -143,28 +207,49 @@ export function registerPluginIpc(ipcMain: Electron.IpcMain, getWindow: () => Br
    *   所以只允许**严格的包名**（见 `isSafeNpmSpec`）：包名不是路径。
    *   不校验的话 `npm pack ../某处` 就成了一条"让主进程去执行任意本地目录"的路 ——
    *   那与"不收路径"的初衷直接矛盾。
+   *
+   * ⚠️ 两条渠道都是**两段式**（2026-10-16，审计 P01）：
+   * 取包/读清单 → **确认框列出权限** → 才装，且只批用户在框里看到的那一组。
+   * npm 那条**先取包再问**：先问再取的话，用户同意的是"一个还没下载的东西"，
+   * 而清单（也就是它会要什么）恰恰只有拿到包才知道。
    */
   ipcMain.handle(PLUGIN_CHANNEL.install, async (_e, spec: unknown) => {
     const paths = pluginPathsNow();
+    const win = getWindow();
+
     if (typeof spec === "string" && spec.trim()) {
-      if (!isSafeNpmSpec(spec.trim())) {
-        return { ok: false as const, errors: [`只允许 npm 包名（可带 @版本），不接受路径：${String(spec).slice(0, 60)}`] };
+      const wanted = spec.trim();
+      if (!isSafeNpmSpec(wanted)) {
+        return { ok: false as const, errors: [`只允许 npm 包名（可带 @版本），不接受路径：${wanted.slice(0, 60)}`] };
       }
-      const got = installFromNpm({ paths, spec: spec.trim() });
-      if (!got.ok) return { ok: false as const, errors: got.errors };
-      await loadPluginsAtStartup();
-      return { ok: true as const, plugin: got.plugin.name, list: pluginViews() };
+      const tmp = makePackDir();
+      try {
+        const packed = packNpm(wanted, tmp);
+        if (!packed.ok) return { ok: false as const, errors: packed.errors };
+        const got = checkedManifestOf(readManifestFromTarball(packed.tgz));
+        if (!got.ok) return { ok: false as const, errors: got.errors };
+        if (!(await confirmInstall(win, got.manifest))) return { ok: false as const, canceled: true as const };
+        const installed = installFromTarball({ paths, tgz: packed.tgz, granted: got.manifest.permissions });
+        if (!installed.ok) return { ok: false as const, errors: installed.errors };
+        await loadPluginsAtStartup();
+        return { ok: true as const, plugin: installed.plugin.name, list: pluginViews() };
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     }
 
-    const win = getWindow();
     const picked = win
       ? await dialog.showOpenDialog(win, { properties: ["openDirectory"], title: "选一个插件目录" })
       : await dialog.showOpenDialog({ properties: ["openDirectory"], title: "选一个插件目录" });
     if (picked.canceled || !picked.filePaths.length) return { ok: false as const, canceled: true as const };
-    const got = installFromDir({ paths, from: picked.filePaths[0] });
+    const from = picked.filePaths[0]!;
+    const got = checkedManifestOf(readManifestFromDir(from));
     if (!got.ok) return { ok: false as const, errors: got.errors };
+    if (!(await confirmInstall(win, got.manifest))) return { ok: false as const, canceled: true as const };
+    const installed = installFromDir({ paths, from, granted: got.manifest.permissions });
+    if (!installed.ok) return { ok: false as const, errors: installed.errors };
     await loadPluginsAtStartup();
-    return { ok: true as const, plugin: got.plugin.name, list: pluginViews() };
+    return { ok: true as const, plugin: installed.plugin.name, list: pluginViews() };
   });
 
   ipcMain.handle(PLUGIN_CHANNEL.setEnabled, async (_e, name: unknown, enabled: unknown) => {

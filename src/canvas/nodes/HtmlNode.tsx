@@ -5,6 +5,7 @@ import type { HtmlNode as HtmlNodeType } from "../types";
 import { NodeView } from "./NodeView";
 import DeferredRender from "./DeferredRender";
 import { useNodeActions } from "../useNodeActions";
+import { createEditBuffer } from "../textCommit";
 import {
   buildSrcdoc,
   describeHtml,
@@ -32,10 +33,33 @@ export default function HtmlNodeView({ id, data, selected }: NodeProps<HtmlNodeT
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   /** 编辑态**只由 `data.preview` 决定**，不另外存一份 state —— 两份状态必然对不上。 */
   const editing = !data.preview;
+  /**
+   * 编辑缓冲（2026-10-16 审计 P27）：源码原来只在 blur 时提交，
+   * 而画布开着 `onlyRenderVisibleElements` —— 滚出视野、或主人把画布面板一关，
+   * 「编辑中」的节点就**卸载**了，blur 永远不来，这段源码只存在于组件内部。
+   * 现在 blur 与**卸载**走同一份口径（`textCommit.ts`，`flush` 幂等）。
+   */
+  const bufferRef = useRef<ReturnType<typeof createEditBuffer> | null>(null);
+  if (bufferRef.current === null) {
+    bufferRef.current = createEditBuffer((value) => {
+      beginEdit(id);
+      setData(id, { html: value });
+    });
+  }
+  const buffer = bufferRef.current;
 
   useEffect(() => {
     setDraft(data.html);
-  }, [data.html]);
+    buffer.reset(data.html);
+  }, [data.html, buffer]);
+
+  useEffect(
+    () => () => {
+      /* ⚠️ 卸载前把没提交的源码交出去（P27）；没有未提交的值时它什么都不做 */
+      buffer.flush();
+    },
+    [buffer],
+  );
 
   /**
    * channelId 必须**跟着内容换**：内容变了要重建 iframe（否则旧文档还跑着），
@@ -72,16 +96,15 @@ export default function HtmlNodeView({ id, data, selected }: NodeProps<HtmlNodeT
    * 这里**必须分两个明确分支**：先前写成"先调 commit()（它自己会写 preview:true）
    * 再写 preview:!data.preview"，结果第二次写把第一次的 `true` 又翻回 `false`，
    * 点「预览」看着毫无反应。
+   *
+   * ⚠️ 切到预览时必须**先把草稿落盘**（P27）：源码输入框会随这一下被卸载，
+   * 而预览渲染的是 `data.html` —— 不 flush 的话用户看到的是**旧内容**
+   *（"我改完点预览，怎么还是原来那段"），而缓冲里那份最终还会在别处被写回去。
    */
   const togglePreview = () => {
     if (editing) {
-      // 编辑 → 预览：把草稿提交上去（顺带把 preview 置 true）
-      if (draft !== data.html) {
-        beginEdit(id);
-        setData(id, { html: draft, preview: true });
-      } else {
-        setData(id, { preview: true });
-      }
+      buffer.flush();
+      setData(id, { preview: true });
       setFrameError(null);
       return;
     }
@@ -171,13 +194,11 @@ export default function HtmlNodeView({ id, data, selected }: NodeProps<HtmlNodeT
           placeholder="粘贴或写一段 HTML，支持 <style>/<script>（在沙箱里跑）"
           onChange={(e) => {
             setDraft(e.target.value);
+            buffer.set(e.target.value);
             beginEdit(id);
           }}
           onBlur={() => {
-            if (draft !== data.html) {
-              beginEdit(id);
-              setData(id, { html: draft });
-            }
+            buffer.flush();
           }}
         />
       )}

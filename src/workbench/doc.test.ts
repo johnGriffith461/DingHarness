@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DOC_BAR_LABELS,
   DOC_CREATE_LABELS,
+  DOC_VERSION_LIMIT,
+  DOC_VERSION_MERGE_MS,
   attachmentLink,
   insertAt,
   docFromMessage,
@@ -16,6 +18,7 @@ import {
   docActionInstruction,
   docTitle,
   makeDoc,
+  normalizeDocs,
   restoreDocVersion,
   versionStamp,
 } from "@shared/doc";
@@ -251,5 +254,64 @@ describe("attachmentLink", () => {
 
   it("origin 空的时候退回 drive（不造一条取不到文件的链接）", () => {
     expect(attachmentLink("a.md", "")).toContain("dshasset://file/drive/");
+  });
+});
+
+describe("历史版本的上限与合并（P18）", () => {
+  const edit = (doc: ReturnType<typeof makeDoc>, body: string, now: number) => applyDocEdit(doc, { body }, "编辑正文", now);
+
+  it("⭐ 连打一串字**合并成一版**（不是每敲一键 append 一份全文）", () => {
+    let doc = makeDoc("d1", NOW);
+    // 模拟逐键输入：每 50ms 一个字符，都在合并窗口内
+    for (let i = 0; i < 20; i += 1) doc = edit(doc, "字".repeat(i + 1), NOW + i * 50);
+    expect(doc.body).toBe("字".repeat(20));
+    /*
+     * 旧实现：versions 会有 21 条（初版 + 20 次击键）。
+     * 现在：同源且连续的改动并上一版，所以只剩 2 条（初版 + 这一次编辑）。
+     */
+    expect(doc.versions.length).toBe(2);
+    expect(doc.versions[doc.versions.length - 1].body).toBe("字".repeat(20));
+    // 开头那条「创建了文档」必须留着（历史面板要有起点）
+    expect(doc.versions[0].reason).toBe("创建了文档");
+  });
+
+  it("隔得够久的同源改动**各记一版**（合并窗口不是永远并在一起）", () => {
+    let doc = makeDoc("d2", NOW);
+    doc = edit(doc, "第一段", NOW);
+    doc = edit(doc, "第一段改了", NOW + DOC_VERSION_MERGE_MS + 1);
+    expect(doc.versions.length).toBe(3);
+  });
+
+  it("不同来源的改动不合并（AI 动作与手改各是一条历史）", () => {
+    let doc = makeDoc("d3", NOW);
+    doc = applyDocEdit(doc, { body: "手改" }, "编辑正文", NOW);
+    doc = applyDocEdit(doc, { body: "润色后" }, "润色", NOW + 10);
+    expect(doc.versions.length).toBe(3);
+    expect(doc.versions[2].reason).toBe("润色");
+  });
+
+  it("⭐ 版本数有**上限**：超了只留最近的（不再 O(n²) 长下去）", () => {
+    let doc = makeDoc("d4", NOW);
+    for (let i = 0; i < DOC_VERSION_LIMIT * 3; i += 1) {
+      // 每次间隔都超出合并窗口 → 每次都真记一版
+      doc = edit(doc, `第 ${i} 稿`, NOW + i * (DOC_VERSION_MERGE_MS + 1));
+    }
+    expect(doc.versions.length, "版本数没有上限 —— 大文档能把它撑爆").toBe(DOC_VERSION_LIMIT);
+    // 留下的必须是**最近**的那些
+    expect(doc.versions[doc.versions.length - 1].body).toBe(`第 ${DOC_VERSION_LIMIT * 3 - 1} 稿`);
+    // 而当前内容与最后一条版本一致（历史与正文不许脱钩）
+    expect(doc.versions[doc.versions.length - 1].body).toBe(doc.body);
+  });
+
+  it("从磁盘读回来的超长历史也被截到上限（normalize 那条路同样收口）", () => {
+    const many = Array.from({ length: DOC_VERSION_LIMIT + 30 }, (_, i) => ({
+      v: i,
+      body: `b${i}`,
+      title: "",
+      at: i,
+      reason: "编辑正文",
+    }));
+    const got = normalizeDocs([{ id: "d5", title: "", body: "b", createdAt: 1, updatedAt: 2, versions: many }]);
+    expect(got[0].versions.length).toBe(DOC_VERSION_LIMIT);
   });
 });

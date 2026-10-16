@@ -32,6 +32,14 @@ import { EffortChip } from "./EffortChip";
 import { sumUsage } from "@shared/cost";
 
 /**
+ * 这一轮还在跑时按发送要说的话（2026-10-16 审计 P46）。
+ *
+ * 导出成常量是为了**能被断言** —— 这句话与「跑着时那颗键是停止」是同一件事的两种说法，
+ * 两处都写死字符串时最容易各自漂移（本仓反复清过的那类毛病）。
+ */
+export const P46_BUSY_NOTE = "这一轮还在跑：先点「停止」，或等它说完再发";
+
+/**
  * 把导入失败的原因转成一句人话。
  *
  * ⚠️ 渲染侧看到的 `reason` 是 `string`（桥那边的类型比 `UploadFailReason` 宽），
@@ -233,6 +241,21 @@ export function Composer({
   const submit = async (): Promise<void> => {
     const value = text.trim();
     if (!value) return;
+    /*
+     * ⚠️ **这一轮还在跑就不许再发**（2026-10-16 审计 P46）。
+     *
+     * `Enter` 那条路原来只看 `shiftKey`、不看 `running` —— 于是跑着的时候连按两下回车，
+     * 就会往同一段对话里并发起两轮（步骤 id 按序号生成会撞、会话日志互插、第二轮的历史里
+     * 没有第一轮的回答）。这里**如实说一句**再返回，而不是静默吞掉：
+     * 静默吞掉的话用户看到的是"按了没反应"，只会再按一次。
+     *
+     * 界面上此刻那颗键就是「停止」，所以这条提示只是把"为什么发不出去"说清。
+     * store 侧还有一道同样的守卫（`sendInTask`）—— 挡住绕过界面的那条路。
+     */
+    if (running) {
+      showMaterialNote(P46_BUSY_NOTE);
+      return;
+    }
     setText("");
     /*
      * 资料在**发送这一刻**读成文本（不是附着那一刻）：
@@ -838,7 +861,7 @@ export function Composer({
             className="wb-send is-stop"
             data-testid="wb-send-stop"
             aria-label="停止" title="停止"
-            onClick={() => useWorkbenchStore.getState().abort()}
+            onClick={() => useWorkbenchStore.getState().abort(activeTask?.id)}
           >
             <Square size={14} />
           </button>

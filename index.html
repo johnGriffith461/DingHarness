@@ -3,6 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      ⭐ 应用文档的 CSP（2026-10-16，审计 P06）。
+      在此之前**一条 CSP 都没有**：`src/canvas/htmlFrame.ts` 那套只覆盖画布里由
+      用户 HTML 生成的 iframe（srcdoc 内容），应用自身这份文档是裸露的 ——
+      渲染进程里任何被注入的脚本、任何远程资源都能无阻加载。
+      这里是最上层的兜底：把"能不能加载外部代码/把数据发出去"这两件事关掉。
+      口径说明：
+        · `default-src 'self'` —— 默认只认自己这一个来源；
+        · `script-src` 里的 `'unsafe-inline'` 是 **Vite 开发态**要的（HMR 预导
+          ＋ react-refresh 会往文档里写内联 module）；`file:` 是打包后 `file://`
+          文档取本地产物要的（`'self'` 在 file: 文档下不可靠）。远程脚本（http/https）
+          一律不允许 —— 被注入的代码没有落脚点，这正是这条 CSP 要挡的；
+        · `img/media-src` 的 `dshasset:` 是生成图/云盘文件自己的协议（见 imageGen.ts）；
+        · `object-src 'none'` 关掉插件/嵌入对象这条路（老式 XSS 载荷）；
+        · `connect-src` 里的 `ws:` 是 Vite HMR，`'self'` 覆盖同源请求。
+      ⚠️ `frame-ancestors` 不能写在 meta 里（规范规定 meta 投递时忽略它），
+      这一条要在主进程的响应头上加 —— 那半边归 `electron/main.ts`。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file: dshasset:; font-src 'self' data: file:; media-src 'self' data: blob: file:; connect-src 'self' ws: wss:; worker-src 'self' blob:; frame-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <!-- 窗口/任务栏标题：2026-10-14 换身份时从「工作台」改为产品名 Ding Harness。
          （应用是自绘标题栏，这一行平时看不见；但切到系统窗口/任务栏时就它。） -->

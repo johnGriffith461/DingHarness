@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import type { McpServerConfig } from "../../shared/mcp";
 
@@ -218,20 +218,39 @@ export class McpClient {
     }
   }
 
-  /** 关掉（应用退出、或用户点了"重新连接"）。 */
+  /**
+   * 关掉（应用退出、或用户点了"重新连接"）。
+   *
+   * ⭐ **杀整棵树，不只杀壳**（2026-10-16，审计 P41）。
+   *
+   * 这个子进程是用 `shell: true` 起的：Windows 上真正的进程是 `cmd.exe`，
+   * 它下面才是 `node <server>`。`child.kill()` **只杀 cmd.exe** ——
+   * 连接器进程留下来继续跑（还占着那个管道），而界面显示"已断开"。
+   * `execTool.ts` 里早就有现成的办法（`taskkill /F /T /PID`，注释里专门写了这件事），
+   * 这里一直没接上。
+   */
   stop(): void {
     this.state = "off";
     this.failAllPending("已断开");
+    const child = this.child;
     try {
       /* 先把 stdin 正常收尾（很多 server 靠它退出），再杀 —— 顺序反了会留下半死的管道 */
-      this.child?.stdin.end();
+      child?.stdin.end();
     } catch {
       /* 已经关了就算了 */
     }
-    try {
-      this.child?.kill();
-    } catch {
-      /* 已经没了就算了 */
+    if (child?.pid && process.platform === "win32") {
+      /*
+       * `/T` 连同子进程一起杀（`shell:true` 之下 cmd.exe 只是外壳）。
+       * 同步：`stop()` 的契约是"回来时已经收完尸"（退出路径上直接调它）。
+       */
+      spawnSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });
+    } else {
+      try {
+        child?.kill();
+      } catch {
+        /* 已经没了就算了 */
+      }
     }
     this.child = null;
   }

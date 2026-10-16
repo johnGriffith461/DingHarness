@@ -1,4 +1,5 @@
 import { useRuntimeStore } from "@/canvas/runtimeStore";
+import { waitCanvasLoaded } from "@/canvas/loadGate";
 import { useWorkbenchStore } from "./store";
 import type { CanvasCommand, CanvasCommandResult, ShellBridge } from "@shared/ipc";
 
@@ -20,7 +21,13 @@ import type { CanvasCommand, CanvasCommandResult, ShellBridge } from "@shared/ip
 
 const bridge = (): ShellBridge | undefined => (globalThis as unknown as { shell?: ShellBridge }).shell;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/**
+ * 等画布载入完成的上限。
+ *
+ * ⚠️ 必须**明显短于主进程那条 5 秒**（`electron/ipc/canvas.ts` 的 `setTimeout(..., 5000)`）——
+ * 否则等待会变成"主进程超时"，回执里就看不到真原因了（P74）。
+ */
+export const CANVAS_LOAD_WAIT_MS = 2500;
 
 /**
  * 起监听。在根组件挂载时调一次。
@@ -45,8 +52,24 @@ export function startCanvasCommandHost(): () => void {
           // 画布没开：先打开它（用户看到的是"画布自己开了"，所以回执里带上 opened）
           wb.toggleCanvas();
           opened = true;
-          // 等它挂载：画布是条件渲染的，紧接着拿 store 会拿到还没初始化的那份
-          await sleep(400);
+          /*
+           * ⚠️⚠️ 等**载入真的回来**，不要赌一个毫秒数（2026-10-16 审计 P74）。
+           *
+           * 原来这里是 `await sleep(400)`。赌输的代价不是"慢一点"：
+           * `usePersistence` 载入完成时会 `loadDocument()` **整块覆盖**画布 ——
+           * 刚建好的那个节点被冲掉，而下面照样回执 `ok:true`
+           * （工具以为干成了，用户去找那个节点什么都没有）。
+           * 现在等的是载入闸（`loadGate.ts`），超时了就**如实说**，不假装成功。
+           */
+          const loaded = await waitCanvasLoaded(CANVAS_LOAD_WAIT_MS);
+          if (!loaded) {
+            reply({
+              ok: false,
+              error: `画布打开后 ${CANVAS_LOAD_WAIT_MS}ms 内没载入完（这里不能赌时间，否则刚建的节点会被载入覆盖掉）`,
+              opened,
+            });
+            return;
+          }
         }
 
         const rt = useRuntimeStore.getState();

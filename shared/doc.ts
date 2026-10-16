@@ -56,6 +56,28 @@ export type DocVersion = {
   reason: string;
 };
 
+/**
+ * 历史版本上限（P18）。
+ *
+ * ⚠️ 原来是**无上限**：正文框每敲一键就 append 一份**整篇正文**，一份文档写 5000 字、
+ * 中间敲 N 次，内存与落盘都按 O(N × 正文长度) 长 —— 大文档能把它撑爆。
+ * 超出上限就丢**最旧**的几版（"回到此版本"只对还留着的版本有效）。
+ */
+export const DOC_VERSION_LIMIT = 50;
+
+/**
+ * 同一种改动在这个时间窗内**合并成一版**（P18：逐键记版）。
+ *
+ * 判据是"上一条历史与这次同源（`reason` 相同）且刚发生过" —— 连打一串字算一次编辑，
+ * 而不是几百次。窗口比 `docStore` 的 400ms 落盘防抖宽一些，才盖得住连续击键。
+ */
+export const DOC_VERSION_MERGE_MS = 1000;
+
+/** 版本数组的收口：超上限只留最近的（顺带保住"别让界面卡死"这条底线）。 */
+function trimVersions(versions: DocVersion[]): DocVersion[] {
+  return versions.length > DOC_VERSION_LIMIT ? versions.slice(-DOC_VERSION_LIMIT) : versions;
+}
+
 export type Doc = {
   id: string;
   title: string;
@@ -122,13 +144,22 @@ export function applyDocEdit(
   const body = patch.body === undefined ? doc.body : patch.body;
   // 没有任何变化就不记一版（否则"点一下按钮"就多一条历史）
   if (title === doc.title && body === doc.body) return doc;
-  const nextV = (doc.versions[doc.versions.length - 1]?.v ?? 0) + 1;
+  const last = doc.versions[doc.versions.length - 1];
+  const nextV = (last?.v ?? 0) + 1;
+  /*
+   * P18：同源且刚发生的改动**并上一版**（连打一串字 = 一次编辑，不是几百次）。
+   * `last.v > 0` 是刻意的：不把开头那条「创建了文档」吃掉 —— 历史面板要有个起点。
+   */
+  const mergeIntoLast = Boolean(last) && last!.v > 0 && last!.reason === reason && now - last!.at <= DOC_VERSION_MERGE_MS;
+  const versions = mergeIntoLast
+    ? [...doc.versions.slice(0, -1), { v: last!.v, body, title, at: now, reason }]
+    : [...doc.versions, { v: nextV, body, title, at: now, reason }];
   return {
     ...doc,
     title,
     body,
     updatedAt: now,
-    versions: [...doc.versions, { v: nextV, body, title, at: now, reason }],
+    versions: trimVersions(versions),
   };
 }
 
@@ -153,10 +184,11 @@ export function restoreDocVersion(doc: Doc, v: number, now: number): Doc {
     title: target.title,
     body: target.body,
     updatedAt: now,
-    versions: [
+    // 还原本身就是一次改动 → 也进历史、也受上限约束（P18）
+    versions: trimVersions([
       ...doc.versions,
       { v: nextV, body: target.body, title: target.title, at: now, reason: `还原自 v${v} 的版本` },
-    ],
+    ]),
   };
 }
 
@@ -233,7 +265,7 @@ export function normalizeDocs(raw: unknown): Doc[] {
       createdAt: typeof d.createdAt === "number" ? d.createdAt : 0,
       updatedAt: typeof d.updatedAt === "number" ? d.updatedAt : 0,
       // 一版都没有时补一个初始版：历史面板要有点东西可显示
-      versions: versions.length ? versions : [{ v: 0, body: "", title: "", at: 0, reason: "创建了文档" }],
+      versions: trimVersions(versions.length ? versions : [{ v: 0, body: "", title: "", at: 0, reason: "创建了文档" }]),
     });
   }
   return out.sort((a, b) => a.updatedAt - b.updatedAt);

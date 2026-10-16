@@ -98,6 +98,9 @@
  * 导出 PNG 走的是"截屏"，所以凡是不属于画面本身就都要先藏起来，
  * 否则导出的是一张带着工具栏、状态栏、缩略图的界面照，而不是作品。
  * 新增浮层时往这条规则里补一行即可 —— 别在导出代码里逐个记类名。
+ *
+ * ⚠️ 2026-10-16（审计 P75）：这份清单原来**漏了四个浮层**，导出的 PNG 上一直带着它们 ——
+ * `.text-toolbar`（排版工具条）/ `.gen-panel` / `.image-actions` / `.bottom-toolbar`。
  */
 .canvas-root[data-exporting="true"] .canvas-toolbar,
 .canvas-root[data-exporting="true"] .marker-toolbar,
@@ -108,12 +111,25 @@
 .canvas-root[data-exporting="true"] .react-flow__minimap,
 .canvas-root[data-exporting="true"] .react-flow__attribution,
 .canvas-root[data-exporting="true"] .react-flow__panel,
+.canvas-root[data-exporting="true"] .text-toolbar,
+.canvas-root[data-exporting="true"] .gen-panel,
+.canvas-root[data-exporting="true"] .image-actions,
+.canvas-root[data-exporting="true"] .bottom-toolbar,
 .canvas-root[data-exporting="true"] .react-flow__controls {
   display: none !important;
 }
 
 /* ---------- 图层面板（阶段 8.1 / 8.2，对标 data-canvas-order） ---------- */
 
+/*
+ * ⚠️ 两个面板（图层 / 版本历史）原来**几何完全重叠**：都是
+ * `top: 56px; right: 12px; bottom: 44px`，只差宽度（250 / 268）与 z-index（11 / 12）
+ * —— 后开的把先开的整块盖住，用户看到的是"点了版本历史，图层不见了"。
+ *
+ * 2026-10-16（审计 P73）两道一起上：① 行为侧两个开关**互斥**（`CanvasRuntime`，
+ * 主判据 —— 同时开两个根本不会发生）；② 样式侧把版本历史挪到图层左边
+ *（`right: 274px = 12 + 250 + 12`），万一有别的路径同时打开也只是并排而非叠死。
+ */
 .layer-panel {
   position: absolute;
   top: 56px;
@@ -341,12 +357,18 @@
   z-index: 20;
 }
 
-/* ---------- 版本历史面板（对标原版 canvas_versions_*） ---------- */
-
+/*
+ * 版本历史面板（对标原版 `canvas_versions_*`）。
+ *
+ * ⚠️ `right` 是 274px 而不是 12px（2026-10-16 审计 P73）：原来它与 `.layer-panel`
+ * **完全同一个矩形**（只差宽度与 z-index），后开的那个会把先开的整块盖住 ——
+ * 用户看到的是"点了版本历史，图层不见了"；关掉上面那个又被盖住的那个冒出来，像开关错乱。
+ * 现在并排在图层左边（`12 + 250 + 12`），叠死这件事在样式层面也不可能。
+ */
 .versions-panel {
   position: absolute;
   top: 56px;
-  right: 12px;
+  right: 274px;
   bottom: 44px;
   width: 268px;
   display: flex;

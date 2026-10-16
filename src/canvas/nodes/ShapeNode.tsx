@@ -3,6 +3,7 @@ import { Circle, Pencil, Square, Type } from "lucide-react";
 import type { NodeProps } from "@xyflow/react";
 import type { EllipseNode as EllipseNodeType, RectNode as RectNodeType } from "../types";
 import { useNodeActions } from "../useNodeActions";
+import { createEditBuffer, shouldCommitOnEnter } from "../textCommit";
 import { flipTransform } from "../layers";
 import { DEFAULT_TEXT_STYLE, normalizeTextStyle, textStyleToCss } from "../textStyle";
 
@@ -21,22 +22,46 @@ export default function ShapeNodeView({ id, type, data, selected }: NodeProps<Re
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(data.text);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  /**
+   * 编辑缓冲（2026-10-16 审计 P27）：正文原来只在 blur 时提交，
+   * 而画布开着 `onlyRenderVisibleElements` —— 形状被滚出视野/画布面板一关就**卸载**，
+   * blur 永远不会来，刚打的字只存在于组件内部。
+   * 现在 blur、回车、**卸载**三个出口都走同一份口径（`textCommit.ts`）。
+   */
+  const bufferRef = useRef<ReturnType<typeof createEditBuffer> | null>(null);
+  if (bufferRef.current === null) {
+    bufferRef.current = createEditBuffer((value) => {
+      beginEdit(id);
+      setData(id, { text: value });
+    });
+  }
+  const buffer = bufferRef.current;
+  /** 已落盘的那份正文（卸载清理里读不到新的 `data.text`，所以自己留一份）。 */
+  const committedRef = useRef(data.text);
 
   useEffect(() => {
     setDraft(data.text);
-  }, [data.text]);
+    committedRef.current = data.text;
+    buffer.reset(data.text);
+  }, [data.text, buffer]);
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
   }, [editing]);
 
+  /** 提交：blur / 回车 / 卸载都走这里（`flush` 幂等，重复调不会多打一个撤销点）。 */
   const commit = () => {
     setEditing(false);
-    if (draft !== data.text) {
-      beginEdit(id);
-      setData(id, { text: draft });
-    }
+    buffer.flush();
   };
+
+  useEffect(
+    () => () => {
+      /* ⚠️ 卸载前把没提交的正文交出去（P27）：缓冲里没有未提交的值时它什么都不做 */
+      buffer.flush();
+    },
+    [buffer],
+  );
 
   const isRect = type === "rect";
   const ts = normalizeTextStyle(data.textStyle);
@@ -95,15 +120,26 @@ export default function ShapeNodeView({ id, type, data, selected }: NodeProps<Re
           placeholder="写点文字"
           onChange={(e) => {
             setDraft(e.target.value);
+            buffer.set(e.target.value);
             beginEdit(id);
           }}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               setDraft(data.text);
+              /*
+               * ⚠️ Esc 是**放弃**这一份草稿，所以要把缓冲一起回退（P27）：
+               * 不回退的话，卸载时那个缓冲会把用户刚放弃的内容又写回去
+               * —— "按了 Esc 却还是改了"会让下面那处卸载刷新看着像撤销失效。
+               */
+              buffer.reset(data.text);
               setEditing(false);
             }
-            if (e.key === "Enter" && !e.shiftKey) {
+            /*
+             * ⚠️ 回车提交要用 IME 感知的判据（P27）：中文输入法里"回车选词"
+             * 也是一次 Enter —— 原来会中途确认好几段，把拼音原文写进内容。
+             */
+            if (shouldCommitOnEnter({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing })) {
               e.preventDefault();
               commit();
             }

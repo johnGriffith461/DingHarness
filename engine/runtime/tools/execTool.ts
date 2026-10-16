@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 
 import { insideDirs } from "./drivePaths";
-import { planSandboxed } from "../../adapters/sandbox";
+import { planFor, planSandboxed, type SandboxPlan } from "../../adapters/sandbox";
 
 /**
  * 「跑命令」工具的执行体（2026-10-14）。
@@ -108,8 +108,21 @@ export type RunCommandResult =
        *
        * ⚠️ **必须如实带出来**：没有隔离时用户/模型要能看见 ——
        * "以为有隔离"比"知道没有"更危险（后者至少会让人谨慎）。
+       *
+       * ⚠️ 但它的**强度**要说清（2026-10-16，审计 P115）：这个值来自
+       * `planSandboxed()` 的 `bounded`，而那是 `--probe` 的**平台级声明** ——
+       * 沙箱进程起来了、作业对象却建失败时，命令不受限、这里仍是 `true`。
+       * 逐条命令的执行事实要等 Rust 侧上报（那一半不在本工单）。
        */
       sandboxed: boolean;
+      /**
+       * 是不是**被用户中止**而结束的（2026-10-16，审计 P35）。
+       *
+       * 与 `timedOut` 分开：超时是"命令太慢"（把 timeout 调大就好），
+       * 中止是"用户按了停止"（再调大也没用）。两者给模型的话不一样，
+       * 而模型据此决定"要不要重跑"。
+       */
+      aborted?: boolean;
     }
   | { ok: false; error: string };
 
@@ -136,18 +149,31 @@ function clampOutput(raw: string): { output: string; truncated: boolean } {
 /**
  * 跑一条命令。
  *
- * @param input 命令与可选的工作目录 / 超时
+ * ## ⭐ 中止信号（2026-10-16，审计 P35）
+ *
+ * 这个参数**原来根本没有**：签名是 `(input, dirs, spawnImpl)`，
+ * 而唯一会 kill 的只有超时定时器 —— 于是"点停止"之后命令**连它的孙进程一起
+ * 继续跑到超时**（`timeout:0` 时不限时时，就是跑到天荒地老）。
+ * 契约 `engine/ports/executor.ts` 明写着「用户点停时，工具内部（子智能体、跑命令）也得停」——
+ * 子智能体那条路早就有信号，跑命令这条一直是空的。
+ *
+ * 接法：信号一响就 `killTree`（Windows 上必须 `/T`，否则只杀掉 cmd 外壳），
+ * 结果里 `aborted: true` 如实带出去 —— 与 `timedOut` 分开报，两者给模型的建议不同。
+ *
+ * @param input 命令、可选的工作目录 / 超时 / **中止信号**
  * @param dirs 允许在其中启动命令的目录白名单（绝对路径）
  * @param spawnImpl 注入点（单测里换成假的；默认真的 `spawn`）
  * @returns 输出与退出码；拒绝了给能照着做的理由
  */
 export async function runCommandForModel(
-  input: { command: string; workdir?: string; timeout?: number },
+  input: { command: string; workdir?: string; timeout?: number; signal?: AbortSignal },
   dirs: readonly string[],
   spawnImpl: typeof spawn = spawn,
 ): Promise<RunCommandResult> {
   const command = String(input.command ?? "").trim();
   if (!command) return { ok: false, error: "命令是空的" };
+  /* 已经中止了就别起了：起完再杀等于白花一次进程创建（也可能有副作用） */
+  if (input.signal?.aborted) return { ok: false, error: "已中止" };
 
   /*
    * 起点必须在授权目录里。没给 `workdir` 时用**第一个**可写目录 ——
@@ -162,10 +188,64 @@ export async function runCommandForModel(
   const asked = typeof input.timeout === "number" ? input.timeout : COMMAND_DEFAULT_TIMEOUT_MS;
   const timeout = asked === 0 ? 0 : Math.min(Math.max(asked, 1_000), COMMAND_MAX_TIMEOUT_MS);
 
-  return await new Promise<RunCommandResult>((resolve) => {
+  /*
+   * ⭐ **沙箱起不来就退回直通**（2026-10-16，审计 P116）。
+   *
+   * `planSandboxed` 只用 `existsSync` 判"有没有沙箱"：二进制**在**但跑不起来时
+   * （架构不对 / 坏 PE / 被安全软件拦下 / EACCES），原来每条 `run_command` **硬失败** ——
+   * 而这一层从第一天起就说"找不到就直通"。所以：先按计划跑，**只有**"进程压根没起来"
+   * 这一种失败才用直通计划重跑一次，并在输出里如实写明"沙箱没起来，这条是直通跑的"
+   * （静默降级比报错更坏；而这一条是**降级后必须让模型/用户知道**）。
+   */
+  const first = await runPlan(planSandboxed(command), { command, cwd, timeout, input, spawnImpl });
+  if (first.spawnError === null || !first.fromSandbox) return first.result;
+
+  const direct = planFor(command, {
+    found: false,
+    bounded: false,
+    binary: "",
+    platform: process.platform,
+    note: "没有沙箱（命令不受限）",
+  });
+  const second = await runPlan(direct, { command, cwd, timeout, input, spawnImpl });
+  return {
+    ...second.result,
+    ...(second.result.ok
+      ? { output: `（⚠️ 沙箱起不来（${first.spawnError}），这一条是**直通**跑的，没有内存/子进程上限）\n${second.result.output}` }
+      : {}),
+  };
+}
+
+/** 一次计划跑出来的一手结果（外层的回落逻辑要区分"没起来"与"跑失败了"）。 */
+type PlanRun = {
+  result: RunCommandResult;
+  /** 进程根本没起来时的原因（null = 起来了，失败与否看 `result`）。 */
+  spawnError: string | null;
+  /** 这次用的是不是沙箱计划。 */
+  fromSandbox: boolean;
+};
+
+/**
+ * 按一份计划跑，把结果收成一个 `RunCommandResult`。
+ *
+ * 抽出来是为了让"沙箱起不来 → 退回直通"能真的重跑一次（审计 P116）——
+ * 原来整段塞在 `runCommandForModel` 的 Promise 里，重试只能靠复制一遍。
+ */
+function runPlan(
+  plan: SandboxPlan,
+  ctx: {
+    command: string;
+    cwd: string;
+    timeout: number;
+    input: { signal?: AbortSignal };
+    spawnImpl: typeof spawn;
+  },
+): Promise<PlanRun> {
+  const { command, cwd, timeout, input, spawnImpl } = ctx;
+  /* 这一条命令有没有真的在沙箱里跑（如实报给模型与用户）。 */
+  const sandboxed = plan.bounded;
+  return new Promise<PlanRun>((resolve) => {
     let child;
-    /** 这一条命令有没有真的在沙箱里跑（如实报给模型与用户）。 */
-    let sandboxed = false;
     try {
       /*
        * ⭐ **经沙箱执行**（Phase 14.1）：命令放进一个有内存/子进程上限的作业对象里跑，
@@ -175,8 +255,6 @@ export async function runCommandForModel(
        * ⚠️ 走沙箱时 **`shell` 不用 Node 的**：那层壳会落在作业对象外面，
        * 于是上限约束的是壳、真正的命令在壳外跑（见 `sandbox.ts` 的说明）。
        */
-      const plan = planSandboxed(command);
-      sandboxed = plan.bounded;
       child = spawnImpl(plan.file, plan.args, {
         cwd,
         shell: false,
@@ -189,12 +267,17 @@ export async function runCommandForModel(
         env: { ...process.env, ...plan.env },
       });
     } catch (e) {
-      resolve({ ok: false, error: `起不来：${e instanceof Error ? e.message : String(e)}` });
+      resolve({
+        result: { ok: false, error: `起不来：${e instanceof Error ? e.message : String(e)}` },
+        spawnError: e instanceof Error ? e.message : String(e),
+        fromSandbox: plan.usedSandbox,
+      });
       return;
     }
 
     const out = new TailBuffer(COMMAND_STREAM_KEEP_BYTES);
     let timedOut = false;
+    let aborted = false;
     let settled = false;
 
     /* stdout 与 stderr 合成一份：终端里看到的就是合在一起的（opencode 走 PTY 同理） */
@@ -209,16 +292,29 @@ export async function runCommandForModel(
           }, timeout)
         : null;
 
-    const finish = (exitCode: number | null, errText?: string) => {
+    /*
+     * 中止信号 → 杀了它（连孙进程）。`AbortSignal` 的监听必须摘掉：
+     * 这一轮请求结束后信号还活着，不摘就是往它上面堆一次性监听（长会话里泄漏）。
+     */
+    const onAbort = () => {
+      aborted = true;
+      killTree(child);
+    };
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+
+    const finish = (exitCode: number | null, errText?: string, spawnError: string | null = null) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      input.signal?.removeEventListener("abort", onAbort);
       const clamped = clampOutput(out.text());
       const truncated = clamped.truncated || out.dropped > 0;
       const output = clamped.output;
       const notes: string[] = [];
       if (truncated) notes.push(`（输出过长，只留了最后 ${COMMAND_MAX_OUTPUT_LINES} 行 / ${Math.round(COMMAND_MAX_OUTPUT_BYTES / 1024)}KB）`);
-      if (timedOut) {
+      if (aborted) {
+        notes.push("（用户中止了这一轮，命令已连它的子进程一起杀掉）");
+      } else if (timedOut) {
         notes.push(
           `（超过 ${timeout} ms 没结束，已中止 —— 如果这条命令本来就慢，把 timeout 调大些）`,
         );
@@ -226,18 +322,23 @@ export async function runCommandForModel(
       if (errText) notes.push(`（${errText}）`);
       if (!output.trim() && !notes.length) notes.push("（没有输出）");
       resolve({
-        ok: true,
-        command,
-        cwd,
-        exitCode,
-        output: [output.trimEnd(), ...notes].filter(Boolean).join("\n"),
-        truncated,
-        timedOut,
-        sandboxed,
+        result: {
+          ok: true,
+          command,
+          cwd,
+          exitCode,
+          output: [output.trimEnd(), ...notes].filter(Boolean).join("\n"),
+          truncated,
+          timedOut,
+          aborted,
+          sandboxed,
+        },
+        spawnError,
+        fromSandbox: plan.usedSandbox,
       });
     };
 
-    child.on("error", (e) => finish(null, `起不来：${e.message}`));
+    child.on("error", (e) => finish(null, `起不来：${e.message}`, e.message));
     /* close 而不是 exit：要等 stdio 也读完，否则大输出会被截断在最后一口气上 */
     child.on("close", (code) => finish(code));
   });
@@ -273,7 +374,11 @@ function killTree(child: ReturnType<typeof spawn>): void {
 export function describeRunResult(result: RunCommandResult, rawCommand: string): string {
   if (!result.ok) return `跑不了「${rawCommand}」：${result.error}`;
   const cmd = result.command.length > 60 ? `${result.command.slice(0, 60)}…` : result.command;
-  const how = result.timedOut ? "超时中止" : `退出码 ${result.exitCode ?? "?"}`;
+  const how = result.aborted
+    ? "被中止"
+    : result.timedOut
+      ? "超时中止"
+      : `退出码 ${result.exitCode ?? "?"}`;
   return `跑了「${cmd}」（${how}）`;
 }
 

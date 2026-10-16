@@ -48,6 +48,9 @@ import type { MarkerKind } from "./markers";
 import { instructionFromMarkers } from "./markers";
 import { matchShortcut, mayStealInEditor } from "./shortcuts";
 import { parseClipboard, planPaste, serializeClipboard } from "./clipboard";
+import { edgesAreStructural, nodesAreStructural } from "./changePolicy";
+import { waitFramesOrTimeout } from "./frameWait";
+import { useKeyDelete } from "./useKeyDelete";
 import { NODE_KIND_META } from "./types";
 import { useRuntimeStore } from "./runtimeStore";
 import type { CanvasNode, NodeKind } from "./types";
@@ -72,6 +75,14 @@ type FlowChange = NodeChange<Node>;
 function extractViewport(viewport: { x: number; y: number; zoom: number }): Viewport {
   return { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
 }
+
+/**
+ * 导出前"等两帧"的上限（P75）。
+ *
+ * 两帧在 60Hz 上是 ~33ms，给到这个数已经是数量级的余量；
+ * 而它必须**有限** —— 窗口不可见时 rAF 根本不回调，没有上限就是永久挂住。
+ */
+const EXPORT_FRAME_WAIT_MS = 350;
 
 export default function CanvasRuntime() {
   /* 渲染计数（见 `renderProbe.ts`）：量拖一次节点到底重渲染几次。 */
@@ -268,13 +279,20 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
        * 导出前先把浮层藏起来（工具条 / 标记条 / 状态栏 / 提示 / 侧栏 / 缩略图）。
        *
        * 不藏的话导出的就是"一张带着工具栏的截图" —— 用户要的是**作品**，不是界面照。
-       * 藏的是 `data-exporting` 这个属性，样式在 styles.css 里统一处理，
+       * 藏的是 `data-exporting` 这个属性，样式在 canvas-nodes.css 里统一处理，
        * 比在这里逐个记类名可靠（以后加新浮层只要往那条规则里补一行）。
        *
        * 等两帧再截：第一帧提交隐藏，第二帧确保合成完成，否则会截到还没隐藏的旧画面。
+       *
+       * ⚠️⚠️ **但两帧不能无限等**（2026-10-16 审计 P75）：`requestAnimationFrame`
+       * 只在窗口可见时回调 —— 窗口被盖住/最小化时那个 await **永不返回**，
+       * 下面的 `finally { setExporting(false) }` 走不到，浮层就**永远停在隐藏态**
+       * （用户看到的是"点了导出，工具栏全没了，怎么点都不回来"）。
+       * `waitFramesOrTimeout` 保证一定会 settle，超时就照常往下走（截到的画面可能还带着
+       * 浮层，但那比"界面永久坏掉"轻得多，而且 `finally` 会把浮层放回来）。
        */
       setExporting(true);
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await waitFramesOrTimeout(2, (cb) => requestAnimationFrame(cb), EXPORT_FRAME_WAIT_MS);
 
       let result;
       try {
@@ -312,7 +330,20 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
     (changes: FlowChange[]) => {
       const dragging = changes.some((c) => c.type === "position" && c.dragging);
       const positional = changes.some((c) => c.type === "position");
-      const structural = changes.some((c) => c.type === "remove" || c.type === "replace");
+      /*
+       * ⚠️⚠️ **`replace` 不算 structural**（2026-10-16 审计 P22）。
+       *
+       * 原来这里是 `c.type === "remove" || c.type === "replace"`。而 `replace` 是
+       * **每次击键**都会来的那一种：`useNodeActions.setData` → React Flow 的
+       * `updateNodeData` → `getElementsDiffChanges` 发 `replace`（实测 @xyflow/react
+       * 12.12.0 的行为）。于是"在节点里打 20 个字"会打 **20 个撤销点** ——
+       * `useNodeActions.beginEdit` 那个 800ms 的合并窗口被整条绕过，
+       * 用户按 Ctrl+Z 得按二十下才退回改动前。
+       *
+       * 取舍：`replace` 的撤销点交给 `beginEdit`（连续输入合并成一个）；
+       * 这里只认真正"图变了"的 `remove`。
+       */
+      const structural = nodesAreStructural(changes);
       if (dragging && !dragStartedRef.current) {
         dragStartedRef.current = true;
         commitHistory();
@@ -334,11 +365,20 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
-      if (changes.some((c) => c.type === "remove" || c.type === "replace")) commitHistory();
+      if (edgesAreStructural(changes)) commitHistory();
       applyEdgeChangesStore(changes);
     },
     [applyEdgeChangesStore, commitHistory],
   );
+
+  /**
+   * 按 Delete/Backspace 时的两段处理（2026-10-16 审计 P106）。
+   *
+   * React Flow 自带的删除会把 `parentId` 命中被删节点的**子节点一并收进去** ——
+   * 与 `removeSelected`（Ctrl+X / 右键删除）明示的取舍**正好相反**。
+   * 两段的实现与理由都在 `useKeyDelete.ts`（摘掉连带项 + 把救下来的子节点接回顶层）。
+   */
+  const { onBeforeDelete, onNodesDelete } = useKeyDelete();
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -681,9 +721,25 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
           resetToSample();
         }}
         versionsOpen={versionsOpen}
-        onToggleVersions={() => setVersionsOpen((prev) => !prev)}
+        /*
+         * ⚠️ 两个面板**互斥**（2026-10-16 审计 P73）：它们原来几何完全重叠
+         * （见 `canvas-nodes.css` 里两块的说明），同时开着就是"后开的把先开的整块盖住"，
+         * 用户看到的是"点了版本历史，图层不见了"。
+         * 样式侧也把它们并排挪开了（多一道），但主判据是这里：同时开两个不该发生。
+         */
+        onToggleVersions={() =>
+          setVersionsOpen((prev) => {
+            if (!prev) setLayersOpen(false);
+            return !prev;
+          })
+        }
         layersOpen={layersOpen}
-        onToggleLayers={() => setLayersOpen((prev) => !prev)}
+        onToggleLayers={() =>
+          setLayersOpen((prev) => {
+            if (!prev) setVersionsOpen(false);
+            return !prev;
+          })
+        }
         onExport={onExportOrReveal}
       />
 
@@ -726,6 +782,8 @@ const patchNodeData = useRuntimeStore((s) => s.patchNodeData);
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onBeforeDelete={onBeforeDelete}
+          onNodesDelete={onNodesDelete}
           onNodeContextMenu={(event, node) => {
             /*
              * 在节点上右键 → 弹出节点菜单。用 React Flow 的 this hook 而不是给每个

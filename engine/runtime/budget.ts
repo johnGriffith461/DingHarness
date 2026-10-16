@@ -15,7 +15,14 @@ import { UNKNOWN_MODEL_BUDGET, describeModel, findModel, isStale } from "./model
  * 想让它变更大，正确做法是把那个模型**登记进来**（带来源），不是调默认值。
  */
 
-/** 保留额度的下限（防止"额度小到等于没有"）。 */
+/**
+ * 保留额度的下限（防止"额度小到等于没有"）。
+ *
+ * ⚠️ 它是一个**上限受模型窗口约束**的下限（2026-10-16，审计 P54）：
+ * 窗口小到放不下这个下限时，实际用的是"窗口的一半"，不是这个常数 ——
+ * 否则额度会**超过模型容量**（额度算得比它的窗口还大 = 没有预算）。
+ * 见 `keepTokensFor`。
+ */
 export const KEEP_RECENT_TOKENS_MIN = 2_000;
 
 /** 历史最多占上限的比例。 */
@@ -81,7 +88,19 @@ export function keepTokensFor(modelId: string | undefined, now: number = Date.no
   const found = budgetOf(modelId, now);
   if (!found.registered) return KEEP_RECENT_TOKENS;
   const byModel = Math.floor(found.contextWindow * KEEP_RATIO);
-  return Math.max(KEEP_RECENT_TOKENS_MIN, Math.min(byModel, MAX_KEEP_TOKENS));
+  /*
+   * ⭐ 下限也要**按这个模型自己的窗口压**（2026-10-16，审计 P54）。
+   *
+   * 原来直接 `Math.max(KEEP_RECENT_TOKENS_MIN, min(byModel, MAX))`：下限 2000 是**绝对**的。
+   * 小窗口模型（或用 `--model` 指到一个我们登记了但窗口很小的本地模型）上，
+   * 这个 `max` 会把额度**顶到超过模型真实上限** —— 额度算得比它的窗口还大，等于没有预算；
+   * 而这条"硬下限"是按大模型的经验定的，它不该对 1k/4k 的模型生效。
+   *
+   * 现在：下限取「2000」与「这个模型窗口的四分之一」里更小的那个 ——
+   * 窗口够大时与原来**逐字一致**，窗口小时不会越界。
+   */
+  const floor = Math.min(KEEP_RECENT_TOKENS_MIN, Math.floor(found.contextWindow / 4));
+  return Math.max(floor, Math.min(byModel, MAX_KEEP_TOKENS));
 }
 
 /**

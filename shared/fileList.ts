@@ -1,4 +1,4 @@
-import type { DriveEntry } from "./drive";
+import { ORIGIN_LABEL_FOR_MODEL, type DriveEntry } from "./drive";
 
 /**
  * 「列文件」工具要说的那段话（2026-10-14）。
@@ -30,17 +30,14 @@ export function formatFileList(entries: readonly DriveEntry[], limit = FILE_LIST
     return "用户的云盘 / 产物 / 导出目录里现在还没有文件。";
   }
 
-  const kindLabel: Record<string, string> = {
-    drive: "云盘",
-    artifact: "产物",
-    export: "导出",
-    asset: "生成图",
-  };
-
   const shown = entries.slice(0, limit);
   const lines = shown.map((e) => {
     const size = e.bytes >= 1024 * 1024 ? `${(e.bytes / 1024 / 1024).toFixed(1)}MB` : `${Math.max(1, Math.round(e.bytes / 1024))}KB`;
-    const from = kindLabel[e.origin] ?? e.origin;
+    /*
+     * 来源名**跟界面用同一张表**（`ORIGIN_LABEL_FOR_MODEL`，见 `shared/drive.ts`）：
+     * 这里原来另抄了一份，asset 在界面上叫「素材」、在留痕里叫「生成图」（审计 P104）。
+     */
+    const from = ORIGIN_LABEL_FOR_MODEL[e.origin] ?? e.origin;
     return `- ${e.name}（${size}，在${from}目录）`;
   });
 

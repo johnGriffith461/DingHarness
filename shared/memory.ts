@@ -130,7 +130,12 @@ export function addMemory(
   };
 
   const entries = [entry, ...lib.entries].slice(0, MEMORY_MAX);
-  return { entries };
+  /*
+   * ⚠️ `...lib` 不是为了好看（审计 P13）：`enabled` 那个开关与条目住在同一个对象里，
+   * 只回 `{ entries }` 会把「用户在设置里关掉了记忆」这件事**静默抹掉** ——
+   * 落盘之后 `memoryPromptBlock` 就判不出关，下一轮记忆又会被塞回提示词里。
+   */
+  return { ...lib, entries };
 }
 
 /**
@@ -138,19 +143,25 @@ export function addMemory(
  *
  * @param lib 现有库
  * @param id 要删的 id
- * @returns 新库
+ * @returns 新库（**保住 `lib` 上的其它字段**，见 P13）
  */
 export function removeMemory(lib: MemoryLib, id: string): MemoryLib {
-  return { entries: lib.entries.filter((e) => e.id !== id) };
+  return { ...lib, entries: lib.entries.filter((e) => e.id !== id) };
 }
 
 /**
  * 清除全部。
  *
+ * ⚠️ 把**当前的库**传进来（审计 P13）：`enabled` 与条目住在同一个对象里，
+ * 只回 `{ entries: [] }` 会把「记忆已关掉」一起抹掉。不传也能编译（旧调用点还在），
+ * 但那条路会丢开关 —— 两份调用点（`src/workbench/memoryStore.ts` 的 `clear()`、
+ * `electron/ipc/memoryStore.ts` 的 `MEMORY_CHANNEL.clear`）要传当前库。
+ *
+ * @param lib 当前的库；不传 = 只给一份空库（会丢 `enabled`）
  * @returns 空库
  */
-export function clearMemory(): MemoryLib {
-  return { entries: [] };
+export function clearMemory(lib?: MemoryLib): MemoryLib {
+  return lib ? { ...lib, entries: [] } : { entries: [] };
 }
 
 /**

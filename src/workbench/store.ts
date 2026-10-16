@@ -19,6 +19,7 @@ import {
 import {
   abortRunning,
   answerTurn,
+  isSessionRunning,
   nextStep,
   persistArtifacts,
   refineTitle,
@@ -197,8 +198,14 @@ export type WorkbenchState = {
   resolveTool: (taskId: string, stepId: string, toolCallId: string, approve: boolean) => Promise<void>;
   /** 生成整段对话的 Markdown（分享/导出用）。 */
   transcript: () => string;
-  /** 中止当前任务。 */
-  abort: () => void;
+  /**
+   * 中止正在跑的轮次。
+   *
+   * @param taskId 只停**这一段对话**的轮次（界面上的「停止」就是这个语义）；
+   *               不给就停掉所有在跑的轮次（2026-10-16 审计 P46：句柄按会话/轮次持有，
+   *               原来是一个单值句柄，同会话并发两轮时「停止」会**打错对象**）
+   */
+  abort: (taskId?: string) => void;
 };
 
 /**
@@ -225,6 +232,14 @@ const port: StorePort = {
 
 let seq = 0;
 const nextId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(seq += 1)}`;
+
+/**
+ * 正在处置的审批（P48）：键是 `任务 id / 调用 id`。
+ *
+ * 放模块级而不是 state 里：它只表达"这一刻有没有同一次调用在飞"，
+ * 不该触发任何重渲染（界面那边有自己的禁用态）。
+ */
+const resolvingTools = new Set<string>();
 
 export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   view: "home",
@@ -295,7 +310,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
    */
   refreshSuggestions: () => set({ suggestions: pickSuggestions(SUGGESTION_POOL) }),
 
-  openTask: (id) => set({ view: "task", activeTaskId: id }),
+  /**
+   * 打开一段已有对话。
+   *
+   * ⚠️ 顺手记下**访问时刻**（2026-10-16 审计 P266）：任务中心的「最近访问」
+   * 原来按 `createdAt` 排（那一栏显示的其实是"最近创建"）。这是"访问"这个动作
+   * 唯一的两处落点之一（另一处是 `sendInTask`），所以更新放在这里最省事也最准。
+   */
+  openTask: (id) =>
+    set((s) => ({
+      view: "task",
+      activeTaskId: id,
+      tasks: s.tasks.map((t) => (t.id === id ? { ...t, openedAt: Date.now() } : t)),
+    })),
 
   renameTask: (id, title) => {
     const clean = title.trim().slice(0, 60);
@@ -396,72 +423,91 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
    * 飘提示的话刷新就没了，用户回头再看这条回复会以为"当时就执行了"。
    */
   resolveTool: async (taskId, stepId, toolCallId, approve) => {
-    /** 只改那一条 trace（按 toolCallId 定位，不能按工具名 —— 一次回复里可能有多条）。 */
-    const patchTrace = (next: Partial<ToolTrace>) =>
-      set((s) => ({
-        // ⚠️ 按**任务**限定（§151）：步骤 id 是按序号生成的，跨任务会撞
-        tasks: s.tasks.map((t) =>
-          t.id !== taskId
-            ? t
-            : {
-                ...t,
-                steps: t.steps.map((x) =>
-                  x.id !== stepId
-                    ? x
-                    : {
-                        ...x,
-                        tools: (x.tools ?? []).map((tt) => (tt.toolCallId === toolCallId ? { ...tt, ...next } : tt)),
-                      },
-                ),
-              },
-        ),
-      }));
+    /*
+     * ⚠️⚠️ **同一次调用只许处置一遍**（2026-10-16 审计 P48 的根因那一半）。
+     *
+     * `runToolOnce` 是**真在主进程干活**的（写文件、跑命令、装插件）。
+     * 而界面上那两颗键原来是裸的 `onClick`：连点两下、或者两个入口同时点，
+     * 就会把同一个副作用执行两遍。界面侧现在也会禁用（`ToolTraceList`），
+     * 但界面禁用拦不住"绕过界面"的路 —— 收口放在这里才管用：
+     *   · `pending` 已经是 false → 这一条早就处置过了，直接返回；
+     *   · 同一把键（任务 + 调用 id）正在执行 → 不并发进第二遍。
+     */
+    const guardKey = `${taskId}/${toolCallId}`;
+    if (resolvingTools.has(guardKey)) return;
+    const snapshot = get();
+    const before = snapshot.tasks
+      .find((t) => t.id === taskId)
+      ?.steps.find((x) => x.id === stepId)
+      ?.tools?.find((tt) => tt.toolCallId === toolCallId);
+    if (!before) return;
+    // 已经处置过（pending 落成 false）就不再来一遍 —— 否则"副作用执行两遍"
+    if (!before.pending) return;
+    resolvingTools.add(guardKey);
+    try {
+      /** 只改那一条 trace（按 toolCallId 定位，不能按工具名 —— 一次回复里可能有多条）。 */
+      const patchTrace = (next: Partial<ToolTrace>) =>
+        set((s) => ({
+          // ⚠️ 按**任务**限定（§151）：步骤 id 是按序号生成的，跨任务会撞
+          tasks: s.tasks.map((t) =>
+            t.id !== taskId
+              ? t
+              : {
+                  ...t,
+                  steps: t.steps.map((x) =>
+                    x.id !== stepId
+                      ? x
+                      : {
+                          ...x,
+                          tools: (x.tools ?? []).map((tt) => (tt.toolCallId === toolCallId ? { ...tt, ...next } : tt)),
+                        },
+                  ),
+                },
+          ),
+        }));
 
-    const step = get()
-      .tasks.find((t) => t.id === taskId)
-      ?.steps.find((x) => x.id === stepId);
-    const trace = step?.tools?.find((tt) => tt.toolCallId === toolCallId);
-    if (!trace || !step) return;
+      if (!approve) {
+        /*
+         * 拒绝也**上报**（C2/INV-3）：主进程把决定记进会话日志。
+         *
+         * 原来这里纯在本地改一行 —— 重启后那条留痕又变回「等你确认」，
+         * 而"谁拒的、拒了什么"查不到。现在与批准对称，文案也以主进程返回的为准。
+         */
+        const rejected = await runToolOnce({
+          name: before.name,
+          input: before.input,
+          toolPolicy: readConfirmMode(),
+          reject: true,
+          toolCallId,
+          ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
+        });
+        patchTrace({ pending: false, ok: true, line: rejected.line || rejectedLine(before.name) });
+        return;
+      }
 
-    if (!approve) {
-      /*
-       * 拒绝也**上报**（C2/INV-3）：主进程把决定记进会话日志。
-       *
-       * 原来这里纯在本地改一行 —— 重启后那条留痕又变回「等你确认」，
-       * 而"谁拒的、拒了什么"查不到。现在与批准对称，文案也以主进程返回的为准。
-       */
-      const rejected = await runToolOnce({
-        name: trace.name,
-        input: trace.input,
+      const result = await runToolOnce({
+        name: before.name,
+        input: before.input,
+        /*
+         * ⚠️ 必须带上当前档位（§150）：`spawn_agent` 会按它给**子智能体**建工具集。
+         * 不带的话，子智能体就会在一次"用户已放行"的名义下拿到全部放行权 ——
+         * 那正是"审批穿透"要防的事。
+         */
         toolPolicy: readConfirmMode(),
-        reject: true,
+        // 决策要进日志（INV-3）：哪一次调用、哪段会话
         toolCallId,
         ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
       });
-      patchTrace({ pending: false, ok: true, line: rejected.line || rejectedLine(trace.name) });
-      return;
+      patchTrace({
+        pending: false,
+        ok: result.ok,
+        line: result.line,
+        ...(result.output !== undefined ? { output: result.output } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      });
+    } finally {
+      resolvingTools.delete(guardKey);
     }
-
-    const result = await runToolOnce({
-      name: trace.name,
-      input: trace.input,
-      /*
-       * ⚠️ 必须带上当前档位（§150）：`spawn_agent` 会按它给**子智能体**建工具集。
-       * 不带的话，子智能体就会在一次"用户已放行"的名义下拿到全部放行权 ——
-       * 那正是"审批穿透"要防的事。
-       */
-      toolPolicy: readConfirmMode(),
-      // 决策要进日志（INV-3）：哪一次调用、哪段会话
-      toolCallId,
-      ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
-    });
-    patchTrace({
-      pending: false,
-      ok: result.ok,
-      line: result.line,
-      ...(result.output !== undefined ? { output: result.output } : {}),
-      ...(result.error ? { error: result.error } : {}),
-    });
   },
 
   transcript: () => {
@@ -479,12 +525,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   },
 
   /**
-   * 中止当前任务。
+   * 中止正在跑的轮次（P46：按会话/轮次，见 `abortRunning`）。
    *
-   * 动作体整段搬去 `taskRuntime.ts` 的 `abortRunning`（C6-4 Step 3）：`activeHandle`
-   * 只由 `runStream` 写，"怎么中止这条流"要和"谁持有它"待在一起。
+   * 动作体整段搬去 `taskRuntime.ts`（C6-4 Step 3）：句柄只由 `runStream` 写，
+   * "怎么中止这条流"要和"谁持有它"待在一起。
    */
-  abort: () => abortRunning(port),
+  abort: (taskId) => abortRunning(port, taskId),
 
   /**
    * 在**已有的对话里**继续说一句（§147）。
@@ -500,6 +546,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   sendInTask: async (taskId, message, options) => {
     const text = String(message ?? "").trim();
     if (!text) return;
+    /*
+     * ⚠️ **这一段对话已经在跑就不许再起一轮**（2026-10-16 审计 P46 的触发那一半）。
+     *
+     * 原来这里一行守卫都没有：`Composer` 的 Enter 分支只看 `shiftKey`、不看 `running`，
+     * 而 `HomeView` 那颗按钮也不 disable —— 于是"同一段对话并发两轮"是**真走得到**的。
+     * 两轮并发会一起改同一份 `steps`（步骤 id 按序号生成 → 必然撞）、一起往会话日志里写，
+     * 而且第二轮的历史里**没有第一轮的回答**。
+     *
+     * 界面上已有明确出路：跑着的时候那颗键是「停止」（`Composer` 的 `running` 分支），
+     * 所以这里拒绝不是在挡用户的正常操作，而是把"绕过界面"的那条路堵上。
+     * （光靠这里也不够 —— 界面侧 `submit()` 同样会先说一句，见 `Composer.tsx`。）
+     */
+    if (isSessionRunning(taskId)) return;
 
     const state = get();
     const task = state.tasks.find((t) => t.id === taskId);
@@ -515,7 +574,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       finishedAt: null,
       activity: "正在思考",
     };
-    set((s) => ({ tasks: upsertTask(s.tasks, withNew), view: "task", activeTaskId: taskId }));
+    set((s) => ({
+      /* 接着说一句也是"访问"这一段对话（P266 的另一处落点，与 `openTask` 同一口径） */
+      tasks: upsertTask(s.tasks, withNew).map((t) => (t.id === taskId ? { ...t, openedAt: Date.now() } : t)),
+      view: "task",
+      activeTaskId: taskId,
+    }));
 
     /*
      * ⚠️ 历史取的是**加新消息之前**的那份 steps —— 新那句话要作为

@@ -3,8 +3,8 @@ import type { WorkbenchView } from "./store";
 /**
  * 左栏的全局快捷键。
  *
- * 依据：本体左栏的提示文字（`.verify` 从 `E:\reverse-out\DoubaoWork\app-triage\dynamic-ui\
- * route-sweep.json` 读到的 head 原文）：
+ * 依据：接入前那版工程左栏的提示文字（逐屏截图与提取产物都在仓外工作区，未入库 ——
+ * 无法复核；判据以本文件里的映射表为准）：
  *
  *     新工作任务        Ctrl N
  *     定时任务          Ctrl Shift T

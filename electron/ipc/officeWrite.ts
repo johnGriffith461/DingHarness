@@ -130,9 +130,23 @@ function blockToDocx(block: MdBlock): Array<Paragraph | Table> {
 }
 
 /**
+ * 一页最多放几条要点（超出的**另起一页**，不再默默扔掉）。
+ *
+ * 2026-10-16（审计 P226）：这里原来是 `bullets.slice(0, 12)` ——
+ * 第 13 条往后的正文**直接消失**，而函数照样返回 Buffer、上层照样报"已生成"。
+ * 长文最容易命中：`bestSectionLevel`（`shared/minimark.ts`）在没有标题时返回 1，
+ * 整篇变成一节一页，于是"一页 12 条"就吃掉了整篇文档的大部分。
+ *
+ * 12 这个数是**排版**决定的（16pt × 1.3 行距在 16:9 上放得下 12 行），
+ * 所以分页而不是放大字体 —— 排版口径不变，内容一条不丢。
+ */
+const PPTX_BULLETS_PER_SLIDE = 12;
+
+/**
  * Markdown → PowerPoint Buffer。
  *
  * 分页规则：按一级标题一页；没有一级标题时整篇一页。每页标题 + 该页的要点。
+ * 一节里的要点超过一页能放的条数 → **续页**（标题带「（续）」），一条都不丢。
  *
  * @param markdown 正文
  * @param title 演示文稿标题（第一页封面）
@@ -159,25 +173,44 @@ export async function markdownToPptx(markdown: string, title: string): Promise<B
   const blocks = parseMarkdown(markdown);
   const sections = splitSections(blocks, bestSectionLevel(blocks));
   for (const section of sections) {
-    const slide = pptx.addSlide();
     const bullets = bulletsOf(section.blocks);
-    if (section.title) {
-      slide.addText(section.title, {
-        x: 0.5,
-        y: 0.35,
-        w: 9,
-        h: 0.9,
-        fontSize: 26,
-        bold: true,
-        color: "1B1D21",
-      });
+    /*
+     * ⚠️ 要点一条都不许丢（P226）：按每页容量切段，第一段放本节，后面的走续页。
+     * 空要点也要出一页（保持"一节至少一页"的原有形状，不要变成空文档）。
+     */
+    const pages: string[][] = [];
+    for (let i = 0; i < bullets.length; i += PPTX_BULLETS_PER_SLIDE) {
+      pages.push(bullets.slice(i, i + PPTX_BULLETS_PER_SLIDE));
     }
-    if (bullets.length > 0) {
-      slide.addText(
-        bullets.slice(0, 12).map((text: string) => ({ text, options: { bullet: true, breakLine: true } })),
-        { x: 0.6, y: 1.5, w: 8.8, h: 3.6, fontSize: 16, color: "33383F", lineSpacingMultiple: 1.3 },
-      );
-    }
+    if (!pages.length) pages.push([]);
+
+    pages.forEach((pageBullets, pageIndex) => {
+      const slide = pptx.addSlide();
+      const heading = section.title
+        ? pageIndex === 0
+          ? section.title
+          : `${section.title}（续 ${pageIndex}）`
+        : pageIndex === 0
+          ? ""
+          : `（续 ${pageIndex}）`;
+      if (heading) {
+        slide.addText(heading, {
+          x: 0.5,
+          y: 0.35,
+          w: 9,
+          h: 0.9,
+          fontSize: 26,
+          bold: true,
+          color: "1B1D21",
+        });
+      }
+      if (pageBullets.length > 0) {
+        slide.addText(
+          pageBullets.map((text: string) => ({ text, options: { bullet: true, breakLine: true } })),
+          { x: 0.6, y: 1.5, w: 8.8, h: 3.6, fontSize: 16, color: "33383F", lineSpacingMultiple: 1.3 },
+        );
+      }
+    });
   }
 
   const out = await pptx.write({ outputType: "nodebuffer" });
