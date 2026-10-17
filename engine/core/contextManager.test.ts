@@ -133,3 +133,75 @@ describe("索引", () => {
     expect(indexFitsBudget(index, tokens - 1)).toBe(false);
   });
 });
+
+/**
+ * V6-4b「永不遗忘的会话」：跨 10 次压缩/切会话之后，**目标还在**。
+ *
+ * 这条不测"模型记不记得"（那要真模型），测的是产品承诺的**机制**：
+ *   ① 活状态触发的是 `fork_index` 而不是 `compact`；
+ *   ② 索引从事件流事实重建，目标与未完成项逐次带过去；
+ *   ③ 索引不会随轮次无限膨胀（有上限）。
+ */
+describe("跨 10 次压缩/切换后的目标保持（V6-4b）", () => {
+  const GOAL = "把 12 份季度报表合并成一份年度纪要，最后跑一遍校验";
+
+  it("每次有活状态都选 fork_index；索引里的目标十轮后一字不差", () => {
+    let openItems = 3;
+    let compactions = 0;
+    const seenGoals = new Set<string>();
+    const seenOpen: string[] = [];
+
+    for (let round = 1; round <= 10; round += 1) {
+      const decision = decideContext({
+        ...base,
+        tokens: 30_000 + round * 1000,
+        openItems,
+        /* 第 5 轮假装"说完成了但只做一半" —— 必须仍然走索引 */
+        claim: round === 5 ? "done" : "progress",
+        evidenceComplete: false,
+        compactions,
+        hasFreshIndex: round > 1,
+      });
+      expect(decision.action, `第 ${round} 轮该走索引`).toBe("fork_index");
+
+      const index = buildContextIndex({
+        sessionId: "task-long",
+        goal: GOAL,
+        openItems: [`第 ${round} 节还没写`, ...Array.from({ length: openItems - 1 }, (_, i) => `待办 ${round}-${i}`)],
+        decisions: [`第 ${round} 轮定的口径`],
+        atSeq: round * 100,
+        eventCount: round * 137,
+      });
+      seenGoals.add(index.goal);
+      seenOpen.push(...index.openItems);
+      /* 索引不会随轮次无限膨胀 */
+      expect(index.openItems.length).toBeLessThanOrEqual(CONTEXT_INDEX_MAX_ITEMS);
+
+      /* 切到"新会话"：把渲染出来的索引带过去 —— 目标必须仍在里面 */
+      const carried = renderContextIndex(index);
+      expect(carried).toContain(GOAL);
+
+      compactions += 1;
+      openItems = Math.max(1, openItems - 1);
+    }
+
+    expect(seenGoals).toEqual(new Set([GOAL]));
+    expect(seenOpen.length).toBeGreaterThan(10);
+  });
+
+  it("任务真正收尾（没有活状态）后才允许 compact —— 不是为了压缩而压缩", () => {
+    const decision = decideContext({
+      ...base,
+      tokens: 50_000,
+      openItems: 0,
+      failedTools: 0,
+      runningChecks: false,
+      pendingWork: false,
+      claim: "done",
+      evidenceComplete: true,
+      compactions: 2,
+      hasFreshIndex: true,
+    });
+    expect(decision.action).toBe("compact");
+  });
+});
