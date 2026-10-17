@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
+import { PRODUCT_VERSION } from "../../shared/product";
+import { engineIncompatibility } from "../runtime/pluginIndex";
 import { checkManifest, type PluginManifest, type PluginPermission, type PluginPublisher } from "../runtime/plugins";
 import { verifyPluginSignature } from "../runtime/pluginSignature";
 import { rememberPublisher } from "./pluginTrust";
@@ -187,6 +189,13 @@ export function installFromDir(input: {
   const checked = checkManifest(got.raw);
   if (!checked.ok) return { ok: false, errors: checked.errors };
   const manifest: PluginManifest = checked.manifest;
+
+  /*
+   * ⭐ **兼容门**（V6-3d）：`engines.ding` 原来只校验"非空字符串"，从不比较版本 ——
+   * 声明了却不生效。现在装之前就判：不兼容直接拒（"装上了但跑不起来"比"装不上"坏得多）。
+   */
+  const incompatible = engineIncompatibility(manifest.engines.ding, PRODUCT_VERSION);
+  if (incompatible) return { ok: false, errors: [incompatible] };
 
   /*
    * ⚠️ 入口文件必须在。**"装了但跑不起来"**比"装不上"坏得多 ——

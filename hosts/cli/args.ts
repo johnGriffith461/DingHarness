@@ -63,6 +63,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "at-turn",
   "at-seq",
   "into",
+  /* `ding plugins search|install --index`（V6-3d）：市场索引（本地路径或 URL） */
+  "index",
   "out",
   "by",
   "kind",

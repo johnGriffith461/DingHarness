@@ -41,7 +41,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding fork <会话 id> [--at-turn N | --at-seq N] [--into <新 id>] [--list]  # 从任一时点分叉",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
-      "  ding plugins [list|install <目录|npm:包名> --yes|enable|disable|remove|doctor]",
+      "  ding plugins [list|search <词>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",
       "  ding config [show|set <键> <值>|unset <键>]    # 默认 provider / 模型 / 档位 / 目录",
       "  ding --json <命令>                             # 给脚本/CI 的 JSON 输出",
       ...(devMode

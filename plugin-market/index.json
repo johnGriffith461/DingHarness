@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "updatedAt": "2026-10-17",
+  "plugins": [
+    {
+      "id": "word-count",
+      "name": "字数统计",
+      "version": "1.0.0",
+      "description": "数一数一段文本里有多少个非空白字符（仓内最小可跑示例；未发布到 npm）",
+      "publisher": "ding-samples",
+      "enginesDing": ">=0.5.0",
+      "tags": ["示例", "统计", "sample"],
+      "local": "../plugin-samples/word-count"
+    }
+  ]
+}

@@ -10,6 +10,14 @@ import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
+import { PRODUCT_VERSION } from "../../shared/product";
+import {
+  parsePluginIndex,
+  searchPluginIndex,
+  engineIncompatibility,
+  type PluginIndex,
+  type PluginIndexEntry,
+} from "../../engine/runtime/pluginIndex";
 import { describeBudget } from "../../engine/runtime/budget";
 import { budgetOf } from "../../engine/runtime/budget";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
@@ -407,6 +415,54 @@ function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
  * 而"权限确认"这件事在无头环境里只能靠一个明确的旗子表达 ——
  * 没有它就把权限清单打出来并**拒绝安装**（而不是替你点了"同意"）。
  */
+/**
+ * 默认市场索引：从 cwd 往上找 `plugin-market/index.json`（V6-3d）。
+ *
+ * ⚠️ 仓库里那份只是**格式示例 + 本仓自带的插件**，不是线上市场。
+ * 线上索引要一个稳定的 URL 与审核流程 —— 那是运营侧的事，不在这里假装已经有了。
+ */
+function defaultPluginIndex(): string | null {
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i += 1) {
+    const candidate = path.join(dir, "plugin-market", "index.json");
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** 读一份索引（本地文件或 http(s) URL）。 */
+async function loadPluginIndex(
+  source?: string,
+): Promise<{ index: PluginIndex; problems: string[]; from: string; baseDir: string; remote: boolean } | { error: string }> {
+  const target = source ?? defaultPluginIndex();
+  if (!target) return { error: "没有市场索引：用 --index <文件|URL> 指一份，或在仓库根放 plugin-market/index.json" };
+  try {
+    let text: string;
+    if (/^https?:\/\//i.test(target)) {
+      const response = await fetch(target, { signal: AbortSignal.timeout(8000) });
+      if (!response.ok) return { error: `索引下载失败：HTTP ${response.status}（${target}）` };
+      text = await response.text();
+    } else {
+      text = await fs.readFile(path.resolve(target), "utf8");
+    }
+    const parsed = parsePluginIndex(JSON.parse(text));
+    if (!parsed.ok) return { error: `索引不合法：${parsed.errors.join("；")}` };
+    const remote = /^https?:\/\//i.test(target);
+    return {
+      index: parsed.index,
+      problems: parsed.problems,
+      from: target,
+      baseDir: remote ? "" : path.dirname(path.resolve(target)),
+      remote,
+    };
+  } catch (error) {
+    return { error: `读索引失败：${String((error as Error)?.message ?? error).slice(0, 160)}` };
+  }
+}
+
 async function cmdPlugins(p: Parsed): Promise<number> {
   const paths = pluginPaths(dataDir());
   const sub = p.args[0] ?? "list";
@@ -445,10 +501,85 @@ async function cmdPlugins(p: Parsed): Promise<number> {
     return 0;
   }
 
+  /*
+   * 市场索引搜索（V6-3d）。
+   *
+   * 这是"发现"这一步：搜索 → 看到兼容性/权限/来源 → `install index:<id>`。
+   * 兼容性在这里**就标出来**（不兼容的也列，但沉下去）——
+   * 让用户先知道"装上跑不起来"，而不是装完才发现。
+   */
+  if (sub === "search") {
+    const query = p.args.slice(1).join(" ");
+    const loaded = await loadPluginIndex(flag(p, "index"));
+    if ("error" in loaded) {
+      console.error(loaded.error);
+      return 1;
+    }
+    if (loaded.problems.length) {
+      console.error(`⚠️ 索引里有 ${loaded.problems.length} 条读不了（已跳过）：${loaded.problems.slice(0, 3).join("；")}`);
+    }
+    const hits = searchPluginIndex(loaded.index, query, PRODUCT_VERSION);
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify({ from: loaded.from, hits }, null, 2));
+      return 0;
+    }
+    if (!hits.length) {
+      console.log(`「${query || "(全部)"}」没有命中（索引：${loaded.from}，共 ${loaded.index.plugins.length} 条）`);
+      return 0;
+    }
+    for (const hit of hits) {
+      const tags = hit.tags?.length ? `　#${hit.tags.join(" #")}` : "";
+      console.log(
+        `${hit.compatible ? "✓" : "⚠️"} ${hit.id}@${hit.version}　${hit.name}` +
+          (hit.publisher ? `　by ${hit.publisher}` : "") +
+          `　[ding ${hit.enginesDing}]${tags}`,
+      );
+      if (hit.description) console.log(`    ${hit.description}`);
+      if (!hit.compatible) console.log(`    ${hit.incompatibility}`);
+    }
+    console.log("");
+    console.log(`装一个：ding plugins install index:<id> --yes`);
+    return 0;
+  }
+
   if (sub === "install") {
     if (!name) {
-      console.error("用法：ding plugins install <目录|npm:包名> [--yes] [--grant tools:register,hooks:register]");
+      console.error("用法：ding plugins install <目录|npm:包名|index:id> [--yes] [--grant tools:register,hooks:register] [--index <文件|URL>]");
       return 2;
+    }
+    /*
+     * `index:<id>`（V6-3d）：从市场索引解析出安装来源。
+     * 索引只是**发现**层 —— 装的时候照样走 npm 取包 + 清单 + 验签 + 权限确认。
+     */
+    let installName = name;
+    let fromIndex: PluginIndexEntry | undefined;
+    if (name.startsWith("index:")) {
+      const id = name.slice("index:".length).trim();
+      const loaded = await loadPluginIndex(flag(p, "index"));
+      if ("error" in loaded) {
+        console.error(loaded.error);
+        return 1;
+      }
+      fromIndex = loaded.index.plugins.find((entry) => entry.id === id);
+      if (!fromIndex) {
+        console.error(`索引里没有「${id}」（索引：${loaded.from}）。用 ding plugins search 看看有哪些。`);
+        return 1;
+      }
+      const incompatible = engineIncompatibility(fromIndex.enginesDing, PRODUCT_VERSION);
+      if (incompatible) {
+        console.error(incompatible);
+        return 1;
+      }
+      if (fromIndex.npm) installName = `npm:${fromIndex.npm}`;
+      else if (fromIndex.local && !loaded.remote) installName = path.resolve(loaded.baseDir, fromIndex.local);
+      else {
+        console.error(
+          loaded.remote && fromIndex.local
+            ? `「${id}」只给了本地路径 —— 远程索引里的 local 会被忽略（那会在你的机器上装任意路径的代码）`
+            : `「${id}」没有可用的安装来源`,
+        );
+        return 1;
+      }
     }
     /*
      * 两个渠道（Phase 8.2）：本地目录 `install <目录>`，npm 包 `install npm:<包名>`。
@@ -457,15 +588,15 @@ async function cmdPlugins(p: Parsed): Promise<number> {
      * 用户加 `--yes` 之后才真装。合成一步的话，"权限确认"就只能发生在
      * **已经下载并解开之后** —— 那不叫确认，那叫通知。
      */
-    const isNpm = name.startsWith("npm:");
+    const isNpm = installName.startsWith("npm:");
     const packDir = isNpm ? makePackDir() : "";
     const probe = isNpm
       ? (() => {
-          const packed = packNpm(name.slice(4), packDir);
+          const packed = packNpm(installName.slice(4), packDir);
           if (!packed.ok) return { note: packed.errors.join("；") };
           return readManifestFromTarball(packed.tgz);
         })()
-      : readManifestFromDir(path.resolve(name));
+      : readManifestFromDir(path.resolve(installName));
     if (!probe.raw) {
       console.error(`读不到清单：${probe.note ?? "未知原因"}`);
       return 1;
@@ -477,7 +608,7 @@ async function cmdPlugins(p: Parsed): Promise<number> {
       return 1;
     }
     const m = checked.manifest;
-    console.log(`插件 ${m.name}@${m.version}`);
+    console.log(`插件 ${m.name}@${m.version}${fromIndex ? `（来自市场索引：${fromIndex.id}）` : ""}`);
     console.log(`  ${m.description}`);
     console.log(`  它申请的权限：${m.permissions.length ? m.permissions.join(" / ") : "（无）"}`);
     const enforced = m.permissions.filter((x) => ENFORCED_PERMISSIONS.includes(x));
@@ -501,8 +632,8 @@ async function cmdPlugins(p: Parsed): Promise<number> {
           .filter((x): x is PluginPermission => PLUGIN_PERMISSIONS.includes(x as PluginPermission))
       : undefined;
     const got = isNpm
-      ? installFromNpm({ paths, spec: name.slice(4), ...(granted ? { granted } : {}) })
-      : installFromDir({ paths, from: path.resolve(name), ...(granted ? { granted } : {}) });
+      ? installFromNpm({ paths, spec: installName.slice(4), ...(granted ? { granted } : {}) })
+      : installFromDir({ paths, from: path.resolve(installName), ...(granted ? { granted } : {}) });
     if (!got.ok) {
       console.error("装不上：");
       for (const e of got.errors) console.error(`  · ${e}`);

@@ -12,6 +12,8 @@ import {
   type PluginPermission,
 } from "./plugins";
 import { manifestDrifted, readManifestFromDir, type InstalledPlugin } from "../adapters/pluginStore";
+import { PRODUCT_VERSION } from "../../shared/product";
+import { engineIncompatibility } from "./pluginIndex";
 import { checkManifest } from "./plugins";
 import type { HooksPort } from "../ports/hooks";
 
@@ -188,6 +190,12 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
   }
   const checked = checkManifest(onDisk.raw);
   if (!checked.ok) return { ...empty, problems: [`磁盘上的清单不合法：${checked.errors.join("；")}`] };
+  /*
+   * 兼容门（V6-3d）：安装时已经判过一次，装载时**再判一次**——
+   * 宿主可能升级/降级过，或者这个插件是别的版本装上来的。
+   */
+  const incompatible = engineIncompatibility(checked.manifest.engines.ding, PRODUCT_VERSION);
+  if (incompatible) return { ...empty, problems: [incompatible] };
   const drift = manifestDrifted(plugin.manifest, checked.manifest);
   if (drift) {
     return { ...empty, problems: [`它在安装之后被改过，已拒绝装载：${drift}。请卸载后重新安装并确认权限`] };
