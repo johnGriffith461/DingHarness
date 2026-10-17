@@ -20,6 +20,10 @@
 @import "./styles/home.css";
 /* 逐文件改动审阅（U08，2026-10-18）：同一理由独立成文件 */
 @import "./styles/review.css";
+/* 首跑向导（U06，2026-10-18） */
+@import "./styles/firstrun.css";
+/* 模型选择 UX（U07，2026-10-18） */
+@import "./styles/models.css";
 @import "./styles/theme.css";
 @import "./styles/panels.css";
 @import "./styles/features.css";

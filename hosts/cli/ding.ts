@@ -42,7 +42,7 @@ import { cmdSync } from "./cmdSync";
 import { cmdApprovals } from "./cmdApprovals";
 import { cmdRecipe } from "./cmdRecipe";
 import { cmdConnect } from "./cmdConnect";
-import { cmdHelp } from "./help";
+import { KNOWN_COMMANDS, cmdCommandHelp, cmdHelp } from "./help";
 import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
@@ -743,6 +743,13 @@ async function main(): Promise<void> {
     process.stdout.write(`${version}\n`);
     process.exit(0);
   }
+  /*
+   * **子命令的 --help**（U11）：`ding run --help` 应该是"告诉我怎么用"，
+   * 而不是"缺参数，退出码 2"。顶层 `--help` 仍走 `cmdDefault` 那一处。
+   */
+  if (parsed.command && (parsed.flags.has("help") || parsed.flags.has("h"))) {
+    process.exit(cmdCommandHelp(parsed.command, parsed.flags.has("dev")));
+  }
   if (parsed.unknown?.length) {
     process.stderr.write(
       `不认识的旗标：${parsed.unknown.map((key) => `--${key}`).join(" / ")}（拼错了？要传字面量就用 -- 隔开）\n` +
@@ -780,41 +787,7 @@ async function main(): Promise<void> {
    * 且不在已知命令表里 → 报错退出 2，并告诉他想跑一句话该用 `ding run "…"`。
    * 中文/带空格的自由文本**照旧**当任务（`ding 你好` 这条自然写法不受影响）。
    */
-  const knownCommands = new Set([
-    "run",
-    "sessions",
-    "record",
-    "replay",
-    "models",
-    "plugins",
-    "recipe",
-    "space",
-    "sync",
-    "approvals",
-    "serve",
-    "connect",
-    "acp",
-    "resume",
-    "backup",
-    "restore",
-    "doctor",
-    "init",
-    "eval",
-    "bench",
-    "fork",
-    "worktree",
-    "knowledge",
-    "acp-drive",
-    "providers",
-    "schedule",
-    "im",
-    "memory",
-    "workflow",
-    "config",
-    "agents",
-    /* U08：逐文件改动审阅与回滚 */
-    "review",
-  ]);
+  const knownCommands = KNOWN_COMMANDS;
   if (parsed.command && !knownCommands.has(parsed.command) && /^[a-z][a-z-]*$/.test(parsed.command)) {
     process.stderr.write(
       `不认识的命令：${parsed.command}（可用：${[...knownCommands].join(" / ")}）\n` +

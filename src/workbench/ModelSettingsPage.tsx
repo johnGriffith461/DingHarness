@@ -3,6 +3,8 @@ import { Check, RefreshCw } from "lucide-react";
 
 import { listProviders } from "@/ai/aiClient";
 import { readSavedRoute } from "@/ai/route";
+import { capabilityOf, formatPrice, formatTokens, groupsOf } from "@engine/runtime/modelCatalog";
+import { keepTokensFor } from "@engine/runtime/budget";
 import type { ShellBridge } from "@shared/ipc";
 
 /**
@@ -141,6 +143,34 @@ export function ModelSettingsPage() {
     patch({ enabled: next, ...(got.default && !next.includes(got.default) ? { default: undefined } : {}) });
   };
 
+  /**
+   * 一个模型的"能不能干、多少钱、实际留多少"（U07，2026-10-18）。
+   *
+   * 口径全部来自目录表（`modelCatalog` + `budget`），**不在界面里另算** ——
+   * 否则设置页与 `ding models` 会给出两个数。未登记模型标出来，不把它混进"推荐"。
+   */
+  const modelMeta = (m: string): string => {
+    const cap = capabilityOf(m);
+    const caps = [
+      cap.toolCalling ? "工具" : "",
+      cap.reasoning ? "思考" : "",
+      cap.modalities?.includes("image") ? "读图" : "",
+    ]
+      .filter(Boolean)
+      .join("+");
+    const groups = groupsOf(cap).filter((g) => g !== "未登记");
+    return [
+      `窗口 ${formatTokens(cap.contextWindow)}${cap.estimated ? "（估计）" : ""}`,
+      `实际留 ${formatTokens(keepTokensFor(m))}`,
+      `${formatPrice(cap.priceIn)}→${formatPrice(cap.priceOut)}`,
+      caps ? `支持 ${caps}` : "",
+      groups.length ? groups.join(" / ") : "",
+      cap.registered ? "" : "未登记",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+
   /** 存这一家的密钥（走 `secrets:set` → safeStorage 加密写；拿不到能力就拒绝写）。 */
   const saveKey = (): void => {
     const b = bridge();
@@ -229,6 +259,10 @@ export function ModelSettingsPage() {
                           {on ? <Check size={12} /> : null}
                         </button>
                         <span className="wb-modelset-modelname">{m}</span>
+                        {/* U07：这个模型能干什么、多少钱、实际留多少历史（口径与 ding models 一致） */}
+                        <em className="wb-modelset-meta" data-testid={`wb-modelset-meta-${m}`}>
+                          {modelMeta(m)}
+                        </em>
                         <button
                           className={`wb-modelset-star${isDefault ? " is-on" : ""}`}
                           data-testid={`wb-modelset-default-${m}`}

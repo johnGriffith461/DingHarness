@@ -1,0 +1,18 @@
+/*
+ * 模型选择 UX（U07，2026-10-18）。
+ *
+ * 一行里三件事：名字 / 能力与价格 / 默认与勾选。
+ * 只补 `wb-modelset-meta` 这一条 —— 其余布局沿用既有 `features.css`。
+ */
+
+.wb-modelset-model {
+  flex-wrap: wrap;
+}
+
+.wb-modelset-meta {
+  flex-basis: 100%;
+  padding-left: 30px;
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.5;
+}

@@ -1,0 +1,14 @@
+{
+  "kind": "ding-harness-backup",
+  "version": 1,
+  "exportedAt": "2026-10-17T20:46:58.831Z",
+  "fromDataDir": ".ding",
+  "sessions": [],
+  "stores": [],
+  "config": {},
+  "summary": {
+    "sessions": 0,
+    "records": 0,
+    "stores": 0
+  }
+}

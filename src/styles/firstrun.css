@@ -1,0 +1,140 @@
+/*
+ * 首跑向导（U06，2026-10-18）。
+ *
+ * 独立区域文件（workbench.css 贴着 1500 行上限）。
+ * 形态：首页顶部一张卡片 + 四步清单；不遮罩整页 —— 用户想先自己点别的也能点。
+ */
+
+.wb-firstrun {
+  padding: 18px 24px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.wb-firstrun-card {
+  width: min(620px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  padding: 16px 18px;
+  font-size: 13px;
+}
+
+.wb-firstrun-card > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.wb-firstrun-card > header > b {
+  font-size: 14px;
+}
+
+.wb-firstrun-skip {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-firstrun-skip:hover {
+  color: var(--fg);
+}
+
+.wb-firstrun-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-firstrun-steps > li {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: var(--fg-dim);
+}
+
+.wb-firstrun-steps > li[data-active="true"] {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--fg);
+}
+
+.wb-firstrun-steps > li[data-done="true"] .wb-firstrun-title {
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+.wb-firstrun-title {
+  font-size: 13px;
+}
+
+.wb-firstrun-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wb-firstrun-body select,
+.wb-firstrun-body input {
+  min-width: 180px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.wb-firstrun-body button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 12px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-firstrun-body button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.wb-firstrun-body button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wb-firstrun-hint {
+  flex-basis: 100%;
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.wb-firstrun-path {
+  flex-basis: 100%;
+  font-family: var(--dh-font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  word-break: break-all;
+}
+
+.wb-firstrun-note {
+  margin-top: 10px;
+  color: var(--warn);
+  font-size: 12px;
+}

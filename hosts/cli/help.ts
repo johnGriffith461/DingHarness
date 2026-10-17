@@ -73,3 +73,119 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
   );
   return 0;
 }
+
+/**
+ * **每条命令自己的用法**（U11，2026-10-18）。
+ *
+ * 在这之前 `--help` 只在**顶层**生效：`ding run --help` 会被当成"缺任务描述"，
+ * 打印一句用法就以退出码 2 失败。对用户来说这是"我想问怎么用，它却报错了"。
+ *
+ * 表里每一条都必须与 `ding.ts` 的分发链一致；`args.test.ts` 会扫命令表核对。
+ */
+
+/**
+ * **认识哪些命令**（U11，2026-10-18：从 `ding.ts` 搬出来的唯一一份）。
+ *
+ * 它同时是"拼错命令要报错"的判据与"每条命令都要有用法说明"的清单 ——
+ * 一份名单两个用途，别再在别处抄第二份。
+ */
+export const KNOWN_COMMANDS: ReadonlySet<string> = new Set([
+  "run",
+  "sessions",
+  "record",
+  "replay",
+  "models",
+  "plugins",
+  "recipe",
+  "space",
+  "sync",
+  "approvals",
+  "serve",
+  "connect",
+  "acp",
+  "resume",
+  "backup",
+  "restore",
+  "doctor",
+  "init",
+  "eval",
+  "bench",
+  "fork",
+  "worktree",
+  "knowledge",
+  "acp-drive",
+  "providers",
+  "schedule",
+  "im",
+  "memory",
+  "workflow",
+  "config",
+  "agents",
+  "review",
+  "help",
+]);
+
+export const COMMAND_USAGE: Record<string, string> = {
+  run: 'ding run "任务描述" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps <整数>]',
+  sessions: "ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>] [--state <会话 id>] [--cost [--by session|day|model]]",
+  review: "ding review <会话 id> [--json] [--revert <文件路径>]",
+  record: "ding record <会话 id> [--out <文件>]（工程模式）",
+  replay: "ding replay <快照文件>（工程模式）",
+  models: "ding models [--json]",
+  plugins: "ding plugins <list|search|install|remove|enable|disable> …",
+  recipe: "ding recipe <list|show|run|export|import> …",
+  space: "ding space <invite|join|members|roles|remove|share|unshare|takeover|rooms|room|usage|audit> …",
+  sync: "ding sync <会话 id> --to <服务地址> --token <口令> [--owner <成员 id>] [--producer <id>]",
+  approvals: "ding approvals --to <服务地址> --token <口令> [--watch] [--state pending|approved|rejected]",
+  serve: "ding serve [--port 8787] [--bind <地址> --token <口令>] [--member <id>:<口令>]…",
+  connect: "ding connect <url> [任务] [--token <口令>] [--cwd <目录>] [--sessions] [--json]",
+  acp: "ding acp（stdio 上的 ACP 宿主；需要一个 provider）",
+  resume: "ding resume <会话 id> [--continue] [--owner <成员 id>]",
+  backup: "ding backup [--out <路径>] [--data-dir <数据根>] [--force]",
+  restore: "ding restore <备份文件> [--list]",
+  doctor: "ding doctor [--json] [--fix]",
+  init: "ding init（交互式向导：provider → key → 模型 → 工作目录）",
+  eval: "ding eval [--json] [--update-baseline] [--repeat N]",
+  bench: "ding bench <list|run> [--task <id>] [--suite <名>] [--repeat N]",
+  fork: "ding fork <源会话 id> [--at-turn N | --at-seq N] [--into <新 id>] [--list]",
+  worktree: "ding worktree <add|list|remove> …",
+  knowledge: "ding knowledge <add|search|list> …",
+  "acp-drive": 'ding acp-drive --cmd <可执行> --arg <参数>… --prompt "任务" [--cwd <目录>] [--timeout <ms>]',
+  providers: "ding providers [--json]",
+  schedule: "ding schedule <add|list|remove|run-due> …",
+  im: "ding im（飞书/Slack 桥；配置在 im.json）",
+  memory: "ding memory <list|add|remove|export|import|status> [--git <目录>]",
+  workflow: "ding workflow <list|show|run> …",
+  config: "ding config <show|set|unset> [键] [值]",
+  agents: "ding agents [--json]",
+  help: "ding help",
+};
+
+/**
+ * 打印某条命令的用法（`ding run --help` 走这里）。
+ *
+ * @param command 命令名
+ * @param devMode 是否显示工程模式命令
+ * @returns 退出码（认识的命令恒 0；不认识的也回 0 并指向总帮助 —— 用户是在问，不是在犯错）
+ */
+export function cmdCommandHelp(command: string, devMode: boolean): number {
+  const line = COMMAND_USAGE[command];
+  if (!line) {
+    process.stdout.write(`没有「${command}」这条命令的单独说明 —— 看总帮助：ding --help\n`);
+    return 0;
+  }
+  if (!devMode && (command === "record" || command === "replay")) {
+    process.stdout.write(`${command} 是工程模式命令（加 --dev 才会出现在总帮助里）。用法：${line}\n`);
+    return 0;
+  }
+  process.stdout.write(
+    [
+      `用法：${line}`,
+      "",
+      "通用：--json（机器可读） / --dir <目录>（可重复） / --mode <档位> / --help",
+      "总帮助：ding --help",
+      "",
+    ].join("\n"),
+  );
+  return 0;
+}

@@ -52,6 +52,7 @@ import TitleBar from "./TitleBar";
 import { NavSidebar } from "./NavSidebar";
 import { TaskView } from "./TaskView";
 import { HomeView } from "./HomeView";
+import { FirstRunGuide } from "./FirstRunGuide";
 import { SummaryPanel } from "./SummaryPanel";
 
 export default function Workbench() {
@@ -246,7 +247,13 @@ export default function Workbench() {
       case "video":
         return <VideoGenPage />;
       default:
-        return <HomeView />;
+        return (
+          <>
+            {/* U06：没配好 key 时先带用户走一遍（配好了就不出现） */}
+            <FirstRunGuide />
+            <HomeView />
+          </>
+        );
     }
   }, [view]);
 
