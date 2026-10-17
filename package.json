@@ -34,6 +34,8 @@
     "eval:samples": "tsx scripts/eval-samples.ts",
     "eval:matrix": "tsx scripts/eval-matrix.ts",
     "cli:bin": "node scripts/build-cli-bin.mjs",
+    "cli:pkg": "node scripts/build-cli-package.mjs",
+    "cli:pkg:check": "node scripts/verify-cli-package.mjs",
     "cli:release": "pnpm cli:bin && node scripts/verify-cli-bin.mjs",
     "verify:cli-npm": "node scripts/verify-cli-npm.mjs",
     "prepack": "pnpm cli:build && node scripts/verify-cli-npm.mjs",

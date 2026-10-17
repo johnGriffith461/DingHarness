@@ -175,10 +175,17 @@ export function startServer(deps: { docFile: string; canvas?: CanvasStore }): Pr
 
 /* 作为脚本直接跑时：起服务（被 import 时不自动起 —— 测试要能只用纯函数那一半） */
 if (process.argv[1] && /canvasServer\.(ts|js)$/.test(process.argv[1].replace(/\\/g, "/"))) {
-  const dataDir = canvasDataDir();
-  const docFile = canvasDocPath(dataDir);
-  /* 事件库就在同一个数据目录的会话库文件里（与桌面同一份 —— 环境变量指到同一个目录时） */
-  const canvas = createCanvasStore(dataDir, "sessions.db");
-  log(`画布文档：${docFile}（事件记进 ${dataDir}/sessions.db 的 canvas_events）`);
-  await startServer({ docFile, canvas });
+  /*
+   * ⚠️ 用 `void main()` 包一层而不是顶层 `await`：CLI 的独立构建是 CommonJS
+   * （`tsconfig.cli.json`），而 CJS 不允许顶层 await —— 那会让**整个 CLI 构建失败**
+   * （`pnpm cli:build` 红在这里，与这个文件的逻辑无关）。行为不变：脚本一跑就起服务。
+   */
+  void (async () => {
+    const dataDir = canvasDataDir();
+    const docFile = canvasDocPath(dataDir);
+    /* 事件库就在同一个数据目录的会话库文件里（与桌面同一份 —— 环境变量指到同一个目录时） */
+    const canvas = createCanvasStore(dataDir, "sessions.db");
+    log(`画布文档：${docFile}（事件记进 ${dataDir}/sessions.db 的 canvas_events）`);
+    await startServer({ docFile, canvas });
+  })();
 }

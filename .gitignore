@@ -32,3 +32,7 @@ evidence/
 sandbox/target/
 # 会话隔离的 git worktree（V6-2e）：里面有用户的临时代码，不入库
 .ding-worktrees/
+# CLI 发布包的构建产物（由 pnpm cli:pkg 生成，不入库）
+packages/cli/dist-cli/
+packages/cli/README.md
+packages/cli/LICENSE

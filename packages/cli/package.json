@@ -1,0 +1,47 @@
+{
+  "name": "@ding/cli",
+  "version": "0.6.0",
+  "description": "Ding Harness 的命令行宿主：本机优先的桌面 Agent 工作台（同一内核、同一套闸门）",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "bin": {
+    "ding": "dist-cli/hosts/cli/ding.js"
+  },
+  "files": [
+    "dist-cli/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnGriffith461/DingHarness.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/johnGriffith461/DingHarness",
+  "bugs": {
+    "url": "https://github.com/johnGriffith461/DingHarness/issues"
+  },
+  "keywords": [
+    "agent",
+    "cli",
+    "local-first",
+    "harness",
+    "llm"
+  ],
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.79",
+    "@ai-sdk/google": "^4.0.95",
+    "@ai-sdk/openai-compatible": "3.0.67",
+    "ai": "7.0.137",
+    "docx": "9.10.0",
+    "exceljs": "4.4.0",
+    "pptxgenjs": "4.0.1",
+    "zod": "^4.6.6"
+  }
+}
