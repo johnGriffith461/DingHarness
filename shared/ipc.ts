@@ -334,6 +334,7 @@ export type ComputerResultView =
 import type { PermissionRuleWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type { PermissionRuleWire, ReviewChangeWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type ShellBridge = {
+  skills: import("./skillsWire").SkillsBridge; /* G08：形状在 skillsWire.ts */
   /* 逐文件变更审阅（U08）：本体在 engine，这里只是接线。 */
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;

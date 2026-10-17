@@ -75,8 +75,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  *
  * ⚠️ 2026-10-18（G05）54 → 56：`shared/uia.ts`（元素树形状与解析）与
  * `shared/uiaTools.ts`（三条工具声明）。同样是纯逻辑，由工具表带进闭包。
+ *
+ * ⚠️ 2026-10-18（G06–G08）56 → 59：`runtime/streamFrames.ts`（续传帧）、
+ * `runtime/jobs.ts`（后台任务记录）、`runtime/skills.ts`（技能发现与预算）。
+ * 三者都是纯逻辑（IO 由调用方注入路径），且属于运行协调层。
  */
-const CLOSURE_BUDGET = 56;
+const CLOSURE_BUDGET = 59;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

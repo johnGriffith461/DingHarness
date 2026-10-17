@@ -5,6 +5,7 @@ import { CLIPBOARD_CHANNEL } from "./ipc/clipboard";
 import { CODING_CHANNEL } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
 import { REVIEW_CHANNEL } from "./ipc/review";
+import { SKILLS_CHANNEL } from "./ipc/skills";
 import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { STATS_CHANNEL } from "./ipc/stats";
@@ -294,6 +295,11 @@ const api = {
       rules?: PermissionRuleWire[];
     }): Promise<{ pinnedModel: string; navCollapsed?: boolean; rules?: PermissionRuleWire[] }> =>
       ipcRenderer.invoke(APP_SETTINGS_CHANNEL.write, next),
+  },
+  /** 技能（G08） */
+  skills: {
+    list: () => ipcRenderer.invoke(SKILLS_CHANNEL.list) as ReturnType<ShellBridge["skills"]["list"]>,
+    block: (text: string) => ipcRenderer.invoke(SKILLS_CHANNEL.block, text) as Promise<string>,
   },
   /** 逐文件改动审阅（U08）：读改动清单 / 回滚某个文件 */
   review: {

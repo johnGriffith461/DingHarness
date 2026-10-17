@@ -16,6 +16,7 @@ import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
 import { registerStatsIpc } from "./ipc/stats";
 import { registerWorkflowIpc } from "./ipc/workflowStore";
 import { registerReviewIpc } from "./ipc/review";
+import { registerSkillsIpc } from "./ipc/skills";
 import { registerPreviewIpc } from "./ipc/preview";
 import { registerComputerIpc } from "./ipc/computer";
 import { registerCanvasIpc } from "./ipc/canvas";
@@ -424,6 +425,8 @@ safeRegister("stats", () => registerStatsIpc(), logRegisterFailure);
 safeRegister("workflow", () => registerWorkflowIpc(), logRegisterFailure);
 /* 逐文件改动审阅（U08）：从会话库还原改动、按文件回滚（路径走 ownedDirs 白名单） */
 safeRegister("review", () => registerReviewIpc(ipcMain), logRegisterFailure);
+/* 技能（G08）：主进程读 <userData>/skills，渲染层只要拼好的那段提示 */
+safeRegister("skills", () => registerSkillsIpc(ipcMain), logRegisterFailure);
 /* 内置浏览器预览（V6-2m）：只允许本机地址、独立持久分区 */
 safeRegister("preview", () => registerPreviewIpc(), logRegisterFailure);
 /* Computer Use（V6-2n）：默认关；每个动作原生确认 + 留痕（不记输入内容） */

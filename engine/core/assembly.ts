@@ -35,6 +35,8 @@ export type AssemblyInput = {
   memory?: string;
   /** 能力说明（插件 / 技能 / 伙伴）。 */
   abilities?: string;
+  /** 技能提示（G08：这个项目里已写好的工作方法）。 */
+  skills?: string;
   /** 其它临时交代（压缩提示、截断说明等）。 */
   extra?: string;
 };
@@ -49,7 +51,7 @@ export const BLOCK_SEPARATOR = "\n\n";
  * @returns 拼好的 system；一块都没有时给空串（**不发一个空的 system**）
  */
 export function assembleSystem(input: AssemblyInput): string {
-  return [input.base, input.persona, input.memory, input.abilities, input.extra]
+  return [input.base, input.persona, input.memory, input.skills, input.abilities, input.extra]
     .map((part) => (typeof part === "string" ? part.trim() : ""))
     .filter(Boolean)
     .join(BLOCK_SEPARATOR);

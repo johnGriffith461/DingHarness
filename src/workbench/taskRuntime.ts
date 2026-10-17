@@ -44,6 +44,7 @@ import {
 } from "@engine/core/contextManager";
 import { buildHistory } from "./history";
 import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
+
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
@@ -217,6 +218,20 @@ async function enabledBlock(): Promise<string> {
     // 用 findItemIn 而不是 findItem：自定义能力不在内置目录里，
     // 只查目录会让它们进了 enabled 也拿不到名字 —— 等于装了没用。
     return enabledPromptBlock(lib, (id) => findItemIn(lib, id));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 这一轮的技能提示（G08）：**走主进程**读技能目录（渲染层没有 fs）。
+ *
+ * 失败/没配就返回空串 —— 技能是增强，不该让一轮跑不起来。
+ */
+async function skillsBlockFor(text: string): Promise<string> {
+  const shell = (globalThis as unknown as { shell?: { skills?: { block: (t: string) => Promise<string> } } }).shell;
+  try {
+    return (await shell?.skills?.block?.(text)) ?? "";
   } catch {
     return "";
   }
@@ -529,7 +544,12 @@ export async function runStream(
    * 装配收成一份纯函数（C2-4）：聊天侧用的是**同一个** `assembleSystem`。
    * 不这么做的时候两边是各写一遍的 —— 于是聊天侧压根没有记忆与人设（实测）。
    */
-  const fullSystem = assembleSystem({ base: system, persona, memory: remembered, abilities: extra });
+  /*
+   * 技能（G08）：从本机技能目录按"常驻 / 关键词 / 路径"选。
+   * 选不到就是空串（不多出空行）。技能目录不存在也不报错 —— 那是正常状态。
+   */
+  const skillBlock = await skillsBlockFor(user);
+  const fullSystem = assembleSystem({ base: system, persona, memory: remembered, skills: skillBlock, abilities: extra });
   /**
    * 这一轮的**投影**（C2）：正文、工具留痕、用量只有一份算法。
    *
