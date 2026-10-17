@@ -13,6 +13,32 @@
 
 ## 未发布（云盘拆掉 · 三处 UI 缺陷 · 矩阵返工 · 远端客户端与输入区真选择器 · 一次样式回归 · 审计整改 · V5 开工前清尾）
 
+### 发布：引擎包 v0.1.0 首次上 npm（2026-10-17）
+
+`ding-engine-core@0.1.0` 与 `ding-engine@0.1.0` 已发布到 npm（public，`latest` 指向 0.1.0）。
+证据不只是"发布命令没报错"：**从 registry 干净安装**并两种消费方式各验一遍 ——
+`npm i ding-engine-core@0.1.0 ding-engine@0.1.0` → `import` 具名导入 ✓ 与 `require` 解构 ✓
+都能拿到 `createEngine` / `buildEngine` / `createSqliteSessionStore`。
+
+- 包名**不带作用域**（`@ding` 那个作用域在 npm 上属于另一个真实用户，发不了）。
+- `ding-engine@0.1.0` 依赖 `ding-engine-core@0.1.0`（发布顺序：先 core 再 engine）。
+- ⚠️ npm 有个"**staged publishing**"的存在方式（registry 上短暂出现
+  `0.0.0-stage` 占位、`ding-engine` 的描述写着 "Temporary package placeholder"）：
+  那只是发布被接受之后的处理窗口，`latest` 已经指向 0.1.0，`npm stage list` 为空。
+- ⚠️ 引擎仓（`ding-engine`）里的 README/CI 同版本；包名沿用不带作用域的两个。
+
+### V5 收尾：批后通知（方案 3.7b 缺的那件）
+
+3.7b 的原文是"授权他人批、**批后通知**、拒绝回注" —— 前两件早已有，通知一直缺着：
+裁决落了痕但没人告诉主人。现在 `GET /v1/approvals/stream`（只读 SSE）会把
+**订阅之后新处置的**那些主动推出来（`decision` 帧：会话 / 工具 / 状态 / 谁批的 / 时刻；
+外加 `ping` 心跳保长连接）。
+
+写法上踩了两格，都留在测试的注释里（服务端一直是对的，坏的是我的**读法**）：
+① 手搓 `reader.read()` 与超时 `Promise.race` → 留下悬着的读、帧被吞；
+② `new Response(res.body).text()` + abort → abort 抛错时把已收到的也丢了。
+现在：循环读到流结束、超时 abort 掐断、**掐断时保留已收到的部分**。
+
 ### V5 收尾：同步内容层加密（ADR-0018）
 
 上一轮的同步客户端推的是**明文**（ADR-0014 定了"内容加密 / 控制明文"，但那条链路没接上）——

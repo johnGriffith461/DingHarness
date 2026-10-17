@@ -265,6 +265,65 @@ describe("审批的 HTTP 面（C3 3.7b）", () => {
     expect(decisions).toHaveLength(0);
   });
 
+  it("⭐ 批后通知（SSE）：远端裁决之后，主人那条流里**主动推**出来", async () => {
+    const { port, token, sessionId, dir } = await bootApprovals();
+    /*
+     * 读法：**先开流、再裁决、再收满 4 秒**，最后一起断言。
+     * ⚠️ 第一版是"边读边等某个帧名出现"（`reader.read()` 与超时赛跑）——那会在同一
+     * reader 上留下悬着的读，帧被吞掉，表现成"服务端发了、客户端什么都没收到"。
+     * 服务端那边我用 stderr 日志确认过它每一拍都在推（`baseline` 从 0 变 1 之后就一直发）。
+     */
+    /**
+     * 收流（**老老实实循环 read**，不用 Promise.race 抢超时）。
+     *
+     * ⚠️ 前两版都栽在"读法"上：① 手搓 `reader.read()` 与超时赛跑 → 留下悬着的读、帧被吞，
+     * 表现成"服务端发了、客户端什么都没收到"（服务端我用 stderr 日志确认过它每拍都在推）；
+     * ② `new Response(res.body).text()` + abort → abort 抛错时**把已经收到的也丢了**。
+     * 现在：循环读到流结束为止，超时用 abort 掐断，**掐断时保留已收到的部分**。
+     */
+    const collect = async (seconds: number): Promise<string> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), seconds * 1000);
+      let text = "";
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/v1/approvals/stream`, {
+          headers: { authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        if (res.status !== 200) return `HTTP ${res.status}`;
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) text += decoder.decode(value, { stream: true });
+        }
+      } catch {
+        /* abort：保留已经收到的 */
+      } finally {
+        clearTimeout(timer);
+      }
+      return text;
+    };
+
+    /* 开流（不 await 完整收流：先让它连上，再去裁决） */
+    const pendingStream = collect(4);
+    await new Promise((r) => setTimeout(r, 300));
+    const rejected = await call(port, `/v1/approvals/${encodeURIComponent(sessionId)}/c1`, {
+      method: "POST",
+      headers: boss(token),
+      body: JSON.stringify({ action: "reject" }),
+    });
+    expect(rejected.status).toBe(200);
+
+    const text = await pendingStream;
+    expect(text, `流里没有 ready 帧：${text.slice(0, 120)}`).toContain("event: ready");
+    expect(text, `没等到 decision 帧；流里是：${text.slice(0, 300)}`).toContain("event: decision");
+    expect(text).toContain('"state":"rejected"');
+    expect(text).toContain('"decidedBy":"local"');
+    cleanupDirs.push(dir);
+  }, 25_000);
+
   it("没接会话写入（appendRecord）时整族 501 —— 落不了痕的决定不做", async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "dh-approvals-nowrite-"));
     cleanupDirs.push(dir);

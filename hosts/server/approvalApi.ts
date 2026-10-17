@@ -129,6 +129,92 @@ export async function handleApprovalRoute(path: string, req: IncomingMessage, re
     return true;
   }
 
+  /* ── 通知面（SSE）：**有人批了/拒了**要能主动告诉主人 ────── */
+  if (path === "/v1/approvals/stream" && req.method === "GET") {
+    /*
+     * 方案 3.7b 的原文是"授权他人批、**批后通知**、拒绝回注" —— 前两件早就有了，
+     * 通知这一件缺着：裁决落了痕（谁批的、结果都在日志里），但**没有任何东西告诉主人**。
+     *
+     * 形态：一条只读的 SSE（`text/event-stream`），按游标轮询审批索引，把
+     * **新处置的**那些推出去。为什么是轮询而不是"写的时候推"：写发生在
+     * `sqliteStore.append`（投影），那一层不认识 HTTP 连接 —— 让它认识就把
+     * 存储和传输粘在一起了。1.5 秒的轮询对"人看通知"这个量级足够。
+     *
+     * `?since=<epoch ms>`：从哪一刻之后的处置开始推（不给 = 从现在起）。
+     */
+    const sessions = await ctx.opts.listSessions();
+    const space = ctx.opts.space ? spaceOf(ctx.opts.space) : null;
+    const empty = { roster: { owner: identity.id, members: [], codes: [] }, tokens: {}, shared: [], sharedRecipes: [], holders: {}, rooms: {} };
+    const readable = sessions
+      .filter((s) => canReadSession(space ?? empty, identity, s.sessionId, { owner: s.owner ?? "local" }))
+      .map((s) => s.sessionId);
+
+    /*
+     * ⚠️ 判据是"**订阅那一刻之后**新处置的"，不是时间戳比较（第一版按 `decidedAt > since` 判，
+     * 测试直接红了 —— 记录的 `at` 与客户端给的 `since` 是两个时钟，且同一毫秒内的处置会被漏掉）。
+     * 现在：订阅时把**已经处置过的**记下来当基线，之后出现的（不在基线里的）才推。
+     * `?since=` 仍然接受（兼容/排错用），但不再参与判定。
+     */
+    const decidedKey = (row: { sessionId: string; toolCallId: string }) => `${row.sessionId}#${row.toolCallId}`;
+    const baseline = new Set(
+      (ctx.approvals!.list({ sessionIds: readable, limit: 500 }) as Array<{ sessionId: string; toolCallId: string; state: string }>)
+        .filter((row) => row.state !== "pending")
+        .map(decidedKey),
+    );
+
+    res.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    const send = (event: string, data: unknown): void => {
+      if (res.writableEnded || res.destroyed) return;
+      res.write(`event: ${event}
+data: ${JSON.stringify(data)}
+
+`);
+    };
+    send("ready", { sessions: readable.length, decidedSoFar: baseline.size });
+
+    const tick = (): void => {
+      if (res.writableEnded || res.destroyed) return;
+      const rows = ctx.approvals!.list({ sessionIds: readable, limit: 500 });
+      for (const row of rows) {
+        if (row.state === "pending") continue;
+        const key = decidedKey(row);
+        if (baseline.has(key)) continue;
+        baseline.add(key);
+        send("decision", {
+          sessionId: row.sessionId,
+          toolCallId: row.toolCallId,
+          name: row.name,
+          state: row.state,
+          decidedBy: row.decidedBy ?? "",
+          at: row.decidedAt ?? row.createdAt,
+        });
+        note(`通知：${row.decidedBy ?? "?"} ${row.state === "approved" ? "批了" : "拒了"} ${row.name}`);
+      }
+    };
+
+    /*
+     * ⚠️ 定时器**不绑 `res` 的 close**（第一版绑了，测试红在"ready 之后就再没有帧"）：
+     * Node 里 `close` 早于"真写完"触发并不罕见（客户端那侧半开、代理缓冲都算），
+     * 而一旦被它清掉，这条流就成了"开着的哑巴" —— 最难查的那种。
+     * 现在：每拍自己看 `writableEnded`，真结束了才停（写入本身在 `send` 里有守卫）。
+     */
+    const timer = setInterval(() => {
+      if (res.writableEnded) {
+        clearInterval(timer);
+        return;
+      }
+      /* 心跳：让中间那层代理别把长连接掐了，也让"流还活着"可见 */
+      send("ping", { at: Date.now() });
+      tick();
+    }, 1500);
+    tick();
+    return true;
+  }
+
   /* ── 处置一条 ─────────────────────────────────────────── */
   const match = /^\/v1\/approvals\/([^/]+)\/([^/]+)$/.exec(path);
   if (!match || req.method !== "POST") {
