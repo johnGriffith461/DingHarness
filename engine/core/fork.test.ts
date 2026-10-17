@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { forkNote, forkReplaysEqual, forkSession } from "./fork";
+import { forkNote, forkPoints, forkReplaysEqual, forkSession, forkSessionAt, recordsUpTo } from "./fork";
 import { logLine, parseLogLine, type LogRecord } from "./events";
 
 /**
@@ -70,5 +70,69 @@ describe("2.5 · fork 为独立副本", () => {
     const plan = forkSession(empty, { source: { sessionId: "a" }, into: { sessionId: "b" } });
     expect(plan.records).toEqual([]);
     expect(plan.note).not.toContain("次工具调用");
+  });
+});
+
+/** 两轮会话：第一轮收尾后有条审批，然后第二轮。 */
+function twoTurnRecords(): LogRecord[] {
+  const lines = [
+    logLine({ requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "第一件事" }] } as never, 1, T(1)),
+    logLine({ requestId: "r1", type: "text", text: "做完了" } as never, 2, T(2)),
+    logLine({ requestId: "r1", type: "done" } as never, 3, T(3)),
+    logLine({ type: "approval", toolCallId: "c1", name: "write_file", approved: true, ok: true, line: "已保存", decidedBy: "local" } as never, 4, T(4)),
+    logLine({ requestId: "r2", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "第二件事" }] } as never, 5, T(5)),
+    logLine({ requestId: "r2", type: "text", text: "也做完了" } as never, 6, T(6)),
+    logLine({ requestId: "r2", type: "done" } as never, 7, T(7)),
+  ];
+  return lines.map((line) => parseLogLine(line)!).filter(Boolean);
+}
+
+describe("V6-4a · 任一时点 fork", () => {
+  it("列出分叉点：每轮一个，带用户原话与时刻", () => {
+    const points = forkPoints(twoTurnRecords());
+    expect(points).toHaveLength(2);
+    expect(points[0]?.label).toBe("第一件事");
+    expect(points[1]?.label).toBe("第二件事");
+    expect(points.map((p) => p.turn)).toEqual([1, 2]);
+  });
+
+  it("⭐ 按轮分叉：只复制到该轮收尾（包括它后面的审批留痕），后面的轮不带", () => {
+    const source = twoTurnRecords();
+    const plan = forkSessionAt(source, {
+      source: { sessionId: "task-1" },
+      into: { sessionId: "task-1-fork" },
+      at: { kind: "turn", turn: 1 },
+    });
+    expect(plan.cutoff).toBe(4);
+    expect(plan.records).toHaveLength(4);
+    /* 审批记录属于第一轮：按位置切不会把它丢掉 */
+    expect(plan.records.some((r) => r.type === "approval")).toBe(true);
+    /* 第二轮不在副本里 */
+    expect(plan.records.some((r) => r.type === "request" && r.requestId === "r2")).toBe(false);
+  });
+
+  it("按 seq 分叉与按轮分叉可以指向同一个前缀", () => {
+    const source = twoTurnRecords();
+    const bySeq = recordsUpTo(source, { kind: "seq", seq: 4 });
+    const byTurn = recordsUpTo(source, { kind: "turn", turn: 1 });
+    expect(bySeq.map((r) => r.seq)).toEqual(byTurn.map((r) => r.seq));
+  });
+
+  it("分叉点越界直接报错（不静默给空副本）", () => {
+    const source = twoTurnRecords();
+    expect(() => recordsUpTo(source, { kind: "turn", turn: 0 })).toThrow(/1–2/);
+    expect(() => recordsUpTo(source, { kind: "turn", turn: 3 })).toThrow(/1–2/);
+    expect(() => recordsUpTo(source, { kind: "seq", seq: -1 })).toThrow(/不合法/);
+  });
+
+  it("从第一轮分叉出来的副本，重放与源会话的第一轮一致", () => {
+    const source = twoTurnRecords();
+    const plan = forkSessionAt(source, {
+      source: { sessionId: "task-1" },
+      into: { sessionId: "f" },
+      at: { kind: "turn", turn: 1 },
+    });
+    const forked = plan.records.map((r, i) => ({ ...r, seq: i + 1 }) as LogRecord);
+    expect(forkReplaysEqual(recordsUpTo(source, { kind: "turn", turn: 1 }), forked)).toBe(true);
   });
 });

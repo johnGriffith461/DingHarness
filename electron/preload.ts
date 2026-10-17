@@ -345,6 +345,9 @@ const api = {
       ipcRenderer.invoke(SESSION_CHANNEL.load, sessionId),
     /** 从这一刻分叉（C6/V5-2 2.5 的产品入口）：源记录复制成一段独立会话。 */
     fork: (sourceSessionId: string) => ipcRenderer.invoke(SESSION_CHANNEL.fork, sourceSessionId),
+    /** 从**任一时点**分叉（V6-4a）：只复制到第 N 轮或第 N 号事件。 */
+    forkAt: (sourceSessionId: string, at: { turn?: number; seq?: number }) =>
+      ipcRenderer.invoke(SESSION_CHANNEL.forkAt, sourceSessionId, at),
     /** 全文检索会话记录（Phase 12.4）：左栏那颗搜索键走它（结果里带命中的那一小段）。 */
     search: (query: string) => ipcRenderer.invoke(SESSION_CHANNEL.search, query),
   },

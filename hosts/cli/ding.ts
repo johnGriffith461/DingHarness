@@ -17,6 +17,7 @@ import { formatCount, usageTotal } from "../../shared/cost";
 import { buildEngine as buildEngineIn } from "./assembly";
 import { cmdBench } from "./cmdBench";
 import { cmdEval } from "./cmdEval";
+import { cmdFork } from "./cmdFork";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
@@ -814,6 +815,7 @@ async function main(): Promise<void> {
     "init",
     "eval",
     "bench",
+    "fork",
     "config",
     "agents",
   ]);
@@ -866,6 +868,8 @@ async function main(): Promise<void> {
                   ? await cmdEval(parsed)
                   : parsed.command === "bench"
                   ? await cmdBench(parsed)
+                  : parsed.command === "fork"
+                  ? await cmdFork(parsed, dataDir())
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"

@@ -3,7 +3,7 @@ import path from "node:path";
 import { app } from "electron";
 
 import { parseLog, type LogInput } from "../../engine/core/events";
-import { forkSession } from "../../engine/core/fork";
+import { forkSession, forkSessionAt } from "../../engine/core/fork";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import type { SessionStore } from "../../engine/ports/store";
 
@@ -68,6 +68,8 @@ export const SESSION_CHANNEL = {
   list: "session:list",
   /** 会话分叉（"从这一刻分叉"）：源记录原样复制成一段**独立会话**。 */
   fork: "session:fork",
+  /** 从**任一时点**分叉（V6-4a）：只复制到第 N 轮 / 第 N 号事件。 */
+  forkAt: "session:fork-at",
   /** 读回一整段会话的记录（渲染层自己投影成消息）。 */
   load: "session:load",
   /** 全文检索会话记录（Phase 12.4；左栏搜索框走它）。 */
@@ -212,6 +214,41 @@ export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
       const plan = forkSession(records, { source: { sessionId: source }, into: { sessionId: intoId } });
       await store.append(intoId, plan.records, { forkedFrom: source });
       return { ok: true, sessionId: intoId, note: plan.note, records: plan.records.length };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  /*
+   * ⭐ V6-4a：从**任一时点**分叉。
+   *
+   * 与整段 fork 共用同一套语义（`forkSessionAt` = 切前缀 + `forkSession`），
+   * 区别只在"复制到哪"：轮次（人话）或 seq（回放锚点）。
+   * 参数**不可信**：轮次/序号都必须是正整数，否则拒绝 ——
+   * 静默截断/猜测会让人以为"分叉成功"，而副本其实来自别的一轮。
+   */
+  ipcMain.handle(SESSION_CHANNEL.forkAt, async (_event, sourceId: unknown, at: unknown) => {
+    const source = safeSessionId(sourceId);
+    if (!source) return { ok: false, error: "会话 id 形状不对" };
+    const raw = (at ?? {}) as { turn?: unknown; seq?: unknown };
+    const turn = typeof raw.turn === "number" ? Math.floor(raw.turn) : NaN;
+    const seq = typeof raw.seq === "number" ? Math.floor(raw.seq) : NaN;
+    const hasTurn = Number.isFinite(turn) && turn >= 1;
+    const hasSeq = Number.isFinite(seq) && seq >= 0;
+    if (hasTurn === hasSeq) return { ok: false, error: "分叉点要给且只给一个：轮次（turn）或事件序号（seq）" };
+    try {
+      const store = desktopSessionStore();
+      const { records } = await store.load(source);
+      if (!records.length) return { ok: false, error: "这段会话没有可复制的记录（是不是已经被收口了？）" };
+      const intoId = `${source}-fork-${Date.now().toString(36)}`;
+      const plan = forkSessionAt(records, {
+        source: { sessionId: source },
+        into: { sessionId: intoId },
+        at: hasTurn ? { kind: "turn", turn } : { kind: "seq", seq },
+      });
+      if (!plan.records.length) return { ok: false, error: "分叉点落在第一条记录之前，没有可复制的记录" };
+      await store.append(intoId, plan.records, { forkedFrom: source });
+      return { ok: true, sessionId: intoId, note: plan.note, records: plan.records.length, cutoff: plan.cutoff };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }

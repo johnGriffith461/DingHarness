@@ -1,6 +1,7 @@
 import { createEngine, type Engine } from "../../engine/index";
 import { createSqliteSessionStore, type OpenOptions } from "../../engine/adapters/sqliteStore";
 import type { ToolExecutor } from "../../engine/ports/executor";
+import type { SessionStore } from "../../engine/ports/store";
 import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } from "../../engine/runtime/registry";
 import { loadEnabledPlugins, pluginHooks, pluginToolEntries } from "../../engine/runtime/pluginHost";
 import { resolveSecret } from "../../engine/runtime/credentials";
@@ -47,6 +48,14 @@ export type BuiltEngine = {
    * 桌面那条路走的是自己的 `runToolOnce`（它绑着界面的 store），服务端只能用这一份。
    */
   executor: ToolExecutor;
+  /**
+   * 会话存储（V6-4a 加；加法，不动既有调用方）。
+   *
+   * 谁要它：`ding fork` 要读源会话的原始记录、把切出来的前缀写进新会话 ——
+   * `Engine` 公开面只有"快照/恢复"，没有"按前缀复制"。fork 本来就是宿主语义，
+   * 让宿主拿着自己的 store 做，比把 store 语义塞进内核公开面更干净。
+   */
+  store: SessionStore;
 };
 
 /**
@@ -119,5 +128,5 @@ export async function buildEngine(
     secret: resolveSecret,
     hooks: pluginHooks,
   });
-  return { engine, close: () => store.close(), plugins, executor };
+  return { engine, close: () => store.close(), plugins, executor, store };
 }

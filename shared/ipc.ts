@@ -664,6 +664,17 @@ export type ShellBridge = {
     fork: (sourceSessionId: string) =>
       Promise<{ ok: true; sessionId: string; note: string; records: number } | { ok: false; error: string }>;
     /**
+     * **从任一时点分叉**（V6-4a）：只复制到第 `turn` 轮或第 `seq` 号事件为止。
+     *
+     * 两者**只能给一个**（主进程会拒双给/都不给）。轮次是人话（"回到第三轮"），
+     * `seq` 是回放锚点（与 `ding sessions --export` / 日志里看到的一致）。
+     * 返回值比整段 fork 多一个 `cutoff`：这次复制了多少条记录。
+     */
+    forkAt: (sourceSessionId: string, at: { turn?: number; seq?: number }) => Promise<
+      | { ok: true; sessionId: string; note: string; records: number; cutoff: number }
+      | { ok: false; error: string }
+    >;
+    /**
      * 全文检索会话记录（Phase 12.4；左栏那颗搜索键走的就是它）。
      *
      * 检索的是**会话记录正文**（不是标题），FTS + LIKE 并集在 store 层做完，

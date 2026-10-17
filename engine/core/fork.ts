@@ -100,6 +100,107 @@ export function forkNote(
  * @param forked 副本记录
  * @returns 逐轮投影相同为 true
  */
+/** 从**哪一时点**分叉（V6-4a）。 */
+export type ForkAt = { kind: "turn"; turn: number } | { kind: "seq"; seq: number };
+
+/** 一个可选的分叉点（界面/CLI 列出来让人选）。 */
+export type ForkPoint = {
+  /** 1 基的轮次。 */
+  turn: number;
+  /** 这一轮的请求 id（日志里可能没有 request 记录时为空）。 */
+  requestId?: string;
+  /** 这一轮**最后一条**记录的时刻（给人看的时间）。 */
+  at: number;
+  /** 用户那一轮说的话（截断；给人选）。 */
+  label: string;
+};
+
+/**
+ * 列出可用的分叉点（按轮）。
+ *
+ * 切法是"轮次边界"：第 N 个 `request` 记录之前的全部记录属于前 N-1 轮。
+ * 审批记录没有 requestId，会跟着**它被回溯到的那一轮**走（见 `splitTurns` 的说明）——
+ * 所以按记录位置切而不是按 requestId 过滤，不会把"用户后来点的批准"丢掉。
+ *
+ * @param records 会话记录（按 seq 升序）
+ * @returns 每轮一个分叉点
+ */
+export function forkPoints(records: readonly LogRecord[]): ForkPoint[] {
+  const chunks = splitTurns(records);
+  const requestPositions: number[] = [];
+  records.forEach((r, i) => {
+    if (r.type === "request") requestPositions.push(i);
+  });
+  return chunks.map((chunk, index) => {
+    const nextRequest = requestPositions[index + 1];
+    const end = nextRequest === undefined ? records.length : nextRequest;
+    const last = records[end - 1];
+    const userText = chunk.request?.messages?.filter((m) => m.role === "user").at(-1)?.content ?? "";
+    return {
+      turn: index + 1,
+      requestId: chunk.request?.requestId,
+      at: last?.at ?? 0,
+      label: userText.replace(/\s+/g, " ").trim().slice(0, 60) || "(没有用户输入)",
+    };
+  });
+}
+
+/**
+ * 按"任一时点"切出要复制的记录。
+ *
+ * @param records 会话记录（按 seq 升序）
+ * @param at 时点：第几轮 / 第几号事件
+ * @returns 要复制的记录（**前缀**；不是副本，副本由 `forkSession` 生成）
+ * @throws 时点超出范围时抛（调用方据此给人话，而不是静默给一份空副本）
+ */
+export function recordsUpTo(records: readonly LogRecord[], at: ForkAt): LogRecord[] {
+  if (at.kind === "seq") {
+    const seq = Math.floor(at.seq);
+    if (!Number.isFinite(seq) || seq < 0) throw new Error(`分叉点 seq 不合法：${at.seq}`);
+    const cut = records.filter((r) => typeof r.seq === "number" && r.seq <= seq);
+    /*
+     * 记录里没有 seq（内存里的 fixture 可能没有）→ 拒绝，而不是"按数组下标猜"：
+     * 猜错一步就是"从别的一轮分叉出去"，那种错在界面上看起来完全正常。
+     */
+    if (!cut.length && records.some((r) => typeof r.seq === "number")) {
+      throw new Error(`分叉点 seq=${seq} 落在第一条记录之前`);
+    }
+    if (!records.some((r) => typeof r.seq === "number")) {
+      throw new Error("这批记录没有 seq，不能按 seq 分叉（请改用 --at-turn）");
+    }
+    return cut;
+  }
+
+  const turn = Math.floor(at.turn);
+  const total = records.filter((r) => r.type === "request").length;
+  if (!Number.isFinite(turn) || turn < 1 || turn > total) {
+    throw new Error(`分叉点要在 1–${total} 轮之间（给了 ${at.turn}）`);
+  }
+  const positions: number[] = [];
+  records.forEach((r, i) => {
+    if (r.type === "request") positions.push(i);
+  });
+  /* 第 turn 轮的下一个 request 之前 = 这一轮收尾处 */
+  const end = positions[turn] ?? records.length;
+  return records.slice(0, end);
+}
+
+/**
+ * 从**任一时点**分叉（V6-4a）：先切前缀，再走同一套 `forkSession`。
+ *
+ * @param sourceRecords 源记录
+ * @param opts 源/目标会话 id + 时点
+ * @returns 与 `forkSession` 同形（多一个 `cutoff`：这次复制了多少条）
+ */
+export function forkSessionAt(
+  sourceRecords: readonly LogRecord[],
+  opts: { source: { sessionId: string }; into: { sessionId: string }; at: ForkAt },
+): ForkPlan & { cutoff: number } {
+  const prefix = recordsUpTo(sourceRecords, opts.at);
+  const plan = forkSession(prefix, { source: opts.source, into: opts.into });
+  return { ...plan, cutoff: prefix.length };
+}
+
 export function forkReplaysEqual(source: readonly LogRecord[], forked: readonly LogRecord[]): boolean {
   const sig = (turns: readonly TurnChunk[]): string =>
     JSON.stringify(

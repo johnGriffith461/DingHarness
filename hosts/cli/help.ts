@@ -38,6 +38,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding init                                      # 首次配置向导（配 key / 选模型 / 选目录）",
       "  ding eval [类别] [--json] [--repeat <k>] [--update-baseline]  # 离线评测集（--repeat = pass@k 采样）",
       "  ding bench list|run [suite] [--task <id>] [--split train|test] [--repeat <k>] [--docker] [--json] [--out <文件>]",
+      "  ding fork <会话 id> [--at-turn N | --at-seq N] [--into <新 id>] [--list]  # 从任一时点分叉",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|install <目录|npm:包名> --yes|enable|disable|remove|doctor]",

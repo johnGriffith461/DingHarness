@@ -59,6 +59,10 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "task",
   "split",
   "suite",
+  /* `ding fork`（V6-4a）：分叉点与目标会话 */
+  "at-turn",
+  "at-seq",
+  "into",
   "out",
   "by",
   "kind",
