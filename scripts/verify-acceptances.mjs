@@ -361,6 +361,7 @@ const CASES = [
    */
   ["accept-memory.mjs", "记忆（加 / 刷新后仍在 / 删）"],
   ["accept-settings-pages.mjs", "设置子页（个人资料 / 账号 / 返回）"],
+  ["accept-team.mjs", "团队空间页（发码 / 入团 / 改角色 / 移除 / 账本，且账本真落盘）"],
   ["accept-shortcuts.mjs", "左栏全局快捷键（Ctrl N / Ctrl Shift T·S·D）"],
   ["accept-threads.mjs", "管理历史对话（分档 / 摘要 / 行内操作 / 刷新后仍在）"],
   ["accept-navsearch.mjs", "左栏搜索（真发一条→搜得中→点开进任务；后退/前进已移除）"],

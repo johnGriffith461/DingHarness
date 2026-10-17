@@ -1291,3 +1291,18 @@ html:not([data-kb="1"])
   padding: 14px 16px;
   background: var(--surface);
 }
+
+/* ── 团队空间页（V5-3 的产品面）─────────────────────────────
+ * 只用三处新类：列表的排版、警示句、账本表。其余全用既有的 wb-card* / wb-chip / wb-icon。
+ * 规矩与别处一致：**不发明新控件样式**（同一件事在同一份设计语言里只有一种长相）。
+ */
+.wb-team-members,
+.wb-team-shared { list-style: none; margin: 0 0 10px; padding: 0; }
+.wb-team-members > li,
+.wb-team-shared > li { gap: 8px; flex-wrap: wrap; }
+.wb-team-warn { color: var(--warn, #b8860b); }
+.wb-team-error { color: var(--danger, #c0392b); }
+.wb-team-usage { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.wb-team-usage th,
+.wb-team-usage td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--bg-2); }
+.wb-team-usage th { color: var(--fg-dim); font-weight: 500; }

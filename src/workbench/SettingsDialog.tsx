@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Blocks, Sparkles, Brain, ChevronRight, Crown, Info, SlidersHorizontal, User, X } from "lucide-react";
+import { Search, Blocks, Sparkles, Brain, ChevronRight, Crown, Info, SlidersHorizontal, User, Users, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -174,6 +174,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     */
     { group: 0, icon: <Blocks size={13} />, label: "插件·技能·伙伴", value: "" },
     { group: 1, icon: <Sparkles size={13} />, label: "模型", value: "provider / 模型 / 拉取" },
+    /*
+      团队空间（V5-3 的产品面，2026-10-17）：名册 / 配对码 / 共享与接管 / 按成员的账本。
+      账本与 `ding space`、`ding serve` 是**同一个文件**（数据目录下的 space.json）。
+    */
+    { group: 1, icon: <Users size={13} />, label: "团队空间", value: "成员 / 配对码 / 共享 / 账本" },
     { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
   ];
   return createPortal(
@@ -245,6 +250,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                         }
                         if (r.label === "模型") {
                           setSubPage("models");
+                          return;
+                        }
+                        /* 团队空间（V5-3 的产品面）：名册 / 配对码 / 共享接管 / 账本 */
+                        if (r.label === "团队空间") {
+                          setSubPage("team");
                           return;
                         }
                         if (r.label === "记忆") {

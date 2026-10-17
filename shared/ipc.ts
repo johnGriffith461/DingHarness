@@ -706,6 +706,44 @@ export type ShellBridge = {
     /** 体检：目录不在的、被扣下能力的。 */
     doctor: () => Promise<{ missing: string[]; withheld: { plugin: string; permissions: readonly string[] }[] }>;
   };
+  /**
+   * **团队空间**（V5-3 的产品面，V5 收尾加）：名册 / 配对码 / 共享与接管 / 账本。
+   *
+   * ⚠️ 操作的是**本机数据目录里的 `space.json`** —— 与 `ding space`（CLI）和
+   * `ding serve`（服务端）是**同一个账本**，规矩来自同一份纯函数。
+   * 所以这三条路上"一码一人 / 不能动主人 / 移除连口令一起作废"一字不差。
+   *
+   * ⚠️ 口令（`token`）**只在 `join` 的返回里给一次**：服务端不提供"再读一次"
+   * （口令可读回 = 泄露即冒充）。界面显示完就没了。
+   */
+  space: {
+    state: () => Promise<{
+      owner: string;
+      members: Array<{ id: string; kind: string; displayName: string; roles: string[]; joinedAt: number; isOwner: boolean }>;
+      shared: string[];
+      holders: Record<string, string>;
+      pendingCodes: Array<{ code: string; roles: string[]; expiresAt: number }>;
+      file: string;
+    }>;
+    /** 发一张配对码（`roles` 缺省 = 只读起步）。 */
+    invite: (roles?: string[]) => Promise<unknown>;
+    /** 替他入团（主人兑码拿口令）—— 返回里那一次性的 `token`。 */
+    join: (request: { code: string; memberId: string; displayName?: string }) => Promise<unknown>;
+    setRoles: (memberId: string, roles: string[]) => Promise<unknown>;
+    /** 移除（口令一并作废：他下一个请求就 401）。 */
+    remove: (memberId: string) => Promise<unknown>;
+    share: (sessionId: string) => Promise<unknown>;
+    unshare: (sessionId: string) => Promise<unknown>;
+    /** 指定持有人（主人代设；成员自己接管走 HTTP）。 */
+    takeover: (sessionId: string, memberId: string) => Promise<unknown>;
+    /** 成本账本（按成员）—— 数字只来自 provider 上报。 */
+    usage: () => Promise<{
+      turns: number;
+      byMember: Array<{ key: string; turns: number; totalTokens: number | null }>;
+      inputTokens: number;
+      outputTokens: number;
+    }>;
+  };
   remote: {
     status: () => Promise<{ allowConnect: boolean; keepAwake: boolean }>;
     setKeepAwake: (on: boolean) => Promise<boolean>;

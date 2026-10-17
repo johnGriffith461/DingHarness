@@ -7,6 +7,7 @@ import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
 import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { PLUGIN_CHANNEL } from "./ipc/pluginHost";
+import { SPACE_CHANNEL } from "./ipc/spaceHost";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
 import { CANVAS_EXPORT_CHANNEL } from "./ipc/canvasExport";
 import { ARTIFACT_CHANNEL } from "./ipc/artifactStore";
@@ -179,6 +180,21 @@ const api = {
     setEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke(PLUGIN_CHANNEL.setEnabled, name, enabled),
     uninstall: (name: string) => ipcRenderer.invoke(PLUGIN_CHANNEL.uninstall, name),
     doctor: () => ipcRenderer.invoke(PLUGIN_CHANNEL.doctor),
+  },
+  /**
+   * 团队空间（V5-3 的产品面，V5 收尾加）：名册 / 配对码 / 共享 / 接管 / 账本。
+   * 操作的是**本机数据目录里的 space.json** —— 与 `ding space` 和 `ding serve` 同一个账本。
+   */
+  space: {
+    state: () => ipcRenderer.invoke(SPACE_CHANNEL.state),
+    invite: (roles?: string[]) => ipcRenderer.invoke(SPACE_CHANNEL.invite, { roles }),
+    join: (request: { code: string; memberId: string; displayName?: string }) => ipcRenderer.invoke(SPACE_CHANNEL.join, request),
+    setRoles: (memberId: string, roles: string[]) => ipcRenderer.invoke(SPACE_CHANNEL.setRoles, { memberId, roles }),
+    remove: (memberId: string) => ipcRenderer.invoke(SPACE_CHANNEL.remove, { memberId }),
+    share: (sessionId: string) => ipcRenderer.invoke(SPACE_CHANNEL.share, sessionId),
+    unshare: (sessionId: string) => ipcRenderer.invoke(SPACE_CHANNEL.unshare, sessionId),
+    takeover: (sessionId: string, memberId: string) => ipcRenderer.invoke(SPACE_CHANNEL.takeover, { sessionId, memberId }),
+    usage: () => ipcRenderer.invoke(SPACE_CHANNEL.usage),
   },
   remote: {
     /** 读本机侧状态：许可 + 是否正在阻止休眠。 */

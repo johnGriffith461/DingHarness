@@ -11,6 +11,7 @@ import { safeRegister } from "./ipc/registerGuard";
 import { clampToWorkArea } from "./ipc/windowBounds";
 import { registerAiIpc } from "./ipc/ai";
 import { loadPluginsAtStartup, registerPluginIpc } from "./ipc/pluginHost";
+import { registerSpaceIpc } from "./ipc/spaceHost";
 import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
@@ -406,6 +407,8 @@ ipcMain.handle(APP_CHANNEL.userDataDir, () => app.getPath("userData"));
  */
 safeRegister("ai", () => registerAiIpc(), logRegisterFailure);
 safeRegister("plugin", () => registerPluginIpc(ipcMain, () => win), logRegisterFailure);
+/* 团队空间（V5-3 的产品面）：名册/配对码/共享/接管/账本 —— 操作的是数据目录里的 space.json */
+safeRegister("space", () => registerSpaceIpc(), logRegisterFailure);
 /* 插件装载**不 await**：它是"用户后来装的东西"，慢了或坏了都不该挡应用起来 */
 safeRegister("plugin-load", () => void loadPluginsAtStartup(), logRegisterFailure);
 safeRegister("session", () => registerSessionIpc(ipcMain), logRegisterFailure);
