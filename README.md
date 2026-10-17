@@ -5,6 +5,8 @@
 > AI 工作台 + 无限画布 —— 一个本机优先的桌面 Agent 工作台
 >
 > *A local-first desktop agent workbench: AI workspace + infinite canvas.*
+>
+> English: [`README.en.md`](README.en.md)
 
 Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无限画布」放在同一个工作台里。
 它本机运行、本机存数据，模型走你自己配置的通道（OpenAI 兼容 / Anthropic / Google 三种协议）——不依赖任何后端服务。
