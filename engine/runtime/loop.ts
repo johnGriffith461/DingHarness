@@ -78,6 +78,8 @@ export type TurnEvent =
    * 也不会让读日志的人多一条要认识的类型。缺用量时**不编**（没有就是没有）。
    */
   | { type: "step-finish"; step?: number; usage?: TurnUsage }
+  /* 中途插话（G06）：只上屏，不改变投影 */
+  | { type: "steer"; text: string }
   | { type: "done"; usage?: TurnUsage }
   | { type: "error"; message: string }
   /**
@@ -157,6 +159,13 @@ export type TurnRequestInput = {
    * 测试传小值（打桩 provider 卡住）。
    */
   stallTimeoutMs?: number;
+  /**
+   * **中途插话**（G06）：在每一步之间取一次用户补的话。
+   *
+   * 取到就作为一条 `user` 消息插进下一步的上下文（AI SDK 的 `prepareStep`），
+   * 并上屏一条 `steer` 事件。**只在步骤边界**投递 —— 不打断正在生成的那一步。
+   */
+  nextSteer?: () => string[];
 };
 
 /** 一次调用的结果（两条路都能用：IPC 那条主要靠 `onEvent`，子智能体主要靠它）。 */
@@ -415,6 +424,22 @@ export async function runTurn(
       ...(input.abortSignal || watchdog ? { abortSignal: watchdog.signal } : {}),
       ...(input.tools
         ? { tools: input.tools, stopWhen: stepCountIs(effectiveMaxSteps(input.maxSteps)) }
+        : {}),
+      /*
+       * 插话（G06）：`prepareStep` 在**每一步之前**跑，正好是"不打断当前生成、
+       * 又能让下一步看见新要求"的那个时机。返回的 messages 会带到后续步骤。
+       */
+      ...(input.nextSteer
+        ? {
+            prepareStep: ({ messages }: { messages: unknown[] }) => {
+              const added = input.nextSteer?.() ?? [];
+              if (!added.length) return {};
+              for (const text of added) onEvent({ type: "steer", text });
+              return {
+                messages: [...messages, ...added.map((text) => ({ role: "user" as const, content: text }))],
+              } as never;
+            },
+          }
         : {}),
     });
 

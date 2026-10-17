@@ -200,6 +200,8 @@ export type ProjectableEvent =
   | { type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
   | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number } }
   | { type: "error"; message: string }
+  /* 中途插话（G06）：只用于上屏，不改变正文投影 */
+  | { type: "steer"; text: string }
   /*
    * 一次委派的进度（Phase 7.3）：**不忽略** —— 它是团队进展的唯一记录。
    * 形状与 `AiStreamEvent` 里那条一致，只是不带 `requestId`（与其余流事件同理）。
@@ -440,6 +442,9 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
   /* 运行态（U01）：改的是"这一段跑到哪了"，不改这一轮的正文/工具/用量。 */
   if (event.type === "run-state") return state;
 
+  /* 插话（G06）不并进正文：它已经作为 user 消息进了下一步，再写进 text 会因果读反 */
+  if (event.type === "steer") return state;
+
   if (event.type === "error") return { ...state, done: true, error: event.message };
 
   /*
@@ -532,8 +537,7 @@ export type ProjectOptions = {
   /**
    * **把"调用了一半、没有结果"的工具补成一条留痕**（U09）。
    *
-   * 只给恢复用：进程被杀时那条 `tool-call` 没有配对结果，原来会被投影整个丢掉；
-   * 实时那一侧不能开（工具正在执行时 `waiting` 本来就有值）。
+   * 只给恢复用：进程被杀时那条 `tool-call` 没有配对结果，原来会被投影整个丢掉。
    */
   markUnfinishedTools?: boolean;
 };
@@ -869,16 +873,13 @@ export function parseLogLine(line: string): LogRecord | null {
     if (o.status !== "started" && o.status !== "finished") return null;
     return o as LoggedEvent;
   }
-  const known = ["text", "tool-call", "tool-result", "done", "error"];
+  const known = ["text", "tool-call", "tool-result", "done", "error", "steer"];
   if (!known.includes(o.type)) return null;
   return o as LoggedEvent;
 }
 
 /**
- * 解析整段日志。
- *
- * ⚠️ **坏行只跳过它自己**：日志是"发生过什么"的记录，一行写入被打断
- * （断电、强杀进程）不该让整段历史消失。跳过的行数**报出来**，不静默吞。
+ * 解析整段日志（**坏行只跳过它自己**；跳过的行数报出来，不静默吞）。
  *
  * @param text 整个 `.jsonl` 文件的内容
  * @returns 记录（按 `seq` 升序）与坏行数

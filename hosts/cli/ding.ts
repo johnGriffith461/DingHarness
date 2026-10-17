@@ -33,6 +33,8 @@ import { cmdWorkflow } from "./cmdWorkflow";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdReview } from "./cmdReview";
+import { cmdJobs, cmdSteer, recordJobExit, spawnBackgroundRun } from "./cmdJobs";
+import { drainSteer } from "../../engine/runtime/inbox";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
 import { renderRecords } from "./renderRecords";
 import { cmdResume } from "./cmdResume";
@@ -247,7 +249,25 @@ async function cmdRun(p: Parsed): Promise<number> {
   }
 
   const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认");
-  const sessionId = cliSessionId(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+  /*
+   * 后台任务（G06）：父进程生成会话 id 交给子进程（`DSH_SESSION_HINT`），
+   * 这样 `ding jobs show` 能直接给出"用哪个会话看状态"。
+   */
+  const sessionId =
+    process.env.DSH_SESSION_HINT?.trim() ||
+    cliSessionId(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+  /*
+   * `--background`（G06）：**起一个脱离的子进程跑同一个命令**，父进程立刻返回。
+   * 不在这里自己跑（那还是会占住终端，而且父进程一退就断）。
+   */
+  if (p.flags.has("background")) {
+    const plan = spawnBackgroundRun({ dataDir: dataDir(), argv: process.argv.slice(2), prompt: task, sessionId });
+    process.stdout.write(`✓ 已交给后台：${plan.id}` + String.fromCharCode(10));
+    process.stdout.write(`看进度：ding jobs show ${plan.id}` + String.fromCharCode(10));
+    process.stdout.write(`会话：${sessionId}` + String.fromCharCode(10));
+    return 0;
+  }
+
   const { engine, close, plugins } = await buildEngine(dirs);
   for (const problem of plugins) process.stderr.write(`[plugin] ${problem}\n`);
 
@@ -264,6 +284,8 @@ async function cmdRun(p: Parsed): Promise<number> {
     mode,
     useTools: true,
     maxSteps: steps.value,
+    /* 插话（G06）：每一步之前看一眼队列（没有就是空数组，零开销） */
+    nextSteer: () => drainSteer(dataDir(), sessionId),
     ...(typeof config.maxBudgetUsd === "number" && config.maxBudgetUsd > 0
       ? { maxBudgetUsd: config.maxBudgetUsd }
       : {}),
@@ -803,6 +825,10 @@ async function main(): Promise<void> {
         ? await cmdSessions(parsed, dataDir())
         : parsed.command === "review"
           ? await cmdReview(parsed, dataDir())
+          : parsed.command === "jobs"
+            ? cmdJobs(parsed, dataDir())
+            : parsed.command === "steer"
+              ? cmdSteer(parsed, dataDir())
           : parsed.command === "record"
           ? await cmdRecord(parsed)
           : parsed.command === "replay"
@@ -862,6 +888,8 @@ async function main(): Promise<void> {
                   : parsed.command === "agents"
                     ? cmdAgents(parsed)
                     : await cmdDefault(parsed, devMode);
+  /* 后台任务的子进程：把结束状态写回 jobs.jsonl（父进程那边只是兜底） */
+  recordJobExit(dataDir(), code);
   process.exit(code);
 }
 void main().catch((error: unknown) => {

@@ -11,7 +11,7 @@ import type { MemberRole } from "../../engine/core/members";
 import { canReadSession, handleJoin, handleSpaceRoute, spaceOf } from "./spaceApi";
 import { handleApprovalRoute } from "./approvalApi";
 import type { ApprovalsIndex } from "../../engine/adapters/sqliteApprovals";
-import { handleRunRoute, handleHookRoute } from "./runApi";
+import { handleRunResumeRoute, handleRunRoute, handleHookRoute } from "./runApi";
 import { handleStreamRoute } from "./streamApi";
 import { handleChannelRoute } from "./channelApi";
 import type { Recipe } from "../../engine/core/recipes";
@@ -761,6 +761,9 @@ async function handle(
       });
       if (handled) return;
     }
+
+    /* ── 断线续传（G07）：回放这一轮已发出的 durable 帧 ── */
+    if (await handleRunResumeRoute(path, req, res, { json })) return;
 
     /* ── 同步中继（V5-2 2.1）：整族在 `./streamApi.ts` ── */
     if (await handleStreamRoute(path, req, res, { relay: opts.relay, json, safeDecode, readBody, note: (t) => (note = t) })) return;

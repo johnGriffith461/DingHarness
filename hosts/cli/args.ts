@@ -138,6 +138,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "json",
   "yes",
+  /* `ding run --background`（G06）：交给后台任务，父进程立刻返回 */
+  "background",
   "dev",
   "continue",
   "update-baseline",

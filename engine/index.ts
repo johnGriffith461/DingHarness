@@ -204,6 +204,12 @@ export type EngineRunRequest = {
    * 单位是美元，按目录单价估算（未登记模型不估算 —— 宁可不判，也不编一个花费）。
    */
   maxBudgetUsd?: number;
+  /**
+   * **中途插话**（G06，2026-10-18）：每一步之前取一次用户补的话。
+   *
+   * 省略 = 不支持插话（老行为）。CLI 用 `ding steer` 写入队列，这里读它。
+   */
+  nextSteer?: () => string[];
 };
 
 /** 一轮的结局。 */
@@ -441,6 +447,7 @@ export function createEngine(ports: EnginePorts): Engine {
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
           ...(request.onRawError ? { onRawError: request.onRawError } : {}),
+          ...(request.nextSteer ? { nextSteer: request.nextSteer } : {}),
           ...(request.useTools
             ? {
                 tools: buildToolSet({

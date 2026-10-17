@@ -122,6 +122,8 @@ export const KNOWN_COMMANDS: ReadonlySet<string> = new Set([
   "config",
   "agents",
   "review",
+  "jobs",
+  "steer",
   "help",
 ]);
 
@@ -129,6 +131,8 @@ export const COMMAND_USAGE: Record<string, string> = {
   run: 'ding run "任务描述" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps <整数>]',
   sessions: "ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>] [--state <会话 id>] [--cost [--by session|day|model]]",
   review: "ding review <会话 id> [--json] [--revert <文件路径>]",
+  jobs: "ding jobs <list|show|wait|cancel> [任务 id]",
+  steer: 'ding steer <会话 id> "要补的话"', 
   record: "ding record <会话 id> [--out <文件>]（工程模式）",
   replay: "ding replay <快照文件>（工程模式）",
   models: "ding models [--json]",

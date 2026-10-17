@@ -209,6 +209,8 @@ export type AiStreamEvent =
    */
   | { requestId: string; type: "step-finish"; step?: number; usage?: { inputTokens?: number; outputTokens?: number } }
   | { requestId: string; type: "error"; message: string }
+  /* 中途插话（G06）：单独一个类型（不是模型输出），界面据此显示"用户插话：…" */
+  | { requestId: string; type: "steer"; text: string }
   /*
    * ── 一次委派的进度（Phase 7.3）───────────────────────────────
    *
@@ -332,10 +334,7 @@ export type ComputerResultView =
 import type { PermissionRuleWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type { PermissionRuleWire, ReviewChangeWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type ShellBridge = {
-  /**
-   * **逐文件变更审阅**（U08）：能力本体在 engine（`fileReview.ts`），这里只是接线。
-   * `before/after` 是日志里记下的原文 —— 界面据此画 diff，回滚也只依赖它们。
-   */
+  /* 逐文件变更审阅（U08）：本体在 engine，这里只是接线。 */
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;
     revert: (sessionId: string, path: string) => Promise<ReviewRevertResult>;

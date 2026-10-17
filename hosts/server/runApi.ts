@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { MAIN_AGENT, type Actor } from "../../engine/core/actor";
 import { humanFailure } from "../../shared/errors";
+import { appendFrame, createFrameLog, framesAfter, canResume, resumeRefusal, type FrameLog } from "../../engine/runtime/streamFrames";
 import type { RequesterIdentity, ServerOptions } from "./agentServer";
 import { canWriteSession, spaceOf, type SessionLookup } from "./spaceApi";
 
@@ -11,6 +12,33 @@ import { canWriteSession, spaceOf, type SessionLookup } from "./spaceApi";
  * 从 `agentServer.ts` 拆出来（贴着 900 行上限；这一块自成一体：两条入口共用
  * `runStreaming`，而它们与鉴权/路由那一层的关系只是"被调用"）。
  */
+
+/**
+ * **进行中/刚结束的轮次帧日志**（G07）：键是宿主给的 `runId`。
+ *
+ * 为什么放内存：它是"重连时补发最后几秒"的窗口，不是历史存储 ——
+ * 历史在会话日志里（`ding resume` 用的是那份）。超过 2000 帧/10 分钟就丢。
+ */
+const runLogs = new Map<string, { log: FrameLog<Record<string, unknown>>; at: number }>();
+const RUN_LOG_TTL_MS = 10 * 60 * 1000;
+
+/** 取一份帧日志（没有就给 undefined）。 */
+export function frameLogOf(runId: string): FrameLog<Record<string, unknown>> | undefined {
+  const hit = runLogs.get(runId);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > RUN_LOG_TTL_MS) {
+    runLogs.delete(runId);
+    return undefined;
+  }
+  return hit.log;
+}
+
+/** 记一份帧日志（宿主在 `/v1/run` 里调用）。 */
+export function rememberFrameLog(runId: string, log: FrameLog<Record<string, unknown>>): void {
+  runLogs.set(runId, { log, at: Date.now() });
+  /* 顺手清过期（不为此单开定时器） */
+  for (const [id, entry] of runLogs) if (Date.now() - entry.at > RUN_LOG_TTL_MS) runLogs.delete(id);
+}
 
 /** 本地主人那个 id（与 C1 的 owner / C4 的归属 / C5 的 actor 同一个 id 空间）。 */
 const LOCAL_OWNER_ID = "local";
@@ -240,9 +268,17 @@ export async function runStreaming(
   });
   /** 这一轮说出来的正文（从事件流里攒 —— 与界面看到的同一份；`done.reply` 用它）。 */
   let spoken = "";
-  const send = (event: string, data: unknown) => {
+  /* G07：帧日志。给了 runId 才记；正文/工具/收尾 durable，进度 transient。 */
+  const runId = typeof context?.extraStarted?.runId === "string" ? String(context.extraStarted.runId) : "";
+  const frameLog = runId ? createFrameLog<Record<string, unknown>>() : undefined;
+  if (runId && frameLog) rememberFrameLog(runId, frameLog);
+  const send = (event: string, data: unknown, kind: "durable" | "transient" = "durable") => {
     if (res.writableEnded || res.destroyed) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const frame = frameLog
+      ? appendFrame(frameLog, { kind, event, data: (data ?? {}) as Record<string, unknown> })
+      : undefined;
+    const idLine = frame ? `id: ${frame.seq}\n` : "";
+    res.write(`${idLine}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
   /*
@@ -279,7 +315,7 @@ export async function runStreaming(
         if (event.type === "text" && typeof (event as { text?: unknown }).text === "string") {
           spoken += (event as { text: string }).text;
         }
-        send("event", { ...event, actor: MAIN_AGENT });
+        send("event", { ...event, actor: MAIN_AGENT }, event.type === "step-finish" ? "transient" : "durable");
       },
     });
     send("done", {
@@ -304,6 +340,7 @@ export async function runStreaming(
       error: humanFailure(String((error as Error)?.message ?? error)),
     });
   } finally {
+    if (frameLog) frameLog.done = true;
     res.off("close", onClose);
     activeRuns.delete(controller);
     mine.delete(controller);
@@ -311,4 +348,42 @@ export async function runStreaming(
     built.close();
     if (!res.writableEnded) res.end();
   }
+}
+
+/**
+ * `/v1/runs/:id/events?after_seq=N`（G07）：**重连回放**。
+ *
+ * 只回放 `durable` 帧（正文/工具/收尾）；落后太多、接不上就明确拒绝
+ * （`409` + 一句话），而不是给一段缺头的正文。
+ *
+ * @returns 处理了就给 true
+ */
+export async function handleRunResumeRoute(
+  path: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: { json: (res: ServerResponse, status: number, body: unknown) => void },
+): Promise<boolean> {
+  const m = /^\/v1\/runs\/([^/]+)\/events$/.exec(path);
+  if (!m || req.method !== "GET") return false;
+  const runId = decodeURIComponent(m[1]!);
+  const log = frameLogOf(runId);
+  if (!log) {
+    ctx.json(res, 404, { error: `没有这一轮：${runId}（只保留最近 10 分钟的帧）` });
+    return true;
+  }
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const afterSeq = Number(url.searchParams.get("after_seq") ?? "0") || 0;
+  if (!canResume(log, afterSeq)) {
+    ctx.json(res, 409, { error: resumeRefusal(log) });
+    return true;
+  }
+  ctx.json(res, 200, {
+    runId,
+    attempt: log.attempt,
+    done: log.done,
+    dropped: log.dropped,
+    frames: framesAfter(log, afterSeq),
+  });
+  return true;
 }
