@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { createSqliteSessionStore } from "../engine/adapters/sqliteStore";
 import { createSpaceStore } from "../engine/adapters/spaceStore";
+import { createApprovalsIndex } from "../engine/adapters/sqliteApprovals";
 import { taskSessionId } from "../engine/core/events";
 import { approversOf, authorizeApprover, canDecide } from "../engine/core/gates";
 import { buildEngine } from "../hosts/cli/assembly";
@@ -215,6 +216,19 @@ const server = await startAgentServer({
   model: "deepseek-flash",
   cwd: dataDir,
   space: createSpaceStore(dataDir),
+  /*
+   * 审批那一族（C3 3.7b）：与 `ding serve` 同一套接线 ——
+   * 索引常开（读"谁在等批"），写入复用会话库那一个端口（单一出口）。
+   */
+  approvals: createApprovalsIndex(dataDir, "sessions.db"),
+  appendRecord: async (sessionId: string, record: unknown) => {
+    const store = openStore();
+    try {
+      await store.append(sessionId, [record as never]);
+    } finally {
+      store.close();
+    }
+  },
   listSessions: async () => {
     const store = openStore();
     try {
@@ -319,6 +333,29 @@ try {
     granted.ok === true && canDecide({ approvers: granted.approvers, actorId: "alice", alreadyDecided: false }).ok === true,
     "授权之后 alice 就能批了（同一条待决、同一套核对）",
   );
+
+  /* ── E2E-3b/4b 远端裁决（C3 3.7b 的服务端入口）────────── */
+  console.log("\nE2E-3b/4b 远端裁决（HTTP：待决列表 / 授权 / 批准）");
+  const listBefore = await A("GET", "/v1/approvals?state=pending", undefined, BOSS);
+  ok(listBefore.status === 200, `待决列表读得到（${((listBefore.json.approvals ?? []) as unknown[]).length} 条）`);
+  /* 之前那两轮 write_file 被拦下的待决（E2E-3 里验过它的审批人是主人） */
+  const pendingRow = ((listBefore.json.approvals ?? []) as Array<{ toolCallId: string; youCanDecide: boolean; approvers: string[] }>).find(
+    (row) => row.youCanDecide,
+  );
+  ok(Boolean(pendingRow), `主人能处置其中一条（审批人：${pendingRow?.approvers.join(" / ") ?? "?"}）`);
+  if (pendingRow) {
+    const granted = await A("POST", `/v1/approvals/${bossSession}/${pendingRow.toolCallId}`, { action: "authorize", target: "alice" }, BOSS);
+    ok(granted.status === 200 && (granted.json.approvers as string[]).includes("alice"), "主人把裁决权授给 alice（HTTP 那条路）");
+    const aliceCanNow = ((await A("GET", "/v1/approvals?state=pending", undefined, aliceToken)).json.approvals ?? []) as Array<{
+      toolCallId: string;
+      youCanDecide: boolean;
+    }>;
+    ok(aliceCanNow.find((row) => row.toolCallId === pendingRow.toolCallId)?.youCanDecide === true, "她那边现在显示「可以处置」");
+    const decided = await A("POST", `/v1/approvals/${bossSession}/${pendingRow.toolCallId}`, { action: "reject" }, aliceToken);
+    ok(decided.status === 200 && decided.json.state === "rejected" && decided.json.decidedBy === "alice", "她拒绝 → 留痕（decidedBy=alice）");
+    const decisions = ((await rawRecords(bossSession)) as Array<{ type?: string; decidedBy?: string }>).filter((r) => r.type === "approval");
+    ok(decisions.some((r) => r.decidedBy === "alice"), "那条决策记录真落了盘（谁批的可复盘）");
+  }
 
   /* ── E2E-5 双端接管（fencing 语义）────────────────────── */
   console.log("\nE2E-5 双端接管（只有最后一个持有人写得进去）");
