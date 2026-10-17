@@ -87,7 +87,11 @@ describe("守卫：渲染口径不许有第二份（P217 的落点）", () => {
   const read = (rel: string): string => fs.readFileSync(path.resolve(process.cwd(), rel), "utf8");
 
   it("ding.ts 与 cmdRecipe.ts 都走 renderRecords，且 ding.ts 没有自己的 render()", () => {
-    const ding = read("hosts/cli/ding.ts");
+    /*
+   * L07（2026-10-18）：`ding.ts` 被拆成薄入口 + `main.ts`（命令实现）。
+   * 渲染口径的判据跟到 `main.ts` —— 这份文件才是"命令怎么打印"的所在地。
+   */
+    const ding = read("hosts/cli/main.ts");
     const recipe = read("hosts/cli/cmdRecipe.ts");
     expect(ding, "ding.ts 没用共用的渲染").toContain('from "./renderRecords"');
     expect(recipe, "cmdRecipe.ts 没用共用的渲染").toContain('from "./renderRecords"');

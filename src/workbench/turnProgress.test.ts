@@ -43,7 +43,8 @@ describe("长回合进度里的 token（P150）", () => {
      * U15 之后这段逻辑搬到了 `hosts/cli/providerFallback.ts`（故障转移要复用同一份）；
      * `ding.ts` 只把它接到 stderr。两处都要看 —— 否则"搬家"会悄悄把这条口径丢掉。
      */
-    const src = read("hosts/cli/ding.ts") + "\n" + read("hosts/cli/providerFallback.ts");
+    /* L07：命令实现搬到 `main.ts`，三处都要看。 */
+    const src = [read("hosts/cli/ding.ts"), read("hosts/cli/main.ts"), read("hosts/cli/providerFallback.ts")].join("\n");
     expect(src, "CLI 进度也要累加").toContain("totalTokens += stepTokens");
     expect(src, "措辞与桌面一致").toContain("累计已用");
     expect(src, "两边读的是同一个字段（usageTotal）").toContain("usageTotal(event.usage)");
