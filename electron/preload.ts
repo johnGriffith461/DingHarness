@@ -8,6 +8,7 @@ import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { STATS_CHANNEL } from "./ipc/stats";
 import { WORKFLOW_CHANNEL } from "./ipc/workflowStore";
+import { PREVIEW_CHANNEL } from "./ipc/preview";
 import { PLUGIN_CHANNEL } from "./ipc/pluginHost";
 import { SPACE_CHANNEL } from "./ipc/spaceHost";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
@@ -362,6 +363,11 @@ const api = {
   workflows: {
     list: () => ipcRenderer.invoke(WORKFLOW_CHANNEL.list),
     saveSpec: (name: string, json: string) => ipcRenderer.invoke(WORKFLOW_CHANNEL.saveSpec, name, json),
+  },
+  /** 内置浏览器预览（V6-2m）：只开本机地址，独立窗口 + 持久登录态。 */
+  preview: {
+    open: (url: string) => ipcRenderer.invoke(PREVIEW_CHANNEL.open, url),
+    close: () => ipcRenderer.invoke(PREVIEW_CHANNEL.close),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */

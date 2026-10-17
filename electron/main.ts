@@ -15,6 +15,7 @@ import { registerSpaceIpc } from "./ipc/spaceHost";
 import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
 import { registerStatsIpc } from "./ipc/stats";
 import { registerWorkflowIpc } from "./ipc/workflowStore";
+import { registerPreviewIpc } from "./ipc/preview";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
@@ -418,6 +419,8 @@ safeRegister("session", () => registerSessionIpc(ipcMain), logRegisterFailure);
 safeRegister("stats", () => registerStatsIpc(), logRegisterFailure);
 /* 工作流（V6-2l）：只读列定义/运行 + 存定义；运行在 CLI（不在这里再装配一套引擎） */
 safeRegister("workflow", () => registerWorkflowIpc(), logRegisterFailure);
+/* 内置浏览器预览（V6-2m）：只允许本机地址、独立持久分区 */
+safeRegister("preview", () => registerPreviewIpc(), logRegisterFailure);
 
 safeRegister("canvas", () => registerCanvasIpc(), logRegisterFailure);
 safeRegister("canvas-export", () => registerCanvasExportIpc(), logRegisterFailure);

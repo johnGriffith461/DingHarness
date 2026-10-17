@@ -722,6 +722,15 @@ export type ShellBridge = {
     saveSpec: (name: string, json: string) => Promise<{ ok: true; file: string; runCommand: string } | { ok: false; error: string }>;
   };
   /**
+   * 内置浏览器预览（V6-2m）：独立窗口 + 持久分区（保留登录态），**只允许本机地址**。
+   *
+   * 预览窗口不带我们的 preload，拿不到应用凭据；新窗口一律拒。
+   */
+  preview: {
+    open: (url: string) => Promise<{ ok: true; reused?: boolean } | { ok: false; error: string }>;
+    close: () => Promise<{ ok: true }>;
+  };
+  /**
    * 诊断包导出（2026-10-17）。
    *
    * 「反馈」的本地形态：没有上报服务端，导出一个 JSON 诊断包（自检结果 + 版本/路径），

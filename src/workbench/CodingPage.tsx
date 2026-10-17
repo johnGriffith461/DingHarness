@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, Heart, Info, Play, Search, Sparkles } from "lucide-react";
+import { ExternalLink, Globe, Heart, Info, Play, Search, Sparkles } from "lucide-react";
 import type { ShellBridge } from "@shared/ipc";
 import {
   CODING_CATEGORIES,
@@ -38,6 +38,9 @@ export function CodingPage() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CodingCategory | "all">("all");
   const [days, setDays] = useState<number>(0);
+  /** 内置预览（V6-2m）：本机地址 + 一句结果提示。 */
+  const [previewUrl, setPreviewUrl] = useState("http://localhost:3000");
+  const [previewNote, setPreviewNote] = useState("");
 
   /** 正在看详情的那个应用（null = 没打开）。 */
   const [detail, setDetail] = useState<CodingApp | null>(null);
@@ -83,6 +86,14 @@ export function CodingPage() {
   const openApp = (app: CodingApp): void => {
     void bridge?.drive?.open(app.path);
   };
+  const openPreview = async (): Promise<void> => {
+    if (!bridge?.preview) {
+      setPreviewNote("这一页要在桌面端打开（浏览器预览里没有内置预览窗口）。");
+      return;
+    }
+    const got = await bridge.preview.open(previewUrl);
+    setPreviewNote(got.ok ? "预览窗口已打开（登录态会保留）" : got.error);
+  };
   const remix = (app: CodingApp): void => {
     // 送到主输入区（§159 的草稿交接）—— 用户在那儿按发送就开工
     setComposerDraft(remixPrompt(app));
@@ -104,6 +115,22 @@ export function CodingPage() {
           <Sparkles size={13} /> {CODING_LABELS.createApp}
         </button>
       </header>
+
+      <div className="wb-coding-tools" data-testid="wb-coding-previewbar">
+        <label className="wb-coding-search">
+          <Globe size={13} />
+          <input
+            data-testid="wb-coding-preview-url"
+            value={previewUrl}
+            placeholder="http://localhost:3000（只允许本机地址）"
+            onChange={(e) => setPreviewUrl(e.target.value)}
+          />
+        </label>
+        <button className="wb-page-btn" data-testid="wb-coding-preview-open" onClick={() => void openPreview()}>
+          <Play size={12} /> 打开预览
+        </button>
+        {previewNote ? <span className="wb-card-desc">{previewNote}</span> : null}
+      </div>
 
       <div className="wb-coding-tools">
         <label className="wb-coding-search">
