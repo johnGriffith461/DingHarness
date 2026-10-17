@@ -144,7 +144,15 @@ export function buildHistory(
    * 不传时保持原样（默认值），单测与旧调用零漂移。
    */
   opts: { factor?: number; keepTokens?: number } = {},
-): { messages: ChatMessage[]; truncated: boolean } {
+): {
+  /** 这次要发的历史（切过之后 = recent；没超额度 = 全量）。 */
+  messages: ChatMessage[];
+  truncated: boolean;
+  /** 全量（未切）；ICM 拿它算"该不该压"的总量。 */
+  all: ChatMessage[];
+  /** 被切掉的那批（旧 → 新）；摘要/索引从它生成。 */
+  older: ChatMessage[];
+} {
   const all: ChatMessage[] = [];
   for (const step of steps) {
     const text = withToolLines((step.text ?? "").trim(), step.tools);
@@ -160,7 +168,13 @@ export function buildHistory(
    * 现在条数不再是判据：同样 20 条，短消息与长消息能差几十倍。
    */
   const { older, recent } = planContext(all, opts.keepTokens ?? KEEP_TOKENS, { factor: opts.factor ?? 1 });
-  return { messages: recent, truncated: older.length > 0 };
+  /*
+   * 三个出口都留着（V6-1c）：原来只返回 `recent`，于是调用方拿到的已经是
+   * 切过的历史，再对它调 `shouldCompact` **恒为假** —— 摘要那条路形同虚设，
+   * 被切掉的 `older` 只留下一句"已省略"就没了。现在旧内容可交给 ICM
+   * 决定"压成摘要"还是"生成索引"。
+   */
+  return { messages: recent, truncated: older.length > 0, all, older };
 }
 
 /**

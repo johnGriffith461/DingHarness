@@ -58,3 +58,51 @@ describe("恢复任务的状态口径（§179）", () => {
     expect(normalizeTask(null)).toBeNull();
   });
 });
+
+/**
+ * ICM 的两个字段（V6-1c）：压缩次数与上下文索引。
+ *
+ * 它们是"永不遗忘"的产品面支撑 —— 重启之后索引必须还在，
+ * 否则下一次请求会拿不到接力棒，长任务的目标就断了。
+ */
+describe("恢复 ICM 字段（V6-1c）", () => {
+  const index = {
+    version: 1,
+    sessionId: "task-42",
+    goal: "整理纪要",
+    decisions: ["只用本地文件"],
+    openItems: ["第四节"],
+    artifacts: ["纪要.md"],
+    anchor: { seq: 120, eventCount: 340 },
+    createdAt: NOW,
+  };
+
+  it("索引与压缩次数都活下来", () => {
+    const got = normalizeTask(task({ contextCompactions: 2, contextIndex: index }));
+    expect(got?.contextCompactions).toBe(2);
+    expect(got?.contextIndex).toEqual(index);
+  });
+
+  it("不认识的索引版本 → 丢掉（不猜旧格式，拿错接力棒比没有更危险）", () => {
+    const got = normalizeTask(task({ contextIndex: { ...index, version: 99 } }));
+    expect(got?.contextIndex).toBeUndefined();
+  });
+
+  it("坏字段被收窄：数组里混入非字符串、锚点不是数字都清掉", () => {
+    const got = normalizeTask(
+      task({
+        contextCompactions: Number.NaN,
+        contextIndex: { ...index, decisions: ["好的", 42, null], anchor: { seq: "x", eventCount: 12 } },
+      }),
+    );
+    expect(got?.contextCompactions).toBeUndefined();
+    expect(got?.contextIndex?.decisions).toEqual(["好的"]);
+    expect(got?.contextIndex?.anchor).toEqual({ seq: 0, eventCount: 12 });
+  });
+
+  it("老任务没有这两个字段 → 也不编一个出来", () => {
+    const got = normalizeTask(task());
+    expect(got?.contextCompactions).toBeUndefined();
+    expect(got?.contextIndex).toBeUndefined();
+  });
+});

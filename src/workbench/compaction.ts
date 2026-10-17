@@ -89,6 +89,24 @@ export function compactedNote(olderCount: number): string {
 }
 
 /**
+ * 把 ICM 索引挂到系统提示词末尾（V6-1c）。
+ *
+ * 与 `withSummary` 分开：摘要来自一次**模型调用**，索引来自**事件流事实**。
+ * 两者在提示词里的标头也不同（索引自带 `【上下文索引（不是摘要）】`），
+ * 模型不会把"事实锚点"当成"上一轮的措辞"来模仿。
+ */
+export function withContextIndex(system: string, indexText: string): string {
+  const text = indexText.trim();
+  if (!text) return system;
+  return `${system}\n\n${text}`;
+}
+
+/** 界面提示：走的是索引接力，不是摘要（事件流还在，可回放核对）。 */
+export function indexedNote(olderCount: number): string {
+  return `更早的 ${olderCount} 条对话已换成上下文索引（事件流保留，可回放核对）`;
+}
+
+/**
  * 一组消息的**签名**（用于摘要缓存）。
  *
  * 为什么要有：不缓存的话，**每一次追问都会多花一次压缩调用** ——

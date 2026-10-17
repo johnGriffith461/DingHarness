@@ -34,6 +34,14 @@ import { applyEvent, emptyTurn, finishTurn } from "@engine/core/events";
 import { assembleSystem } from "@engine/core/assembly";
 import { fabricatedCost, type StepUsage } from "@shared/cost";
 import { calibrationOf, estimateTokens, totalTokens } from "@engine/core/context";
+import {
+  buildContextIndex,
+  classifyClaim,
+  decideContext,
+  renderContextIndex,
+  type ContextIndex,
+  type ContextSignals,
+} from "@engine/core/contextManager";
 import { buildHistory } from "./history";
 import { keepTokensFor } from "@engine/runtime/budget";
 import { readSavedRoute } from "@/ai/route";
@@ -44,9 +52,9 @@ import { resolveChatRoute } from "@/ai/route";
 import {
   compactedNote,
   compactPrompt,
-  shouldCompact,
+  indexedNote,
   signatureOf,
-  planContext,
+  withContextIndex,
   withSummary,
 } from "./compaction";
 import { readConfirmMode } from "./confirmMode";
@@ -283,6 +291,51 @@ async function summaryFor(taskId: string, older: ChatMessage[]): Promise<string>
   }
 }
 
+/** 还没回答的澄清问题（ICM 的"未完成"信号之一）。 */
+function unansweredQuestions(task: WorkTask): string[] {
+  return task.questions.slice(task.questionIndex).map((q) => q.text);
+}
+
+/**
+ * 从**已有事实**里取 ICM 信号（V6-1c）。
+ *
+ * ⚠️ 这里不读模型自述，只看三类真值：工具留痕（pending/失败/在跑检查）、
+ * 未答问题、最近一条助手回复的**口径**（真假由 `decideContext` 拿证据判）。
+ *
+ * @param task 当前任务（可能还没建）
+ * @param history 这一步之前的历史
+ * @param tokens 全量历史估算
+ * @param keepTokens 保留额度
+ */
+function contextSignalsOf(task: WorkTask | undefined, history: TaskStep[], tokens: number, keepTokens: number): ContextSignals {
+  /* 只看最近几步：很久以前 pending 过的工具早已被处理，拿它当"活状态"会永远不压缩 */
+  const recent = history.slice(-6);
+  const tools = recent.flatMap((s) => s.tools ?? []);
+  const pendingWork = tools.some((t) => t.pending);
+  const runningChecks = tools.some(
+    (t) =>
+      Boolean(t.pending) &&
+      t.name === "run_command" &&
+      /(test|check|build|lint|测试|检查|构建|构建)/i.test(`${JSON.stringify(t.input ?? "")} ${t.line ?? ""}`),
+  );
+  const failedTools = tools.filter((t) => !t.ok && !t.pending).length;
+  const openItems = task ? Math.max(0, task.questions.length - task.questionIndex) : 0;
+  const lastAssistant = [...history].reverse().find((s) => s.role === "assistant");
+  const claim = classifyClaim(lastAssistant?.text ?? "");
+  return {
+    tokens,
+    keepTokens,
+    pendingWork,
+    openItems,
+    failedTools,
+    runningChecks,
+    claim,
+    evidenceComplete: !pendingWork && openItems === 0 && failedTools === 0 && !runningChecks,
+    compactions: task?.contextCompactions ?? 0,
+    hasFreshIndex: Boolean(task?.contextIndex),
+  };
+}
+
 /**
  * 用"接着聊"那条路回答一句（§147 / §149 / §151 共用）。
  *
@@ -303,33 +356,71 @@ export async function answerTurn(
   /** 这一轮随用户话一起带的资料（见 `WorkTask.material`）：空则只用任务上那份。 */
   material?: string,
 ): Promise<void> {
-  /* ⚠️ 与下面 `compactKeepTokens()` 用**同一把尺**（审计 P156：两把尺会让"该压就压"失真） */
-  const { messages, truncated } = buildHistory(history, { factor: calibrationFactor, keepTokens: compactKeepTokens() });
-
   /*
-   * 上下文压缩（§149）。
+   * ⚠️ 与下面 `compactKeepTokens()` 用**同一把尺**（审计 P156：两把尺会让"该压就压"失真）。
    *
-   * 顺序很要紧：**先按消息边界切、再决定压不压**，压成功才只发 recent + 摘要。
-   * 压失败就退回"发截断后的完整历史" —— 不能因为压缩失败就把更早的内容
-   * 悄悄丢掉（那等于压缩把上下文弄丢了）。
+   * ⭐ V6-1c 修正了一个**静默失效**：`buildHistory` 返回的 `messages` 已经是切过的，
+   * 再对它调 `shouldCompact` 几乎恒为假 —— 摘要那条路等于没接上，被切掉的旧内容
+   * 只留下一句"已省略"。现在拿 `all` 算总量、拿 `older` 喂给 ICM。
    */
   const keepTokens = compactKeepTokens();
+  const built = buildHistory(history, { factor: calibrationFactor, keepTokens });
+  const { messages, truncated, all, older } = built;
+  const task = current(port.getState().tasks, taskId);
+
+  /*
+   * ICM 裁决（V6-1c）：不是所有超额度都该摘要。
+   *
+   *   · `compact`   —— 旧内容可以压成要点（一次模型调用，有成本）；
+   *   · `fork_index` —— 有活状态/假完成风险，改用**事件流索引**接力（0 次模型调用）；
+   *   · `keep`      —— 没超额度。
+   *
+   * 压失败仍退回"发切过的历史"（不能因为摘要失败就把旧内容强行塞回去顶爆窗口）。
+   */
+  const decision = decideContext(contextSignalsOf(task, history, totalTokens(all), keepTokens));
   let effective = messages;
   let summary = "";
+  let contextIndex: ContextIndex | null = null;
   let olderCount = 0;
-  if (shouldCompact(messages, keepTokens)) {
-    const { older, recent } = planContext(messages, keepTokens);
-    if (older.length > 0) {
+  if (decision.action !== "keep" && older.length > 0) {
+    if (decision.action === "compact") {
       summary = await summaryFor(taskId, older);
       if (summary) {
-        effective = recent;
         olderCount = older.length;
+        port.setState((s) => {
+          const t = current(s.tasks, taskId);
+          return {
+            tasks: upsertTask(s.tasks, {
+              ...t,
+              contextCompactions: (t.contextCompactions ?? 0) + 1,
+              contextIndex: undefined,
+            }),
+          };
+        });
       }
+    } else {
+      /*
+       * 索引从**已有事实**生成（任务目标/待办/产物），不调用模型。
+       * 锚点用"这次请求前已有的事件条数"—— 回放时可以从此处核对。
+       */
+      contextIndex = buildContextIndex({
+        sessionId: taskId,
+        goal: task?.brief || task?.title || "",
+        openItems: [
+          ...(task ? unansweredQuestions(task) : []),
+          ...(decision.action === "fork_index" ? [decision.reason] : []),
+        ],
+        artifacts: (task?.artifacts ?? []).map((a) => a.filePath || a.title).filter(Boolean),
+      });
+      olderCount = older.length;
+      port.setState((s) => ({ tasks: upsertTask(s.tasks, { ...current(s.tasks, taskId), contextIndex: contextIndex ?? undefined }) }));
     }
   }
 
   const { system: baseSystem, user } = buildFollowUpPrompt(text, truncated, material);
-  const system = withSummary(baseSystem, summary);
+  const system = contextIndex
+    ? withContextIndex(baseSystem, renderContextIndex(contextIndex))
+    : withSummary(baseSystem, summary);
   const reply = await runStream(
     port,
     user,
@@ -347,7 +438,8 @@ export async function answerTurn(
    * ② 压缩提示（§149）。
    * 合成一行而不是两条：界面上那一行本来就只放一句。
    */
-  const notes = [extraNote, reply.note, olderCount ? compactedNote(olderCount) : ""].filter(Boolean);
+  const contextNote = contextIndex ? indexedNote(olderCount) : olderCount ? compactedNote(olderCount) : "";
+  const notes = [extraNote, reply.note, contextNote].filter(Boolean);
   nextStep(
     port,
     taskId,

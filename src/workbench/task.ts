@@ -13,6 +13,7 @@
 /** 任务在生命周期里的位置。 */
 export type TaskStage = "running" | "awaiting" | "done" | "failed";
 
+import type { ContextIndex } from "@engine/core/contextManager";
 import { ARTIFACT_FORMATS, type Artifact, type ArtifactKind } from "./artifact";
 import { normalizeToolTraces, type ToolTrace } from "@shared/agentTools";
 import type { StepUsage } from "@shared/cost";
@@ -164,6 +165,22 @@ export type WorkTask = {
    * 只能按那句说明认一次（见 `continueTargetOf` 的兜底）。
    */
   interrupted?: boolean;
+
+  /**
+   * 这段会话已经做过几次**摘要式压缩**（V6-1c ICM 的计数）。
+   *
+   * 用途只有一个：`decideContext` 判断"再压就是摘要的摘要"。
+   * 它是真值、随任务落盘；老任务没有这个字段时按 0 算（不编一个次数）。
+   */
+  contextCompactions?: number;
+
+  /**
+   * 最近一次生成的**上下文索引**（V6-1c）。
+   *
+   * 与摘要不同：索引从**事件流/任务事实**生成，不调模型、不丢锚点，
+   * 所以切会话/重启之后还能按 `anchor` 回放核对。随任务落盘。
+   */
+  contextIndex?: ContextIndex;
 };
 
 /* ============================================================

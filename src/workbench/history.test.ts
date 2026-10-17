@@ -83,6 +83,17 @@ describe("buildHistory", () => {
     expect(got.messages[0]?.content).not.toContain("第0条");
   });
 
+  it("⭐ 切掉的旧内容也交出来（V6-1c：ICM 要拿它生成摘要/索引，不能只剩一句「已省略」）", () => {
+    const long = "很长的内容".repeat(4000);
+    const many = Array.from({ length: 6 }, (_, i) => step(i % 2 ? "assistant" : "user", `${long}第${i}条`, `L${i}`));
+    const got = buildHistory(many);
+    expect(got.truncated).toBe(true);
+    /* 全量 = 切掉的那批 + 留下的那批（一条都不丢，只是分工不同） */
+    expect(got.all.length).toBe(got.older.length + got.messages.length);
+    expect(got.older.length).toBeGreaterThan(0);
+    expect(got.older[0]?.content).toContain("第0条");
+  });
+
   it("⭐ 保留额度可注入（审计 P156：别让同一条回合用两把尺）", () => {
     const many = Array.from({ length: 40 }, (_, i) => step(i % 2 ? "assistant" : "user", "字".repeat(500), `K${i}`));
     const wide = buildHistory(many);

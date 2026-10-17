@@ -14,9 +14,42 @@
  * 别在 store.ts 或别处再声明一份：两份 = 写盘竞态，而且从现象上几乎看不出来。
  */
 import type { ShellBridge } from "@shared/ipc";
+import { CONTEXT_INDEX_VERSION, type ContextIndex } from "@engine/core/contextManager";
 import { interruptedFromStage } from "@engine/core/recovery";
 import { INTERRUPTED_NOTE, normalizeArtifacts, normalizeQuestions, normalizeStep, type WorkTask } from "./task";
 import type { StorePort } from "./store";
+
+/**
+ * 恢复上下文索引（磁盘按不可信处理）。
+ *
+ * 版本不认识就给 null（**不猜**旧格式的字段）：索引是接力棒，
+ * 拿一份读不懂的索引去续写比没有索引更危险。
+ */
+function normalizeContextIndex(raw: unknown): ContextIndex | null {
+  if (!raw || typeof raw !== "object") return null;
+  const i = raw as Record<string, unknown>;
+  if (i.version !== CONTEXT_INDEX_VERSION) return null;
+  if (typeof i.sessionId !== "string" || typeof i.goal !== "string") return null;
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
+  const anchor = (i.anchor ?? {}) as Record<string, unknown>;
+  return {
+    version: CONTEXT_INDEX_VERSION,
+    sessionId: i.sessionId,
+    goal: i.goal,
+    decisions: strings(i.decisions),
+    openItems: strings(i.openItems),
+    artifacts: strings(i.artifacts),
+    anchor: {
+      seq: typeof anchor.seq === "number" && Number.isFinite(anchor.seq) ? Math.max(0, Math.floor(anchor.seq)) : 0,
+      eventCount:
+        typeof anchor.eventCount === "number" && Number.isFinite(anchor.eventCount)
+          ? Math.max(0, Math.floor(anchor.eventCount))
+          : 0,
+    },
+    createdAt: typeof i.createdAt === "number" && Number.isFinite(i.createdAt) ? i.createdAt : 0,
+  };
+}
 
 /** 恢复时把盘上的数据收窄成合法任务（磁盘内容按不可信处理）。 */
 /**
@@ -65,6 +98,7 @@ export function normalizeTask(raw: unknown): WorkTask | null {
    * **在等人的状态不该被系统自己判死。**
    */
   const interrupted = interruptedFromStage(stage);
+  const contextIndex = normalizeContextIndex(t.contextIndex);
   return {
     id: t.id,
     title: typeof t.title === "string" && t.title ? t.title : "未命名任务",
@@ -92,6 +126,11 @@ export function normalizeTask(raw: unknown): WorkTask | null {
      * 只有真被打断过才落这个字段，没被恢复过的任务身上不该多一个字段。
      */
     ...(interrupted ? { interrupted: true } : {}),
+    /* ICM（V6-1c）：压缩次数与索引都是真值；老任务没有就不带，不编 0 次/空索引 */
+    ...(typeof t.contextCompactions === "number" && t.contextCompactions > 0
+      ? { contextCompactions: Math.floor(t.contextCompactions) }
+      : {}),
+    ...(contextIndex ? { contextIndex } : {}),
   };
 }
 
