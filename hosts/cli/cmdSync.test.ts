@@ -148,7 +148,7 @@ describe("ding sync（同步客户端）", () => {
     a.close();
 
     const slept: number[] = [];
-    const seen: number[] = [];
+    const seen: string[] = [];
     const reports = await syncLoop({
       opts: { dataDir: dirA, sessionId: sid, to: `http://127.0.0.1:${port}`, token, producerId: "device-loop" },
       rounds: 3,

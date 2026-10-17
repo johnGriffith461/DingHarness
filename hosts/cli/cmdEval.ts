@@ -9,10 +9,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { EVAL_CASES } from "../../engine/eval/cases";
+import { describeFailureSummary } from "../../engine/eval/failClassifier";
 import { runSuite } from "../../engine/eval/run";
 import { EVAL_CATEGORIES } from "../../engine/eval/types";
 import { buildEngine as buildEngineIn } from "./assembly";
-import type { Parsed } from "./args";
+import { flag, parseIntFlagValue, type Parsed } from "./args";
 /* ────────────────────── eval（Phase 10） ────────────────────── */
 
 /**
@@ -87,8 +88,12 @@ export function baselineUpdateAllowed(only: string | undefined): { ok: true } | 
  *
  * ## 它与 `engine/eval/eval.test.ts` 的关系
  *
- * **同一个 `runSuite`**：那条在 CI 里当门（通过率跌超 5% 即红），这条给人看报告。
+ * **同一个 `runSuite`**：那条在 CI 里当门（任何产品失败/装置不可达都红），这条给人看报告。
  * 一个跑、一个看 —— 不会出现"CI 判的与命令行看到的不一样"。
+ *
+ * `--repeat <k>`（V6-1d）把每条用例采样 k 次，报告同时给 pass@k 与 pass^k：
+ * 前者是"多试几次能不能过"，后者是"每次都过"。只公开前者会把
+ * "偶尔能过"说成"能过"。
  *
  * @param p 解析后的参数
  * @returns 退出码（有失败 = 1）
@@ -110,6 +115,12 @@ export async function cmdEval(p: Parsed): Promise<number> {
   const cases = only ? EVAL_CASES.filter((c) => c.category === only) : EVAL_CASES;
   if (!cases.length) {
     process.stderr.write("这一类还没有用例。\n");
+    return 2;
+  }
+  /* `--repeat`（V6-1d）：坏值不许静默变成 1 —— 那会让"多采样"看起来生效了 */
+  const repeat = parseIntFlagValue(flag(p, "repeat"), "repeat", { min: 1, max: 20, fallback: 1 });
+  if (!repeat.ok) {
+    process.stderr.write(`${repeat.message}\n`);
     return 2;
   }
 
@@ -138,12 +149,14 @@ export async function cmdEval(p: Parsed): Promise<number> {
       if (p.flags.has("json")) return;
       /* 装置不可达的用 ⚠️ 而不是 ✗ —— 它不是产品失败，但**绝不能不吭声** */
       const mark = r.ok ? "✓" : r.environment ? "⚠️" : "✗";
-      process.stdout.write(`${mark} [${i}/${total}] ${r.id}  ${r.title}\n`);
+      const sample = repeat.value > 1 ? `（${r.passedRuns ?? 0}/${r.runs ?? repeat.value} 次通过${r.flaky ? "，不稳定" : ""}）` : "";
+      process.stdout.write(`${mark} [${i}/${total}] ${r.id}  ${r.title}${sample}\n`);
       for (const f of r.failures) process.stdout.write(`     ${f.what}：${f.detail}\n`);
       if (r.environment) process.stdout.write(`     装置：${r.environment}\n`);
       /* error 事件说了什么 —— 没有这一行，"为什么红"只能靠猜 */
       for (const e of r.errors ?? []) process.stdout.write(`     error 事件：${e}\n`);
     },
+    { repeat: repeat.value },
   );
 
   if (p.flags.has("json")) {
@@ -157,6 +170,19 @@ export async function cmdEval(p: Parsed): Promise<number> {
     for (const [category, slot] of Object.entries(report.byCategory)) {
       process.stdout.write(`  ${category}：${slot.passed}/${slot.total}\n`);
     }
+    /*
+     * pass@k / pass^k：采样次数 > 1 才有意义（k=1 时两者与通过率相同，不啰嗦）。
+     * `flaky` 是**产品质量信号**：同一道题一次绿一次红，说明有竞态/时序问题。
+     */
+    if (report.samples > 1) {
+      process.stdout.write(
+        `  采样 ${report.samples} 次：pass@${report.samples} ${report.passAtKRate}%，` +
+          `pass^${report.samples} ${report.passAllRate}%，不稳定 ${report.flaky} 条\n`,
+      );
+    }
+    /* 失败按稳定类别汇总：跨版本对比只看这张表（V6-1d） */
+    const failureLine = describeFailureSummary(report.byFailure);
+    if (failureLine) process.stdout.write(`  失败分类：${failureLine}\n`);
   }
 
   /* 基线：`--update-baseline` 落盘；否则只比对并提示（判定在单测里，这里给人看） */

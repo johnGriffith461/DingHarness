@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Engine } from "../index";
 import type { TurnEvent } from "../runtime/loop";
 import { startFakeProvider, type EvalReply } from "./fakeProvider";
+import { summarizeFailures, type FailureKind } from "./failClassifier";
 import type { EvalCase, EvalCategory } from "./types";
 
 /**
@@ -31,7 +32,17 @@ import type { EvalCase, EvalCategory } from "./types";
  */
 
 /** 一条用例的失败项（空 = 通过）。 */
-export type EvalFailure = { caseId: string; what: string; detail: string };
+export type EvalFailure = {
+  caseId: string;
+  /**
+   * 稳定类别（V6-1d）：跨版本聚合只看它，不看 `what` 文案。
+   * 新增判据必须往 `FAILURE_KINDS` 里加键 —— 不许随手新造一句 `what`。
+   */
+  kind: FailureKind;
+  /** 给人看的一句话（CLI 里贴着明细显示）。 */
+  what: string;
+  detail: string;
+};
 
 export type EvalCaseResult = {
   id: string;
@@ -61,6 +72,21 @@ export type EvalCaseResult = {
   rawErrors?: string[];
   /** 这一条被重跑过几次（见 `runSuite` 里的"装置不可达"处理）。 */
   retried?: number;
+  /** 失败项按稳定类别去重后的列表（V6-1d；报告按它聚合）。 */
+  failureKinds?: FailureKind[];
+  /** pass@k 采样：这一条实际跑了多少次（`runSuite` 填充，默认 1）。 */
+  runs?: number;
+  /** 这些采样里有几次通过。 */
+  passedRuns?: number;
+  /** 至少一次通过（pass@k 口径）。 */
+  passAtK?: boolean;
+  /**
+   * 采样结果不一致（既不是全过也不是全不过）。
+   *
+   * ⚠️ 这是**质量不稳定**的直接证据：同一道题跑两次一次绿一次红，
+   * 说明产品有竞态/时序问题，而不是"模型这次心情不好"。
+   */
+  flaky?: boolean;
   /**
    * 判红的原因是**装置**（本机回环那一会儿不通，连不上我们自己的假 provider），
    * 不是产品。这类**不计进 `failed`**，单独计数并在报告里点名（见 `EvalReport.environment`）。
@@ -167,7 +193,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
   const failures: EvalFailure[] = [];
   const events: TurnEvent[] = [];
   const workDir = tempWorkDir(c.id);
-  const fail = (what: string, detail: string) => failures.push({ caseId: c.id, what, detail });
+  const fail = (kind: FailureKind, what: string, detail: string) => failures.push({ caseId: c.id, kind, what, detail });
 
   /*
    * 纯函数格子（`kind: "core"`）：不起 provider、不跑回合 —— 直接问核心里那把尺子。
@@ -176,9 +202,9 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
   if (c.kind === "core") {
     try {
       const detail = c.coreCheck?.();
-      if (detail) fail("核心判据", detail);
+      if (detail) fail("core_check", "核心判据", detail);
     } catch (error) {
-      fail("异常", String((error as Error)?.message ?? error).slice(0, 200));
+      fail("exception", "异常", String((error as Error)?.message ?? error).slice(0, 200));
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
@@ -188,6 +214,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
       title: c.title,
       ok: failures.length === 0,
       failures,
+      failureKinds: [...new Set(failures.map((f) => f.kind))],
       eventTypes: [],
       steps: 0,
       ms: Date.now() - started,
@@ -276,7 +303,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
       for (const want of expect.events) {
         const found = types.indexOf(want, at);
         if (found < 0) {
-          fail("事件序列", `期望按顺序出现 ${expect.events.join(" → ")}，但第 ${at + 1} 个「${want}」没出现（实际：${types.join(" → ")}）`);
+          fail("event_sequence", "事件序列", `期望按顺序出现 ${expect.events.join(" → ")}，但第 ${at + 1} 个「${want}」没出现（实际：${types.join(" → ")}）`);
           break;
         }
         at = found + 1;
@@ -289,7 +316,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
       const haystack = copyHaystack(events, resumed.turns);
       for (const needle of expect.copy) {
         if (!haystack.includes(needle)) {
-          fail("关键文案", `呈现出来的文案里没有「${needle}」`);
+          fail("copy_presentation", "关键文案", `呈现出来的文案里没有「${needle}」`);
         }
       }
     }
@@ -312,6 +339,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
         .filter((e) => Boolean(e.error) && !declared.has(e.toolName));
       if (failedTools.length) {
         fail(
+          "tool_silent_failure",
           "工具结果",
           `${failedTools.length} 条工具调用失败了（用例没声明）：` +
             failedTools.map((e) => `${e.toolName}：${String(e.error).slice(0, 60)}`).join(" / "),
@@ -321,32 +349,32 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
 
     /* ---------- 判据三：产物存在性 ---------- */
     for (const rel of expect.files ?? []) {
-      if (!fs.existsSync(path.join(workDir, rel))) fail("产物", `期望落盘的「${rel}」不存在`);
+      if (!fs.existsSync(path.join(workDir, rel))) fail("artifact", "产物", `期望落盘的「${rel}」不存在`);
     }
     for (const rel of expect.filesAbsent ?? []) {
-      if (fs.existsSync(path.join(workDir, rel))) fail("产物", `不该存在的「${rel}」却在`);
+      if (fs.existsSync(path.join(workDir, rel))) fail("artifact", "产物", `不该存在的「${rel}」却在`);
     }
 
     /* ---------- 闸门 / 步数 / 账本（都取自投影） ---------- */
     if (expect.gate) {
       const resumed = await built.engine.resume(sessionId);
       const pending = (resumed.pending ?? []).length;
-      if (expect.gate === "pending" && pending === 0) fail("闸门", "期望有待决审批，实际没有");
-      if (expect.gate === "none" && pending > 0) fail("闸门", `期望没有待决审批，实际有 ${pending} 条`);
+      if (expect.gate === "pending" && pending === 0) fail("gate", "闸门", "期望有待决审批，实际没有");
+      if (expect.gate === "none" && pending > 0) fail("gate", "闸门", `期望没有待决审批，实际有 ${pending} 条`);
     }
     if (expect.eventsAbsent?.length) {
       for (const banned of expect.eventsAbsent) {
-        if (types.includes(banned)) fail("事件序列", `不该出现的「${banned}」出现了（实际：${types.join(" → ")}）`);
+        if (types.includes(banned)) fail("event_sequence", "事件序列", `不该出现的「${banned}」出现了（实际：${types.join(" → ")}）`);
       }
     }
     if (expect.delegations !== undefined) {
       const n = types.filter((t) => t === "delegation").length;
-      if (n < expect.delegations) fail("委派", `至少 ${expect.delegations} 次委派，实际 ${n} 次`);
+      if (n < expect.delegations) fail("delegation", "委派", `至少 ${expect.delegations} 次委派，实际 ${n} 次`);
     }
     if (expect.toolErrors?.length) {
       for (const name of expect.toolErrors) {
         const hit = events.some((e) => e.type === "tool-result" && e.toolName === name && Boolean(e.error));
-        if (!hit) fail("工具报错", `期望「${name}」以失败收场，但没见到它失败`);
+        if (!hit) fail("tool_error_expectation", "工具报错", `期望「${name}」以失败收场，但没见到它失败`);
       }
     }
     /*
@@ -361,10 +389,10 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
       const firstBody = provider.bodies[0] as { tools?: Array<{ function?: { name?: string } }> } | undefined;
       const names = (firstBody?.tools ?? []).map((t) => t.function?.name ?? "").filter(Boolean);
       for (const want of expect.toolsSent ?? []) {
-        if (!names.includes(want)) fail("工具清单", `下发的工具里没有「${want}」（实际：${names.join(" / ") || "一个都没有"}）`);
+        if (!names.includes(want)) fail("tool_listing", "工具清单", `下发的工具里没有「${want}」（实际：${names.join(" / ") || "一个都没有"}）`);
       }
       for (const banned of expect.toolsNotSent ?? []) {
-        if (names.includes(banned)) fail("工具清单", `不该下发的工具「${banned}」出现了（模型会以为自己能做这件事）`);
+        if (names.includes(banned)) fail("tool_listing", "工具清单", `不该下发的工具「${banned}」出现了（模型会以为自己能做这件事）`);
       }
     }
     if (expect.toolErrorIncludes?.length) {
@@ -373,12 +401,12 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
         .map((e) => String((e as { error?: string }).error ?? ""))
         .join("\n");
       for (const needle of expect.toolErrorIncludes) {
-        if (!messages.includes(needle)) fail("工具报错", `失败的文案里没有「${needle}」（实际：${messages.slice(0, 160)}）`);
+        if (!messages.includes(needle)) fail("tool_error_expectation", "工具报错", `失败的文案里没有「${needle}」（实际：${messages.slice(0, 160)}）`);
       }
     }
     const steps = types.filter((t) => t === "step-finish").length;
     if (expect.minSteps !== undefined && steps < expect.minSteps) {
-      fail("步数", `至少 ${expect.minSteps} 步，实际 ${steps} 步`);
+      fail("step_budget", "步数", `至少 ${expect.minSteps} 步，实际 ${steps} 步`);
     }
     if (expect.usage) {
       /*
@@ -389,14 +417,14 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
       const withUsage = events.some(
         (e) => e.type === "done" && e.usage && (e.usage.inputTokens ?? 0) + (e.usage.outputTokens ?? 0) > 0,
       );
-      if (!withUsage) fail("账本", "这一轮没有任何带数字的用量（done 事件的 usage 是空的）");
+      if (!withUsage) fail("ledger", "账本", "这一轮没有任何带数字的用量（done 事件的 usage 是空的）");
     }
   } catch (error) {
-    fail("异常", String((error as Error)?.message ?? error).split("\n")[0]?.slice(0, 200) ?? "未知异常");
+    fail("exception", "异常", String((error as Error)?.message ?? error).split("\n")[0]?.slice(0, 200) ?? "未知异常");
   } finally {
     clearTimeout(watchdogTimer);
     if (watchdog.signal.aborted) {
-      fail("看门狗", `这一条超过 ${CASE_WATCHDOG_MS / 1000} 秒没收场 —— 已中止（不然整批会被它拖死，也看不出是哪一条）`);
+      fail("watchdog", "看门狗", `这一条超过 ${CASE_WATCHDOG_MS / 1000} 秒没收场 —— 已中止（不然整批会被它拖死，也看不出是哪一条）`);
     }
     try {
       close?.();
@@ -431,6 +459,7 @@ export async function runCase(c: EvalCase, deps: EvalDeps): Promise<EvalCaseResu
     title: c.title,
     ok: failures.length === 0,
     failures,
+    failureKinds: [...new Set(failures.map((f) => f.kind))],
     eventTypes,
     steps: eventTypes.filter((t) => t === "step-finish").length,
     ms: Date.now() - started,
@@ -456,6 +485,28 @@ export type EvalReport = {
   /** 通过率（0–100，保留一位小数）。 */
   rate: number;
   byCategory: Record<string, { total: number; passed: number }>;
+  /**
+   * 失败按**稳定类别**汇总（V6-1d）：跨版本对比只看这张表，
+   * 不依赖中文 `what` 文案。装置不可达不计进来（见 `environment`）。
+   */
+  byFailure: Partial<Record<FailureKind, number>>;
+  /**
+   * pass@k：每条用例**至少一次**通过的比例（k = `samples`）。
+   *
+   * k = 1 时与 `rate` 相同；k > 1 时它回答"多试几次能不能过"。
+   */
+  passAtKRate: number;
+  /**
+   * pass^k：每条用例**全部采样都通过**的比例。
+   *
+   * 这是可靠性口径 —— 公开成绩页必须同时给这两个数，
+   * 只给 pass@k 会把"偶尔能过"说成"能过"。
+   */
+  passAllRate: number;
+  /** 采样结果不一致的用例条数（同一题一次绿一次红 = 不稳定）。 */
+  flaky: number;
+  /** 这批每条用例采样了几次（默认 1）。 */
+  samples: number;
   results: EvalCaseResult[];
   /**
    * 这一批的用量数字**是什么口径**（审计 P165）。
@@ -518,14 +569,26 @@ export async function runSuite(
   cases: readonly EvalCase[],
   deps: EvalDeps,
   onProgress?: (r: EvalCaseResult, index: number, total: number) => void,
+  /**
+   * 采样次数（pass@k 的 k）。
+   *
+   * ⚠️ 默认 1：常规 `pnpm eval` / CI 不重复跑（63 条 × k 会线性变慢）。
+   * 公开评测/爬山时才显式给 `repeat`。k 次采样**共用同一份用例定义**，
+   * 但每条采样各自起临时目录与假 provider（`runCase` 内部保证隔离）。
+   */
+  opts: { repeat?: number } = {},
 ): Promise<EvalReport> {
+  const repeat = Math.max(1, Math.floor(opts.repeat ?? 1));
   const results: EvalCaseResult[] = [];
-  for (let i = 0; i < cases.length; i += 1) {
-    let r = await runCase(cases[i]!, deps);
+  const allFailures: EvalFailure[] = [];
+
+  /** 跑一次，并做"装置不可达重跑一次"的处理（与旧行为逐字一致）。 */
+  const runOnce = async (c: EvalCase): Promise<EvalCaseResult> => {
+    let r = await runCase(c, deps);
     if (!r.ok && deps.fakeProvider !== false) {
       const why = environmentFailure(r);
       if (why) {
-        const again = await runCase(cases[i]!, deps);
+        const again = await runCase(c, deps);
         /*
          * `retried` 与 `environment` 各管一件事，别混：
          *  · `retried` = 这一条被重跑过（重跑后通过也算通过，但痕迹留着，报告里看得见）；
@@ -539,8 +602,51 @@ export async function runSuite(
         }
       }
     }
-    results.push(r);
-    onProgress?.(r, i + 1, cases.length);
+    return r;
+  };
+
+  for (let i = 0; i < cases.length; i += 1) {
+    const c = cases[i]!;
+    const runs: EvalCaseResult[] = [];
+    for (let k = 0; k < repeat; k += 1) runs.push(await runOnce(c));
+
+    /*
+     * 一条用例的最终判定用**严格口径**：k 次全过才算过。
+     *
+     * 为什么不是 pass@k（至少一次过）：那会把"十次里过一次"说成"能过"。
+     * pass@k 作为**单独指标**照样给（`passAtKRate` / `passAtK`），
+     * 但 `ok` 与基线棘轮吃的是严格口径 —— 及格线不能靠多试几次刷出来。
+     */
+    const ok = runs.every((r) => r.ok);
+    const passedRuns = runs.filter((r) => r.ok).length;
+    const base = runs[runs.length - 1]!;
+    const merged: EvalCaseResult = {
+      ...base,
+      ok,
+      failures: runs.flatMap((r) => r.failures),
+      failureKinds: [...new Set(runs.flatMap((r) => r.failureKinds ?? []))],
+      eventTypes: base.eventTypes,
+      steps: base.steps,
+      ms: runs.reduce((sum, r) => sum + r.ms, 0),
+      usage: {
+        input: runs.reduce((sum, r) => sum + r.usage.input, 0),
+        output: runs.reduce((sum, r) => sum + r.usage.output, 0),
+      },
+      runs: repeat,
+      passedRuns,
+      passAtK: passedRuns > 0,
+      flaky: passedRuns > 0 && passedRuns < repeat,
+      ...(base.environment ? { environment: base.environment } : {}),
+    };
+    /*
+     * 装置不可达：只有**全部采样都不可达**才沿用 environment 标记；
+     * 部分采样不可达、部分真跑过时，不能拿"机器抽风"解释整条用例
+     * （`flaky` 会把它标出来，人工看报告时能看到是哪一种）。
+     */
+    if (merged.environment && passedRuns > 0) delete merged.environment;
+    results.push(merged);
+    allFailures.push(...merged.failures);
+    onProgress?.(merged, i + 1, cases.length);
   }
 
   const byCategory: Record<string, { total: number; passed: number }> = {};
@@ -555,6 +661,8 @@ export async function runSuite(
   }
   const envCount = results.filter((r) => r.environment && !r.ok).length;
   const passed = results.filter((r) => r.ok).length;
+  const passAtK = results.filter((r) => r.passAtK ?? r.ok).length;
+  const flaky = results.filter((r) => r.flaky).length;
   return {
     total: results.length,
     passed,
@@ -570,10 +678,15 @@ export async function runSuite(
      */
     rate: results.length ? Math.round((passed / results.length) * 1000) / 10 : 0,
     byCategory,
+    byFailure: summarizeFailures(allFailures),
+    passAtKRate: results.length ? Math.round((passAtK / results.length) * 1000) / 10 : 0,
+    passAllRate: results.length ? Math.round((passed / results.length) * 1000) / 10 : 0,
+    flaky,
+    samples: repeat,
     results,
     usageNote:
       deps.fakeProvider === false
         ? "用量来自真实 provider 的上报"
-        : "用量来自**假 provider**（按请求体字节估算的合成数字），不是真实账单、不可用于成本核算", 
+        : "用量来自**假 provider**（按请求体字节估算的合成数字），不是真实账单、不可用于成本核算",
   };
 }

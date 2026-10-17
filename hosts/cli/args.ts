@@ -50,6 +50,11 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "model",
   "mode",
   "steps",
+  /*
+   * `--repeat <k>`（V6-1d）：评测采样次数（pass@k 的 k）。
+   * 常规跑默认 1；公开评测/爬山时显式给 —— 详见 `runSuite` 的 `opts.repeat`。
+   */
+  "repeat",
   "out",
   "by",
   "kind",
