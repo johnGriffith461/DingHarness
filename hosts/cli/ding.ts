@@ -25,6 +25,7 @@ import { cmdProviders } from "./cmdProviders";
 import { cmdPlugins } from "./cmdPlugins";
 import { cmdSchedule } from "./cmdSchedule";
 import { cmdIm } from "./cmdIm";
+import { cmdMemory } from "./cmdMemory";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
@@ -681,6 +682,7 @@ async function main(): Promise<void> {
     "providers",
     "schedule",
     "im",
+    "memory",
     "config",
     "agents",
   ]);
@@ -747,6 +749,8 @@ async function main(): Promise<void> {
                   ? await cmdSchedule(parsed, dataDir())
                   : parsed.command === "im"
                   ? await cmdIm(parsed, dataDir())
+                  : parsed.command === "memory"
+                  ? await cmdMemory(parsed, dataDir())
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"

@@ -88,6 +88,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "every",
   /* `ding im`（V6-2f）：配置文件 */
   "config",
+  /* `ding memory --git`（V6-2k）：镜像仓库目录 */
+  "git",
   "out",
   "by",
   "kind",
@@ -151,6 +153,9 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "fix",
   /* `ding schedule run-due --once`（V6-2g）：只跑一轮，不常驻 */
   "once",
+  /* `ding memory`（V6-2k）：镜像推/拉 */
+  "push",
+  "pull",
   /* `ding approvals --watch`：盯着通知流（不给就看一眼列一遍） */
   "watch",
 ]);
