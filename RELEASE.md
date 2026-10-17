@@ -1,7 +1,8 @@
-# 发布策略（引擎包）
+# 发布策略（引擎包 / CLI / 桌面）
 
-这份文档管两件事：**版本怎么定**、**破坏了怎么办**。它进仓（`docs/` 不入库 —— 见
-`.gitignore` 与 `CHANGELOG.md` 开头那条说明），所以它是可复核的那一份出处。
+这份文档管三件事：**版本怎么定**、**破坏了怎么办**、**发版前过哪些门**。
+它进仓（`docs/` 与 `docs/ADR/` 不入库 —— 见 `.gitignore` 与 `CHANGELOG.md` 开头那条说明），
+所以它是可复核的那一份出处。
 
 ## 一、版本号
 
@@ -23,7 +24,8 @@
 
 ## 二、破坏了怎么办（三件套，缺一不可）
 
-1. **ADR**：在 `ADR/` 写一份新的（是什么、为什么必须破坏、备选方案为什么不行）；
+1. **ADR**：在本地 `docs/ADR/` 写一份新的（是什么、为什么必须破坏、备选方案为什么不行；
+   ADR 不随仓库公开，但改契约时仍必须留名）；
 2. **major**：升大版本号；
 3. **迁移指南**：写进 `CHANGELOG.md` 的 `### 迁移` 一节 —— 至少给"旧写法 → 新写法"
    的对照，和"不迁移会怎样"（编译错？运行时 undefined？）的如实描述。
@@ -55,11 +57,43 @@
 3. 打 tag（主仓 `vX.Y.Z`，引擎包 `ding-engine-core@X.Y.Z` / `ding-engine@X.Y.Z`）；
 4. `npm publish`（两个包，先 core 再 engine —— 后者依赖前者）。
 
-⚠️ **第 4 步要主人授权**（对外发布不可逆）。2026-10-16 的决定是**主仓 CLI 暂不发 npm**；
-引擎包同一个口径：产物与流程都备好，`npm publish` 那一下由人拍。
-在那之前，"能不能装"的证据是 `pnpm verify:sdk`（本地 tarball → 干净工程 → 跑通一轮）。
+⚠️ **第 4 步要主人授权**（对外发布不可逆）。
+2026-10-17 的现状：引擎包 `ding-engine-core@0.1.0` / `ding-engine@0.1.0` 已发布；
+**CLI 主包 `@ding/cli` 已构建并校验、尚未发布**（npm 账号 2FA / 作用域归属卡点，
+见 `packages/cli/PUBLISHING.md`）。发布前把根 `package.json` 与
+`packages/cli/package.json` 的 `version` 对齐。
 
-## 六、这条策略自己怎么被验证
+## 六、stable / nightly 双轨
+
+| 轨道 | 版本形态 | 用途 | 晋升 |
+|---|---|---|---|
+| nightly | `X.Y.Z-nightly.YYYYMMDD` | 先跑通新东西；允许回归 | 手动：测试 + 评测 + 基准全绿后改回 `X.Y.Z` |
+| stable | `X.Y.Z` | 用户默认装这个 | — |
+
+规矩：
+
+- **nightly 不承诺兼容窗口**；但破坏性变更仍要 ADR（否则 stable 晋升时没人知道为什么变）；
+- **stable 只从 nightly 晋升**，不直接从开发分支切；
+- 晋升检查（缺一不可）：`pnpm typecheck` / `pnpm lint` / `pnpm test` / `pnpm eval` /
+  `pnpm bench` / `pnpm verify:supply-chain` / `pnpm verify:sdk`；
+- 公开成绩随 stable 一起发（`BENCHMARKS.md` 更新 + 评测不回退）。
+
+> ⚠️ 现状如实说：**nightly→stable 的自动化尚未跑过一次**（没有 nightly 发布通道）。
+> 上面是纪律与检查表，不是"已经有的流水线"。
+
+## 七、发版 checklist（照着勾）
+
+- [ ] 版本号：根 `package.json` 与 `packages/cli/package.json` 一致；stable 无预发布后缀
+- [ ] `CHANGELOG.md`：把 `未发布` 改成版本号 + 日期，条目说用户可见差异
+- [ ] 六道门全绿（上面那串命令）
+- [ ] `BENCHMARKS.md`：本次跑过的数字更新；没跑的不写
+- [ ] 桌面产物：`pnpm build`（Windows 签名仍然**未做** —— 发布说明里必须勾选"未签名"）
+- [ ] 引擎包：`pnpm sdk:build` + `pnpm verify:sdk`
+- [ ] CLI 包：`pnpm cli:build` + `pnpm cli:pkg` + `pnpm cli:pkg:check`
+- [ ] tag：`vX.Y.Z`（主仓）/ `ding-engine-core@X.Y.Z` / `ding-engine@X.Y.Z`
+- [ ] 发布说明带上「已知边界」链接（`SAFETY.md` / `BENCHMARKS.md`）
+
+## 八、这条策略自己怎么被验证
 
 - `src/sdkApiFreeze.test.ts`：公开面清单对账 + 版本一致 + **本文档里那三个词必须在**
   （ADR / major / 迁移指南）—— 文档删了、改口了，门会红；
