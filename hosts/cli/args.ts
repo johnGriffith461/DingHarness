@@ -65,6 +65,9 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "into",
   /* `ding plugins search|install --index`（V6-3d）：市场索引（本地路径或 URL） */
   "index",
+  /* `ding worktree`（V6-2e）：起点 ref 与合并提交信息 */
+  "base",
+  "message",
   "out",
   "by",
   "kind",

@@ -150,6 +150,7 @@ pnpm ding eval [类别] [--json] [--repeat <k>]  # 离线评测集（不烧 toke
 pnpm ding eval --update-baseline               # 落一份通过率基线（进版本库）
 pnpm ding bench list|run [suite]               # 任务级公开基准（判产物；见 BENCHMARKS.md）
 pnpm ding fork <会话 id> [--at-turn N|--at-seq N] [--into <新id>] [--list]  # 从任一时点分叉
+pnpm ding worktree start|list|merge|remove <名字>   # git 工作树隔离改动，改完合回主树
 pnpm ding doctor [--json]                      # 一键自检（每项失败都给下一步）
 pnpm ding init                                 # 首次配置向导（配 key / 选模型 / 选目录）
 pnpm ding resume [<会话 id>] [--continue]      # 崩溃恢复（看被打断的回合 / 接着跑完）

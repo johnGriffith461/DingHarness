@@ -39,6 +39,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding eval [类别] [--json] [--repeat <k>] [--update-baseline]  # 离线评测集（--repeat = pass@k 采样）",
       "  ding bench list|run [suite] [--task <id>] [--split train|test] [--repeat <k>] [--docker] [--json] [--out <文件>]",
       "  ding fork <会话 id> [--at-turn N | --at-seq N] [--into <新 id>] [--list]  # 从任一时点分叉",
+      "  ding worktree start|list|merge|remove <名字> [--base <ref>] [--dir <仓库>] [--yes]  # git 工作树隔离",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|search <词>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",
