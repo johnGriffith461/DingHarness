@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 /**
  * OTLP trace 导出（V6-2h）。
  *
@@ -89,7 +87,21 @@ export function otlpConfigFromEnv(env: NodeJS.ProcessEnv = process.env): OtlpCon
   };
 }
 
-const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
+/**
+ * 随机十六进制（traceId/spanId）。
+ *
+ * ⚠️ **不用 `node:crypto`**：这个文件被主循环 import，而 `ding-engine-core`（最小嵌入面）
+ * 的边界守卫禁止闭包里出现 `node:*`（`src/engineCoreBoundary.test.ts`）。
+ * `globalThis.crypto.getRandomValues` 是 Web 标准，Node 18+ 与浏览器都有；
+ * 极端环境没有时才退回 Math.random（span id 只用于关联，不是安全凭据）。
+ */
+function hex(bytes: number): string {
+  const buffer = new Uint8Array(bytes);
+  const webCrypto = (globalThis as { crypto?: { getRandomValues?: (array: Uint8Array) => Uint8Array } }).crypto;
+  if (webCrypto?.getRandomValues) webCrypto.getRandomValues(buffer);
+  else for (let i = 0; i < bytes; i += 1) buffer[i] = Math.floor(Math.random() * 256);
+  return Array.from(buffer, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /** 毫秒 → OTLP 的纳秒字符串（用 BigInt，避免 53 位精度丢位）。 */
 function nanos(ms: number): string {

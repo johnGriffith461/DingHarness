@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, RefreshCw } from "lucide-react";
+import { Activity, Check, RefreshCw, X } from "lucide-react";
 
 import type { ShellBridge, TurnTraceView, UsageSummaryView } from "@shared/ipc";
 import { formatCount } from "@shared/cost";
@@ -216,7 +216,8 @@ export function InsightsPage() {
               {filtered.map((trace) => (
                 <li key={`${trace.sessionId}:${trace.requestId}:${trace.at}`} className="wb-card-row" data-testid={`wb-trace-${trace.requestId}`}>
                   <span className="wb-card-label">
-                    {trace.ok ? "✓" : "✗"} {trace.title || trace.sessionId}
+                    {trace.ok ? <Check size={13} color="#2ea043" /> : <X size={13} color="#da3633" />}{" "}
+                    {trace.title || trace.sessionId}
                   </span>
                   <span className="wb-card-desc">
                     {fmtTime(trace.at)} · {trace.model || "(未记录模型)"} · {fmtMs(trace.elapsedMs)} ·{" "}

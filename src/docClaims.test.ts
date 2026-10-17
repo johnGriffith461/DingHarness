@@ -447,13 +447,21 @@ describe("自述必须有判据 / 点名必须找得到（D9）", () => {
       .join("\n");
 
     /* 顶层派发：`parsed.command === "x"` */
+    /* 命令名允许连字符（`acp-drive` / `run-due` 这类）；只认小写会把它截成 `acp` 然后误报 */
     const dispatch = new Set(
-      [...ding.slice(ding.indexOf("async function main()")).matchAll(/parsed[.]command === "([a-z]+)"/g)].map((m) => m[1]!),
+      [...ding.slice(ding.indexOf("async function main()")).matchAll(/parsed[.]command === "([a-z][a-z0-9-]*)"/g)].map((m) => m[1]!),
     );
     expect(dispatch.size, "顶层命令派发解析不出来了").toBeGreaterThan(10);
 
-    /* 插件子命令：cmdPlugins 里的 `sub === "x"` */
-    const pluginsBody = ding.slice(ding.indexOf("async function cmdPlugins"), ding.indexOf("function cmdConfig"));
+    /*
+     * 插件子命令：`cmdPlugins` 里的 `sub === "x"`。
+     * ⚠️ 2026-10-17：为了把 `ding.ts` 拉回 900 行以内，`cmdPlugins` 搬进了
+     * `hosts/cli/cmdPlugins.ts` —— 守卫跟着搬（不绑文件路径，绑"那个命令的实现"）。
+     */
+    const pluginsFile = path.join(ROOT, "hosts/cli/cmdPlugins.ts");
+    const pluginsBody = existsSync(pluginsFile)
+      ? readFileSync(pluginsFile, "utf8")
+      : ding.slice(ding.indexOf("async function cmdPlugins"), ding.indexOf("function cmdConfig"));
     const subs = new Set([...pluginsBody.matchAll(/sub === "([a-z]+)"/g)].map((m) => m[1]!));
     expect(subs.size, "插件子命令解析不出来了").toBeGreaterThan(4);
 
