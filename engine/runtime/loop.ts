@@ -397,6 +397,15 @@ export async function runTurn(
     const result = streamText({
       model: client,
       messages: input.messages,
+      /*
+       * **重试策略**（U10，2026-10-18）：显式写出来，不靠 SDK 默认值。
+       *
+       * AI SDK 的重试是"指数退避 + 尊重 Retry-After"，且**只重试可重试的错误**
+       * （408/409/429/5xx 与网络类）；401/400/上下文超限不在其中 ——
+       * 与 `shared/errors.ts` 的 `retryPolicyOf` 同一口径（那张表能单测）。
+       * 2 次 = 最多三次请求；再多就只是让用户多等几分钟。
+       */
+      maxRetries: 2,
       ...(input.system ? { system: input.system } : {}),
       ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
       /* 思考强度：没选就是 undefined，一个字段都不多发（见 reasoning.ts 的口径） */

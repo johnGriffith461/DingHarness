@@ -57,6 +57,13 @@ export type CliConfig = {
    */
   maxBudgetUsd?: number;
   /**
+   * **Provider 故障转移链**（U15，2026-10-18）：主 provider 失败时依次尝试这些。
+   *
+   * 只在"这一轮还没执行过任何工具"且失败可重试时生效 —— 执行过工具就不换，
+   * 否则会把已经发生的副作用再做一遍。
+   */
+  providerFallback?: string[];
+  /**
    * 自定义 provider（V6-2j）：端点/协议/密钥引用都是**配置**，不是代码。
    *
    * 与内置表严格分开：内置表是"我们验过的那些"；这里是"你自己接的那些"。
@@ -92,7 +99,18 @@ export function configPaths(dataDir: string): { primary: string; legacy: string 
  * 就永远报"合法"—— 而用户看到的表现是"我明明配了啊"。
  * （2026-10-17 从 doctor 搬到这里：配置的合法键属于配置模块，自检只借它用。）
  */
-export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "maxBudgetUsd", "providers", "contextBudget", "rules"] as const;
+export const CONFIG_KEYS = [
+  "provider",
+  "model",
+  "mode",
+  "dirs",
+  "softLimitUsd",
+  "maxBudgetUsd",
+  "providerFallback",
+  "providers",
+  "contextBudget",
+  "rules",
+] as const;
 
 /** 收窄从磁盘读回来的配置（**磁盘不可信**：坏值一律丢掉，别让它影响一次真实运行）。 */
 export function normalizeConfig(raw: unknown): CliConfig {
@@ -112,6 +130,10 @@ export function normalizeConfig(raw: unknown): CliConfig {
   }
   if (typeof o.maxBudgetUsd === "number" && Number.isFinite(o.maxBudgetUsd) && o.maxBudgetUsd > 0) {
     out.maxBudgetUsd = o.maxBudgetUsd;
+  }
+  if (Array.isArray(o.providerFallback)) {
+    const list = o.providerFallback.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+    if (list.length) out.providerFallback = [...new Set(list)];
   }
   if (Array.isArray(o.dirs)) {
     const dirs = o.dirs.filter((d): d is string => typeof d === "string" && d.trim() !== "");
@@ -225,6 +247,7 @@ export function describeConfig(config: CliConfig): string {
     `上下文预算：${config.contextBudget ?? "（没设，默认 long：按模型窗口推导）"}（可选：${CONTEXT_BUDGET_MODES.join(" / ")}）`,
     `权限规则：${config.rules?.length ? `${config.rules.length} 条（ding config set rules '<JSON 数组>' 覆盖）` : "（没有；未命中规则时回落档位判定）"}`,
     `单会话预算上限：${typeof config.maxBudgetUsd === "number" ? `$${config.maxBudgetUsd}（超了就暂停）` : "（没设，不限）"}`,
+    `故障转移：${config.providerFallback?.length ? config.providerFallback.join(" → ") : "（没设；主 provider 挂了就报错）"}`,
     `工作目录：${config.dirs?.length ? config.dirs.join(" / ") : "（没设，用当前目录）"}`,
   ];
   return lines.join("\n");

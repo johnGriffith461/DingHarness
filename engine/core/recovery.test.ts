@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chatSessionId, type LogInput, type LogRecord } from "./events";
+import { chatSessionId, resumeSession, type LogInput, type LogRecord } from "./events";
 import { interruptedTurns, recoveryViewOf } from "./recovery";
 
 /**
@@ -120,5 +120,63 @@ describe("崩溃恢复：认出被打断的回合（Phase 12.2）", () => {
 describe("会话 id（顺带钉一下依赖）", () => {
   it("chat 前缀", () => {
     expect(chatSessionId("x")).toBe("chat-x");
+  });
+});
+
+/* ============================================================
+ * U09：四类恢复（2026-10-18）
+ *
+ * 判据是"重开之后用户能看见什么、能做什么"：
+ * ① 会话本身可恢复；② 待批可继续；③ 工具结果已在（不用重跑）；
+ * ④ 调用了一半的工具**有留痕写着"结果未知"**（不是凭空消失）。
+ * ============================================================ */
+describe("U09：四类恢复", () => {
+  const T = (n: number) => 1_700_000_000_000 + n * 1000;
+  const base = [
+    { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "帮我改个文件" }] },
+    { seq: 2, at: T(2), requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "edit_file", input: { path: "a.ts", oldText: "1", newText: "2" } },
+    { seq: 3, at: T(3), requestId: "r1", type: "tool-result", toolCallId: "c1", toolName: "edit_file", output: { ok: true, line: "改了「a.ts」" } },
+    { seq: 4, at: T(4), requestId: "r1", type: "text", text: "改好了" },
+    { seq: 5, at: T(5), requestId: "r1", type: "done" },
+  ] as never[];
+
+  it("① 会话可恢复：轮次与正文都在", () => {
+    const resumed = resumeSession(base as never);
+    expect(resumed.turns).toHaveLength(1);
+    expect(resumed.turns[0]?.view.text).toBe("改好了");
+  });
+
+  it("③ 工具结果已在：留痕是成功，不是「未知」", () => {
+    const traces = resumeSession(base as never).turns[0]?.view.traces ?? [];
+    expect(traces).toHaveLength(1);
+    expect(traces[0]?.toolCallId).toBe("c1");
+    expect(traces[0]?.ok).toBe(true);
+    expect(traces[0]?.line).not.toContain("结果未知");
+  });
+
+  it("⭐ ④ 调用了一半（没有 tool-result）→ 留痕写明「结果未知」", () => {
+    const killed = [
+      { seq: 1, at: T(1), requestId: "r1", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "写文件" }] },
+      { seq: 2, at: T(2), requestId: "r1", type: "tool-call", toolCallId: "c9", toolName: "write_file", input: { path: "a.md", content: "x" } },
+    ] as never[];
+    const traces = resumeSession(killed as never).turns[0]?.view.traces ?? [];
+    expect(traces).toHaveLength(1);
+    expect(traces[0]?.toolCallId).toBe("c9");
+    expect(traces[0]?.line).toContain("结果未知");
+    /* 参数还在（否则用户连"它当时想写什么"都看不到） */
+    expect(traces[0]?.input).toEqual({ path: "a.md", content: "x" });
+  });
+
+  it("② 待批可继续：pending 名单 + 运行态都在", () => {
+    const waiting = [
+      ...base.slice(0, 2),
+      { seq: 3, at: T(3), requestId: "r1", type: "tool-result", toolCallId: "c1", toolName: "edit_file", output: { pending: true, notice: "等你确认" } },
+      { seq: 4, at: T(4), requestId: "r1", type: "done" },
+      { seq: 5, at: T(5), type: "run-state", state: "waiting_for_confirmation", pending: [{ toolCallId: "c1", name: "edit_file", since: T(3) }] },
+    ] as never[];
+    const resumed = resumeSession(waiting as never);
+    expect(resumed.pending.map((p) => p.toolCallId)).toEqual(["c1"]);
+    expect(resumed.runState?.state).toBe("waiting_for_confirmation");
+    expect(resumed.turns[0]?.view.traces[0]?.pending).toBe(true);
   });
 });

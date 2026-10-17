@@ -3,6 +3,7 @@ import path from "node:path";
 import { app, ipcMain, shell } from "electron";
 
 import { doctorReport, runDoctor, type Check } from "../../engine/runtime/doctor";
+import { redactSecrets } from "../../shared/redact";
 import { APP_SETTINGS_KEYS, appSettingsPath } from "./appSettings";
 
 /**
@@ -98,7 +99,11 @@ export function buildDiagnosticsBundle(now: number = Date.now()): { bundle: Reco
     doctor: doctorReport(checks),
   };
 
-  return { bundle, json: JSON.stringify(bundle, null, 2), checks };
+  /*
+   * U14：整包再过一道脱敏。诊断包是**要给第三方看**的（用户贴给帮忙的人），
+   * 而 doctor 的某些说明里可能带着上游原文或用户命令 —— 兜底比"记得别写进去"可靠。
+   */
+  return { bundle, json: redactSecrets(JSON.stringify(bundle, null, 2)), checks };
 }
 
 /**

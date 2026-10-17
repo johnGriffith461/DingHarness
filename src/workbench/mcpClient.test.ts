@@ -48,9 +48,43 @@ process.stdin.on("data", (chunk) => {
 });
 `;
 
+
+/** 会变工具清单的 server（U04：验 `tools/list_changed` 真的触发重列）。 */
+const MUTABLE_SERVER = `
+let buf = "";
+let extra = false;
+process.stdin.setEncoding("utf8");
+const send = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+const list = () => (extra ? [{ name: "echo" }, { name: "added", description: "后来加的" }] : [{ name: "echo" }]);
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let at;
+  while ((at = buf.indexOf("\\n")) !== -1) {
+    const line = buf.slice(0, at).trim();
+    buf = buf.slice(at + 1);
+    if (!line) continue;
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.method === "initialize") send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "m", version: "1" } } });
+    else if (msg.method === "tools/list") send({ jsonrpc: "2.0", id: msg.id, result: { tools: list() } });
+    else if (msg.method === "tools/call") {
+      if (msg.params.name === "reload") {
+        extra = true;
+        send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+        send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "changed" }] } });
+      } else {
+        send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "ok" }] } });
+      }
+    }
+  }
+});
+`;
+
 beforeAll(() => {
   ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "mcptool-"));
   fs.writeFileSync(path.join(ROOT, "fake.mjs"), FAKE_SERVER, "utf8");
+  /* 会变清单的 server（U04） */
+  fs.writeFileSync(path.join(ROOT, "mutable.mjs"), MUTABLE_SERVER, "utf8");
   /* 立刻退出（命令写错/依赖没装的样子） */
   fs.writeFileSync(path.join(ROOT, "die.mjs"), "process.exit(3);\n", "utf8");
   /* 装死：收东西但永不回话（超时路径） */
@@ -154,5 +188,28 @@ describe("坏掉的时候", () => {
     client.stop();
     const res = await client.call("echo", { text: "x" });
     expect(res.ok).toBe(false);
+  }, 20000);
+});
+
+/* ============================================================
+ * U04：tools/list_changed（服务端换了清单要真的重列）
+ * ============================================================ */
+describe("工具清单热更新（U04）", () => {
+  it("⭐ 服务端发 list_changed → 重列工具，并通过回调告诉宿主", async () => {
+    let seen: string[] = [];
+    const client = new McpClient(cfg("mutable.mjs", "mutable"), fast, {
+      onToolsChanged: (tools) => {
+        seen = tools.map((t) => t.name);
+      },
+    });
+    await client.start();
+    expect(client.toolList().map((t) => t.name)).toEqual(["echo"]);
+    const res = await client.call("reload", {});
+    expect(res.ok).toBe(true);
+    /* 通知是异步处理的：等一小会儿再看 */
+    for (let i = 0; i < 20 && seen.length === 0; i += 1) await new Promise((r) => setTimeout(r, 50));
+    expect(seen).toEqual(["echo", "added"]);
+    expect(client.toolList().map((t) => t.name)).toEqual(["echo", "added"]);
+    client.stop();
   }, 20000);
 });

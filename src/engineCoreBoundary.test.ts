@@ -63,8 +63,11 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * ⚠️ 2026-10-18（U08）50 → 51：`shared/review.ts`（审阅的线路形状）。
  * `shared/ipc.ts` 引了它（从 900 行上限里搬出去的），而 `ConfirmMode` 的
  * 类型链本来就会把 `shared/ipc.ts` 带进闭包 —— 纯类型文件，没有任何 IO。
+ *
+ * ⚠️ 2026-10-18（U09）51 → 52：`engine/core/unfinishedTools.ts`（"结果未知"留痕的
+ * 形状构造）。它由 `events.ts` 在恢复路径里调用，是纯函数。
  */
-const CLOSURE_BUDGET = 51;
+const CLOSURE_BUDGET = 52;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

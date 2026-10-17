@@ -77,7 +77,10 @@ export function PluginsPage() {
     empty: string;
     servers: Array<{
       name: string;
+      /** stdio 的命令（HTTP 传输时为空串） */
       command: string;
+      /** HTTP 端点（stdio 传输时为空串；U04 加的） */
+      url?: string;
       args: string[];
       enabled: boolean;
       status: string;
@@ -339,7 +342,8 @@ export function PluginsPage() {
                   <div className="wb-mcp-item" key={srv.name} data-testid={`wb-mcp-${srv.name}`}>
                     <div className="wb-sched-item-main">
                       <b>{srv.name}</b>
-                      <em>{[srv.command, ...srv.args].join(" ")}</em>
+                      {/* U04：HTTP 传输显示端点，stdio 显示命令行 —— 用户要知道"它是怎么连的" */}
+                      <em>{srv.url ? `HTTP · ${srv.url}` : [srv.command, ...srv.args].join(" ")}</em>
                       <span className="wb-sched-meta" data-testid={`wb-mcp-line-${srv.name}`}>
                         {srv.line}
                       </span>

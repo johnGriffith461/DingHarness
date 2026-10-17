@@ -44,8 +44,54 @@ export type FailureKind =
   | "network" // 连不上 / 本地服务没起
   | "upstream" // 上游暂时不可用（502/503）
   | "moderation" // 内容审核没过
+  | "context" // 输入超出模型窗口（要压缩，不是重试）
   | "timeout"
   | "unknown";
+
+/**
+ * 这一类失败**该不该自动重试**，以及"怎么试"（U10，2026-10-18）。
+ *
+ * 口径：
+ * - **限流 / 上游 / 网络 / 超时**：可以重试（它们是"这次没成"，不是"这件事不行"）；
+ * - **鉴权 / 模型名 / 欠费 / 审核 / 上下文超限**：**不许**重试 ——
+ *   再发一次同样的请求，得到的会是同一句拒绝，只是多花一次钱；
+ *   上下文超限的正确动作是**压缩/缩短输入**（调用方据此提示）。
+ * - `aborted` 是用户自己停的，重试等于对着干。
+ *
+ * ⚠️ 这是**策略表**，不是"重试实现"：文本那条的重试由 AI SDK 的
+ * `retryWithExponentialBackoff`（指数退避 + 尊重 `Retry-After`）执行，
+ * 它的可重试判据与这张表同一口径（408/409/429/5xx）。
+ * 把表放在这里，是为了让"为什么 401 不重试"有一个能测的答案。
+ */
+export type RetryPolicy = { retryable: boolean; maxAttempts: number; why: string };
+
+/** 某类失败的重试策略（单一来源）。 */
+export function retryPolicyOf(kind: FailureKind): RetryPolicy {
+  switch (kind) {
+    case "rate":
+      return { retryable: true, maxAttempts: 3, why: "限流是临时的，退避后重试" };
+    case "upstream":
+      return { retryable: true, maxAttempts: 3, why: "上游暂时不可用" };
+    case "network":
+      return { retryable: true, maxAttempts: 3, why: "连接问题是临时的" };
+    case "timeout":
+      return { retryable: true, maxAttempts: 2, why: "超时可能只是排队" };
+    case "context":
+      return { retryable: false, maxAttempts: 0, why: "上下文超限要先压缩，重发同一份输入只会再超一次" };
+    case "auth":
+      return { retryable: false, maxAttempts: 0, why: "密钥不对，重试多少次都是同一句拒绝" };
+    case "model":
+      return { retryable: false, maxAttempts: 0, why: "模型名不对，换名字才有意义" };
+    case "quota":
+      return { retryable: false, maxAttempts: 0, why: "余额不足，要充值或换 key" };
+    case "moderation":
+      return { retryable: false, maxAttempts: 0, why: "内容审核是确定性的，改内容才有效" };
+    case "aborted":
+      return { retryable: false, maxAttempts: 0, why: "用户自己停的" };
+    default:
+      return { retryable: false, maxAttempts: 0, why: "原因不明，先别重复花钱" };
+  }
+}
 
 /**
  * 从一段上游错误里认出**原因**。
@@ -91,6 +137,13 @@ export function classifyFailure(raw: string): FailureKind {
   if (/insufficient|balance|quota|arrearage|overdue|good standing|欠费|余额不足|额度/i.test(raw)) return "quota";
   if (hasStatus(raw, "401") || hasStatus(raw, "403") || /unauthorized|invalid api key|api key/i.test(raw)) return "auth";
   if (hasStatus(raw, "404") || /model.*not.*found|no such model/i.test(raw)) return "model";
+  /*
+   * 上下文超限（U10）：**必须排在 429 之前** —— 有的上游把它包成 400/429，
+   * 而判成"限流"会让用户一直重试同一份过长的输入（永远失败、还一直花钱）。
+   */
+  if (/context[ _-]?length|maximum context|context[ _-]?window|too many tokens|reduce the length|prompt is too long|上下文.{0,6}(超|过长|上限)/i.test(raw)) {
+    return "context";
+  }
   if (hasStatus(raw, "429") || /rate limit|too many requests|限流/i.test(raw)) return "rate";
   if (/timeout|timed out|超时/i.test(raw)) return "timeout";
   if (hasStatus(raw, "502") || hasStatus(raw, "503") || hasStatus(raw, "504") || /unavailable|bad gateway|上游暂时/i.test(raw)) {
@@ -129,6 +182,8 @@ export function failureMessage(kind: FailureKind): string {
       return "上游服务暂时不可用，稍后重试";
     case "moderation":
       return "内容审核没通过（改一下措辞或去掉敏感内容后重试）";
+    case "context":
+      return "输入超出了模型窗口（先压缩历史或减少引用资料，再发一次）";
     case "timeout":
       return "请求超时（生成可能还在排队，稍后重试）";
     default:

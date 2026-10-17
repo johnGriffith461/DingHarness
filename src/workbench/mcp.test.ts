@@ -13,6 +13,7 @@ import {
   parseMcpToolName,
   serverStatusLine,
   serverUsable,
+  transportOf,
 } from "@shared/mcp";
 
 /**
@@ -133,5 +134,33 @@ describe("状态那句话", () => {
     expect(serverStatusLine({ name: "a", command: "x", enabled: false }, "off", 0)).toBe(MCP_LABELS.status.off);
     expect(serverStatusLine({ name: "a", command: "x" }, "error", 0)).toBe(MCP_LABELS.status.error);
     expect(serverStatusLine({ name: "a", command: "x" }, "starting", 0)).toBe(MCP_LABELS.status.starting);
+  });
+});
+
+/* ============================================================
+ * U04（2026-10-18）：streamable HTTP 与配置二选一
+ * ============================================================ */
+describe("传输选择（U04）", () => {
+  it("给了 url 走 HTTP；只给 command 走 stdio；都没有 / 关掉 → none", () => {
+    expect(transportOf({ name: "a", url: "https://x/mcp" })).toBe("http");
+    expect(transportOf({ name: "a", command: "npx" })).toBe("stdio");
+    expect(transportOf({ name: "a" })).toBe("none");
+    expect(transportOf({ name: "a", url: "https://x", enabled: false })).toBe("none");
+  });
+
+  it("⭐ command 与 url 同时给 → 整条丢掉（取哪个都会让另一条静默失效）", () => {
+    const got = normalizeMcpConfig({ servers: [{ name: "both", command: "x", url: "https://y" }] });
+    expect(got.servers).toEqual([]);
+  });
+
+  it("HTTP 配置保留 headers（鉴权要用）", () => {
+    const got = normalizeMcpConfig({
+      servers: [{ name: "remote", url: "https://x/mcp", headers: { authorization: "Bearer t", "x-b": 1 } }],
+    });
+    expect(got.servers[0]).toEqual({
+      name: "remote",
+      url: "https://x/mcp",
+      headers: { authorization: "Bearer t" },
+    });
   });
 });

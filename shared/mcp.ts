@@ -26,15 +26,37 @@ export const MCP_TOOL_PREFIX = "mcp__";
 export type McpServerConfig = {
   /** 短名（进工具名，所以只允许 `[a-z0-9_-]`）。 */
   name: string;
-  /** 命令（可执行文件）。 */
-  command: string;
+  /**
+   * stdio 传输的命令（可执行文件）。与 `url` **二选一**。
+   *
+   * ⚠️ U04（2026-10-18）：它变成可选 —— 加了 streamable HTTP 之后，
+   * 一个 server 可以只给 `url`。
+   */
+  command?: string;
   /** 传给命令的参数。 */
   args?: string[];
   /** 额外的环境变量。 */
   env?: Record<string, string>;
+  /**
+   * **streamable HTTP** 端点（U04）：`https://…/mcp` 这样的一行。
+   *
+   * 传输选择：给了 `url` 走 HTTP（与进程无关，跨机器也能用），
+   * 否则走 stdio（起一个子进程）。两条都实现，而不是"只支持一种然后假装"。
+   */
+  url?: string;
+  /** HTTP 传输的自定义请求头（鉴权用：`Authorization: Bearer …`）。 */
+  headers?: Record<string, string>;
   /** `false` = 保留配置但不连接。 */
   enabled?: boolean;
 };
+
+/** 这个 server 用哪种传输（配置层面的事实，不是猜的）。 */
+export function transportOf(server: McpServerConfig): "http" | "stdio" | "none" {
+  if (server.enabled === false) return "none";
+  if (server.url) return "http";
+  if (server.command) return "stdio";
+  return "none";
+}
 
 /** 落盘形状。 */
 export type McpConfig = { servers: McpServerConfig[] };
@@ -87,7 +109,14 @@ export function normalizeMcpConfig(raw: unknown): McpConfig {
     const o = item as Record<string, unknown>;
     const name = typeof o.name === "string" ? o.name.trim() : "";
     const command = typeof o.command === "string" ? o.command.trim() : "";
-    if (!isValidServerName(name) || !command) continue;
+    const url = typeof o.url === "string" ? o.url.trim() : "";
+    /*
+     * U04：`command` 与 `url` 二选一。
+     * 两个都给 = 这条配置不合法（取哪个都会让另一条静默失效），直接丢掉。
+     */
+    if (!isValidServerName(name)) continue;
+    if (!command && !url) continue;
+    if (command && url) continue;
     /*
      * ⚠️ 去掉的是两种"重复"（审计 P07）：
      *   · **同名**（原样重复）；
@@ -109,11 +138,19 @@ export function normalizeMcpConfig(raw: unknown): McpConfig {
             Object.entries(o.env as Record<string, unknown>).filter(([, v]) => typeof v === "string"),
           ) as Record<string, string>
         : undefined;
+    const headers =
+      o.headers && typeof o.headers === "object" && !Array.isArray(o.headers)
+        ? Object.fromEntries(
+            Object.entries(o.headers as Record<string, unknown>).filter(([, v]) => typeof v === "string"),
+          ) as Record<string, string>
+        : undefined;
     servers.push({
       name,
-      command,
+      ...(command ? { command } : {}),
       ...(args ? { args } : {}),
       ...(env ? { env } : {}),
+      ...(url ? { url } : {}),
+      ...(headers ? { headers } : {}),
       ...(o.enabled === false ? { enabled: false } : {}),
     });
     if (servers.length >= MAX_MCP_SERVERS) break;

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { classifyFailure, failureMessage, humanFailure, type FailureKind } from "./errors";
+import { classifyFailure, failureMessage, humanFailure, retryPolicyOf, type FailureKind } from "./errors";
 import { pendingApprovalNotice, toolFailedNotice } from "../engine/core/notices";
 
 /**
@@ -179,5 +179,39 @@ describe("人话清单（Phase 10.4 / 13.1）", () => {
       }
     }
     expect(offenders, "又出现了把裸状态码直接当用户消息的写法").toEqual([]);
+  });
+});
+
+/* ============================================================
+ * U10（2026-10-18）：上下文超限的归类与重试策略
+ * ============================================================ */
+describe("上下文超限与重试策略（U10）", () => {
+  it("⭐ 上下文超限不许被判成限流（判错会让用户一直重试同一份过长输入）", () => {
+    const raw = "Error 400: maximum context length is 8192 tokens, however you requested 42913 tokens";
+    expect(classifyFailure(raw)).toBe("context");
+  });
+
+  it("中文说法也认", () => {
+    expect(classifyFailure("输入超过模型上下文上限")).toBe("context");
+  });
+
+  it("⭐ 可重试的只有限流/上游/网络/超时；鉴权与上下文一律不重试", () => {
+    for (const kind of ["rate", "upstream", "network", "timeout"] as const) {
+      expect(retryPolicyOf(kind).retryable, kind).toBe(true);
+      expect(retryPolicyOf(kind).maxAttempts, kind).toBeGreaterThan(0);
+    }
+    for (const kind of ["auth", "model", "quota", "moderation", "context", "aborted", "unknown"] as const) {
+      expect(retryPolicyOf(kind).retryable, kind).toBe(false);
+      expect(retryPolicyOf(kind).maxAttempts, kind).toBe(0);
+    }
+  });
+
+  it("每类都说得清为什么（不是一张空表）", () => {
+    expect(retryPolicyOf("context").why).toContain("压缩");
+    expect(retryPolicyOf("auth").why).toContain("密钥");
+  });
+
+  it("上下文超限的话术给出的是「压缩」而不是「重试」", () => {
+    expect(failureMessage("context")).toContain("压缩");
   });
 });

@@ -6,6 +6,7 @@ import {
 } from "../../shared/agentTools";
 import type { AiStreamEvent } from "../../shared/ipc";
 import { pendingGates } from "./gates";
+import { unknownToolTraces } from "./unfinishedTools";
 
 /**
  * 会话事件日志 + **一轮对话的投影**（C2）。
@@ -528,6 +529,13 @@ export type ProjectOptions = {
    * （统一它会让聊天多出可放行的按钮，属行为变更，单独决定）。
    */
   expandBlocked?: boolean;
+  /**
+   * **把"调用了一半、没有结果"的工具补成一条留痕**（U09）。
+   *
+   * 只给恢复用：进程被杀时那条 `tool-call` 没有配对结果，原来会被投影整个丢掉；
+   * 实时那一侧不能开（工具正在执行时 `waiting` 本来就有值）。
+   */
+  markUnfinishedTools?: boolean;
 };
 
 /**
@@ -708,6 +716,15 @@ export function splitTurns(records: readonly LogRecord[], opts: ProjectOptions =
     if (record.type === "approval" && feedBack(record)) continue;
     feed(current, record);
   }
+  /* 恢复时补"结果未知"的留痕（口径见 ProjectOptions.markUnfinishedTools） */
+  if (opts.markUnfinishedTools) {
+    for (let i = 0; i < chunks.length; i += 1) {
+      const waiting = states[i]?.waiting ?? [];
+      if (!waiting.length) continue;
+      const traces = [...chunks[i].view.traces, ...unknownToolTraces(waiting)];
+      chunks[i] = { ...chunks[i], view: { ...chunks[i].view, traces } };
+    }
+  }
   return chunks;
 }
 
@@ -772,7 +789,8 @@ export type ResumedSession = {
  * @returns 按轮切片 + 待确认清单
  */
 export function resumeSession(records: readonly LogRecord[], opts: ProjectOptions = {}): ResumedSession {
-  const turns = splitTurns(records, opts);
+  /* 恢复语义：调用了一半的工具要补一条"结果未知"（U09）—— 只在这一层开 */
+  const turns = splitTurns(records, { ...opts, markUnfinishedTools: true });
   /*
    * ⚠️ 待办清单由 `engine/core/gates.ts` 挑（那里是这个语义的负责人）。
    * 这里原来自己写了一段 for —— 而"审批闸门的语义"只能有一处，

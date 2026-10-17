@@ -227,10 +227,22 @@ export function createSqliteSessionStore(
    * 备份是保险，不是闸门（闸门是"迁移失败就 ROLLBACK 停在旧版"，见 `runMigrations`）。
    */
   let backup: string | null = null;
-  if (hadContent && pendingMigrations(db).length) {
+  const pending = hadContent ? pendingMigrations(db) : [];
+  if (pending.length) {
     try {
+      /*
+       * 两处都留（U13，2026-10-18）：
+       * - `.pre-migrate.bak`：**覆盖式**的"上一版"，回退脚本只认它；
+       * - `backup/pre-upgrade-v<目标版本>-<时间戳>.db`：**每次升级一份**，
+       *   不会被下一次升级冲掉 —— 连续升两次之后，"最早那一版"仍然找得回来。
+       *   这是"升级失败可回滚"里最实在的那一格：回滚需要一个**没被覆盖过的**原件。
+       */
       backup = `${dbFile}.pre-migrate.bak`;
       copyFileSync(dbFile, backup);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const dir = path.join(path.dirname(dbFile), "backup");
+      mkdirSync(dir, { recursive: true });
+      copyFileSync(dbFile, path.join(dir, `pre-upgrade-v${pending.at(-1)!.version}-${stamp}.db`));
     } catch (error) {
       backup = null;
       console.error("[sqlite] 迁移前备份没做成（继续迁移，库没法回退这一步）：", error);

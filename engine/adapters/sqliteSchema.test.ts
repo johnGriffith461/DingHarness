@@ -262,6 +262,21 @@ describe("熔断数据纪律：迁移前后重放 diff=0（§3.1）", () => {
     openStore();
     expect(readdirSync(dir).filter((f) => f.endsWith(".pre-migrate.bak")).length).toBe(stale);
   });
+
+  it("⭐ 每次升级另存一份带时间戳的 `backup/pre-upgrade-*.db`（不会被下一次升级冲掉）", () => {
+    const file = path.join(dir, "sessions.db");
+    const raw = openSqlite(file);
+    raw.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, bytes INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, at INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (session_id, seq));
+    `);
+    raw.close();
+
+    openStore();
+    const backupDir = path.join(dir, "backup");
+    const files = readdirSync(backupDir).filter((f) => /^pre-upgrade-v\d+-.*\.db$/.test(f));
+    expect(files, "升级前没有留带时间戳的备份").toHaveLength(1);
+  });
 });
 
 describe("失败回滚：某一步炸了，库停在旧版本", () => {

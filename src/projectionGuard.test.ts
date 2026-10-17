@@ -75,8 +75,14 @@ const TOOLCALL_ID_OK = new Set([
  *   `normalizeToolTraces` 恢复落盘数据）。投影是**调用**它们，不是与它们并列 ——
  *   它不折叠事件流，所以不属于要防的那件事。
  *   （把这里删掉会让守卫连"唯一那份实现"一起骂，那它就废了。）
+ * - `engine/core/unfinishedTools.ts`（U09）：它按 `ToolTrace` 的形状造"结果未知"那一条，
+ *   由 `events.ts` **在恢复路径里调用**。同样是"形状的使用者"，不是第二份事件流折叠。
  */
-const SHAPE_OWNERS = new Set(["engine/core/events.ts", "shared/agentTools.ts"]);
+const SHAPE_OWNERS = new Set([
+  "engine/core/events.ts",
+  "shared/agentTools.ts",
+  "engine/core/unfinishedTools.ts",
+]);
 
 /** 去掉块注释与整行注释（判定前必须先做：说明文字里就会提到这些词）。 */
 function stripComments(src: string): string {

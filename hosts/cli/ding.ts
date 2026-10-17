@@ -15,7 +15,8 @@ import { budgetOf, parseBudgetMode, CONTEXT_BUDGET_MODES } from "../../engine/ru
 import { normalizeRules } from "../../engine/core/permissionRules";
 import { capabilityOf, describeCapability, groupCatalog, recommendReason, type ModelCapability } from "../../engine/runtime/modelCatalog";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
-import { formatCount, usageTotal } from "../../shared/cost";
+import { runWithFallback, failoverNote } from "./providerFallback";
+import { formatCount } from "../../shared/cost";
 import { buildEngine as buildEngineIn } from "./assembly";
 import { cmdBench } from "./cmdBench";
 import { cmdEval } from "./cmdEval";
@@ -268,33 +269,31 @@ async function cmdRun(p: Parsed): Promise<number> {
       : {}),
   };
 
+  /* 长回合进度打到 stderr（stdout 是结果，混在一起会污染重定向的产物） */
   /*
-   * ⭐ **长回合进度叙述**（Phase 13.3）：每一步结束打一行到 **stderr**。
-   *
-   * 打到 stderr 是刻意的：stdout 是"结果"（`render` 出来的正文），
-   * 而进度是"过程" —— 混在一起会让 `ding run ... > out.txt` 的产物里夹着进度行。
-   *
-   * 口径与桌面**同一个字段**（`step-finish` 的 `usage`），所以两边说的是同一件事。
-   * 拿不到用量就不显示数字（**不编**）。
+   * 故障转移（U15）：逻辑在 `./providerFallback.ts`（边界与口径写在那个文件头）。
+   * 这里只负责把进度行接到 stderr —— 与原来那条逐字一致。
    */
-  /** 这一轮的累计 token（先累加、后报 —— 见下面那段说明） */
-  let totalTokens = 0;
-  const outcome = await engine.run({
-    ...request,
-    onEvent: (event) => {
-      if (event.type !== "step-finish") return;
-      /*
-       * ⚠️ **累加**（2026-10-16，审计 P150）：`step-finish` 带的是**这一步**的用量，
-       * 原来每次都拿它当"已用"报出去 —— 与同一轮的账本差一倍以上。
-       * 桌面那边（`taskRunner` 的进度行）读同一个字段、同一套累加，措辞也一致。
-       */
-      const stepTokens = usageTotal(event.usage);
-      if (stepTokens !== null) totalTokens += stepTokens;
-      const head = event.step ? `第 ${event.step} 步` : "一步";
+  const fallbacks = (config.providerFallback ?? []).filter((id) => id !== provider && getProvider(id));
+  const run = await runWithFallback({
+    engine,
+    request,
+    primary: provider,
+    fallbacks,
+    modelFor: (id, index) => flag(p, "model") ?? (config.model && index === 0 ? config.model : undefined) ?? getProvider(id)!.models[0],
+    onProgress: ({ step, totalTokens }) => {
+      const head = step ? `第 ${step} 步` : "一步";
       const tail = totalTokens ? `（累计已用 ${formatCount(totalTokens)} token）` : "";
-      process.stderr.write(`· ${head}${tail}\n`);
+      process.stderr.write(`· ${head}${tail}
+`);
     },
   });
+  const outcome = run.outcome;
+  {
+    const note = failoverNote(run, provider);
+    if (note) process.stderr.write(`[2m${note}[0m
+`);
+  }
   if (p.flags.has("json")) {
     /*
      * JSON 输出给脚本用：**只把"发生过什么"结构化**，不夹一句人话。
@@ -501,7 +500,7 @@ function cmdConfig(p: Parsed): number {
       console.error("用法：ding config set <provider|model|mode|dirs|contextBudget|rules|maxBudgetUsd> <值>（dirs 用逗号分隔）");
       return 2;
     }
-    if (!["provider", "model", "mode", "dirs", "contextBudget", "rules", "maxBudgetUsd"].includes(key)) {
+    if (!["provider", "model", "mode", "dirs", "contextBudget", "rules", "maxBudgetUsd", "providerFallback"].includes(key)) {
       console.error(`不认识的键：${key}（可用：provider / model / mode / dirs / contextBudget / rules / maxBudgetUsd）`);
       return 2;
     }
@@ -547,6 +546,9 @@ function cmdConfig(p: Parsed): number {
         return 2;
       }
       next.maxBudgetUsd = amount;
+    } else if (key === "providerFallback") {
+      /* 逗号分隔的 provider id 链；不去猜"哪个对"，只在 doctor 里报不认识的 */
+      next.providerFallback = value.split(",").map((x: string) => x.trim()).filter(Boolean);
     } else if (key === "provider") next.provider = value;
     else next.model = value;
 
@@ -559,7 +561,7 @@ function cmdConfig(p: Parsed): number {
 
   if (sub === "unset") {
     const key = p.args[1] as keyof CliConfig | undefined;
-    if (!key || !["provider", "model", "mode", "dirs", "contextBudget", "rules", "maxBudgetUsd"].includes(key)) {
+    if (!key || !["provider", "model", "mode", "dirs", "contextBudget", "rules", "maxBudgetUsd", "providerFallback"].includes(key)) {
       console.error("用法：ding config unset <provider|model|mode|dirs|contextBudget|rules|maxBudgetUsd>");
       return 2;
     }

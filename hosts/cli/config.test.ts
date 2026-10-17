@@ -148,3 +148,15 @@ describe("单会话预算上限（U01）", () => {
     expect(describeConfig({})).toContain("不限");
   });
 });
+
+describe("故障转移链（U15）", () => {
+  it("读回来去重、丢空串；不是数组就当没有", () => {
+    expect(normalizeConfig({ providerFallback: ["a", " b ", "a", ""] }).providerFallback).toEqual(["a", "b"]);
+    expect(normalizeConfig({ providerFallback: "a" }).providerFallback).toBeUndefined();
+    expect(normalizeConfig({ providerFallback: ["", ""] }).providerFallback).toBeUndefined();
+  });
+
+  it("describeConfig 说得出来", () => {
+    expect(describeConfig({ providerFallback: ["deepseek", "openai"] })).toContain("deepseek → openai");
+  });
+});

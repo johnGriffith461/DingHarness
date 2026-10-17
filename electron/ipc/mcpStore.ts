@@ -7,11 +7,12 @@ import {
   mcpToolName,
   normalizeMcpConfig,
   serverStatusLine,
+  transportOf,
   type McpConfig,
   type McpServerConfig,
 } from "../../shared/mcp";
 import { createJsonStore } from "./jsonStore";
-import { McpClient, type McpCallResult, type McpStatus } from "./mcpClient";
+import { HttpMcpClient, McpClient, type McpCallResult, type McpConnection, type McpStatus } from "./mcpClient";
 
 /**
  * 连接器（MCP server）的配置、生命周期与工具暴露（2026-10-14）。
@@ -53,13 +54,16 @@ const store = createJsonStore<McpConfig>({
 /** 配置（内存一份；启动时读、reload 时更新）。 */
 let config: McpConfig = emptyMcpConfig();
 
-/** 正在跑的连接（按 server 名）。 */
-const clients = new Map<string, McpClient>();
+/** 正在跑的连接（按 server 名）。两种传输共用一个形状（`McpConnection`）。 */
+const clients = new Map<string, McpConnection>();
 
 /** 一个连接器给界面看的样子。 */
 export type McpServerView = {
   name: string;
+  /** stdio 的命令（HTTP 传输时为空串）。 */
   command: string;
+  /** HTTP 端点（stdio 传输时为空串）。U04 加了它，界面才能说清"这是怎么连的"。 */
+  url: string;
   args: string[];
   enabled: boolean;
   status: McpStatus;
@@ -86,10 +90,19 @@ export async function loadMcpConfig(): Promise<McpConfig> {
  */
 export async function startAllMcp(): Promise<void> {
   await loadMcpConfig();
+  /*
+   * 非文本内容的落点（U04）：`<userData>/mcp-attachments`。
+   * 与工具结果落盘（`tool-results/`）分开：一个是"连接器给回来的附件"，
+   * 一个是"我们截断下来的完整输出"，混在一起会让 TTL 清理互相误伤。
+   */
+  const attachmentsDir = path.join(app.getPath("userData"), "mcp-attachments");
   await Promise.all(
     config.servers.map(async (server) => {
       if (server.enabled === false) return;
-      const client = new McpClient(server);
+      const client =
+        transportOf(server) === "http"
+          ? new HttpMcpClient(server, undefined, { attachmentsDir })
+          : new McpClient(server, undefined, { attachmentsDir });
       clients.set(server.name, client);
       const ok = await client.start();
       console.log(`[mcp] ${server.name}：${ok ? `已连接（${client.toolList().length} 个工具）` : `连接失败（${client.errorText()}）`}`);
@@ -189,7 +202,8 @@ export function mcpServerViews(): McpServerView[] {
       : [];
     return {
       name: server.name,
-      command: server.command,
+      command: server.command ?? "",
+      url: server.url ?? "",
       args: server.args ?? [],
       enabled: server.enabled !== false,
       status,
