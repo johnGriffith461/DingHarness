@@ -296,6 +296,45 @@ export type CanvasCommandResult = {
 };
 
 /** preload 暴露的 `window.shell`。 */
+/**
+ * 一轮请求的追踪记录（V6-2c）。
+ *
+ * 「哪一轮、什么模型、花了多久、多少 token、有没有失败」—— 全部来自**已有的事件日志**，
+ * 不是另记一份遥测。数字缺了就是缺（`elapsedMs` 可选、`ok:false` 的轮不计入用量）。
+ */
+export type TurnTraceView = {
+  sessionId: string;
+  title: string;
+  requestId: string;
+  at: number;
+  provider: string;
+  model: string;
+  elapsedMs?: number;
+  input: number;
+  output: number;
+  ok: boolean;
+  toolCalls: number;
+  error?: string;
+};
+
+/** 用量桶（天 × 模型）。 */
+export type UsageBucketView = {
+  day: string;
+  model: string;
+  input: number;
+  output: number;
+  turns: number;
+};
+
+/** 用量汇总（V6-2d）：90 天窗口、按天与按模型两个切面。 */
+export type UsageSummaryView = {
+  since: number;
+  totals: { input: number; output: number; turns: number };
+  byDay: { day: string; input: number; output: number; turns: number }[];
+  byModel: { model: string; input: number; output: number; turns: number }[];
+  rows: UsageBucketView[];
+};
+
 export type ShellBridge = {
   ping: () => Promise<{
     ok: boolean;
@@ -681,6 +720,18 @@ export type ShellBridge = {
      * 这里只搬结果。空串查询回空数组（不是"全部"）。
      */
     search: (query: string) => Promise<SessionSearchHit[]>;
+  };
+  /**
+   * 请求追踪与用量统计（V6-2c / V6-2d）。
+   *
+   * ⚠️ 这是**只读派生数据**：从同一份会话事件日志里按需算出来，
+   * 不另记遥测、不上报。库不在/表没有 → 空结果（不是错误）。
+   */
+  stats: {
+    /** 最近 N 天的逐轮追踪（按时间倒序）。 */
+    turns: (opts?: { days?: number; limit?: number }) => Promise<TurnTraceView[]>;
+    /** 最近 N 天的用量汇总（按天 / 按模型）。 */
+    usage: (opts?: { days?: number }) => Promise<UsageSummaryView>;
   };
   /**
    * 诊断包导出（2026-10-17）。

@@ -6,6 +6,7 @@ import { CODING_CHANNEL } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
 import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
+import { STATS_CHANNEL } from "./ipc/stats";
 import { PLUGIN_CHANNEL } from "./ipc/pluginHost";
 import { SPACE_CHANNEL } from "./ipc/spaceHost";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
@@ -350,6 +351,11 @@ const api = {
       ipcRenderer.invoke(SESSION_CHANNEL.forkAt, sourceSessionId, at),
     /** 全文检索会话记录（Phase 12.4）：左栏那颗搜索键走它（结果里带命中的那一小段）。 */
     search: (query: string) => ipcRenderer.invoke(SESSION_CHANNEL.search, query),
+  },
+  /** 请求追踪与用量（V6-2c/2d）：只读派生数据，不上报。 */
+  stats: {
+    turns: (opts?: { days?: number; limit?: number }) => ipcRenderer.invoke(STATS_CHANNEL.turns, opts),
+    usage: (opts?: { days?: number }) => ipcRenderer.invoke(STATS_CHANNEL.usage, opts),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */

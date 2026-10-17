@@ -13,6 +13,7 @@ import { registerAiIpc } from "./ipc/ai";
 import { loadPluginsAtStartup, registerPluginIpc } from "./ipc/pluginHost";
 import { registerSpaceIpc } from "./ipc/spaceHost";
 import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
+import { registerStatsIpc } from "./ipc/stats";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
@@ -412,6 +413,8 @@ safeRegister("space", () => registerSpaceIpc(), logRegisterFailure);
 /* 插件装载**不 await**：它是"用户后来装的东西"，慢了或坏了都不该挡应用起来 */
 safeRegister("plugin-load", () => void loadPluginsAtStartup(), logRegisterFailure);
 safeRegister("session", () => registerSessionIpc(ipcMain), logRegisterFailure);
+/* 请求追踪 + 用量（V6-2c/2d）：只读同一份 sessions.db，不另记遥测 */
+safeRegister("stats", () => registerStatsIpc(), logRegisterFailure);
 
 safeRegister("canvas", () => registerCanvasIpc(), logRegisterFailure);
 safeRegister("canvas-export", () => registerCanvasExportIpc(), logRegisterFailure);

@@ -49,7 +49,22 @@ import {
  */
 
 /** 工作台里的一个"页面"。 */
-export type WorkbenchView = "home" | "task" | "scheduled" | "plugins" | "phone" | "threads" | "doc" | "center" | "reader" | "agent" | "coding" | "image" | "video";
+export type WorkbenchView =
+  | "home"
+  | "task"
+  | "scheduled"
+  | "plugins"
+  | "phone"
+  | "threads"
+  | "doc"
+  | "center"
+  | "reader"
+  | "agent"
+  | "coding"
+  | "image"
+  | "video"
+  /* V6-2c/2d：用量与请求追踪（只读派生数据，见 InsightsPage） */
+  | "usage";
 
 export type WorkbenchState = {
   view: WorkbenchView;

@@ -16,6 +16,7 @@ import { useWorkbenchStore, restoreTasks, startTaskPersistence } from "./store";
 import { PhonePage } from "./PhonePage";
 import { PluginsPage } from "./PluginsPage";
 import { ScheduledPage } from "./ScheduledPage";
+import { InsightsPage } from "./InsightsPage";
 import CanvasRuntime from "@/canvas/CanvasRuntime";
 import { startScheduler } from "./scheduleStore";
 import { useLibraryStore } from "./libraryStore";
@@ -187,6 +188,9 @@ export default function Workbench() {
         return <TaskView />;
       case "scheduled":
         return <ScheduledPage />;
+      /* V6-2c/2d：用量与请求追踪（只读派生数据） */
+      case "usage":
+        return <InsightsPage />;
       case "plugins":
         return <PluginsPage />;
       case "phone":

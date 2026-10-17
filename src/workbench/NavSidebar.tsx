@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  Activity,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -51,6 +52,8 @@ export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListT
   { view: "home", label: "新工作任务", icon: ListTodo, shortcut: shortcutFor("home") },
   { view: "scheduled", label: "定时任务", icon: Clock, shortcut: shortcutFor("scheduled") },
   { view: "phone", label: "手机遥控电脑", icon: Smartphone },
+  /* V6-2c/2d：用量与请求追踪（原来只有单会话弹层，没有跨会话的页） */
+  { view: "usage", label: "用量与追踪", icon: Activity },
 ];
 
 /** 每秒重算一次"已处理 N 秒"。 */
