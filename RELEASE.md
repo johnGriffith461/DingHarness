@@ -58,9 +58,12 @@
 4. `npm publish`（两个包，先 core 再 engine —— 后者依赖前者）。
 
 ⚠️ **第 4 步要主人授权**（对外发布不可逆）。
-2026-10-17 的现状：引擎包 `ding-engine-core@0.1.0` / `ding-engine@0.1.0` 已发布；
-**CLI 主包 `@ding/cli` 已构建并校验、尚未发布**（npm 账号 2FA / 作用域归属卡点，
-见 `packages/cli/PUBLISHING.md`）。发布前把根 `package.json` 与
+2026-10-18 的现状：引擎包 `ding-engine-core@0.1.0` / `ding-engine@0.1.0` 已发布；
+**CLI 主包 `@ding/cli` 已构建并校验、尚未发布**。卡点**只有作用域归属**：
+`@ding` 属于另一个真实 npm 用户（与引擎包当初同一个病），**不是 2FA**
+（账号没有开 2FA；本机 `~/.npmrc` 已有 `sunwenshan` 的可发布令牌）。
+「主仓 CLI 发不发 npm」仍按 2026-10-16 的决定**待主人拍**，拍板前不改名、不发布。
+详见 `packages/cli/PUBLISHING.md`。发布前把根 `package.json` 与
 `packages/cli/package.json` 的 `version` 对齐。
 
 ## 六、stable / nightly 双轨

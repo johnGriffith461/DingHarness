@@ -236,7 +236,7 @@ CLI 有**两种装法**，验过的程度不一样 —— 分开说，别混成�
 
 | 跑法 | 是什么 | 谁在验它 |
 |---|---|---|
-| **npm 那条路**（`npm i -g @ding/cli` → `dist-cli/`） | 发布包在 `packages/cli`（`pnpm cli:pkg` 生成），`bin.ding` 指向 `dist-cli/hosts/cli/ding.js`，要目标机器**有 Node**；**尚未发布**（卡在账号 2FA，见 [`packages/cli/PUBLISHING.md`](packages/cli/PUBLISHING.md)） | `pnpm cli:build` + `pnpm cli:pkg:check` + `node scripts/verify-cli-npm.mjs`（在 `pnpm build` 链里，也在 CI 的 `gates` 里） |
+| **npm 那条路**（`npm i -g @ding/cli` → `dist-cli/`） | 发布包在 `packages/cli`（`pnpm cli:pkg` 生成），`bin.ding` 指向 `dist-cli/hosts/cli/ding.js`，要目标机器**有 Node**；**尚未发布**——卡点是 `@ding` 作用域归属（不属于本账号），**不是 2FA**；且「发不发」待定，见 [`packages/cli/PUBLISHING.md`](packages/cli/PUBLISHING.md) | `pnpm cli:build` + `pnpm cli:pkg:check` + `node scripts/verify-cli-npm.mjs`（在 `pnpm build` 链里，也在 CI 的 `gates` 里） |
 | **单二进制那条路**（`dist-bin/ding-<平台>`） | Bun 编出来的单文件，**不需要目标机器装 Node** | `pnpm cli:release`（= `cli:bin` + `verify-cli-bin.mjs`），CI 里是独立一个 `cli-bin` job |
 | 开发态 | `pnpm ding`（tsx 直接跑源码） | `pnpm test` 里的引擎/宿主测试 |
 

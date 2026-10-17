@@ -22,13 +22,16 @@ the same approval gates on both.
 ## Install (when published)
 
 ```bash
-npm i -g @ding/cli     # package is built and verified; publishing is blocked on 2FA
+npm i -g @ding/cli     # placeholder name: @ding scope belongs to another npm user
 ding doctor
 ding init
 ding run "summarize ./docs into memo.md" --dir ./docs
 ```
 
-The CLI package is prepared but **not published yet** (npm account 2FA).
+The CLI package is built and verified but **not published yet**. The blocker is
+**scope ownership**, not 2FA: the `@ding` npm scope belongs to another real user
+(the same problem the engine packages had). Whether to publish at all is still a
+pending owner decision.
 Desktop builds are Windows-first; see the platform table in the Chinese README.
 
 ## What is not done
