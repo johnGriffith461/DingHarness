@@ -36,3 +36,5 @@ sandbox/target/
 packages/cli/dist-cli/
 packages/cli/README.md
 packages/cli/LICENSE
+# 文档站构建产物（pnpm docs:build）
+docs-site-dist/
