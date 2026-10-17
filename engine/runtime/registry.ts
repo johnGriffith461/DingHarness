@@ -14,6 +14,8 @@ import { DEFAULT_APPROVER } from "../core/gates";
 import type { MemberRole } from "../core/members";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
 import { noopHooks, type HooksPort } from "../ports/hooks";
+import type { SpillPort } from "../ports/spill";
+import { applySpill } from "./spill";
 
 /**
  * **工具注册表**（Phase 1 D5）。
@@ -164,6 +166,13 @@ export function buildToolSet(input: {
    * 而不装载与不接线在这里是同一件事。Node 宿主注入 `pluginHost` 的 `pluginHooks`。
    */
   hooks?: HooksPort;
+  /**
+   * **工具结果落盘**（U02，2026-10-18）。
+   *
+   * 给了它就按 `spill.ts` 的策略处理超限结果：全文写进会话私有目录，
+   * 回注"前/后 N 行 + 路径"。不给 = 不落盘（最小嵌入面与测试）。
+   */
+  spill?: SpillPort;
 }): ToolSet {
   const { registry, mode, executor, ctx } = input;
   const hooks = input.hooks ?? noopHooks;
@@ -186,7 +195,7 @@ export function buildToolSet(input: {
     out[entry.name] = tool({
       description: entry.description,
       inputSchema: entry.inputSchema,
-      execute: async (value: unknown) => {
+      execute: async (value: unknown, options: { toolCallId?: string } = {}) => {
         /*
          * 闸门在这里、执行在宿主。注意判定用的是**当前档位**而不是"建工具集时的档位" ——
          * 两者此刻相同（同一轮），但从这里读一次比闭包捕获更不容易在将来出错。
@@ -244,7 +253,13 @@ export function buildToolSet(input: {
          * （不变量 3：错误即结果）。只有走这条路，投影才会算出 `ok=false`、
          * 留痕才会写"失败"；返回一个 ok:false 的**正常**载荷会被当成"工具跑成功了"。
          */
-        if (result.ok) return result.output;
+        if (result.ok) {
+          /*
+           * 落盘（U02）：**成功结果**才有"完整证据"这回事。
+           * 失败的一句人话本来就短，而且它是结论而不是证据。
+           */
+          return applySpill(entry.name, result.output, input.spill, options.toolCallId ?? `${entry.name}-${Date.now().toString(36)}`);
+        }
         throw new Error(toolFailedNotice(entry.name, result.error));
       },
     });

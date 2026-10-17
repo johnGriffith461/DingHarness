@@ -195,12 +195,15 @@ export const READ_FILE_DESC = [
   "用户提到某个文件的路径、或者需要看文件内容才能完成任务时用它。",
   "路径可以是完整绝对路径，**也可以只给文件名**（会在用户的云盘/产物目录里按名字找）。",
   "只给文件名而目录里有多个同名时，会返回候选路径让你指定 —— 不会替你猜一个读。",
-  `单次最多返回 ${READ_FILE_MODEL_CHARS} 字，超出会截断并注明原文长度。`,
+  `单次最多返回 ${READ_FILE_MODEL_CHARS} 字；结果很长时（例如工具输出落盘的文件）可用 offset / limit 按行分页读。`,
   "目录之外的文件、二进制文件、空文件都会如实说明读不到，不要凭路径猜测内容。",
 ].join("");
 
 export const READ_FILE_INPUT = z.object({
   path: z.string().trim().min(1).describe("要读的文件的绝对路径"),
+  /* 分页（U02）：行号 1 基；省略 offset 从头读，省略 limit 读到单次字数上限。 */
+  offset: z.number().int().positive().optional().describe("从第几行开始读（1 基）；省略 = 第一行"),
+  limit: z.number().int().positive().optional().describe("最多读几行；省略 = 读到单次字数为准"),
 });
 
 export const WRITE_FILE_TOOL = "write_file";

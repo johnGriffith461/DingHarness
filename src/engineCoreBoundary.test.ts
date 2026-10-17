@@ -45,8 +45,15 @@ const FORBIDDEN: ReadonlyArray<{ pattern: RegExp; why: string }> = [
 /** 闭包只许在这些目录里（加目录 = 有意识地扩大最小面，改动要能解释）。 */
 const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engine/core/", "engine/runtime/", "engine/ports/", "shared/"];
 
-/** 闭包规模预算 —— 涨了要有人解释"这一层为什么也得进来"。 */
-const CLOSURE_BUDGET = 45;
+/**
+ * 闭包规模预算 —— 涨了要有人解释"这一层为什么也得进来"。
+ *
+ * ⚠️ 2026-10-18（U02）45 → 47：工具结果落盘增加了两个**纯逻辑**文件 ——
+ * `engine/ports/spill.ts`（端口类型）与 `engine/runtime/spill.ts`（策略 + 回注文案）。
+ * 它们没有 `node:*`、不读全局路径，所以留在最小面里是对的；
+ * 真正的文件写法在 `engine/adapters/spillStore.ts`（**不在**闭包里，由宿主注入）。
+ */
+const CLOSURE_BUDGET = 47;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

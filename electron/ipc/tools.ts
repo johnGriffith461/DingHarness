@@ -32,7 +32,7 @@ import { describeNextRun, makeJob, REPEAT_LABEL, validateJob, type RepeatType } 
 import { readMemory, writeMemory } from "./memoryStore";
 import { broadcastScheduleChanged, loadJobs, saveJobs } from "./scheduleStore";
 import { sendCanvasCommand } from "./canvas";
-import { describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
+import { AGENT_READ_MAX_BYTES, describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
 import { describeWriteResult, writeFileForModel } from "../../engine/runtime/tools/writeTool";
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
@@ -47,6 +47,20 @@ import { isPluginTool } from "../../engine/runtime/plugins";
 import { runPluginTool } from "../../engine/runtime/pluginHost";
 import { runComputerAction } from "./computer";
 import type { ComputerKey } from "../../shared/computer";
+import { app } from "electron";
+import { createFileSpillStore } from "../../engine/adapters/spillStore";
+
+/**
+ * 工具结果落盘目录（U02）：`<userData>/tool-results`。
+ *
+ * ⚠️ 用**函数**而不是模块级常量：`app.getPath("userData")` 在打包前后不同，
+ * 而模块被 import 的时刻早于 `app.whenReady()`。
+ */
+let spillCache: ReturnType<typeof createFileSpillStore> | null = null;
+function spillStore(): ReturnType<typeof createFileSpillStore> {
+  if (!spillCache) spillCache = createFileSpillStore(app.getPath("userData"));
+  return spillCache;
+}
 
 /**
  * 工具的**执行**绑定（§141）。
@@ -214,12 +228,26 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
    *   · 返回的那句话（`describeReadResult`）同时用于**界面留痕**，两边不会说法不一。
    */
   [READ_FILE_TOOL]: async (input) => {
-    const { path } = input as { path: string };
-    const result = await readFileForModel(path, ownedDirs());
+    const { path, offset, limit } = input as { path: string; offset?: number; limit?: number };
+    /* U02：不分页读整份（到 READ_MAX_BYTES），让 `applySpill` 决定落盘与回注 */
+    const paged = offset !== undefined || limit !== undefined;
+    const result = await readFileForModel(path, ownedDirs(), {
+      ...(paged ? {} : { maxChars: AGENT_READ_MAX_BYTES, maxBytes: AGENT_READ_MAX_BYTES }),
+      extraReadDirs: [spillStore().dir],
+      page: { offset, limit },
+    });
     return {
       ok: result.ok,
       line: describeReadResult(result, path),
-      ...(result.ok ? { text: result.text, chars: result.chars, truncated: result.truncated } : { error: result.error }),
+      ...(result.ok
+        ? {
+            text: result.text,
+            chars: result.chars,
+            truncated: result.truncated,
+            ...(result.fromLine === undefined ? {} : { fromLine: result.fromLine }),
+            ...(result.totalLines === undefined ? {} : { totalLines: result.totalLines }),
+          }
+        : { error: result.error }),
     };
   },
 
@@ -589,6 +617,8 @@ export function agentTools(env: ToolEnv): ToolSet {
       ...(env.depth === undefined ? {} : { depth: env.depth }),
       ...(env.onDelegation ? { onDelegation: env.onDelegation } : {}),
     },
+    /* 落盘（U02）：超限结果写进 userData，回注路径让模型能回读 */
+    spill: spillStore(),
   });
 }
 

@@ -7,6 +7,7 @@ import type { MakeTools } from "../../engine/runtime/team";
 import { loadEnabledPlugins, pluginHooks, pluginToolEntries } from "../../engine/runtime/pluginHost";
 import { resolveSecret } from "../../engine/runtime/credentials";
 import { pluginPaths, readLedger } from "../../engine/adapters/pluginStore";
+import { createFileSpillStore } from "../../engine/adapters/spillStore";
 import type { ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
 
@@ -87,12 +88,18 @@ export async function buildEngine(
   open: OpenOptions = {},
 ): Promise<BuiltEngine> {
   const store = createSqliteSessionStore(dataDir, "sessions.db", {}, open);
+  /*
+   * 工具结果落盘（U02）：落在**数据目录**下的 `tool-results/`。
+   * 评测器给的是临时目录 —— 于是它的落盘文件也跟着临时目录，跑完即弃。
+   */
+  const spill = createFileSpillStore(dataDir);
 
   let makeTools:
     | ((mode: ConfirmMode, depth: number, provider: string, signal?: AbortSignal, only?: readonly string[]) => ReturnType<typeof buildToolSet>)
     | null = null;
   const executor: ToolExecutor = createCliExecutor({
     dirs,
+    extraReadDirs: [spill.dir],
     makeTools: (mode, depth, provider, signal, only) => {
       if (!makeTools) throw new Error("工具集还没装配好（不应该发生）");
       return makeTools(mode, depth, provider, signal, only);
@@ -122,6 +129,7 @@ export async function buildEngine(
       executor,
       ctx: { mode, provider, depth, ...(signal ? { signal } : {}) },
       ...(only ? { only } : {}),
+      spill,
     });
 
   /*
@@ -135,6 +143,7 @@ export async function buildEngine(
     tools: pluginEntries as readonly ToolEntry[],
     secret: resolveSecret,
     hooks: pluginHooks,
+    spill,
   });
   return { engine, close: () => store.close(), plugins, executor, store, makeTools };
 }

@@ -127,3 +127,65 @@ describe("人轴接在执行点上（C5 之后：deny ≠ ask）", () => {
     await expect((tools.read_file!.execute as (v: unknown) => Promise<unknown>)({ path: "a.md" })).resolves.toBeTruthy();
   });
 });
+
+/* ============================================================
+ * 工具结果落盘（U02，2026-10-18）
+ *
+ * 这条链路只有"执行体 → 模型"这一处，所以它必须在**注册表**这一层验：
+ * 换到宿主里验就变成"两边的接线各测一遍"，而真正要钉的是"超限结果一定落盘、
+ * 回注里一定有路径、模型能回读"。
+ * ============================================================ */
+describe("工具结果落盘（U02）", () => {
+  const big = (n: number) => Array.from({ length: n }, (_, i) => `row ${i + 1}`).join("\n");
+
+  it("⭐ 超限结果落盘：回注是预览 + 路径，全文进了端口", async () => {
+    const written: string[] = [];
+    const spill = {
+      dir: "/virtual",
+      async write({ text }: { text: string }) {
+        written.push(text);
+        return { path: "/virtual/call_1.txt", bytes: Buffer.byteLength(text, "utf8"), lines: text.split("\n").length };
+      },
+    };
+    const registry = createToolRegistry({ include: ["list_dir"] });
+    const tools = buildToolSet({
+      registry,
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true, output: { ok: true, text: big(3_000) } }) },
+      ctx: { mode: "全部允许", provider: "p" },
+      spill,
+    });
+    const got = (await (tools.list_dir!.execute as (v: unknown) => Promise<unknown>)({ path: "." })) as Record<string, unknown>;
+    expect(written).toHaveLength(1);
+    expect(String(got.text)).toContain("/virtual/call_1.txt");
+    expect(got.spillPath).toBe("/virtual/call_1.txt");
+  });
+
+  it("小结果不落盘（不只是「少写一个文件」，还意味着返回对象不变）", async () => {
+    let writes = 0;
+    const registry = createToolRegistry({ include: ["list_dir"] });
+    const output = { ok: true, text: "short" };
+    const tools = buildToolSet({
+      registry,
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true, output }) },
+      ctx: { mode: "全部允许", provider: "p" },
+      spill: { dir: "/virtual", async write() { writes += 1; return { path: "x", bytes: 1, lines: 1 }; } },
+    });
+    const got = await (tools.list_dir!.execute as (v: unknown) => Promise<unknown>)({ path: "." });
+    expect(writes).toBe(0);
+    expect(got).toBe(output);
+  });
+
+  it("不给端口时行为与从前一致（最小嵌入面不被迫学落盘）", async () => {
+    const registry = createToolRegistry({ include: ["list_dir"] });
+    const output = { ok: true, text: big(3_000) };
+    const tools = buildToolSet({
+      registry,
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true, output }) },
+      ctx: { mode: "全部允许", provider: "p" },
+    });
+    expect(await (tools.list_dir!.execute as (v: unknown) => Promise<unknown>)({ path: "." })).toBe(output);
+  });
+});

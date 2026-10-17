@@ -16,7 +16,7 @@ import {
   nothingFoundNote,
   searchFilesForModel,
 } from "../../engine/runtime/tools/searchTool";
-import { describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
+import { AGENT_READ_MAX_BYTES, describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
 import { describeWriteResult, writeFileForModel } from "../../engine/runtime/tools/writeTool";
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
@@ -64,8 +64,16 @@ export function createCliExecutor(opts: {
   dirs: readonly string[];
   makeTools: MakeTools;
   health?: HealthStore;
+  /**
+   * **额外的只读目录**（U02）：工具结果落盘目录。
+   *
+   * 只加"能读"：模型要靠 `read_file` 回读落盘的大结果。
+   * 写入仍然只认 `dirs` —— 这条边界不因为回读而放宽。
+   */
+  extraReadDirs?: readonly string[];
 }): ToolExecutor {
   const { dirs, makeTools } = opts;
+  const extraReadDirs = opts.extraReadDirs ?? [];
 
   /** 逐个工具的实现（键就是 `AGENT_TOOLS` 里的名字）。 */
   const run = async (name: string, input: unknown, ctx: ExecutorContext): Promise<ToolResult> => {
@@ -82,14 +90,32 @@ export function createCliExecutor(opts: {
       }
 
       case "read_file": {
-        const { path: raw } = input as { path: string };
-        const result = await readFileForModel(raw, dirs);
+        const { path: raw, offset, limit } = input as { path: string; offset?: number; limit?: number };
+        /*
+         * U02：不分页时读**整份**（到 READ_MAX_BYTES），把"要不要落盘"交给 `applySpill` ——
+         * 只读 8000 字的话，50k 行日志永远进不了落盘那条路（那是审计点名的缺陷）。
+         * 分页时仍然按模型单次上限切（模型就是要那一小段）。
+         */
+        const paged = offset !== undefined || limit !== undefined;
+        const result = await readFileForModel(raw, dirs, {
+          ...(paged ? {} : { maxChars: AGENT_READ_MAX_BYTES, maxBytes: AGENT_READ_MAX_BYTES }),
+          extraReadDirs,
+          page: { offset, limit },
+        });
         return {
           ok: result.ok,
           output: {
             ok: result.ok,
             line: describeReadResult(result, raw),
-            ...(result.ok ? { text: result.text, chars: result.chars, truncated: result.truncated } : { error: result.error }),
+            ...(result.ok
+              ? {
+                  text: result.text,
+                  chars: result.chars,
+                  truncated: result.truncated,
+                  ...(result.fromLine === undefined ? {} : { fromLine: result.fromLine }),
+                  ...(result.totalLines === undefined ? {} : { totalLines: result.totalLines }),
+                }
+              : { error: result.error }),
           },
           ...(result.ok ? {} : { error: result.error }),
         };

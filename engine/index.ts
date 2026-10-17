@@ -13,6 +13,7 @@ import type { ExecutorContext, ToolExecutor } from "./ports/executor";
 import type { HealthStore } from "./ports/health";
 import { noopHealth } from "./ports/health";
 import { noopHooks, type HooksPort } from "./ports/hooks";
+import type { SpillPort } from "./ports/spill";
 import type { SessionStore } from "./ports/store";
 import type { ConfirmMode } from "../shared/ipc";
 import {
@@ -78,6 +79,13 @@ export type EnginePorts = {
   hooks?: HooksPort;
   /** 额外的工具来源（MCP 工具 / Phase 8 的插件工具）。 */
   tools?: readonly ToolEntry[];
+  /**
+   * **工具结果落盘**（U02，2026-10-18；加法）。
+   *
+   * 省略 = 不落盘（最小嵌入面 / 测试）——超限结果仍按旧口径截断。
+   * CLI 与桌面都注入文件实现（`engine/adapters/spillStore.ts`）。
+   */
+  spill?: SpillPort;
   /** 只要内置里的这些（宿主能力不同：CLI 登记不了落到桌面界面 store 上的工具）。省略 = 全部。 */
   include?: readonly string[];
 };
@@ -353,6 +361,7 @@ export function createEngine(ports: EnginePorts): Engine {
                   ...(request.memberRoles?.length ? { memberRoles: request.memberRoles } : {}),
                   /* 钩子端口（V5-4 4.1）：最小面里它是 no-op */
                   hooks,
+                  ...(ports.spill ? { spill: ports.spill } : {}),
                 }),
                 maxSteps: request.maxSteps ?? 4,
               }
