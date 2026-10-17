@@ -241,3 +241,73 @@ describe("内置名保护（U05）", () => {
     expect(registry.list().find((e) => e.name === "write_file")?.source).toBe("builtin");
   });
 });
+
+/* ============================================================
+ * 权限规则接在执行点上（U03，2026-10-18）
+ *
+ * 判定层的单测在 `engine/core/permissionRules.test.ts`；这里钉的是**接线**：
+ * 规则与危险命令真的改变了 execute 的结果（run ↔ pending）。
+ * ============================================================ */
+describe("权限规则接在执行点上（U03）", () => {
+  const ctx = { mode: "全部允许" as const, provider: "p" };
+
+  it("⭐ 危险命令在「全部允许」下也变成 pending（不是执行了再问）", async () => {
+    let ran = 0;
+    const tools = buildToolSet({
+      registry: createToolRegistry({ include: ["run_command"] }),
+      mode: "全部允许",
+      executor: { run: async () => ((ran += 1), { ok: true, output: { exitCode: 0 } }) },
+      ctx,
+    });
+    const got = (await (tools.run_command!.execute as (v: unknown) => Promise<unknown>)({ command: "rm -rf /" })) as {
+      pending?: boolean;
+      why?: string;
+      commandRisk?: { level?: string };
+    };
+    expect(got.pending).toBe(true);
+    expect(got.why).toContain("危险命令");
+    expect(got.commandRisk?.level).toBe("high");
+    expect(ran, "被拦下的危险命令仍然执行了").toBe(0);
+  });
+
+  it("正常命令在「全部允许」下直接跑（不打扰）", async () => {
+    let ran = 0;
+    const tools = buildToolSet({
+      registry: createToolRegistry({ include: ["run_command"] }),
+      mode: "全部允许",
+      executor: { run: async () => ((ran += 1), { ok: true, output: { exitCode: 0 } }) },
+      ctx,
+    });
+    await (tools.run_command!.execute as (v: unknown) => Promise<unknown>)({ command: "git status" });
+    expect(ran).toBe(1);
+  });
+
+  it("⭐ allow 规则把「按需确认」的写操作放开（重启后仍生效的那类决定）", async () => {
+    let ran = 0;
+    const tools = buildToolSet({
+      registry: createToolRegistry({ include: ["write_file"] }),
+      mode: "按需确认",
+      executor: { run: async () => ((ran += 1), { ok: true, output: { ok: true, path: "src/a.ts" } }) },
+      ctx: { mode: "按需确认", provider: "p" },
+      rules: [{ action: "write_file", resource: "src/**", effect: "allow" }],
+    });
+    await (tools.write_file!.execute as (v: unknown) => Promise<unknown>)({ path: "src/a.ts", content: "x" });
+    expect(ran).toBe(1);
+  });
+
+  it("deny 规则把只读调用也变成 pending", async () => {
+    let ran = 0;
+    const tools = buildToolSet({
+      registry: createToolRegistry({ include: ["read_file"] }),
+      mode: "全部允许",
+      executor: { run: async () => ((ran += 1), { ok: true, output: { text: "x" } }) },
+      ctx,
+      rules: [{ action: "*", resource: "**/*.key", effect: "deny" }],
+    });
+    const got = (await (tools.read_file!.execute as (v: unknown) => Promise<unknown>)({ path: "C:/k/a.key" })) as {
+      pending?: boolean;
+    };
+    expect(got.pending).toBe(true);
+    expect(ran).toBe(0);
+  });
+});

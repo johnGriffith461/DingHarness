@@ -55,8 +55,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  *
  * ⚠️ 2026-10-18（U01）47 → 48：`engine/core/runState.ts`（状态迁移 + 回放）。
  * 它同样是纯逻辑（不碰 IO），而且是主循环收尾时必须写的记录 —— 必须在最小面里。
+ *
+ * ⚠️ 2026-10-18（U03）48 → 50：`commandRisk.ts`（命令分词 + 风险规则）与
+ * `permissionRules.ts`（规则评估 + glob）。权限判定必须在最小面里 ——
+ * 它是**执行点**上的判定，宿主不应该各写一份。
  */
-const CLOSURE_BUDGET = 48;
+const CLOSURE_BUDGET = 50;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

@@ -8,6 +8,7 @@ import { loadEnabledPlugins, pluginHooks, pluginToolEntries } from "../../engine
 import { resolveSecret } from "../../engine/runtime/credentials";
 import { pluginPaths, readLedger } from "../../engine/adapters/pluginStore";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
+import { readConfig } from "./config";
 import type { ConfirmMode } from "../../shared/ipc";
 import { createCliExecutor } from "./tools";
 
@@ -93,6 +94,11 @@ export async function buildEngine(
    * 评测器给的是临时目录 —— 于是它的落盘文件也跟着临时目录，跑完即弃。
    */
   const spill = createFileSpillStore(dataDir);
+  /*
+   * 权限规则（U03）从**配置**读：它们是用"总是允许"攒出来的长期决定，
+   * 必须重启仍然生效 —— 所以不能只活在这一次进程里。
+   */
+  const rules = readConfig(dataDir).config.rules ?? [];
 
   let makeTools:
     | ((mode: ConfirmMode, depth: number, provider: string, signal?: AbortSignal, only?: readonly string[]) => ReturnType<typeof buildToolSet>)
@@ -135,6 +141,7 @@ export async function buildEngine(
       ctx: { mode, provider, depth, ...(signal ? { signal } : {}) },
       ...(only ? { only } : {}),
       spill,
+      ...(rules.length ? { rules } : {}),
     });
 
   /*
@@ -149,6 +156,7 @@ export async function buildEngine(
     secret: resolveSecret,
     hooks: pluginHooks,
     spill,
+    ...(rules.length ? { rules } : {}),
   });
   return { engine, close: () => store.close(), plugins, executor, store, makeTools };
 }

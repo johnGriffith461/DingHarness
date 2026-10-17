@@ -98,3 +98,39 @@ describe("给人看的那句话", () => {
     expect(line).toContain("全部允许");
   });
 });
+
+/* ============================================================
+ * 权限规则持久化（U03，2026-10-18）
+ *
+ * 验收里那句"save 后重启仍生效"的落点：规则必须能从 `config.json` 读回来。
+ * ============================================================ */
+describe("权限规则（contextBudget 同级的加法）", () => {
+  it("⭐ 规则读写往返：写进去、重新读出来还在", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "dsh-rules-"));
+    try {
+      const rules = [
+        { action: "run_command", resource: "npm test", effect: "allow" as const },
+        { action: "write_file", resource: "src/**", effect: "allow" as const, expiresAt: Date.now() + 1000 },
+      ];
+      writeConfig(dir, { rules });
+      expect(readConfig(dir).config.rules).toEqual(rules);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("坏规则被丢弃（不因为一条坏数据让整份配置读不出来）", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "dsh-rules-"));
+    try {
+      writeFileSync(path.join(dir, "config.json"), JSON.stringify({ rules: [{ action: "x", effect: "nope" }, { action: "ok", effect: "ask" }] }));
+      expect(readConfig(dir).config.rules).toEqual([{ action: "ok", effect: "ask" }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("describeConfig 会说出规则条数", () => {
+    expect(describeConfig({ rules: [{ action: "a", effect: "allow" }] })).toContain("1 条");
+    expect(describeConfig({})).toContain("没有");
+  });
+});

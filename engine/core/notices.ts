@@ -53,8 +53,9 @@ export function unknownToolNotice(name: string, reason?: string): string {
  * @param mode 当前档位
  * @returns 一句话
  */
-export function pendingApprovalNotice(name: string, mode: ConfirmMode): string {
-  return `已把这次「${name}」交给用户确认（当前档位：${mode}），**还没有执行**。请不要重试，直接把需要确认的事告诉用户。`;
+export function pendingApprovalNotice(name: string, mode: ConfirmMode, why?: string): string {
+  const reason = why ? `（${why}）` : "";
+  return `已把这次「${name}」交给用户确认${reason}（当前档位：${mode}），**还没有执行**。请不要重试，直接把需要确认的事告诉用户。`;
 }
 
 /**

@@ -19,6 +19,7 @@ import type { HealthStore } from "./ports/health";
 import { noopHealth } from "./ports/health";
 import { noopHooks, type HooksPort } from "./ports/hooks";
 import type { SpillPort } from "./ports/spill";
+import type { PermissionRule } from "./core/permissionRules";
 import type { SessionStore } from "./ports/store";
 import type { ConfirmMode } from "../shared/ipc";
 import {
@@ -91,6 +92,12 @@ export type EnginePorts = {
    * CLI 与桌面都注入文件实现（`engine/adapters/spillStore.ts`）。
    */
   spill?: SpillPort;
+  /**
+   * **权限规则**（U03，2026-10-18；加法）。
+   *
+   * 省略 = 不启用规则（只有档位与角色两轴，行为与从前一致）。
+   */
+  rules?: readonly PermissionRule[];
   /** 只要内置里的这些（宿主能力不同：CLI 登记不了落到桌面界面 store 上的工具）。省略 = 全部。 */
   include?: readonly string[];
 };
@@ -383,6 +390,7 @@ export function createEngine(ports: EnginePorts): Engine {
                   /* 钩子端口（V5-4 4.1）：最小面里它是 no-op */
                   hooks,
                   ...(ports.spill ? { spill: ports.spill } : {}),
+                  ...(ports.rules?.length ? { rules: ports.rules } : {}),
                 }),
                 maxSteps: request.maxSteps ?? 4,
               }

@@ -11,7 +11,8 @@ import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider, isBuiltinProviderId, setCustomProviders } from "../../engine/runtime/providers";
 import { PRODUCT_VERSION } from "../../shared/product";
-import { budgetOf } from "../../engine/runtime/budget";
+import { budgetOf, parseBudgetMode, CONTEXT_BUDGET_MODES } from "../../engine/runtime/budget";
+import { normalizeRules } from "../../engine/core/permissionRules";
 import { capabilityOf, describeCapability, groupCatalog, recommendReason, type ModelCapability } from "../../engine/runtime/modelCatalog";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { formatCount, usageTotal } from "../../shared/cost";
@@ -484,11 +485,11 @@ function cmdConfig(p: Parsed): number {
     const key = p.args[1];
     const value = p.args.slice(2).join(" ").trim();
     if (!key || !value) {
-      console.error("用法：ding config set <provider|model|mode|dirs> <值>（dirs 用逗号分隔）");
+      console.error("用法：ding config set <provider|model|mode|dirs|contextBudget|rules> <值>（dirs 用逗号分隔）");
       return 2;
     }
-    if (!["provider", "model", "mode", "dirs"].includes(key)) {
-      console.error(`不认识的键：${key}（可用：provider / model / mode / dirs）`);
+    if (!["provider", "model", "mode", "dirs", "contextBudget", "rules"].includes(key)) {
+      console.error(`不认识的键：${key}（可用：provider / model / mode / dirs / contextBudget / rules）`);
       return 2;
     }
     const current = readConfig(dir).config;
@@ -501,19 +502,45 @@ function cmdConfig(p: Parsed): number {
         return 2;
       }
       next.mode = mode;
+    } else if (key === "contextBudget") {
+      const mode = parseBudgetMode(value);
+      if (mode !== value) {
+        console.error(`「${value}」不是有效预算档位。可用：${CONTEXT_BUDGET_MODES.join(" / ")}`);
+        return 2;
+      }
+      next.contextBudget = mode;
+    } else if (key === "rules") {
+      /*
+       * 规则一整份覆盖（不逐条追加）：规则表是**一份**有序清单，`findLast` 依赖顺序；
+       * 逐条 append 会让"后写的覆盖先写的"变成"永远最后一条生效"，用户很难理解。
+       */
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch (error) {
+        console.error(`rules 必须是 JSON 数组：${error instanceof Error ? error.message : String(error)}`);
+        return 2;
+      }
+      const rules = normalizeRules(parsed);
+      if (!Array.isArray(parsed) || rules.length !== parsed.length) {
+        console.error("rules 里有条目形状不对（要 {action, effect}，effect ∈ allow/deny/ask）");
+        return 2;
+      }
+      next.rules = rules;
     } else if (key === "provider") next.provider = value;
     else next.model = value;
 
     const file = writeConfig(dir, next);
-    console.log(`✓ ${key} = ${key === "dirs" ? next.dirs?.join(" / ") : value}`);
+    const shown = key === "dirs" ? next.dirs?.join(" / ") : key === "rules" ? `${next.rules?.length ?? 0} 条` : value;
+    console.log(`✓ ${key} = ${shown}`);
     console.log(`  写进了 ${file}`);
     return 0;
   }
 
   if (sub === "unset") {
     const key = p.args[1] as keyof CliConfig | undefined;
-    if (!key || !["provider", "model", "mode", "dirs"].includes(key)) {
-      console.error("用法：ding config unset <provider|model|mode|dirs>");
+    if (!key || !["provider", "model", "mode", "dirs", "contextBudget", "rules"].includes(key)) {
+      console.error("用法：ding config unset <provider|model|mode|dirs|contextBudget|rules>");
       return 2;
     }
     const current = { ...readConfig(dir).config };

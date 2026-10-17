@@ -10,6 +10,7 @@ import {
 import type { ConfirmMode } from "../../shared/ipc";
 import { pendingApprovalNotice, toolFailedNotice } from "../core/notices";
 import { decideForMember, injectableTools } from "../core/policy";
+import { decideCall, type PermissionRule } from "../core/permissionRules";
 import { DEFAULT_APPROVER } from "../core/gates";
 import type { MemberRole } from "../core/members";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
@@ -197,6 +198,14 @@ export function buildToolSet(input: {
    * 回注"前/后 N 行 + 路径"。不给 = 不落盘（最小嵌入面与测试）。
    */
   spill?: SpillPort;
+  /**
+   * **权限规则**（U03，2026-10-18；加法）。
+   *
+   * `{action, resource, effect}` 的规则表。给了就参与判定：
+   * deny 优先、findLast、无匹配回落到档位；`run_command` 的高风险命令
+   * 在「全部允许」下也会被抬成 `ask`（除非有显式 allow 规则）。
+   */
+  rules?: readonly PermissionRule[];
 }): ToolSet {
   const { registry, mode, executor, ctx } = input;
   const hooks = input.hooks ?? noopHooks;
@@ -241,7 +250,20 @@ export function buildToolSet(input: {
            */
           throw new Error(gate.notice);
         }
-        if (gate.verdict === "ask") {
+        /*
+         * ⭐ **规则层与命令风险**（U03）：在档位判定之上再叠一层。
+         *
+         * 顺序是刻意的：人轴的 `deny` 先判（角色不够 → 直接拒，不等批），
+         * 然后才是规则/危险命令。反过来的话，一个被 viewer 拒绝的动作会先被
+         * 抬成 `ask`，用户批了还是不生效 —— 那是"把权限问题伪装成审批问题"。
+         */
+        const call = decideCall({
+          base: gate.verdict,
+          action: entry.name,
+          input: value,
+          ...(input.rules?.length ? { rules: input.rules } : {}),
+        });
+        if (call.verdict === "ask") {
           /*
            * 「待谁批」（C3，V5-1 3.7a）：**拦下那一刻**就写在载荷里 ——
            * 默认 = 这一段会话的 owner（本机单用户 = local；执行上下文里带着它）。
@@ -249,8 +271,12 @@ export function buildToolSet(input: {
            */
           return {
             pending: true,
-            notice: pendingApprovalNotice(entry.name, mode),
+            notice: pendingApprovalNotice(entry.name, mode, call.why),
             approvers: [ctx.owner?.trim() || DEFAULT_APPROVER],
+            /* 风险与规则命中一起回注：审批卡片与日志都要能说出"为什么问这一次" */
+            ...(call.command ? { commandRisk: call.command } : {}),
+            ...(call.rule !== "none" ? { rule: call.rule } : {}),
+            ...(call.why ? { why: call.why } : {}),
           };
         }
         /*

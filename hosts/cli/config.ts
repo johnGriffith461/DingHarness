@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { CONTEXT_BUDGET_MODES, parseBudgetMode, type ContextBudgetMode } from "../../engine/runtime/budget";
+import { normalizeRules, type PermissionRule } from "../../engine/core/permissionRules";
 import type { CustomProviderInput } from "../../engine/runtime/providers";
 
 /**
@@ -61,6 +62,13 @@ export type CliConfig = {
    * 这是"花多少钱换多少连续性"的选择，所以做成显式配置，而不是替用户定死。
    */
   contextBudget?: ContextBudgetMode;
+  /**
+   * **权限规则**（U03）：`{action, resource, effect}`。
+   *
+   * 它们是用户"总是允许"攒下来的长期决定，所以活在配置里 —— 重启仍生效。
+   * 规则没命中时回落到档位判定（行为与从前一致）。
+   */
+  rules?: PermissionRule[];
 };
 
 /** 配置文件位置。 */
@@ -76,7 +84,7 @@ export function configPaths(dataDir: string): { primary: string; legacy: string 
  * 就永远报"合法"—— 而用户看到的表现是"我明明配了啊"。
  * （2026-10-17 从 doctor 搬到这里：配置的合法键属于配置模块，自检只借它用。）
  */
-export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "providers", "contextBudget"] as const;
+export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "providers", "contextBudget", "rules"] as const;
 
 /** 收窄从磁盘读回来的配置（**磁盘不可信**：坏值一律丢掉，别让它影响一次真实运行）。 */
 export function normalizeConfig(raw: unknown): CliConfig {
@@ -87,6 +95,10 @@ export function normalizeConfig(raw: unknown): CliConfig {
   if (typeof o.model === "string" && o.model.trim()) out.model = o.model.trim();
   if (o.mode !== undefined) out.mode = normalizeConfirmMode(o.mode);
   if (o.contextBudget !== undefined) out.contextBudget = parseBudgetMode(o.contextBudget);
+  if (o.rules !== undefined) {
+    const rules = normalizeRules(o.rules);
+    if (rules.length) out.rules = rules;
+  }
   if (typeof o.softLimitUsd === "number" && Number.isFinite(o.softLimitUsd) && o.softLimitUsd > 0) {
     out.softLimitUsd = o.softLimitUsd;
   }
@@ -200,6 +212,7 @@ export function describeConfig(config: CliConfig): string {
     `model：${config.model ?? "（没设，用该 provider 的第一个）"}`,
     `档位：${config.mode ?? "（没设，默认「按需确认」）"}（可选：${CONFIRM_MODES.join(" / ")}）`,
     `上下文预算：${config.contextBudget ?? "（没设，默认 long：按模型窗口推导）"}（可选：${CONTEXT_BUDGET_MODES.join(" / ")}）`,
+    `权限规则：${config.rules?.length ? `${config.rules.length} 条（ding config set rules '<JSON 数组>' 覆盖）` : "（没有；未命中规则时回落档位判定）"}`,
     `工作目录：${config.dirs?.length ? config.dirs.join(" / ") : "（没设，用当前目录）"}`,
   ];
   return lines.join("\n");
