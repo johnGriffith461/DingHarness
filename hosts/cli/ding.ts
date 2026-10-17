@@ -24,6 +24,7 @@ import { cmdAcpDrive } from "./cmdAcpDrive";
 import { cmdProviders } from "./cmdProviders";
 import { cmdPlugins } from "./cmdPlugins";
 import { cmdSchedule } from "./cmdSchedule";
+import { cmdIm } from "./cmdIm";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
@@ -679,6 +680,7 @@ async function main(): Promise<void> {
     "acp-drive",
     "providers",
     "schedule",
+    "im",
     "config",
     "agents",
   ]);
@@ -743,6 +745,8 @@ async function main(): Promise<void> {
                   ? await cmdProviders(parsed, dataDir())
                   : parsed.command === "schedule"
                   ? await cmdSchedule(parsed, dataDir())
+                  : parsed.command === "im"
+                  ? await cmdIm(parsed, dataDir())
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"

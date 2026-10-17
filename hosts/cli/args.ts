@@ -86,6 +86,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "title",
   "at",
   "every",
+  /* `ding im`（V6-2f）：配置文件 */
+  "config",
   "out",
   "by",
   "kind",

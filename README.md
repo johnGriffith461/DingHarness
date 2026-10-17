@@ -148,6 +148,7 @@ pnpm ding models [--json]                      # provider 与模型（逐条标�
 pnpm ding providers list|add|remove …          # 自定义 provider（端点/协议/密钥引用，进 config.json）
 pnpm ding schedule add "每天 9 点" --title <名> --prompt <任务>  # 定时任务（与桌面共用 schedules.json）
 pnpm ding schedule run-due --every 1           # 常驻执行（关掉终端才停）
+pnpm ding im serve [--port 8790]               # 飞书/Slack bot 身份桥（webhook 验签 + 去重 + 回复）
 pnpm ding agents                               # 内置专家（AgentSpec）
 pnpm ding eval [类别] [--json] [--repeat <k>]  # 离线评测集（不烧 token；--repeat = pass@k）
 pnpm ding eval --update-baseline               # 落一份通过率基线（进版本库）
