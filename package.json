@@ -30,6 +30,7 @@
     "bench": "tsx hosts/cli/ding.ts bench run",
     "bench:list": "tsx hosts/cli/ding.ts bench list",
     "bench:hillclimb": "tsx scripts/bench-hillclimb.ts",
+    "e2ee:demo": "tsx scripts/e2ee-demo.ts",
     "eval:samples": "tsx scripts/eval-samples.ts",
     "eval:matrix": "tsx scripts/eval-matrix.ts",
     "cli:bin": "node scripts/build-cli-bin.mjs",
