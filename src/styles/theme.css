@@ -1300,8 +1300,8 @@ html:not([data-kb="1"])
 .wb-team-shared { list-style: none; margin: 0 0 10px; padding: 0; }
 .wb-team-members > li,
 .wb-team-shared > li { gap: 8px; flex-wrap: wrap; }
-.wb-team-warn { color: var(--warn, #b8860b); }
-.wb-team-error { color: var(--danger, #c0392b); }
+.wb-team-warn { color: var(--warn); }
+.wb-team-error { color: var(--danger); }
 .wb-team-usage { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .wb-team-usage th,
 .wb-team-usage td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--bg-2); }

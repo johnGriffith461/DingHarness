@@ -73,7 +73,6 @@ export function settingsSections(): SettingsSection[] {
     { id: "profile", label: "个人资料" },
     { id: "account", label: "账号" },
     { id: "general", label: "通用" },
-    { id: "team", label: "团队空间" },
     { id: "about", label: "关于" },
   ];
 }
