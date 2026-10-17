@@ -151,6 +151,9 @@ pnpm ding eval --update-baseline               # 落一份通过率基线（进�
 pnpm ding bench list|run [suite]               # 任务级公开基准（判产物；见 BENCHMARKS.md）
 pnpm ding fork <会话 id> [--at-turn N|--at-seq N] [--into <新id>] [--list]  # 从任一时点分叉
 pnpm ding worktree start|list|merge|remove <名字>   # git 工作树隔离改动，改完合回主树
+pnpm ding knowledge add <文件|目录> [--domain private|team]  # 本地知识库（FTS，带引用）
+pnpm ding knowledge search <词> [--limit n]        # 检索并给出「标题 + 路径 + 第几段」
+pnpm ding knowledge ask <问题>                     # 真模型 + 引用（会花钱）
 pnpm ding doctor [--json]                      # 一键自检（每项失败都给下一步）
 pnpm ding init                                 # 首次配置向导（配 key / 选模型 / 选目录）
 pnpm ding resume [<会话 id>] [--continue]      # 崩溃恢复（看被打断的回合 / 接着跑完）

@@ -68,6 +68,10 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   /* `ding worktree`（V6-2e）：起点 ref 与合并提交信息 */
   "base",
   "message",
+  /* `ding knowledge`（V6-3e）：域/归属/检索条数 */
+  "domain",
+  "owner",
+  "limit",
   "out",
   "by",
   "kind",

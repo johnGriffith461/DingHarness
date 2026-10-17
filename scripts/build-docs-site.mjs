@@ -144,6 +144,7 @@ function renderMarkdown(markdown) {
 const ZH_NAV = [
   ["index.html", "首页 / README"],
   ["getting-started.html", "十分钟跑通"],
+  ["knowledge.html", "本地知识库"],
   ["honesty.html", "诚实边界"],
   ["safety.html", "安全边界（SAFETY）"],
   ["architecture.html", "架构与协作"],
@@ -279,6 +280,7 @@ const pages = [
   /* [输出文件, 标题, 源文件, 语言] */
   ["index.html", "Ding Harness", "README.md", "zh"],
   ["getting-started.html", "十分钟跑通", "docs-site/zh/getting-started.md", "zh"],
+  ["knowledge.html", "本地知识库", "docs-site/zh/knowledge.md", "zh"],
   ["honesty.html", "诚实边界", "docs-site/zh/honesty.md", "zh"],
   ["safety.html", "安全边界（SAFETY）", "SAFETY.md", "zh"],
   ["architecture.html", "架构与协作", "AGENTS.md", "zh"],

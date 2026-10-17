@@ -39,6 +39,7 @@
     "cli:pkg:check": "node scripts/verify-cli-package.mjs",
     "cli:release": "pnpm cli:bin && node scripts/verify-cli-bin.mjs",
     "verify:cli-npm": "node scripts/verify-cli-npm.mjs",
+    "verify:supply-chain": "node scripts/verify-supply-chain.mjs",
     "prepack": "pnpm cli:build && node scripts/verify-cli-npm.mjs",
     "sandbox:build": "cargo build --release --manifest-path sandbox/Cargo.toml",
     "sandbox:probe": "cargo run --release --manifest-path sandbox/Cargo.toml -- --probe",
@@ -70,6 +71,7 @@
     "ai": "7.0.137",
     "docx": "9.10.0",
     "exceljs": "4.4.0",
+    "jszip": "3.10.2",
     "pptxgenjs": "4.0.1",
     "zod": "^4.6.6"
   },
