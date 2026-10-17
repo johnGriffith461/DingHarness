@@ -18,6 +18,7 @@ import { PluginsPage } from "./PluginsPage";
 import { ScheduledPage } from "./ScheduledPage";
 import { InsightsPage } from "./InsightsPage";
 import { PermissionMatrixPage } from "./PermissionMatrixPage";
+import { WorkflowPage } from "./WorkflowPage";
 import CanvasRuntime from "@/canvas/CanvasRuntime";
 import { startScheduler } from "./scheduleStore";
 import { useLibraryStore } from "./libraryStore";
@@ -195,6 +196,9 @@ export default function Workbench() {
       /* V6-2i/4d：两轴权限矩阵（只读展示内核判定） */
       case "permissions":
         return <PermissionMatrixPage />;
+      /* V6-2l：工作流泳道与断点续跑（运行在 CLI） */
+      case "workflow":
+        return <WorkflowPage />;
       case "plugins":
         return <PluginsPage />;
       case "phone":

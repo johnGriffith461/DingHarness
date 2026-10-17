@@ -302,38 +302,15 @@ export type CanvasCommandResult = {
  * 「哪一轮、什么模型、花了多久、多少 token、有没有失败」—— 全部来自**已有的事件日志**，
  * 不是另记一份遥测。数字缺了就是缺（`elapsedMs` 可选、`ok:false` 的轮不计入用量）。
  */
-export type TurnTraceView = {
-  sessionId: string;
-  title: string;
-  requestId: string;
-  at: number;
-  provider: string;
-  model: string;
-  elapsedMs?: number;
-  input: number;
-  output: number;
-  ok: boolean;
-  toolCalls: number;
-  error?: string;
-};
-
-/** 用量桶（天 × 模型）。 */
-export type UsageBucketView = {
-  day: string;
-  model: string;
-  input: number;
-  output: number;
-  turns: number;
-};
-
-/** 用量汇总（V6-2d）：90 天窗口、按天与按模型两个切面。 */
-export type UsageSummaryView = {
-  since: number;
-  totals: { input: number; output: number; turns: number };
-  byDay: { day: string; input: number; output: number; turns: number }[];
-  byModel: { model: string; input: number; output: number; turns: number }[];
-  rows: UsageBucketView[];
-};
+import type { TurnTraceView, UsageSummaryView, WorkflowSpecView, WorkflowRunView } from "./views";
+export type {
+  TurnTraceView,
+  UsageBucketView,
+  UsageSummaryView,
+  WorkflowSpecView,
+  WorkflowStepView,
+  WorkflowRunView,
+} from "./views";
 
 export type ShellBridge = {
   ping: () => Promise<{
@@ -732,6 +709,17 @@ export type ShellBridge = {
     turns: (opts?: { days?: number; limit?: number }) => Promise<TurnTraceView[]>;
     /** 最近 N 天的用量汇总（按天 / 按模型）。 */
     usage: (opts?: { days?: number }) => Promise<UsageSummaryView>;
+  };
+  /**
+   * 工作流（V6-2l）：列定义与运行、保存定义。
+   *
+   * ⚠️ 运行本身在 CLI（`ding workflow run`）—— 桌面这一页是**可视化 + 入口**，
+   * 不假装一个"开始"按钮能跑（那需要在这里再装配一套引擎与凭据，两条路必然漂）。
+   */
+  workflows: {
+    list: () => Promise<{ specs: WorkflowSpecView[]; runs: WorkflowRunView[]; dir: string }>;
+    /** 把一份定义存进 `<数据目录>/workflows/`；返回文件与运行命令。 */
+    saveSpec: (name: string, json: string) => Promise<{ ok: true; file: string; runCommand: string } | { ok: false; error: string }>;
   };
   /**
    * 诊断包导出（2026-10-17）。

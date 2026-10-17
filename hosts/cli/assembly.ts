@@ -3,6 +3,7 @@ import { createSqliteSessionStore, type OpenOptions } from "../../engine/adapter
 import type { ToolExecutor } from "../../engine/ports/executor";
 import type { SessionStore } from "../../engine/ports/store";
 import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } from "../../engine/runtime/registry";
+import type { MakeTools } from "../../engine/runtime/team";
 import { loadEnabledPlugins, pluginHooks, pluginToolEntries } from "../../engine/runtime/pluginHost";
 import { resolveSecret } from "../../engine/runtime/credentials";
 import { pluginPaths, readLedger } from "../../engine/adapters/pluginStore";
@@ -56,6 +57,13 @@ export type BuiltEngine = {
    * 让宿主拿着自己的 store 做，比把 store 语义塞进内核公开面更干净。
    */
   store: SessionStore;
+  /**
+   * 工具集装配（V6-2l 加；加法）。
+   *
+   * 谁要它：工作流要直接调 `runTeam`（一层并行），而 `runTeam` 收的是
+   * "给定档位/深度造一套工具"的回调 —— 那正是这里已经装好的 `makeTools`。
+   */
+  makeTools: MakeTools;
 };
 
 /**
@@ -128,5 +136,5 @@ export async function buildEngine(
     secret: resolveSecret,
     hooks: pluginHooks,
   });
-  return { engine, close: () => store.close(), plugins, executor, store };
+  return { engine, close: () => store.close(), plugins, executor, store, makeTools };
 }

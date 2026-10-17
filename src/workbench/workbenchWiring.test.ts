@@ -192,6 +192,7 @@ describe("P193：那颗按钮的页面清单要与实际引用点一致", () => 
     "TaskView.tsx": "任务视图",
     "InsightsPage.tsx": "用量与追踪",
     "PermissionMatrixPage.tsx": "权限矩阵",
+    "WorkflowPage.tsx": "工作流",
   };
 
   /** 真的渲染了这颗按钮的文件（`<NavCollapseButton />`，不是 import 行）。 */

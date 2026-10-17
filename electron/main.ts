@@ -14,6 +14,7 @@ import { loadPluginsAtStartup, registerPluginIpc } from "./ipc/pluginHost";
 import { registerSpaceIpc } from "./ipc/spaceHost";
 import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
 import { registerStatsIpc } from "./ipc/stats";
+import { registerWorkflowIpc } from "./ipc/workflowStore";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
@@ -415,6 +416,8 @@ safeRegister("plugin-load", () => void loadPluginsAtStartup(), logRegisterFailur
 safeRegister("session", () => registerSessionIpc(ipcMain), logRegisterFailure);
 /* 请求追踪 + 用量（V6-2c/2d）：只读同一份 sessions.db，不另记遥测 */
 safeRegister("stats", () => registerStatsIpc(), logRegisterFailure);
+/* 工作流（V6-2l）：只读列定义/运行 + 存定义；运行在 CLI（不在这里再装配一套引擎） */
+safeRegister("workflow", () => registerWorkflowIpc(), logRegisterFailure);
 
 safeRegister("canvas", () => registerCanvasIpc(), logRegisterFailure);
 safeRegister("canvas-export", () => registerCanvasExportIpc(), logRegisterFailure);

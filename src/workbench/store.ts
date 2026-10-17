@@ -66,7 +66,9 @@ export type WorkbenchView =
   /* V6-2c/2d：用量与请求追踪（只读派生数据，见 InsightsPage） */
   | "usage"
   /* V6-2i/4d：两轴权限矩阵（只读展示内核判定，见 PermissionMatrixPage） */
-  | "permissions";
+  | "permissions"
+  /* V6-2l：多 agent 工作流（泳道与断点续跑；运行在 CLI，见 WorkflowPage） */
+  | "workflow";
 
 export type WorkbenchState = {
   view: WorkbenchView;
@@ -90,14 +92,14 @@ export type WorkbenchState = {
    * 左侧导航栏是否收起（2026-10-15，M0 工单 3）。
    *
    * 这条**兑现的是工单里"能快的就实现"那一类**：几个页面（手机遥控电脑 / 插件·技能·伙伴 /
-   * 定时任务 / 历史对话 / 任务视图 / 用量与追踪 / 权限矩阵）的头部各自摆过同一颗「打开/收起左侧栏」，
+   * 定时任务 / 历史对话 / 任务视图 / 用量与追踪 / 权限矩阵 / 工作流）的头部各自摆过同一颗「打开/收起左侧栏」，
    * 而它一直是 `disabled` —— 后来收成一个 `NavCollapseButton`，一处实现几处受益。
    *
    * ⚠️ **清单要照实际引用点写**（2026-10-16 审计 P193）：
    * 这里原来声称「六个页面」共用它，与实际不符 —— 云盘整页早就拆掉了，
    * 而**任务中心从来没有**这颗按钮；真正引用它的是
    * `PhonePage` / `PluginsPage` / `ScheduledPage` / `ThreadListPage` / `TaskView` /
-   * `InsightsPage`（用量与追踪）/ `PermissionMatrixPage`（权限矩阵）七处
+   * `InsightsPage`（用量与追踪）/ `PermissionMatrixPage`（权限矩阵）/ `WorkflowPage`（工作流）八处
    * （`grep NavCollapseButton src/workbench`）。假清单的代价不只是读着不对：
    * 它把**真实缺口**盖住了 —— 首页 / 任务中心 / 文档 / 阅读器 / 智能体 / 编程 / 图片 / 视频都**没有**它
    * （收起后在那几页里回不去，只剩快捷键那一套）。

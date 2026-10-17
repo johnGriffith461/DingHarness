@@ -7,6 +7,7 @@ import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
 import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { STATS_CHANNEL } from "./ipc/stats";
+import { WORKFLOW_CHANNEL } from "./ipc/workflowStore";
 import { PLUGIN_CHANNEL } from "./ipc/pluginHost";
 import { SPACE_CHANNEL } from "./ipc/spaceHost";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
@@ -356,6 +357,11 @@ const api = {
   stats: {
     turns: (opts?: { days?: number; limit?: number }) => ipcRenderer.invoke(STATS_CHANNEL.turns, opts),
     usage: (opts?: { days?: number }) => ipcRenderer.invoke(STATS_CHANNEL.usage, opts),
+  },
+  /** 工作流（V6-2l）：列定义/运行 + 存定义；运行在 CLI。 */
+  workflows: {
+    list: () => ipcRenderer.invoke(WORKFLOW_CHANNEL.list),
+    saveSpec: (name: string, json: string) => ipcRenderer.invoke(WORKFLOW_CHANNEL.saveSpec, name, json),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */

@@ -90,6 +90,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "config",
   /* `ding memory --git`（V6-2k）：镜像仓库目录 */
   "git",
+  /* `ding workflow run --resume <运行.json>`（V6-2l） */
+  "resume",
   "out",
   "by",
   "kind",
@@ -156,6 +158,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   /* `ding memory`（V6-2k）：镜像推/拉 */
   "push",
   "pull",
+  /* `ding workflow run --retry-failed`（V6-2l）：续跑时重试失败步骤 */
+  "retry-failed",
   /* `ding approvals --watch`：盯着通知流（不给就看一眼列一遍） */
   "watch",
 ]);

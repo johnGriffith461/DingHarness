@@ -20,6 +20,7 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
+  Workflow,
   X,
 } from "lucide-react";
 import { useWorkbenchStore, type WorkbenchView } from "./store";
@@ -57,6 +58,8 @@ export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListT
   { view: "usage", label: "用量与追踪", icon: Activity },
   /* V6-2i/4d：两轴权限矩阵（内核早就有判定，缺的是能看的那张表） */
   { view: "permissions", label: "权限矩阵", icon: ShieldCheck },
+  /* V6-2l：多 agent 工作流（泳道 + 断点续跑命令） */
+  { view: "workflow", label: "工作流", icon: Workflow },
 ];
 
 /** 每秒重算一次"已处理 N 秒"。 */

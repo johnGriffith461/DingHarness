@@ -26,6 +26,7 @@ import { cmdPlugins } from "./cmdPlugins";
 import { cmdSchedule } from "./cmdSchedule";
 import { cmdIm } from "./cmdIm";
 import { cmdMemory } from "./cmdMemory";
+import { cmdWorkflow } from "./cmdWorkflow";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
@@ -683,6 +684,7 @@ async function main(): Promise<void> {
     "schedule",
     "im",
     "memory",
+    "workflow",
     "config",
     "agents",
   ]);
@@ -751,6 +753,8 @@ async function main(): Promise<void> {
                   ? await cmdIm(parsed, dataDir())
                   : parsed.command === "memory"
                   ? await cmdMemory(parsed, dataDir())
+                  : parsed.command === "workflow"
+                  ? await cmdWorkflow(parsed, dataDir())
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"

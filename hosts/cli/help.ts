@@ -46,6 +46,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding schedule add \"每天 9 点\" --title <名> --prompt <任务> | list | run-due [--every N]  # 定时任务常驻执行",
       "  ding im serve|status [--port 8790] [--config <文件>]  # 飞书/Slack bot 身份桥（验签+去重+回复）",
       "  ding memory list|export|import|status [--git <目录>] [--push|--pull]  # 记忆的 Git 工作树承载",
+      "  ding workflow run|validate|list|show … [--resume <运行.json>] [--retry-failed]  # 多 agent 工作流（断点续跑）",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|search <词>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",
