@@ -51,6 +51,16 @@ export type ApprovalsIndex = {
    * @param opts.limit 上限（默认 200；这条路的调用方是界面/服务端）
    */
   list: (opts: { sessionIds: readonly string[]; state?: ApprovalRow["state"]; limit?: number }) => ApprovalRow[];
+  /**
+   * **会话收口时一起清**（ADR-0016 第 7 条）：删掉这些会话名下**已决**的审批行。
+   *
+   * ⚠️ **待决的不删** —— 待决是"还没处置的事"，跟着会话收口一起消失等于把用户的待办
+   * 悄悄清了（他会以为"没人等他批"）。讨论与依据在 ADR-0016。
+   *
+   * @param sessionIds 刚被收口掉的会话
+   * @returns 删了几行
+   */
+  pruneWith: (sessionIds: readonly string[]) => number;
   close: () => void;
 };
 
@@ -93,6 +103,15 @@ export function createApprovalsIndex(dataDir: string, file = "sessions.db"): App
     }
   };
 
+  const run = (sql: string, ...params: unknown[]): void => {
+    const statement = db.prepare(sql);
+    try {
+      statement.run(...params);
+    } finally {
+      statement.finalize?.();
+    }
+  };
+
   return {
     get: (sessionId, toolCallId) => {
       const rows = all(`SELECT ${cols} FROM approvals WHERE session_id = ? AND tool_call_id = ?`, sessionId, toolCallId);
@@ -110,6 +129,14 @@ export function createApprovalsIndex(dataDir: string, file = "sessions.db"): App
         `SELECT ${cols} FROM approvals WHERE session_id IN (${marks})${stateSql} ORDER BY created_at DESC LIMIT ?`,
         ...args,
       ).map(toRow);
+    },
+
+    pruneWith: (sessionIds) => {
+      if (!sessionIds.length) return 0;
+      const marks = sessionIds.map(() => "?").join(",");
+      const before = Number((all(`SELECT COUNT(*) AS n FROM approvals WHERE session_id IN (${marks}) AND state <> 'pending'`, ...sessionIds)[0]?.n ?? 0));
+      run(`DELETE FROM approvals WHERE session_id IN (${marks}) AND state <> 'pending'`, ...sessionIds);
+      return before;
     },
 
     close: () => db.close(),

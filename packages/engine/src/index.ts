@@ -1,18 +1,18 @@
 /**
- * `@ding/engine` 的公开面（Node 侧 / 完整能力面）。
+ * `ding-engine` 的公开面（Node 侧 / 完整能力面）。
  *
  * 这一份是**声明**，不是实现：实现全在 `engine/` 与 `hosts/cli/`（与产品用的是同一份代码）。
  * 它存在的理由只有一个 —— **公开面要有唯一一处落脚点**：
  * API 冻结清单（V5-4 4.2）指着它，第三方示例（4.3）只从它这里 import，
  * 于是"给外面看的东西"不会随着内部重构漂。
  *
- * 分层（与 `@ding/engine-core` 的关系）：
+ * 分层（与 `ding-engine-core` 的关系）：
  *
  * ```
- * @ding/engine-core   事件 + 主循环（无 IO）
+ * ding-engine-core   事件 + 主循环（无 IO）
  *      ▲
  *      │ 完整能力面 = 最小面 + 下面这些"要 IO 的"：
- * @ding/engine        SQLite 存储 / 工具执行体 / 凭据库 / 插件装载 / 装配（buildEngine）
+ * ding-engine        SQLite 存储 / 工具执行体 / 凭据库 / 插件装载 / 装配（buildEngine）
  * ```
  */
 

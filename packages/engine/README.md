@@ -1,6 +1,6 @@
-# @ding/engine
+# ding-engine
 
-**Ding Harness 的完整能力面**（Node 侧）：`@ding/engine-core` + 那些**要 IO** 的部件 ——
+**Ding Harness 的完整能力面**（Node 侧）：`ding-engine-core` + 那些**要 IO** 的部件 ——
 SQLite 存储、工具执行体、凭据库、插件装载、以及把这一整套接起来的**装配**。
 
 产品和这个包用的是**同一份代码**（`hosts/cli/assembly.ts`）：
@@ -9,7 +9,7 @@ SQLite 存储、工具执行体、凭据库、插件装载、以及把这一整�
 ## 用法（10 分钟那条路）
 
 ```js
-const { buildEngine } = require("@ding/engine");
+const { buildEngine } = require("ding-engine");
 
 // ① 工作目录（工具能碰的范围）+ 数据目录（会话记录放哪）
 const built = await buildEngine([process.cwd()], ".ding-data");

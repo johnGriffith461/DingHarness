@@ -1,5 +1,5 @@
 /**
- * **用 `@ding/engine-core` 跑一轮**（第三方最小示例 · 最小嵌入面）。
+ * **用 `ding-engine-core` 跑一轮**（第三方最小示例 · 最小嵌入面）。
  *
  * 与 `run.mjs` 的分别：这一份只用**最小面**（事件 + 主循环），
  * **一行文件系统都不碰** —— 会话记录放内存里，密钥从环境变量来。
@@ -10,7 +10,7 @@
  *
  * 跑法与 `run.mjs` 同一套环境变量。
  */
-const { createEngine } = require("@ding/engine-core");
+const { createEngine } = require("ding-engine-core");
 
 /** 内存里的一段会话库（实现 `engine/ports/store` 那个形状）。 */
 function memoryStore() {

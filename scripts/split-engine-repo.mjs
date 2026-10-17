@@ -29,6 +29,79 @@ if (existsSync(target)) {
 mkdirSync(target, { recursive: true });
 const copy = (rel) => cpSync(path.join(ROOT, rel), path.join(target, rel), { recursive: true });
 for (const rel of ["engine", "shared", "packages", "hosts/cli", "examples/sdk-turn", "LICENSE"]) copy(rel);
+/* 构建与验收要的那几样：包的 tsconfig extends 根那份，两个脚本是"构建 + 打包冒烟"本身 */
+for (const rel of ["tsconfig.json"]) copy(rel);
+mkdirSync(path.join(target, "scripts"), { recursive: true });
+for (const rel of ["scripts/build-sdk.mjs", "scripts/verify-sdk.mjs"]) copy(rel);
+/*
+ * 一份**裁剪过的** package.json：只要 SDK 那两块（typescript / tsx / @types node / vitest 的类型），
+ * 不把桌面那一整套（electron / react / playwright）拖进引擎仓。
+ */
+writeFileSync(
+  path.join(target, "package.json"),
+  JSON.stringify(
+    {
+      name: "ding-engine",
+      version: "0.1.0",
+      private: true,
+      description: "Ding Harness 的引擎与 SDK（ding-engine-core / ding-engine）",
+      license: "Apache-2.0",
+      type: "module",
+      scripts: {
+        build: "node scripts/build-sdk.mjs",
+        verify: "node scripts/build-sdk.mjs && node scripts/verify-sdk.mjs",
+      },
+      devDependencies: {
+        "@types/node": "^22.0.0",
+        tsx: "4.23.15",
+        typescript: "^5.0.0",
+        vitest: "5.0.3",
+      },
+      dependencies: {
+        "@ai-sdk/anthropic": "4.0.79",
+        "@ai-sdk/google": "4.0.95",
+        "@ai-sdk/openai-compatible": "3.0.67",
+        "@ai-sdk/provider": "4.0.26",
+        ai: "7.0.137",
+        zod: "4.6.6",
+      },
+    },
+    null,
+    2,
+  ) + "\n",
+);
+writeFileSync(
+  path.join(target, "README.md"),
+  [
+    "# ding-engine",
+    "",
+    "**Ding Harness 的引擎与 SDK**：事件溯源内核 + Node 侧完整能力面。",
+    "",
+    "| 包 | 是什么 |",
+    "|---|---|",
+    "| `ding-engine-core` | 最小嵌入面：事件模型 + 主循环（**无 IO**） |",
+    "| `ding-engine` | 完整能力面：最小面 + SQLite / 工具执行体 / 凭据库 / 插件 / 装配 |",
+    "",
+    "这个仓是从主仓 `DingHarness` **拆出来的**（`scripts/split-engine-repo.mjs`）：",
+    "同一份代码、同一套测试口径 —— 主仓的 CI 每 push 都跑 `pnpm verify:sdk`",
+    "（两个包真构建 → 真打包 → 干净工程里跑通两种用法）。",
+    "",
+    "```bash",
+    "pnpm install",
+    "pnpm verify          # 构建两个包 + 打包冒烟（零出网：假模型端点）",
+    "```",
+    "",
+    "十分钟上手：[`examples/sdk-turn/README.md`](examples/sdk-turn/README.md)。",
+    "版本与发布口径：[`RELEASE.md`](RELEASE.md)（破坏性变更要 ADR + major + 迁移指南）。",
+    "",
+    "## 边界（如实说）",
+    "",
+    "- 这个仓**不含**桌面与 CLI 宿主（它们在主仓）；这里只有引擎、SDK 与最小示例。",
+    "- 主仓是唯一开发处，这里是**发布用的拆分**：改代码请改主仓，再按需重新拆。",
+    "",
+  ].join("\n"),
+);
+
 writeFileSync(path.join(target, "RELEASE.md"), readFileSync(path.join(ROOT, "RELEASE.md")));
 /* 产物与依赖不进新仓 */
 writeFileSync(path.join(target, ".gitignore"), "node_modules/\npackages/*/dist/\ndist/\n*.tgz\n");

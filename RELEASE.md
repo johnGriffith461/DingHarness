@@ -14,7 +14,7 @@
 | 只改内部实现、注释、测试 | **patch** |
 
 **首个独立仓版本 = `0.1.0`**（对应主仓 v0.3.0 之后的引擎仓起点）。
-`@ding/engine-core` 与 `@ding/engine` **同版本号**（后者依赖前者的具体版本 ——
+`ding-engine-core` 与 `ding-engine` **同版本号**（后者依赖前者的具体版本 ——
 版本一漂，装的就不是同一份契约了）；这条由 `src/sdkApiFreeze.test.ts` 盯着。
 
 ⚠️ `0.x` 阶段的惯例是"minor 也可以破坏"。**这个项目不这么干**：既然把
@@ -52,7 +52,7 @@
 
 1. 主仓这边：测试绿（`pnpm test`）→ SDK 冒烟绿（`pnpm verify:sdk`）→ 契约门与冻结门绿；
 2. `pnpm sdk:build` 出产物 → `CHANGELOG.md` 把 `未发布` 改成版本号 + 日期；
-3. 打 tag（主仓 `vX.Y.Z`，引擎包 `@ding/engine-core@X.Y.Z` / `@ding/engine@X.Y.Z`）；
+3. 打 tag（主仓 `vX.Y.Z`，引擎包 `ding-engine-core@X.Y.Z` / `ding-engine@X.Y.Z`）；
 4. `npm publish`（两个包，先 core 再 engine —— 后者依赖前者）。
 
 ⚠️ **第 4 步要主人授权**（对外发布不可逆）。2026-10-16 的决定是**主仓 CLI 暂不发 npm**；

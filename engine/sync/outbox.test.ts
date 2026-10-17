@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createCursorJournal } from "../adapters/syncCursorJournal";
-import { kvWrite } from "../adapters/kvStore";
+import { closeKv, kvWrite } from "../adapters/kvStore";
 import { createSqliteSessionStore } from "../adapters/sqliteStore";
 import { chatSessionId, type LogRecord } from "../core/events";
 import { createSyncCursor, type CursorState } from "./cursor";
@@ -145,6 +145,95 @@ describe("2.6 · 杀进程重连 → 续传 diff=0（真 SQLite + 真中继 + �
     expect(cursor2.push(more)).toMatchObject({ ok: true, pushed: 1 });
     const finalPage = relay.pull(sid, { from: 0 });
     if (finalPage.ok) expect(resumeMatches(sid, grown, finalPage.events)).toBe(true);
+  });
+
+  it("⭐ 中继**换了一个实例**（进程重启）：客户端从游标接着推，不重发已送达的（ADR-0016 第 1 条）", async () => {
+    /*
+     * 这条是"中继**保持不持久化**"那个决定要的证据：会丢东西的场景不是"客户端崩"，
+     * 而是"中继重启/换实例" —— 而客户端那一侧有落盘的游标 + 从本地记录推出来的出站队列，
+     * 所以它能接着推。**代价也一起钉住**：新中继上只有"游标之后"的那一段
+     * （重启前已经送达、进了老中继内存的那些，在新实例上没有了 —— 那要从另一端或本地库补）。
+     */
+    /*
+     * ⚠️ 用本文件既有的装置（`dir` + `opened` + afterEach 统一收）：Windows 上
+     * 自己 `rmSync` 会因为库/账本的句柄还开着而 EPERM —— 那是装置的事，不是被测的事。
+     */
+    dir = mkdtempSync(path.join(tmpdir(), "dh-sync-restart-"));
+    {
+      const sid = chatSessionId("relay-restart");
+      const store = openStore();
+      for (let i = 0; i < 4; i += 1) await store.append(sid, [{ requestId: "r1", type: "text", text: `第 ${i} 条` } as never]);
+      const local = (await store.load(sid)).records;
+      const journal = createCursorJournal(dir);
+
+      /* ① 老中继：接管 + 推前两条 + 游标落账 */
+      const relayA = createSyncRelay({ now: () => 1_700_000_000_000 });
+      relayA.createStream(sid);
+      const claimedA = relayA.claim(sid, "手机");
+      const epochA = claimedA.ok ? claimedA.epoch : 0;
+      const cursorA = createSyncCursor(relayA, {
+        streamId: sid,
+        producerId: "手机-p1",
+        state: { streamId: sid, producerId: "手机-p1", epoch: epochA, pushedSeq: 0, pulledOffset: 0 },
+      });
+      expect(cursorA.push(outboxOf(sid, local.slice(0, 2), cursorA.state()))).toMatchObject({ ok: true, pushed: 2 });
+      journal.save(cursorA.state());
+      expect(relayA.pull(sid, { from: 0 })).toMatchObject({ ok: true });
+
+      /* ② 老中继"进程结束"（对象直接丢掉 —— 它本来就不落盘） */
+      expect(journal.load(sid)).toMatchObject({ status: "ok", cursor: { pushedSeq: 2 } });
+
+      /* ③ 新中继：建流 + 重新接管（epoch 会前进 —— fencing 语义照旧） */
+      const relayB = createSyncRelay({ now: () => 1_700_000_000_000 });
+      relayB.createStream(sid);
+      const claimedB = relayB.claim(sid, "手机");
+      expect(claimedB.ok).toBe(true);
+      const epochB = claimedB.ok ? claimedB.epoch : 0;
+      /*
+       * ⚠️ 新实例的 epoch **从头开始**（这是内存中继的必然：它不记得上一次谁接管过）。
+       * 这条如实钉住 —— 它是"中继不持久化"的**代价之一**：重启那一刻的 fencing 只剩
+       * "本机库的归属校验 + 单一中继"这层保护（真的多实例部署时，epoch 必须落盘，
+       * 那正是"该持久化中继"的触发条件，写进 ADR-0016）。
+       */
+      expect(epochB, "新实例的 epoch 从头开始（内存中继不记得上一次接管）").toBe(1);
+      void epochA;
+
+      const restored = journal.load(sid);
+      if (restored.status !== "ok") throw new Error("游标没读回来");
+      const cursorB = createSyncCursor(relayB, {
+        streamId: sid,
+        producerId: "手机-p1",
+        state: { ...restored.cursor, epoch: epochB },
+      });
+
+      /*
+       * ⭐ **关键一步**：换流之后拿旧游标直接推，中继会回 `gap`
+       * （新流的起点是 1，而游标说 3）—— 这是**设计好的信号**：这条流不认识你的进度了。
+       * 客户端要做的是"从这条流的头重推"（事件 id 稳定，另一端按 id 去重），
+       * 而不是放弃。第一版这里我直接推 3..4，于是拿到 `gap` 并红了 —— 那条红是对的：
+       * 它把"中继不持久化之后到底怎么恢复"这件事逼出了一个明确的写法（`restartStream`）。
+       */
+      const naive = cursorB.push(outboxOf(sid, local.slice(2), cursorB.state()));
+      expect(naive, "拿旧游标往新流推：中继该说 gap（跳号）").toMatchObject({ ok: false, code: "gap" });
+
+      cursorB.restartStream({ epoch: epochB });
+      expect(cursorB.state()).toMatchObject({ epoch: epochB, pushedSeq: 0 });
+      const all = outboxOf(sid, local, cursorB.state());
+      expect(all.map((e) => e.id), "重推是**整条流从头**（id 不变 → 另一端按 id 去重）").toEqual([
+        eventIdOf(sid, 1),
+        eventIdOf(sid, 2),
+        eventIdOf(sid, 3),
+        eventIdOf(sid, 4),
+      ]);
+      expect(cursorB.push(all), "重置之后推不上去").toMatchObject({ ok: true, pushed: 4 });
+
+      /* ④ 判据：新中继那条流与本地记录**逐条一致（diff=0）** —— 这才是"能恢复"的真判据 */
+      const pulled = relayB.pull(sid, { from: 0 });
+      expect(pulled.ok).toBe(true);
+      if (!pulled.ok) return;
+      expect(resumeMatches(sid, local, pulled.events), "换实例 + 从头重推之后，流与本地仍不一致").toBe(true);
+      closeKv(dir);
+    }
   });
 
   it("⭐ ack 丢了（崩在「推成功但没落账」之后）：重推同一批被去重，流里不出现两次", async () => {

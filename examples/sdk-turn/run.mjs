@@ -1,11 +1,11 @@
 /**
- * **用 `@ding/engine` 跑一轮**（第三方最小示例 · 完整能力面）。
+ * **用 `ding-engine` 跑一轮**（第三方最小示例 · 完整能力面）。
  *
  * 这个文件是**真能跑**的，不是伪代码：CI 里由 `scripts/verify-sdk.mjs`
  * 把两个包打成 tarball、装进一个干净工程、再把本文件原样跑一遍。
  *
  * 跑法：
- *   npm i @ding/engine
+ *   npm i ding-engine
  *   STRATA_BASE_URL=http://127.0.0.1:8080/v1 STRATA_API_KEY=sk-... node run.mjs
  *
  * 没有任何本地服务也没关系：`STRATA_BASE_URL` 指向**任何 OpenAI 兼容端点**即可。
@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { buildEngine } from "@ding/engine";
+import { buildEngine } from "ding-engine";
 
 /* ① 两个目录：工作目录（工具能碰的范围）与数据目录（会话记录放哪） */
 const workdir = process.argv[2] ?? process.cwd();

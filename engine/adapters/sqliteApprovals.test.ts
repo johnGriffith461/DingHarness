@@ -125,6 +125,30 @@ describe("审批索引（v6 投影）", () => {
     }
   });
 
+  it("⭐ 会话收口时清掉**已决**的行、**待决的留着**（ADR-0016 第 7 条）", async () => {
+    const dir = tmpDir();
+    const store = createSqliteSessionStore(dir);
+    const index = createApprovalsIndex(dir);
+    try {
+      const decided = chatSessionId("approvals-prune-a");
+      const stillOpen = chatSessionId("approvals-prune-b");
+      await store.append(decided, pendingRecords("c1", ["local"]));
+      await store.append(decided, [
+        { type: "approval", toolCallId: "c1", name: "write_file", approved: true, ok: true, line: "已保存", decidedBy: "local" } as LogInput,
+      ]);
+      await store.append(stillOpen, pendingRecords("c2", ["local"]));
+
+      const removed = index.pruneWith([decided, stillOpen]);
+      expect(removed, "只该删掉那一条已决的").toBe(1);
+      expect(index.get(decided, "c1"), "已决的行该跟着会话一起走").toBeUndefined();
+      expect(index.get(stillOpen, "c2")?.state, "**待决的不能删** —— 那是用户的待办").toBe("pending");
+      expect(index.pruneWith([])).toBe(0);
+    } finally {
+      index.close();
+      store.close();
+    }
+  });
+
   it("④ 50 名成员的待决查询 ≤50ms（V5 §8 ⑥ 的那条数字）", async () => {
     const dir = tmpDir();
     const store = createSqliteSessionStore(dir);

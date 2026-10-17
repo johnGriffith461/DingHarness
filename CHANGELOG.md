@@ -68,8 +68,8 @@
 
 ### V5-4 施工：引擎独立包与 SDK（任务 4.1 / 4.2 / 4.6）
 
-- **两个包**（Cline 式分包）：`@ding/engine-core`（事件 + 主循环，**无 IO**）与
-  `@ding/engine`（最小面 + SQLite / 工具执行体 / 凭据库 / 插件 / 装配）。
+- **两个包**（Cline 式分包）：`ding-engine-core`（事件 + 主循环，**无 IO**）与
+  `ding-engine`（最小面 + SQLite / 工具执行体 / 凭据库 / 插件 / 装配）。
   **边界是机器判的**：`src/engineCoreBoundary.test.ts` 走一遍 import 闭包，
   闭包里出现 `node:*` / `electron` 就红（`src/` 里那个文件就是那条边界）。
 - **公开面冻结**：`packages/api.frozen.json` 两份名单 = "外面能用的东西"；

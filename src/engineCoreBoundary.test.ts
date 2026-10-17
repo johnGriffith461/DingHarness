@@ -3,10 +3,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * **最小嵌入面（`@ding/engine-core`）的边界守卫**（V5-4 任务 4.1）。
+ * **最小嵌入面（`ding-engine-core`）的边界守卫**（V5-4 任务 4.1）。
  *
  * 4.1 要的是 Cline 式的分包：一个**事件 + 主循环**的最小面（无 IO，能嵌进别的程序、
- * 别的运行时），与一个带 store / 宿主绑定的完整面（`@ding/engine`）。
+ * 别的运行时），与一个带 store / 宿主绑定的完整面（`ding-engine`）。
  *
  * 这条守卫盯的就是那条边界 —— 而且**它不是文档，是 import 闭包**：
  * 从 `engine/index.ts`（`createEngine` 那个入口）出发把 import 图走一遍，

@@ -1,4 +1,4 @@
-# @ding/engine-core
+# ding-engine-core
 
 **Ding Harness 的最小嵌入面**：事件模型（日志即真相）+ 主循环（`createEngine`）。
 **无 IO** —— 不需要文件系统、不需要子进程、不需要宿主运行时就能跑一轮真回合。
@@ -26,7 +26,7 @@
 ## 用法（最小一跑）
 
 ```js
-const { createEngine } = require("@ding/engine-core");
+const { createEngine } = require("ding-engine-core");
 
 const engine = createEngine({
   store: myMemoryStore,        // 实现 engine/ports/store.ts 那个形状
@@ -48,5 +48,5 @@ const result = await engine.run({
 
 - 产物是 **CommonJS**（与主仓 CLI 同一条构建路）—— `import` 与 `require` 都能用；
 - **不含**：SQLite 存储、工具的真实执行体、插件装载、凭据库、桌面/CLI 的装配。
-  那些在 `@ding/engine`（完整能力面）。
+  那些在 `ding-engine`（完整能力面）。
 - 版本口径见主仓 [`RELEASE.md`](../../RELEASE.md)；破坏性变更要 ADR + major。

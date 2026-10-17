@@ -64,7 +64,7 @@ export type EnginePorts = {
    * **凭据解析**（V5-4 4.1）：`keyRef` → 明文密钥。
    *
    * 省略 = 只读环境变量（`envSecret`）—— **那是不碰文件系统的那一半**，
-   * 也正是最小嵌入面（`@ding/engine-core`）的全部能力。
+   * 也正是最小嵌入面（`ding-engine-core`）的全部能力。
    * CLI / 桌面注入 `runtime/credentials.ts` 的 `resolveSecret`：
    * 多出来的来源是凭据库与桌面加密库（要 fs / safeStorage，那是宿主的事）。
    */

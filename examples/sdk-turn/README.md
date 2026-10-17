@@ -4,14 +4,14 @@
 
 | 包 | 是什么 | 什么时候用 |
 |---|---|---|
-| `@ding/engine-core` | 事件模型 + 主循环，**无 IO** | 嵌进别的程序/别的运行时；存储与工具你自己给 |
-| `@ding/engine` | 最小面 + SQLite/工具执行体/凭据库/插件/装配 | 在 Node 里跑一个真的 agent（和产品同一份实现） |
+| `ding-engine-core` | 事件模型 + 主循环，**无 IO** | 嵌进别的程序/别的运行时；存储与工具你自己给 |
+| `ding-engine` | 最小面 + SQLite/工具执行体/凭据库/插件/装配 | 在 Node 里跑一个真的 agent（和产品同一份实现） |
 
 ## 第 1 步：装
 
 ```bash
-npm i @ding/engine-core     # 或者
-npm i @ding/engine
+npm i ding-engine-core     # 或者
+npm i ding-engine
 ```
 
 > 还没发布到 npm 时：`npm i <仓库>/packages/engine-core`（本地路径安装），

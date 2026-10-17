@@ -113,10 +113,10 @@ jobs:
           node scripts/verify-cli-npm.mjs
 
       - name: SDK 包（V5-4 4.1/4.2：两个包独立构建 + 打包冒烟）
-        # 两个包（@ding/engine-core / @ding/engine）真构建 → npm pack → 解进一个**干净工程**
+        # 两个包（ding-engine-core / ding-engine）真构建 → npm pack → 解进一个**干净工程**
         # → 原样跑 examples/sdk-turn 的两个示例（假端点，零出网零花费）。
         # 同一段里还把两条契约判据钉住：engine-core 的产物不含 node:*（最小面），
-        # @ding/engine 的产物含 node:fs（完整面）；公开面清单的对账在 `pnpm test`
+        # ding-engine 的产物含 node:fs（完整面）；公开面清单的对账在 `pnpm test`
         # 的 src/sdkApiFreeze.test.ts 里（那一条不需要构建）。
         #
         # ⚠️ 这就是 RELEASE.md 里"示例仓 CI 验证"的落点：示例在仓内，验的就是它。

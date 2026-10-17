@@ -9,7 +9,7 @@
  * 2. **打包可发布**：`npm pack` 出的 tarball 里该有的都在（`files` 字段）、
  *    `exports` 映射解得开（两种写法：`import` 与 `require`）；
  * 3. **闭包边界在产物里成立**：engine-core 的 dist **不含** `node:*` 的 import；
- *    而 @ding/engine 的 dist **有**（两个包是真的不同，不是改名复制）；
+ *    而 ding-engine 的 dist **有**（两个包是真的不同，不是改名复制）；
  * 4. **陌生人那条路能跑通**：把示例文件原样复制到干净工程里跑 ——
  *    完整面（SQLite 真落盘）与最小面（内存 store，不碰文件系统）各一轮。
  *
@@ -86,7 +86,7 @@ ok(
   `两份产物都真读到了（core ${coreCode.length} 字节 / engine ${engineCode.length} 字节）`,
 );
 ok(!/require\("node:(fs|os|path|child_process)"\)/.test(coreCode), "engine-core 产物里没有 node:fs/os/path/child_process（最小面成立）");
-ok(/require\("node:fs"\)/.test(engineCode), "@ding/engine 产物里有 node:fs（完整面真的是完整面）");
+ok(/require\("node:fs"\)/.test(engineCode), "ding-engine 产物里有 node:fs（完整面真的是完整面）");
 
 /* ── ② 打包 + 装进干净工程 ───────────────────────────────────────── */
 console.log("\n② 打包（npm pack）与安装");
@@ -159,9 +159,9 @@ try {
   coreTar = packInto("packages/engine-core");
   engineTar = packInto("packages/engine");
   ok(existsSync(coreTar) && existsSync(engineTar), `两个 tarball 都出来了（${path.basename(coreTar)} / ${path.basename(engineTar)}）`);
-  extractTgz(coreTar, path.join(nm, "@ding/engine-core"));
-  extractTgz(engineTar, path.join(nm, "@ding/engine"));
-  ok(existsSync(path.join(nm, "@ding/engine-core", "README.md")), "tarball 里带了 README（files 字段对不对的一条实证）");
+  extractTgz(coreTar, path.join(nm, "ding-engine-core"));
+  extractTgz(engineTar, path.join(nm, "ding-engine"));
+  ok(existsSync(path.join(nm, "ding-engine-core", "README.md")), "tarball 里带了 README（files 字段对不对的一条实证）");
 } catch (error) {
   ok(false, `打包/解包失败：${String(error.stdout ?? error.message ?? "").slice(-300)}`);
   process.exit(1);
@@ -170,8 +170,10 @@ try {
 /* 第三方依赖用 junction 指回仓库的 node_modules（离线、且必须是真依赖解析） */
 const depsOf = (pkgDir) => Object.keys(JSON.parse(readFileSync(path.join(ROOT, pkgDir, "package.json"), "utf8")).dependencies ?? {});
 const deps = new Set([...depsOf("packages/engine-core"), ...depsOf("packages/engine")]);
+/* 两个包本体是解出来的 tarball，不许指回仓库（包名不带作用域，靠名单判，不能靠前缀） */
+const INTERNAL = new Set(["ding-engine-core", "ding-engine"]);
 for (const dep of deps) {
-  if (dep.startsWith("@ding/")) continue; // 两个包本体是解出来的 tarball，不许指回仓库
+  if (INTERNAL.has(dep)) continue;
   const target = path.join(ROOT, "node_modules", dep);
   const link = path.join(nm, dep);
   if (!existsSync(target)) {
@@ -181,7 +183,7 @@ for (const dep of deps) {
   mkdirSync(path.dirname(link), { recursive: true });
   if (!existsSync(link)) symlinkSync(target, link, "junction");
 }
-ok(true, `第三方依赖指好了：${[...deps].filter((d) => !d.startsWith("@ding/")).join(" / ")}`);
+ok(true, `第三方依赖指好了：${[...deps].filter((d) => !INTERNAL.has(d)).join(" / ")}`);
 
 /* ── ③ 起一个假的 OpenAI 兼容端点（零出网、零花费） ──────────────── */
 const fake = createServer((req, res) => {
@@ -228,13 +230,13 @@ ${error.message}` }));
   });
 
 const full = await runDemo("app/run.mjs");
-ok(full.code === 0 && full.out.includes("跑通了吗：true"), `完整面示例跑通（@ding/engine + SQLite 真落盘）\n${full.out.slice(-500)}`);
+ok(full.code === 0 && full.out.includes("跑通了吗：true"), `完整面示例跑通（ding-engine + SQLite 真落盘）\n${full.out.slice(-500)}`);
 const fullRecords = Number(/records=(\d+)/.exec(full.out)?.[1] ?? 0);
 /* 一轮文本回合就是 request + （文本/收尾）：条数随协议分帧变，判据只要求"确实落了盘" */
 ok(fullRecords >= 2, `示例里落了记录（${fullRecords} 条）`);
 
 const core = await runDemo("app/core-only.cjs");
-ok(core.code === 0 && core.out.includes("跑通了吗：true"), `最小面示例跑通（@ding/engine-core + 内存 store，不碰文件系统）\n${core.out.slice(-500)}`);
+ok(core.code === 0 && core.out.includes("跑通了吗：true"), `最小面示例跑通（ding-engine-core + 内存 store，不碰文件系统）\n${core.out.slice(-500)}`);
 
 /* ── ⑤ 收尾 ─────────────────────────────────────────────────────── */
 await new Promise((resolve) => fake.close(resolve));

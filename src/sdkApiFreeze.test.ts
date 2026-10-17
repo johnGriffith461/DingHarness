@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
  *
  * ## 它挡的是什么
  *
- * `@ding/engine-core` / `@ding/engine` 一旦发出去，外部程序就按那份名字表写代码 ——
+ * `ding-engine-core` / `ding-engine` 一旦发出去，外部程序就按那份名字表写代码 ——
  * 内部重构顺手改掉一个导出名、或者把一个"值"改成"只剩类型"，在 diff 里看不出问题，
  * 而在使用者那边是**编译不过 / 运行时 undefined**。
  *
@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
  *
  *   ① 代码里的导出 = 清单里的那一条（加了 / 删了 / 种类变了 → 红）；
  *   ② 每个条目都带 `since`（它从哪一版起存在）—— 版本是要能追溯的；
- *   ③ 两个包的版本与清单版本一致（`@ding/engine` 依赖着 `@ding/engine-core` 的具体版本，
+ *   ③ 两个包的版本与清单版本一致（`ding-engine` 依赖着 `ding-engine-core` 的具体版本，
  *      版本一漂，装的就不是同一份契约了）；
  *   ④ 发布流程文档在仓（`RELEASE.md`）且写着那三件必须写的事
  *      （ADR / major / 迁移指南）—— 4.2 的验收原文是"破坏性变更必须 ADR+major bump"，
@@ -94,7 +94,7 @@ describe("SDK 公开面冻结（V5-4 4.2）", () => {
 
   it("两个包的版本与清单一致（不然装的不是同一份契约）", () => {
     const versions = Object.keys(frozen.packages).map((pkg) => {
-      const file = pkg === "@ding/engine-core" ? "packages/engine-core/package.json" : "packages/engine/package.json";
+      const file = pkg === "ding-engine-core" ? "packages/engine-core/package.json" : "packages/engine/package.json";
       return { pkg, version: (JSON.parse(readFileSync(path.join(ROOT, file), "utf8")) as { version: string }).version };
     });
     for (const { pkg, version } of versions) {

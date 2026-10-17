@@ -6,7 +6,7 @@
   },
   "version": "0.1.0",
   "packages": {
-    "@ding/engine-core": {
+    "ding-engine-core": {
       "entry": "packages/engine-core/src/index.ts",
       "exports": [
         {
@@ -376,7 +376,7 @@
         }
       ]
     },
-    "@ding/engine": {
+    "ding-engine": {
       "entry": "packages/engine/src/index.ts",
       "exports": [
         {

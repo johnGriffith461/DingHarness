@@ -1,5 +1,5 @@
 {
-  "name": "@ding/engine-core",
+  "name": "ding-engine-core",
   "version": "0.1.0",
   "description": "Ding Harness 的最小嵌入面：事件模型 + 主循环（无 IO —— 不需要文件系统就能跑一轮）",
   "license": "Apache-2.0",

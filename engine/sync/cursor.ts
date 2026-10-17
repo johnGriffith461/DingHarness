@@ -47,6 +47,18 @@ export type SyncCursor = {
   /** 断线重连：从持久化的游标恢复（丢内存不丢进度）。 */
   restore(state: CursorState): void;
   /**
+   * **换了一条流：从头重推**（ADR-0016 第 1 条：中继不持久化，重启后流是新的）——
+   * 把 `pushedSeq` 清零、用新接管拿到的 `epoch`。
+   *
+   * ⚠️ 触发信号是**中继自己给的 `gap`**（"你推的 seq 对不上这条流的下一个位置"）：
+   * 那不是"推失败"，是"这条流不认识你的进度了" —— 客户端该做的是从这条流的头重推
+   * （事件 id 稳定，另一端按 id 去重），不是放弃这一轮。
+   *
+   * @param input.epoch 新接管的 epoch（`claim` 拿到的）
+   * @returns 重置后的状态
+   */
+  restartStream(input: { epoch: number }): CursorState;
+  /**
    * 推一批本地事件。
    *
    * seq 由游标自己编号（`pushedSeq + 1` 起，连续）—— 调用方不该自己编，
@@ -83,6 +95,12 @@ export function createSyncCursor(
 
   return {
     state: () => ({ ...cursor }),
+
+    restartStream: ({ epoch: next }) => {
+      epoch = next;
+      cursor = { ...cursor, epoch: next, pushedSeq: 0 };
+      return { ...cursor };
+    },
 
     restore: (state) => {
       /* 只认同一条流、同一个 producer 的游标（换流/换人就是另一本账） */

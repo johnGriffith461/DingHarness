@@ -160,7 +160,7 @@ export function buildToolSet(input: {
   /**
    * **钩子端口**（V5-4 4.1）：`tool:before` / `tool:after`。
    *
-   * 不给 = 没有钩子（`noopHooks`）—— 最小嵌入面（`@ding/engine-core`）不装载插件，
+   * 不给 = 没有钩子（`noopHooks`）—— 最小嵌入面（`ding-engine-core`）不装载插件，
    * 而不装载与不接线在这里是同一件事。Node 宿主注入 `pluginHost` 的 `pluginHooks`。
    */
   hooks?: HooksPort;

@@ -1,5 +1,5 @@
 {
-  "name": "@ding/engine",
+  "name": "ding-engine",
   "version": "0.1.0",
   "description": "Ding Harness 的完整能力面：引擎 + SQLite 存储 + 工具执行体 + 凭据库 + 插件（Node 侧）",
   "license": "Apache-2.0",
@@ -27,7 +27,7 @@
     "@ai-sdk/google": "4.0.95",
     "@ai-sdk/openai-compatible": "3.0.67",
     "@ai-sdk/provider": "4.0.26",
-    "@ding/engine-core": "0.1.0",
+    "ding-engine-core": "0.1.0",
     "ai": "7.0.137",
     "zod": "4.6.6"
   }

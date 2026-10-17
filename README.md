@@ -177,8 +177,8 @@ pnpm ding config [show|set <键> <值>|unset <键>] # 默认 provider / 模型 /
 ## 当 SDK 用（把引擎嵌进你自己的程序）
 
 ```bash
-npm i @ding/engine        # 完整能力面（SQLite + 工具 + 凭据 + 插件）
-npm i @ding/engine-core   # 最小嵌入面（只有事件 + 主循环，不碰 IO）
+npm i ding-engine        # 完整能力面（SQLite + 工具 + 凭据 + 插件）
+npm i ding-engine-core   # 最小嵌入面（只有事件 + 主循环，不碰 IO）
 ```
 
 十分钟那条路在 [`examples/sdk-turn/README.md`](examples/sdk-turn/README.md)；

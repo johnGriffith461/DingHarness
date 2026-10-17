@@ -343,7 +343,7 @@ export async function runHooks(hook: HookName, payload: unknown): Promise<void> 
  * 把这一份实现接到内核的钩子端口上（V5-4 4.1）。
  *
  * Node 侧的宿主（CLI / 桌面）在 `createEngine` 时注入它；最小嵌入面
- * （`@ding/engine-core`）不注入 —— 那时内核用 `noopHooks`，
+ * （`ding-engine-core`）不注入 —— 那时内核用 `noopHooks`，
  * "没装插件"与"没有钩子能力"在那里是同一件事。
  */
 export const pluginHooks: HooksPort = { run: runHooks };
