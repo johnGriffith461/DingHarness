@@ -187,6 +187,79 @@ const PROVIDER_TABLE: ProviderDef[] = [
   },
 ];
 
+/** 宿主注入的**自定义 provider**（V6-2j；只由宿主设，内核不读磁盘）。 */
+export type CustomProviderInput = {
+  id: string;
+  label: string;
+  baseURL: string;
+  protocol: Protocol;
+  keyRef: string;
+  models: string[];
+};
+
+let CUSTOM: ProviderDef[] = [];
+
+/**
+ * 设置自定义 provider（宿主在启动时把配置里的那批交进来）。
+ *
+ * 规矩：
+ * - **不能与内置同名**（否则"我配的端点"会悄悄替换掉内置定义，排错时看不到）；
+ * - `models` 必须非空（没有模型名的 provider 选不了，等于配了个寂寞）；
+ * - 只存进程内，不读磁盘 —— 读盘是宿主的事（CLI 读 config.json，桌面读自己的设置）。
+ *
+ * @param list 自定义定义
+ * @returns 被拒绝的条目（与内置同名/字段不合法），宿主据此提示用户
+ */
+export function setCustomProviders(list: readonly CustomProviderInput[]): { rejected: { id: string; why: string }[] } {
+  const builtinIds = new Set(PROVIDER_TABLE.map((p) => p.id));
+  const rejected: { id: string; why: string }[] = [];
+  const next: ProviderDef[] = [];
+  for (const item of list) {
+    const id = String(item.id ?? "").trim();
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
+      rejected.push({ id: id || "(空)", why: "id 要小写字母开头、只含小写字母/数字/连字符" });
+      continue;
+    }
+    if (builtinIds.has(id)) {
+      rejected.push({ id, why: "与内置 provider 同名（内置定义不能被覆盖）" });
+      continue;
+    }
+    if (!/^https?:\/\//.test(String(item.baseURL ?? ""))) {
+      rejected.push({ id, why: "baseURL 必须是 http(s) 地址" });
+      continue;
+    }
+    if (!["openai-compatible", "anthropic", "google"].includes(item.protocol)) {
+      rejected.push({ id, why: `不认识的协议：${String(item.protocol)}` });
+      continue;
+    }
+    if (!String(item.keyRef ?? "").trim()) {
+      rejected.push({ id, why: "keyRef 必填（密钥的环境变量名/凭据键）" });
+      continue;
+    }
+    const models = (item.models ?? []).map((m) => String(m).trim()).filter(Boolean);
+    if (!models.length) {
+      rejected.push({ id, why: "至少要给一个模型名（否则选不了）" });
+      continue;
+    }
+    next.push({
+      id,
+      label: item.label?.trim() || id,
+      baseURL: item.baseURL.trim(),
+      protocol: item.protocol,
+      keyRef: item.keyRef.trim(),
+      models,
+      note: "自定义端点（宿主配置）",
+    });
+  }
+  CUSTOM = next;
+  return { rejected };
+}
+
+/** 当前生效的自定义 provider（只读副本）。 */
+export function customProviders(): readonly ProviderDef[] {
+  return [...CUSTOM];
+}
+
 /**
  * 全部 provider（**带上环境变量里的 baseURL 覆盖**）。
  *
@@ -195,7 +268,7 @@ const PROVIDER_TABLE: ProviderDef[] = [
  * @returns provider 定义（新的数组，调用方改它不会污染表）
  */
 export function allProviders(): ProviderDef[] {
-  return PROVIDER_TABLE.map((p) => {
+  return [...PROVIDER_TABLE, ...CUSTOM].map((p) => {
     const override = (p.modelsEnv ? process.env[p.modelsEnv]?.trim() : "") || "";
     const models = override
       ? override

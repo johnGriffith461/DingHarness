@@ -77,6 +77,11 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "arg",
   "prompt",
   "timeout",
+  /* `ding providers add`（V6-2j）：自定义端点 */
+  "label",
+  "base-url",
+  "protocol",
+  "key-ref",
   "out",
   "by",
   "kind",

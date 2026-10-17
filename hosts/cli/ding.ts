@@ -9,7 +9,7 @@ import { createEngine, type Engine, type EngineRunRequest } from "../../engine/i
 import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
-import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
+import { allProviders, firstAvailableProvider, getProvider, setCustomProviders } from "../../engine/runtime/providers";
 import { PRODUCT_VERSION } from "../../shared/product";
 import {
   parsePluginIndex,
@@ -29,6 +29,7 @@ import { cmdFork } from "./cmdFork";
 import { cmdWorktree } from "./cmdWorktree";
 import { cmdKnowledge } from "./cmdKnowledge";
 import { cmdAcpDrive } from "./cmdAcpDrive";
+import { cmdProviders } from "./cmdProviders";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
@@ -911,6 +912,18 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  /*
+   * 自定义 provider（V6-2j）：启动时把配置里那批交给内核。
+   * 被拒的条目**明确提示**（同名内置/字段不合法）—— 静默丢弃会让用户以为"配了没生效"。
+   */
+  {
+    const custom = readConfig(dataDir()).config.providers ?? [];
+    if (custom.length || process.env.DH_STRICT_PROVIDERS) {
+      const { rejected } = setCustomProviders(custom);
+      for (const item of rejected) process.stderr.write(`⚠️ 自定义 provider「${item.id}」没生效：${item.why}\n`);
+    }
+  }
+
   /* `--dev`：工程模式（Phase 9）。`record` / `replay` 是**验收驱动器**，不是产品表面 ——
    * 它们留在命令行里（脚本要用），但**不出现在默认帮助里**，除非显式 `--dev`。
    * 这样"给人看的命令面"与"给工程用的命令面"分得开，而两者还在同一个二进制里。 */
@@ -953,6 +966,7 @@ async function main(): Promise<void> {
     "worktree",
     "knowledge",
     "acp-drive",
+    "providers",
     "config",
     "agents",
   ]);
@@ -1013,6 +1027,8 @@ async function main(): Promise<void> {
                   ? await cmdKnowledge(parsed, dataDir())
                   : parsed.command === "acp-drive"
                   ? await cmdAcpDrive(parsed)
+                  : parsed.command === "providers"
+                  ? await cmdProviders(parsed, dataDir())
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"

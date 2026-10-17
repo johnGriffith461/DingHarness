@@ -145,6 +145,7 @@ pnpm ding run "把 demo 里的 md 整理成一份纪要" --dir ./demo
 pnpm ding sessions [--json|--export <id>]      # 列会话 / 导出 JSONL
 pnpm ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）
 pnpm ding models [--json]                      # provider 与模型（逐条标出数据来源与是否过期）
+pnpm ding providers list|add|remove …          # 自定义 provider（端点/协议/密钥引用，进 config.json）
 pnpm ding agents                               # 内置专家（AgentSpec）
 pnpm ding eval [类别] [--json] [--repeat <k>]  # 离线评测集（不烧 token；--repeat = pass@k）
 pnpm ding eval --update-baseline               # 落一份通过率基线（进版本库）

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import path from "node:path";
 
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
+import type { CustomProviderInput } from "../../engine/runtime/providers";
 
 /**
  * CLI 的**配置**（Phase 9）。
@@ -45,6 +46,13 @@ export type CliConfig = {
    * 默认不设是刻意的：替用户定一个他没同意的额度，比不提示更烦人。
    */
   softLimitUsd?: number;
+  /**
+   * 自定义 provider（V6-2j）：端点/协议/密钥引用都是**配置**，不是代码。
+   *
+   * 与内置表严格分开：内置表是"我们验过的那些"；这里是"你自己接的那些"。
+   * 同名会被拒绝（见 `setCustomProviders`），免得自定义悄悄覆盖内置定义。
+   */
+  providers?: CustomProviderInput[];
 };
 
 /** 配置文件位置。 */
@@ -60,7 +68,7 @@ export function configPaths(dataDir: string): { primary: string; legacy: string 
  * 就永远报"合法"—— 而用户看到的表现是"我明明配了啊"。
  * （2026-10-17 从 doctor 搬到这里：配置的合法键属于配置模块，自检只借它用。）
  */
-export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd"] as const;
+export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "providers"] as const;
 
 /** 收窄从磁盘读回来的配置（**磁盘不可信**：坏值一律丢掉，别让它影响一次真实运行）。 */
 export function normalizeConfig(raw: unknown): CliConfig {
@@ -76,6 +84,35 @@ export function normalizeConfig(raw: unknown): CliConfig {
   if (Array.isArray(o.dirs)) {
     const dirs = o.dirs.filter((d): d is string => typeof d === "string" && d.trim() !== "");
     if (dirs.length) out.dirs = dirs;
+  }
+  /*
+   * 自定义 provider：这里只做**形状收窄**（字符串/数组），语义校验在
+   * `setCustomProviders` 里做（它还要对内置同名等情况给出人能读的原因）。
+   */
+  if (Array.isArray(o.providers)) {
+    const providers: CustomProviderInput[] = [];
+    for (const item of o.providers) {
+      if (!item || typeof item !== "object") continue;
+      const p = item as Record<string, unknown>;
+      if (
+        typeof p.id !== "string" ||
+        typeof p.baseURL !== "string" ||
+        typeof p.keyRef !== "string" ||
+        (p.protocol !== "openai-compatible" && p.protocol !== "anthropic" && p.protocol !== "google")
+      ) {
+        continue;
+      }
+      const models = Array.isArray(p.models) ? p.models.filter((m): m is string => typeof m === "string" && m.trim() !== "") : [];
+      providers.push({
+        id: p.id.trim(),
+        label: typeof p.label === "string" && p.label.trim() ? p.label.trim() : p.id.trim(),
+        baseURL: p.baseURL.trim(),
+        protocol: p.protocol,
+        keyRef: p.keyRef.trim(),
+        models,
+      });
+    }
+    if (providers.length) out.providers = providers;
   }
   return out;
 }
