@@ -64,7 +64,9 @@ export type WorkbenchView =
   | "image"
   | "video"
   /* V6-2c/2d：用量与请求追踪（只读派生数据，见 InsightsPage） */
-  | "usage";
+  | "usage"
+  /* V6-2i/4d：两轴权限矩阵（只读展示内核判定，见 PermissionMatrixPage） */
+  | "permissions";
 
 export type WorkbenchState = {
   view: WorkbenchView;

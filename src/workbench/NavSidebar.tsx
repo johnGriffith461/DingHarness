@@ -18,6 +18,7 @@ import {
   Pencil,
   Pin,
   Settings,
+  ShieldCheck,
   Smartphone,
   X,
 } from "lucide-react";
@@ -54,6 +55,8 @@ export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListT
   { view: "phone", label: "手机遥控电脑", icon: Smartphone },
   /* V6-2c/2d：用量与请求追踪（原来只有单会话弹层，没有跨会话的页） */
   { view: "usage", label: "用量与追踪", icon: Activity },
+  /* V6-2i/4d：两轴权限矩阵（内核早就有判定，缺的是能看的那张表） */
+  { view: "permissions", label: "权限矩阵", icon: ShieldCheck },
 ];
 
 /** 每秒重算一次"已处理 N 秒"。 */

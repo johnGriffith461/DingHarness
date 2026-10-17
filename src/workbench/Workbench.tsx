@@ -17,6 +17,7 @@ import { PhonePage } from "./PhonePage";
 import { PluginsPage } from "./PluginsPage";
 import { ScheduledPage } from "./ScheduledPage";
 import { InsightsPage } from "./InsightsPage";
+import { PermissionMatrixPage } from "./PermissionMatrixPage";
 import CanvasRuntime from "@/canvas/CanvasRuntime";
 import { startScheduler } from "./scheduleStore";
 import { useLibraryStore } from "./libraryStore";
@@ -191,6 +192,9 @@ export default function Workbench() {
       /* V6-2c/2d：用量与请求追踪（只读派生数据） */
       case "usage":
         return <InsightsPage />;
+      /* V6-2i/4d：两轴权限矩阵（只读展示内核判定） */
+      case "permissions":
+        return <PermissionMatrixPage />;
       case "plugins":
         return <PluginsPage />;
       case "phone":
