@@ -4,10 +4,13 @@ import type { AddressInfo, Socket } from "node:net";
 import { networkInterfaces } from "node:os";
 
 import type { Engine } from "../../engine/index";
+import type { ToolExecutor } from "../../engine/ports/executor";
 import type { SyncRelay } from "../../engine/sync/relay";
 import type { SpaceStore } from "../../engine/adapters/spaceStore";
 import type { MemberRole } from "../../engine/core/members";
 import { canReadSession, handleJoin, handleSpaceRoute, spaceOf } from "./spaceApi";
+import { handleApprovalRoute } from "./approvalApi";
+import type { ApprovalsIndex } from "../../engine/adapters/sqliteApprovals";
 import { handleRunRoute, handleHookRoute } from "./runApi";
 import { handleStreamRoute } from "./streamApi";
 import { handleChannelRoute } from "./channelApi";
@@ -65,8 +68,15 @@ export type ServerOptions = {
    * 绑非回环地址且**没显式给口令**时仍然硬拒（那一步是"别把 agent 送出去"）。
    */
   token?: string;
-  /** 每建一次引擎（工作目录 → 引擎）。 */
-  makeEngine: (cwd: string) => Promise<{ engine: Engine; close: () => void }>;
+  /**
+   * 每建一次引擎（工作目录 → 引擎）。
+   *
+   * `executor`（可选，V5 收尾加）：服务端替远端成员**执行**那一次被拦下的调用时要用它
+   * （C3 3.7b 的批准那条路）。`buildEngine` 现在就带着它；装置里的假引擎不带 ——
+   * 那时审批路由会如实说"决定可以留痕，但执行要在会话所在的那一端做"（501），
+   * 而不是假装执行过。
+   */
+  makeEngine: (cwd: string) => Promise<{ engine: Engine; close: () => void; executor?: ToolExecutor }>;
   mode: ConfirmMode;
   provider: string;
   model?: string;
@@ -97,6 +107,21 @@ export type ServerOptions = {
   space?: SpaceStore;
   /** 会话列表（宿主注入的真实实现）。不给 = `/v1/sessions` 回 501。 */
   listSessions?: () => Promise<SessionSummary[]>;
+  /**
+   * **审批索引**（V5 收尾加；C3 3.7b）：`/v1/approvals` 那一族要用它读
+   * "谁在等批、归谁批、批了没有"。不给 = 那一族回 501（不假装"没有待决"）。
+   *
+   * ⚠️ 它与 `listSessions`/`loadSession` 不同：**常开**（每次请求都要查，
+   * 不像会话清单可以现开现关）。宿主负责在退出时 `close()`。
+   */
+  approvals?: ApprovalsIndex;
+  /**
+   * **往会话日志追加一条记录**（V5 收尾加）：审批路由落决策 / 授权记录要用它。
+   *
+   * 不给 = 审批的"决定"那一步回 501 —— **落不了痕的决定不做**（日志即真相：
+   * 决定不落痕，重启之后那条待决会又一次变回"等你确认"，而用户明明点过）。
+   */
+  appendRecord?: (sessionId: string, record: unknown) => Promise<void>;
   /**
    * 逐段读会话记录（审计查询用；V5-3 3.3）。
    *
@@ -716,6 +741,25 @@ async function handle(
       note = `读记录：${id}（${got.records.length} 条）`;
       json(res, 200, { sessionId: id, records: got.records });
       return;
+    }
+
+    /* ── 审批（C3 3.7b）：整族在 `./approvalApi.ts` ── */
+    if (path.startsWith("/v1/approvals")) {
+      if (!opts.appendRecord) {
+        note = "审批未接线（宿主没给 appendRecord）";
+        json(res, 501, { error: "这个服务没有接会话写入（宿主没给 appendRecord）：决定落不了痕，所以不接这一步" });
+        return;
+      }
+      const handled = await handleApprovalRoute(path, req, res, {
+        opts,
+        identity,
+        approvals: opts.approvals,
+        json,
+        readBody,
+        note: (t) => (note = t),
+        append: (target, record) => opts.appendRecord!(target, record),
+      });
+      if (handled) return;
     }
 
     /* ── 同步中继（V5-2 2.1）：整族在 `./streamApi.ts` ── */

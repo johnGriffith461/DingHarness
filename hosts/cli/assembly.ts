@@ -35,7 +35,19 @@ export const CLI_TOOLS = [
   "spawn_agents",
 ] as const;
 
-export type BuiltEngine = { engine: Engine; close: () => void; plugins: string[] };
+export type BuiltEngine = {
+  engine: Engine;
+  close: () => void;
+  plugins: string[];
+  /**
+   * **工具执行体**（V5 收尾加；加法，不动既有调用方）。
+   *
+   * 谁要它：服务端替**远端成员**执行那一次被拦下的调用（C3 3.7b —— 成员点了批准，
+   * 工具要在会话所在的那一端真的跑一次，见 `hosts/server/approvalApi.ts`）。
+   * 桌面那条路走的是自己的 `runToolOnce`（它绑着界面的 store），服务端只能用这一份。
+   */
+  executor: ToolExecutor;
+};
 
 /**
  * 建一个供一次运行使用的引擎。
@@ -107,5 +119,5 @@ export async function buildEngine(
     secret: resolveSecret,
     hooks: pluginHooks,
   });
-  return { engine, close: () => store.close(), plugins };
+  return { engine, close: () => store.close(), plugins, executor };
 }

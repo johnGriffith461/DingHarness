@@ -1,3 +1,4 @@
+import { createApprovalsIndex } from "../../engine/adapters/sqliteApprovals";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
@@ -139,6 +140,8 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
   }
 
   let started;
+  /* 审批索引常开（每次请求都要查）；关服务时一并关掉 */
+  const approvals = createApprovalsIndex(dataDir, "sessions.db");
   try {
     started = await startAgentServer({
       port: portDecision.port,
@@ -180,6 +183,21 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
        * 不是数据本身（离线续传靠客户端持久化的 offset 游标，2.6）。
        */
       relay: createSyncRelay(),
+      /*
+       * 审批（C3 3.7b，V5 收尾）：索引**常开**（每次请求都要查），写入复用会话库
+       * 那个端口（单一出口 —— 决策与事件流必须落在同一条编号序列上）。
+       */
+      approvals,
+      appendRecord: async (sessionId: string, record: unknown) => {
+        const store = createSqliteSessionStore(dataDir, "sessions.db", {}, { protectBefore: startedAt });
+        try {
+          /* ⚠️ **不传 owner**：这段会话已经存在，传一个不同的 owner 会被归属校验拒掉
+             （C1 的"跨 owner 写入拒绝"）—— 老路径什么都不查，正是这里要的 */
+          await store.append(sessionId, [record as never]);
+        } finally {
+          store.close();
+        }
+      },
       /*
        * 团队空间（V5-3 3.1）：名册 + 配对码 + 成员口令 + 共享清单都落这一个账本。
        * 每一请求现读 —— 改角色/移除成员**立刻生效**（U8-5）。
@@ -229,7 +247,10 @@ export async function cmdServe(p: Parsed, dataDir: string): Promise<number> {
       }
       stopping = true;
       process.stderr.write("[serve] 正在关闭：中止在跑的回合、销毁在途连接……\n");
-      void started.stop().then(() => resolve(0));
+      void started.stop().then(() => {
+        approvals.close();
+        resolve(0);
+      });
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);

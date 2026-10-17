@@ -124,7 +124,18 @@ function secondParserMarks(src: string): string[] {
  * CLI 要把待确认标出来），不是"第二份投影"。产品层（`src/` / `engine/` /
  * `shared/`）**不在此列** —— 那里必须走 `engine/core/events.ts` 的投影。
  */
-const HOST_TRANSLATORS = ["hosts/acp/agent.ts"];
+const HOST_TRANSLATORS = [
+  "hosts/acp/agent.ts",
+  /*
+   * `hosts/server/approvalApi.ts`（V5 收尾加）：它把**审批索引的一行**翻成 HTTP 的视图
+   * （`{sessionId, toolCallId, name, approvers, state, youCanDecide}`）。
+   * 那是"对外协议形状"，不是第二份投影 —— 待决与"谁能批"是从 `approvals` 索引
+   * 与 `gates.approversFor` 读来的（两处都只有一份实现）。
+   * 守卫的正则把 `toolCallId: row.toolCallId` + `name:` 认成了"手搓 ToolTrace"：
+   * 形状像，但它**不是**从事件流里自己算留痕 —— 理由写在这里，放行。
+   */
+  "hosts/server/approvalApi.ts",
+];
 
 describe("C2 结构守卫：事件流只有一份解析", () => {
   /*

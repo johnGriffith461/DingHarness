@@ -269,6 +269,19 @@ export function grantRecord(input: {
 }
 
 /**
+ * **授权那一行**（界面与 HTTP 回执共用一句 —— 两处各写一遍必然漂）。
+ *
+ * @param input.by 谁授的权
+ * @param input.target 授给谁
+ */
+export function grantLine(input: { by: string; target: string }): string {
+  return `🔑 ${input.by} 把裁决权授给了 ${input.target}`;
+}
+
+/** 「这个人已经在名单里」的回执（重复授权**不算错**，但也不会再记一条 —— 幂等）。 */
+export const GRANT_ALREADY_NOTE = "这个人已经在审批人名单里（重复授权不算错，也没有再记一条）";
+
+/**
  * **这条待决现在归谁批**（C3 3.7b：pending 载荷 + 之后的授权记录）。
  *
  * 读路径的唯一口径，两条来源按顺序叠加：
