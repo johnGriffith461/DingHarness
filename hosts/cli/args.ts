@@ -98,6 +98,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "export",
   /* `ding sessions --state <会话 id>`（U01）：回放运行态（运行中/等确认/暂停…） */
   "state",
+  /* `ding review <会话 id> --revert <路径>`（U08）：逐文件回滚 */
+  "revert",
   "grant",
   "search",
   "hook",

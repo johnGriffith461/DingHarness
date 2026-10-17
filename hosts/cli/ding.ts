@@ -31,6 +31,7 @@ import { cmdMemory } from "./cmdMemory";
 import { cmdWorkflow } from "./cmdWorkflow";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
+import { cmdReview } from "./cmdReview";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
 import { renderRecords } from "./renderRecords";
 import { cmdResume } from "./cmdResume";
@@ -790,6 +791,8 @@ async function main(): Promise<void> {
     "workflow",
     "config",
     "agents",
+    /* U08：逐文件改动审阅与回滚 */
+    "review",
   ]);
   if (parsed.command && !knownCommands.has(parsed.command) && /^[a-z][a-z-]*$/.test(parsed.command)) {
     process.stderr.write(
@@ -804,7 +807,9 @@ async function main(): Promise<void> {
       ? await cmdRun(parsed)
       : parsed.command === "sessions"
         ? await cmdSessions(parsed, dataDir())
-        : parsed.command === "record"
+        : parsed.command === "review"
+          ? await cmdReview(parsed, dataDir())
+          : parsed.command === "record"
           ? await cmdRecord(parsed)
           : parsed.command === "replay"
             ? await cmdReplay(parsed)
