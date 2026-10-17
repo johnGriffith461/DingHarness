@@ -15,6 +15,7 @@ import { budgetOf } from "../../engine/runtime/budget";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { formatCount, usageTotal } from "../../shared/cost";
 import { buildEngine as buildEngineIn } from "./assembly";
+import { cmdBench } from "./cmdBench";
 import { cmdEval } from "./cmdEval";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
@@ -812,6 +813,7 @@ async function main(): Promise<void> {
     "doctor",
     "init",
     "eval",
+    "bench",
     "config",
     "agents",
   ]);
@@ -862,6 +864,8 @@ async function main(): Promise<void> {
                     ? await cmdInit(parsed, dataDir())
                     : parsed.command === "eval"
                   ? await cmdEval(parsed)
+                  : parsed.command === "bench"
+                  ? await cmdBench(parsed)
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"

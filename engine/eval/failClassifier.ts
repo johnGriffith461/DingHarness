@@ -45,6 +45,10 @@ export const FAILURE_KINDS = [
   "watchdog",
   /** 纯函数格子（core）的判据不成立。 */
   "core_check",
+  /** 基准任务的**判分命令**没通过（测试挂了 / 退出码不对）。 */
+  "bench_command",
+  /** 基准任务的**文件判分**不符（该有却没有 / 内容不对）。 */
+  "bench_file",
 ] as const;
 
 export type FailureKind = (typeof FAILURE_KINDS)[number];
@@ -64,6 +68,8 @@ export const FAILURE_KIND_LABELS: Record<FailureKind, string> = {
   exception: "执行异常",
   watchdog: "超时未收场",
   core_check: "核心判据不成立",
+  bench_command: "判分命令未通过",
+  bench_file: "判分文件不符",
 };
 
 /** 稳定排序（报告每次输出顺序一致，diff 才好读）。 */

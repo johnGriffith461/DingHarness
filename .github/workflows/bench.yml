@@ -1,0 +1,84 @@
+# 质量证据门（V6-1e）。
+#
+# 为什么**不**放进 ci.yml：
+#   · `ding bench` 是任务级基准（起真引擎、真工具、跑判分命令），比单测慢；
+#   · SWE-bench 那类要真模型/真钱，绝不能在每次 push 跑。
+# 这里的定位是**发版门**：tag 或手动触发，产物（JSON 报告）留档。
+name: Bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "每条任务采样次数（pass@k 的 k）"
+        required: false
+        default: "1"
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    # 与 ci.yml 不同，这里跑 Ubuntu：bench 任务只依赖 node，
+    # 跨平台跑一遍顺带验证"行尾归一 / argv 不走 shell"那两条约定。
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      # 假 provider 那条路不需要真模型；万一将来有人加了真 provider 任务，
+      # 这个变量会让它直接失败而不是悄悄烧钱。
+      DSH_NO_REAL_MODEL: "1"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 过程回归（63 条；不进 bench 成绩）
+        run: pnpm exec tsx hosts/cli/ding.ts eval --json > eval-report.json
+
+      - name: 任务基准（harness 套）
+        run: |
+          pnpm exec tsx hosts/cli/ding.ts bench run \
+            --json --repeat "${{ github.event.inputs.repeat || '1' }}" \
+            --out bench-report.json > bench-stdout.json
+
+      - name: 归档报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-report
+          path: |
+            bench-report.json
+            bench-stdout.json
+            eval-report.json
+          if-no-files-found: warn
+
+      # 成绩必须"发布即存档"：失败也要留证据（否则只能看到红，看不到红在哪一类）
+      - name: 打印摘要
+        if: always()
+        run: |
+          node -e '
+            const fs=require("fs");
+            for (const f of ["eval-report.json","bench-report.json"]) {
+              if (!fs.existsSync(f)) continue;
+              const j=JSON.parse(fs.readFileSync(f,"utf8"));
+              console.log(`== ${f} ==`);
+              console.log(`total=${j.total} passed=${j.passed} failed=${j.failed} rate=${j.rate}% samples=${j.samples}`);
+              console.log("byFailure="+JSON.stringify(j.byFailure));
+            }
+          '

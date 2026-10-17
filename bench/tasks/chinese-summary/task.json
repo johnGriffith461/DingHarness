@@ -1,0 +1,47 @@
+{
+  "id": "chinese-summary",
+  "title": "读两份中文笔记写季度摘要",
+  "category": "docs",
+  "split": "train",
+  "description": "挡的是「不读文件就编」和「留着旧产物不覆盖」：判分要两个季度的营收/成本/利润数字都对。",
+  "seed": "seed",
+  "environment": { "node": ">=20", "network": false },
+  "turns": [
+    "读 notes 下的两份笔记，把 summary.md 覆盖成一份中文季度摘要：每个季度都要写营收、成本、利润（利润 = 营收 - 成本）。"
+  ],
+  "replies": [
+    [
+      {
+        "say": "先读两份笔记。",
+        "call": [
+          { "name": "read_file", "args": { "path": "{{dir}}/notes/q1.md" } },
+          { "name": "read_file", "args": { "path": "{{dir}}/notes/q2.md" } }
+        ]
+      },
+      {
+        "call": [
+          {
+            "name": "write_file",
+            "args": {
+              "path": "{{dir}}/summary.md",
+              "overwrite": true,
+              "content": "# 季度摘要\n\n- 第一季度：营收 120 万，成本 80 万，利润 40 万。\n- 第二季度：营收 150 万，成本 90 万，利润 60 万。\n"
+            }
+          }
+        ]
+      },
+      { "say": "摘要写好了。" }
+    ]
+  ],
+  "mode": "全部允许",
+  "maxSteps": 6,
+  "grader": {
+    "files": [
+      {
+        "path": "summary.md",
+        "contains": ["120", "80", "40", "150", "90", "60", "第一季度", "第二季度"],
+        "absent": ["旧内容"]
+      }
+    ]
+  }
+}

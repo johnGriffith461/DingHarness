@@ -1,0 +1,54 @@
+{
+  "id": "long-horizon-total",
+  "title": "多步读取、汇总、落盘并自检",
+  "category": "long-horizon",
+  "split": "test",
+  "description": "挡的是「读一半就汇总」和「不跑自检就交付」：必须汇总 5 个文件，且 check.js 通过。",
+  "seed": "seed",
+  "environment": { "node": ">=20", "network": false },
+  "turns": [
+    "data 目录下有 5 个数字文件。逐个读出来，算总和与平均数，写进 report.md（要写出具体数字），最后运行 node check.js 自检。"
+  ],
+  "replies": [
+    [
+      {
+        "say": "先看目录里有哪些文件。",
+        "call": [{ "name": "list_dir", "args": { "path": "{{dir}}/data" } }]
+      },
+      {
+        "call": [
+          { "name": "read_file", "args": { "path": "{{dir}}/data/1.txt" } },
+          { "name": "read_file", "args": { "path": "{{dir}}/data/2.txt" } },
+          { "name": "read_file", "args": { "path": "{{dir}}/data/3.txt" } }
+        ]
+      },
+      {
+        "call": [
+          { "name": "read_file", "args": { "path": "{{dir}}/data/4.txt" } },
+          { "name": "read_file", "args": { "path": "{{dir}}/data/5.txt" } }
+        ]
+      },
+      {
+        "call": [
+          {
+            "name": "write_file",
+            "args": {
+              "path": "{{dir}}/report.md",
+              "content": "# 汇总\n\n- 总和：150\n- 平均数：30\n"
+            }
+          }
+        ]
+      },
+      {
+        "call": [{ "name": "run_command", "args": { "command": "node check.js", "workdir": "{{dir}}" } }]
+      },
+      { "say": "汇总写完，自检通过。" }
+    ]
+  ],
+  "mode": "全部允许",
+  "maxSteps": 14,
+  "grader": {
+    "files": [{ "path": "report.md", "contains": ["150", "30"] }],
+    "commands": [{ "argv": ["node", "check.js"], "exitCode": 0, "stdoutContains": ["ok"] }]
+  }
+}

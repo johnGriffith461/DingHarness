@@ -37,6 +37,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding restore <文件> [--list]                   # 从备份恢复（--list 只看不恢复；只补不覆盖：已有的键跳过）",
       "  ding init                                      # 首次配置向导（配 key / 选模型 / 选目录）",
       "  ding eval [类别] [--json] [--repeat <k>] [--update-baseline]  # 离线评测集（--repeat = pass@k 采样）",
+      "  ding bench list|run [suite] [--task <id>] [--split train|test] [--repeat <k>] [--docker] [--json] [--out <文件>]",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|install <目录|npm:包名> --yes|enable|disable|remove|doctor]",

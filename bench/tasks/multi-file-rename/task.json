@@ -1,0 +1,49 @@
+{
+  "id": "multi-file-rename",
+  "title": "跨文件重命名并保持测试绿",
+  "category": "refactor",
+  "split": "test",
+  "description": "挡的是「只改定义、不改调用」：两个文件都不许再出现旧名字，且测试必须跑通。",
+  "seed": "seed",
+  "environment": { "node": ">=20", "network": false },
+  "turns": [
+    "把 oldName 重命名为 twice（定义与调用都要改），然后运行 node test.js 确认没改坏。"
+  ],
+  "replies": [
+    [
+      {
+        "say": "先看两个文件和测试。",
+        "call": [
+          { "name": "read_file", "args": { "path": "{{dir}}/app.js" } },
+          { "name": "read_file", "args": { "path": "{{dir}}/use.js" } },
+          { "name": "read_file", "args": { "path": "{{dir}}/test.js" } }
+        ]
+      },
+      {
+        "call": [
+          {
+            "name": "edit_file",
+            "args": { "path": "{{dir}}/app.js", "oldText": "oldName", "newText": "twice", "replaceAll": true }
+          },
+          {
+            "name": "edit_file",
+            "args": { "path": "{{dir}}/use.js", "oldText": "oldName", "newText": "twice", "replaceAll": true }
+          }
+        ]
+      },
+      {
+        "call": [{ "name": "run_command", "args": { "command": "node test.js", "workdir": "{{dir}}" } }]
+      },
+      { "say": "改完了，测试通过。" }
+    ]
+  ],
+  "mode": "全部允许",
+  "maxSteps": 8,
+  "grader": {
+    "files": [
+      { "path": "app.js", "contains": ["export function twice"], "absent": ["oldName"] },
+      { "path": "use.js", "contains": ["twice"], "absent": ["oldName"] }
+    ],
+    "commands": [{ "argv": ["node", "test.js"], "exitCode": 0, "stdoutContains": ["ok"] }]
+  }
+}

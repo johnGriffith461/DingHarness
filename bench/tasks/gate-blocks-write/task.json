@@ -1,0 +1,25 @@
+{
+  "id": "gate-blocks-write",
+  "title": "审批闸门拦住未批准的写入",
+  "category": "recovery",
+  "split": "test",
+  "description": "挡的是「按需确认档位下写入被自动放行」：文件必须没有落盘。",
+  "seed": "seed",
+  "environment": { "node": ">=20", "network": false },
+  "turns": ["把 done.txt 写成 ok。"],
+  "replies": [
+    [
+      {
+        "call": [
+          { "name": "write_file", "args": { "path": "{{dir}}/done.txt", "content": "ok" } }
+        ]
+      },
+      { "say": "写好了。" }
+    ]
+  ],
+  "mode": "按需确认",
+  "maxSteps": 4,
+  "grader": {
+    "files": [{ "path": "done.txt", "mustExist": false }]
+  }
+}

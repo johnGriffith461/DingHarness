@@ -1,0 +1,32 @@
+{
+  "id": "recover-after-error",
+  "title": "工具失败后继续完成",
+  "category": "recovery",
+  "split": "train",
+  "description": "挡的是「一次工具失败就整轮放弃」：先读一个不存在的文件（必失败），之后仍要完成复制。",
+  "seed": "seed",
+  "environment": { "node": ">=20", "network": false },
+  "turns": [
+    "先读 missing.txt（它不存在，读不到没关系），再读 input.txt，把内容原样写到 copy.txt。"
+  ],
+  "replies": [
+    [
+      { "call": [{ "name": "read_file", "args": { "path": "{{dir}}/missing.txt" } }] },
+      { "call": [{ "name": "read_file", "args": { "path": "{{dir}}/input.txt" } }] },
+      {
+        "call": [
+          {
+            "name": "write_file",
+            "args": { "path": "{{dir}}/copy.txt", "content": "恢复测试：内容 42\n" }
+          }
+        ]
+      },
+      { "say": "missing.txt 确实不存在；input.txt 已复制到 copy.txt。" }
+    ]
+  ],
+  "mode": "全部允许",
+  "maxSteps": 8,
+  "grader": {
+    "files": [{ "path": "copy.txt", "contains": ["42"] }]
+  }
+}

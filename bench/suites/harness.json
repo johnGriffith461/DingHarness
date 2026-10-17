@@ -1,0 +1,13 @@
+{
+  "name": "harness",
+  "description": "Ding 自带任务集：确定性、不烧 token，判任务级产物（文件内容 + 判分命令）",
+  "tasks": [
+    "../tasks/fix-failing-test",
+    "../tasks/add-name-flag",
+    "../tasks/chinese-summary",
+    "../tasks/multi-file-rename",
+    "../tasks/long-horizon-total",
+    "../tasks/recover-after-error",
+    "../tasks/gate-blocks-write"
+  ]
+}

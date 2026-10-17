@@ -55,6 +55,10 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
    * 常规跑默认 1；公开评测/爬山时显式给 —— 详见 `runSuite` 的 `opts.repeat`。
    */
   "repeat",
+  /* `ding bench`（V6-1a）：按任务 id 过滤 / 按 train|test 切分 */
+  "task",
+  "split",
+  "suite",
   "out",
   "by",
   "kind",
@@ -112,6 +116,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "force",
   "h",
   "help",
+  /* `ding bench run --docker`（V6-1a）：判分命令跑在容器里（需要本机有 Docker） */
+  "docker",
   /* `ding approvals --watch`：盯着通知流（不给就看一眼列一遍） */
   "watch",
 ]);
