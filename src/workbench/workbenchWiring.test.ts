@@ -263,9 +263,18 @@ describe("P187 / P191：收起态跨重启记得住（设置 ↔ 界面状态只
     expect(raw("shared/ipc.ts"), "契约里缺 navCollapsed：`write` 传不上去").toContain("navCollapsed");
     const settings = source("src/workbench/appSettings.ts");
     expect(settings).toContain("setNavCollapsed");
-    expect(settings, "写的是**整份**设置（只送自己那一项会把钉住的模型抹掉）").toContain(
-      "pinnedModel: get().pinnedModel",
-    );
+    /*
+     * 写的是**整份**设置（只送自己那一项会把钉住的模型抹掉）。
+     * L06 起三个写入口统一走 `persist(get())`，整份组装只有那一处 ——
+     * 判据跟着改成"只许 persist 里那一处 write，且每个字段都在"。
+     */
+    const writes = [...settings.matchAll(/appSettings\?\.write\(/g)].length;
+    expect(writes, "有写入口绕过了 `persist()`（迟早漏带一个新字段）").toBe(1);
+    expect(settings).toContain("await persist(get())");
+    const body = /async function persist[\s\S]*?\n\}/.exec(settings)?.[0] ?? "";
+    for (const field of ["pinnedModel", "navCollapsed", "rules", "keymap", "persona"]) {
+      expect(body, `persist() 里没有 ${field} —— 写一次别的设置就把这项抹掉了`).toContain(field);
+    }
   });
 
   it("⭐ store 里不许自己也接一遍（两条接线会互相覆盖，也重复写盘）", () => {

@@ -1,5 +1,7 @@
 import { app } from "electron";
 import { normalizePinnedModel } from "../../shared/settings";
+import { normalizeKeymap, type Keymap } from "../../shared/keymap";
+import { normalizePersona, type PersonaPref } from "../../shared/persona";
 import { normalizeRules, type PermissionRule } from "../../engine/core/permissionRules";
 import path from "node:path";
 
@@ -60,6 +62,14 @@ export type AppSettings = {
    * 于是**重启之后仍然生效**（与 CLI 的 `config.rules` 同一套语义、同一份实现）。
    */
   rules?: PermissionRule[];
+  /**
+   * **键位表**（L06）：`palette` / `newChat` / `scheduled` → 组合字符串。
+   *
+   * 收窄在 `shared/keymap.ts`（渲染层用同一份判定）—— 这里只负责别在读写时丢掉它。
+   */
+  keymap?: Keymap;
+  /** **助手人格偏好**（L06）：只影响提示词，不改界面排版。 */
+  persona?: PersonaPref;
 };
 
 /**
@@ -69,7 +79,7 @@ export type AppSettings = {
  * 手写进去的坏键会被 `normalizeAppSettings` 静默丢掉，而"我明明设了啊"就是从这里来的
  * （与 CLI 那边 `CONFIG_KEYS` 同一个理由，审计 P202）。
  */
-export const APP_SETTINGS_KEYS = ["pinnedModel", "navCollapsed", "rules"] as const;
+export const APP_SETTINGS_KEYS = ["pinnedModel", "navCollapsed", "rules", "keymap", "persona"] as const;
 
 /**
  * 把落盘的（不可信）值收窄。
@@ -92,6 +102,14 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
    */
   const rules = normalizeRules(s.rules);
   if (rules.length) out.rules = rules;
+  /*
+   * 键位（L06）：**总是**写进去（不是"有才写"）——
+   * 渲染层拿到 `undefined` 会回默认，看起来一样，但诊断包里就看不到
+   * "用户其实改过键位"。另两项同理：人格是空对象时省掉（它没有默认值可言）。
+   */
+  out.keymap = normalizeKeymap(s.keymap);
+  const persona = normalizePersona(s.persona);
+  if (Object.keys(persona).length) out.persona = persona;
   return out;
 }
 

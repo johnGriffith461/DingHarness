@@ -83,8 +83,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * ⚠️ 2026-10-18（L04）59 → 60：`runtime/pluginIndexTrust.ts`（索引钉摘要 + 验签）。
  * 摘要与验签是插件的信任地基，必须与 `pluginSignature.ts` 同一份；其余
  * `pluginDeps.ts` 不在闭包里（只被插件适配器引用）。
+ *
+ * ⚠️ 2026-10-18（L06）60 → 62：`shared/keymap.ts`（键位判定/校验）与
+ * `shared/persona.ts`（人格偏好收窄与提示词片段）。两者都是**零 IO 的纯函数**，
+ * 被 `shared/ipc.ts` 的契约类型带进来（主进程落盘与渲染层判定必须同一份）。
  */
-const CLOSURE_BUDGET = 60;
+const CLOSURE_BUDGET = 62;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

@@ -22,6 +22,20 @@ import type { AgentFile } from "./agent";
 import type { Doc } from "./doc";
 import type { DriveEntry } from "./drive";
 import type { Reading } from "./reader";
+import type { Keymap } from "./keymap";
+import type { PersonaPref } from "./persona";
+
+/* 键位与人格（L06）用真形状，不手抄 —— 收窄与判定都在各自模块里。 */
+export type KeymapWire = Keymap;
+export type PersonaWire = PersonaPref;
+/** 应用设置落盘形状（`appSettings:read/write` 共用，避免两处手抄）。 */
+export type AppSettingsWire = {
+  pinnedModel: string;
+  navCollapsed?: boolean;
+  rules?: PermissionRuleWire[];
+  keymap?: KeymapWire;
+  persona?: PersonaWire;
+};
 
 export type { CanvasDocument, CanvasLoadResult, CanvasSaveResult, CanvasSnapshotFile };
 
@@ -495,24 +509,12 @@ export type ShellBridge = {
   };
   /**
    * 本机版应用设置（§183）—— 主进程原子写（不走 localStorage，§156 的教训）。
-   *
-   * · `pinnedModel`：钉住的默认通道（空串 = 记忆上次）；
-   * · `navCollapsed`：左侧导航栏收起来了没有（2026-10-16，审计 P187 / P191）。
-   *   它原来只活在渲染层的内存里（`workbench/store.ts` 的 `navCollapsed`），
-   *   所以**重启就忘** —— 用户每开一次都要再收一次。它是"用户设过一次的东西"，
-   *   与 `pinnedModel` 同一类，所以走同一条落盘。
-   *
-   * ⚠️ `navCollapsed` 是**可选**的：磁盘上现存的 `settings.json` 里没有这一项
-   * （它是这次才加的），缺了就按 `false`（展开）——
-   * 让"老文件读出来就报缺字段"变成一次迁移事故是本末倒置。
+   * 字段见 `AppSettingsWire`：默认通道 / 左栏收起态 / 权限规则 / 键位 / 人格。
+   * 可选字段缺了就是默认值 —— 让旧 `settings.json` 读出来报缺字段是本末倒置。
    */
   appSettings: {
-    read: () => Promise<{ pinnedModel: string; navCollapsed?: boolean; rules?: PermissionRuleWire[] }>;
-    write: (next: { pinnedModel: string; navCollapsed?: boolean; rules?: PermissionRuleWire[] }) => Promise<{
-      pinnedModel: string;
-      navCollapsed?: boolean;
-      rules?: PermissionRuleWire[];
-    }>;
+    read: () => Promise<AppSettingsWire>;
+    write: (next: AppSettingsWire) => Promise<AppSettingsWire>;
   };
   /** 创作广场的「喜欢」（§180）：只存名字，不编点赞数。 */
   coding: {

@@ -31,7 +31,8 @@ import { startScheduler } from "./scheduleStore";
 import { useLibraryStore } from "./libraryStore";
 import { matchShortcut } from "./shortcuts";
 import { escYieldsToOverlay } from "./escOverlays";
-import { useAppSettings } from "./appSettings";
+import { keymapNow, useAppSettings } from "./appSettings";
+import { matchKeyAction } from "@shared/keymap";
 import { DocPanel } from "./DocPanel";
 import { TaskCenterPage } from "./TaskCenterPage";
 import { ReaderPanel } from "./ReaderPanel";
@@ -135,6 +136,7 @@ export default function Workbench() {
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      /* L06：导航键位来自可自定义的键位表（默认 Ctrl N / Ctrl Shift T） */
       const to = matchShortcut(e);
       if (!to) return;
       // 认下的组合要拦掉浏览器/系统的默认行为，否则会和默认快捷键打架。
@@ -146,13 +148,14 @@ export default function Workbench() {
   }, [setView]);
 
   /*
-   * **Ctrl/Cmd+K 开合命令面板**（G13）：它在输入框里也要能按 ——
-   * 那正是"随手跳走"的用法（导航快捷键那条"输入框里让开"的规矩不适用于它）。
+   * **命令面板的键位**（G13 / L06）：默认 Ctrl/Cmd+K，可自定义。
+   *
+   * 它在输入框里也要能按 —— 那正是"随手跳走"的用法（导航快捷键那条"输入框里让开"
+   * 的规矩不适用于它）。绑定来自 `@shared/keymap`，与设置页录制的是同一份。
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      if (e.key.toLowerCase() !== "k") return;
+      if (matchKeyAction(e, keymapNow()) !== "palette") return;
       e.preventDefault();
       setPaletteOpen((v) => !v);
     };

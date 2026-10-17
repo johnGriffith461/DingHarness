@@ -3,6 +3,7 @@ import { SETTINGS_LABELS, aboutTitle, memoryStateLabel, settingsSections } from 
 import { ModelSettingsPage } from "./ModelSettingsPage";
 import { TeamPage } from "./TeamPage";
 import { PluginsPage } from "./PluginsPage";
+import { PersonalizePanel } from "./PersonalizePanel";
 import { useMemoryStore } from "./memoryStore";
 import { useAppSettings } from "./appSettings";
 import { spacing } from "../utils/spacing";
@@ -178,6 +179,9 @@ export default function SettingsPages({
               {SETTINGS_LABELS.newTopic}
             </button>
           </div>
+
+          {/* L06 个性化：主题 / 快捷键 / 助手人格（独立组件，见 PersonalizePanel 的说明） */}
+          <PersonalizePanel />
         </div>
       ) : null}
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { formatChord, isMacPlatform } from "@shared/keymap";
 import { useWorkbenchStore } from "./store";
 import { useAppSettings } from "./appSettings";
 
@@ -35,9 +36,23 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const toggleCanvas = useWorkbenchStore((s) => s.toggleCanvas);
   const toggleNav = useWorkbenchStore((s) => s.toggleNav);
   const rules = useAppSettings((s) => s.rules);
+  /* L06：开合键位可自定义 —— 占位文案跟着键位表走 */
+  const paletteChord = useAppSettings((s) => s.keymap.palette);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const paletteKeyHint = useMemo(() => {
+    if (!paletteChord) return "无快捷键";
+    const mac = (() => {
+      try {
+        return isMacPlatform(typeof navigator === "undefined" ? "" : navigator.platform);
+      } catch {
+        return false;
+      }
+    })();
+    return formatChord(paletteChord, mac);
+  }, [paletteChord]);
 
   const actions = useMemo<Action[]>(
     () => [
@@ -110,7 +125,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           ref={inputRef}
           className="wb-palette-input"
           data-testid="wb-palette-input"
-          placeholder="输入动作名（Ctrl/Cmd+K 开合）"
+          placeholder={`输入动作名（${paletteKeyHint} 开合）`}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);

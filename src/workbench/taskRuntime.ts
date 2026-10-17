@@ -47,6 +47,8 @@ import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/
 
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
+import { personaNow } from "./appSettings";
+import { personaPromptBlock } from "@shared/persona";
 import { skillsBlockFor, stricterMode } from "./runInputs";
 import { memoryPromptBlock } from "@shared/memory";
 import { useMemoryStore } from "./memoryStore";
@@ -515,10 +517,10 @@ export async function runStream(
   // 启用能力拼在系统提示词末尾：任务本身的要求在前，能力说明在后
   /*
    * 选中的 AI 智能体（§156）：它的「设定描述 + 标签」要拼进系统提示词 ——
-   * 模型看不到我们那些数组，只有写进去它才会以那个身份说话。
-   * 放在能力说明**之前**：人设是"你是谁"，能力是"你能用什么"。
+   * 模型看不到我们那些数组，只有写进去它才会以那个身份说话（人设 → 能力）。
+   * L06：再叠一段用户偏好（称呼/语气）。后者只影响表达，压不过角色与任务。
    */
-  const persona = agentPromptBlock();
+  const persona = [agentPromptBlock(), personaPromptBlock(personaNow())].filter(Boolean).join("\n\n");
   /*
    * L05：智能体的工具白名单与档位。
    * 档位只能**更严**（用户选的旋钮不能被一个角色定义放宽）——

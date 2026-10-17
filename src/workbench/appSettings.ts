@@ -1,21 +1,27 @@
 import { create } from "zustand";
 import type { PermissionRuleWire, ShellBridge } from "@shared/ipc";
+import { DEFAULT_KEYMAP, normalizeKeymap, validateChord, type KeyAction, type Keymap } from "@shared/keymap";
+import { normalizePersona, type PersonaPref } from "@shared/persona";
 
 /**
  * 本机版设置（§183）。
  *
- * 两项：
+ * 五项：
  *   · **新对话默认模型**（`settings_defaultNewChatModel`）——
  *     空串 = 「记忆上次」（`settings_modelSelection_useLast`）；
  *   · **左栏收起态**（2026-10-16，审计 P187 / P191）——
- *     它原来只活在 `store.ts` 的内存里，**重启就忘**（用户每开一次都要再收一次）。
+ *     它原来只活在 `store.ts` 的内存里，**重启就忘**（用户每开一次都要再收一次）；
+ *   · **权限规则**（U03）：「总是允许」攒出来的那些；
+ *   · **键位表**（L06）：三个动作的快捷键（`""` = 解绑）；
+ *   · **助手人格**（L06）：称呼 / 语气 / 补充说明（只影响提示词，不改界面排版）。
  *
  * ⚠️ 走主进程落盘（不走 localStorage）：§156 那次"硬杀进程就没了"的教训。
  * 另外**读一次缓存在内存里** —— `resolveChatRoute()` 是同步被调的，
  * 不能每次都 await 一趟 IPC。
  *
- * ⚠️ 写的是**整份设置**（两个字段一起）：`appSettings:write` 收到的是一整个对象，
- * 只送自己那一项会把另一项从盘上抹掉（用户会看到"钉住的模型重启后没了"）。
+ * ⚠️ 写的是**整份设置**：`appSettings:write` 收到的是一整个对象，只送自己那一项
+ * 会把别的从盘上抹掉（用户会看到"钉住的模型重启后没了"）。
+ * 所以写盘只有 `persist()` **一处** —— L06 加字段时正是靠这一点没有漏写。
  */
 
 const bridge = (): ShellBridge | undefined => (globalThis as unknown as { shell?: ShellBridge }).shell;
@@ -25,12 +31,12 @@ type State = {
   pinnedModel: string;
   /** 左侧导航栏收起来了没有。 */
   navCollapsed: boolean;
-  /**
-   * **权限规则**（U03）：「总是允许」攒出来的那些。
-   *
-   * 与另外两个字段**一起读写**：单独写一项会把别的从盘上抹掉（见文件头）。
-   */
+  /** **权限规则**（U03）：「总是允许」攒出来的那些。 */
   rules: PermissionRuleWire[];
+  /** 键位表（L06）。 */
+  keymap: Keymap;
+  /** 助手人格偏好（L06）。 */
+  persona: PersonaPref;
   loaded: boolean;
   /** 上一次写盘的说明（成功为空串；失败时给一句人话，界面据此如实提示）。 */
   note: string;
@@ -40,13 +46,25 @@ type State = {
   setNavCollapsed: (value: boolean) => Promise<void>;
   /** 追加一条「总是允许」规则（与已有规则一模一样就不重复加）。 */
   addRule: (rule: PermissionRuleWire) => Promise<boolean>;
+  /**
+   * 改一个动作的键位。
+   *
+   * @returns `ok:false` 时带着能直接显示的原因（裸键/宿主键/与别人重复）
+   */
+  setKeyChord: (action: KeyAction, chord: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** 改人格偏好（传 undefined 的字段表示不改）。 */
+  setPersona: (patch: Partial<PersonaPref>) => Promise<void>;
 };
 
 /** 磁盘上那份（不可信）→ 干净的设置对象。 */
-function readSettings(raw: { pinnedModel?: unknown; navCollapsed?: unknown; rules?: unknown } | undefined): {
+function readSettings(
+  raw: { pinnedModel?: unknown; navCollapsed?: unknown; rules?: unknown; keymap?: unknown; persona?: unknown } | undefined,
+): {
   pinnedModel: string;
   navCollapsed: boolean;
   rules: PermissionRuleWire[];
+  keymap: Keymap;
+  persona: PersonaPref;
 } {
   return {
     pinnedModel: typeof raw?.pinnedModel === "string" ? raw.pinnedModel : "",
@@ -75,6 +93,9 @@ function readSettings(raw: { pinnedModel?: unknown; navCollapsed?: unknown; rule
           return [rule];
         })
       : [],
+    /* 键位与人格的收窄在 `shared/` 那一份里（主进程也用同一份，不许两边各写一遍） */
+    keymap: normalizeKeymap(raw?.keymap),
+    persona: normalizePersona(raw?.persona),
   };
 }
 
@@ -82,6 +103,8 @@ export const useAppSettings = create<State>()((set, get) => ({
   pinnedModel: "",
   navCollapsed: false,
   rules: [],
+  keymap: { ...DEFAULT_KEYMAP },
+  persona: {},
   loaded: false,
   note: "",
 
@@ -98,6 +121,8 @@ export const useAppSettings = create<State>()((set, get) => ({
         pinnedModel: clean.pinnedModel,
         navCollapsed: clean.navCollapsed,
         rules: clean.rules,
+        keymap: clean.keymap,
+        persona: clean.persona,
         loaded: true,
       });
     } catch {
@@ -118,11 +143,7 @@ export const useAppSettings = create<State>()((set, get) => ({
      * 取舍与 `codingLikes.ts` 的 `toggle` 一致：失败就回到改动前那个值，并如实说一句。
      */
     try {
-      await bridge()?.appSettings?.write({
-        pinnedModel: value,
-        navCollapsed: get().navCollapsed,
-        rules: get().rules,
-      });
+      await persist(get());
     } catch (error) {
       set({
         pinnedModel: before,
@@ -136,11 +157,7 @@ export const useAppSettings = create<State>()((set, get) => ({
     set({ navCollapsed: value, note: "" });
     /* 同 `setPinned` 的取舍：失败回滚 + 如实说一句（不回滚的话界面收起、盘上没记，重启自己弹回来） */
     try {
-      await bridge()?.appSettings?.write({
-        pinnedModel: get().pinnedModel,
-        navCollapsed: value,
-        rules: get().rules,
-      });
+      await persist(get());
     } catch (error) {
       set({
         navCollapsed: before,
@@ -159,14 +176,9 @@ export const useAppSettings = create<State>()((set, get) => ({
     const key = (r: PermissionRuleWire) => `${r.action}|${r.resource ?? "*"}|${r.effect}`;
     if (get().rules.some((r) => key(r) === key(rule))) return true;
     const before = get().rules;
-    const next = [...before, rule];
-    set({ rules: next, note: "" });
+    set({ rules: [...before, rule], note: "" });
     try {
-      await bridge()?.appSettings?.write({
-        pinnedModel: get().pinnedModel,
-        navCollapsed: get().navCollapsed,
-        rules: next,
-      });
+      await persist(get());
       return true;
     } catch (error) {
       set({
@@ -176,7 +188,60 @@ export const useAppSettings = create<State>()((set, get) => ({
       return false;
     }
   },
+
+  setKeyChord: async (action, chord) => {
+    const current = get().keymap;
+    const others = Object.fromEntries(
+      (Object.entries(current) as Array<[KeyAction, string]>).filter(([name]) => name !== action),
+    ) as Partial<Record<KeyAction, string>>;
+    const verdict = validateChord(chord, others, action);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+    const before = current;
+    const next: Keymap = { ...current, [action]: verdict.chord };
+    set({ keymap: next, note: "" });
+    try {
+      await persist(get());
+      return { ok: true };
+    } catch (error) {
+      set({
+        keymap: before,
+        note: `没能记住这个键位：${error instanceof Error ? error.message : String(error)}`,
+      });
+      return { ok: false, reason: "写盘失败（重试过仍失败），键位没有改变" };
+    }
+  },
+
+  setPersona: async (patch) => {
+    const before = get().persona;
+    /* 走同一份收窄：表单里能清空（`undefined` 与空串都表示"这一项不设"） */
+    const next = normalizePersona({ ...before, ...patch });
+    set({ persona: next, note: "" });
+    try {
+      await persist(get());
+    } catch (error) {
+      set({
+        persona: before,
+        note: `没能记住人格偏好：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  },
 }));
+
+/**
+ * 写盘（**唯一一处**：整份写）。
+ *
+ * 加字段时只改这里与 `readSettings`，不会出现"某个写入口漏带了新字段、
+ * 把它从盘上抹掉"—— 那正是这个文件头警告过的缺陷形状。
+ */
+async function persist(state: Pick<State, "pinnedModel" | "navCollapsed" | "rules" | "keymap" | "persona">): Promise<void> {
+  await bridge()?.appSettings?.write({
+    pinnedModel: state.pinnedModel,
+    navCollapsed: state.navCollapsed,
+    rules: state.rules,
+    keymap: state.keymap,
+    persona: state.persona,
+  });
+}
 
 /** 同步读一眼（给 `resolveChatRoute` 用）。 */
 export function pinnedModelNow(): string {
@@ -186,6 +251,21 @@ export function pinnedModelNow(): string {
 /** 同步读一眼左栏收起态（给"接盘"的那一刻用，见 `NavSidebar.tsx`）。 */
 export function navCollapsedNow(): boolean {
   return useAppSettings.getState().navCollapsed;
+}
+
+/**
+ * 同步读一眼键位表（L06：窗口级 keydown 在事件回调里读，不能 await）。
+ *
+ * 读到的是**载入完成之后**的那份；载入之前是默认键位 ——
+ * 这与左栏收起态的处理一致（`loaded` 之前界面用默认值，载入后订阅更新）。
+ */
+export function keymapNow(): Keymap {
+  return useAppSettings.getState().keymap;
+}
+
+/** 同步读一眼人格偏好（任务启动时拼提示词用）。 */
+export function personaNow(): PersonaPref {
+  return useAppSettings.getState().persona;
 }
 
 /**

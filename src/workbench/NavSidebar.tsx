@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { useWorkbenchStore, type WorkbenchView } from "./store";
-import { navCollapsedNow, startNavCollapsedSync } from "./appSettings";
+import { navCollapsedNow, startNavCollapsedSync, useAppSettings } from "./appSettings";
 import { type WorkTask } from "./task";
 import { useLibraryStore } from "./libraryStore";
 import { startTheme } from "./theme";
@@ -50,9 +50,9 @@ import { SettingsDialog } from "./SettingsDialog";
  *   · 澄清提问卡（同一张卡逐题推进，最多 3 题）
  */
 
-export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListTodo; shortcut?: string }> = [
-  { view: "home", label: "新工作任务", icon: ListTodo, shortcut: shortcutFor("home") },
-  { view: "scheduled", label: "定时任务", icon: Clock, shortcut: shortcutFor("scheduled") },
+export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListTodo }> = [
+  { view: "home", label: "新工作任务", icon: ListTodo },
+  { view: "scheduled", label: "定时任务", icon: Clock },
   { view: "phone", label: "手机遥控电脑", icon: Smartphone },
   /* V6-2c/2d：用量与请求追踪（原来只有单会话弹层，没有跨会话的页） */
   { view: "usage", label: "用量与追踪", icon: Activity },
@@ -93,6 +93,8 @@ export function NavSidebar() {
   }, []);
   /** 左栏收起（工单 3）：状态在 store 里，六个页面的那颗按钮共用一个开关。 */
   const navCollapsed = useWorkbenchStore((s) => s.navCollapsed);
+  /* L06：订阅键位表 —— 设置里改完，左栏的提示立刻跟着变 */
+  const keymap = useAppSettings((s) => s.keymap);
   /*
    * ⭐ 收起态要**跨重启记住**（2026-10-16，审计 P187 / P191）。
    *
@@ -174,6 +176,8 @@ export function NavSidebar() {
         {NAV.map((item) => {
           const Icon = item.icon;
           const on = view === item.view || (item.view === "home" && view === "task");
+          /* L06：提示文本从当前键位表来 —— 改完键位立刻反映，不会写着旧的 */
+          const shortcut = shortcutFor(item.view, keymap);
           return (
             <button
               key={item.view}
@@ -183,7 +187,7 @@ export function NavSidebar() {
             >
               <Icon size={15} />
               <span>{item.label}</span>
-              {item.shortcut ? <em className="wb-kbd">{item.shortcut}</em> : null}
+              {shortcut ? <em className="wb-kbd">{shortcut}</em> : null}
             </button>
           );
         })}

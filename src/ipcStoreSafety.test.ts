@@ -91,12 +91,14 @@ afterEach(() => {
 
 describe("P223 · 写盘失败不许假装成功", () => {
   it("设置：正常路径照常写回、读得回来", async () => {
-    /* 读回来的形状总是两字段（收窄带上 `navCollapsed`，见 `appSettingsNav.test.ts`） */
+    /* 读回来的形状总是带 `navCollapsed` 与 `keymap`（L06 起键位也总在） */
+    const keymap = { palette: "Mod+K", newChat: "Mod+N", scheduled: "Mod+Shift+T" };
     expect(await saveAppSettings({ pinnedModel: "deepseek/deepseek-chat" })).toEqual({
       pinnedModel: "deepseek/deepseek-chat",
       navCollapsed: false,
+      keymap,
     });
-    expect(await loadAppSettings()).toEqual({ pinnedModel: "deepseek/deepseek-chat", navCollapsed: false });
+    expect(await loadAppSettings()).toEqual({ pinnedModel: "deepseek/deepseek-chat", navCollapsed: false, keymap });
   });
 
   it("设置：写盘不可能时**抛错**（不再是打个日志、照样 resolve 成功值）", async () => {

@@ -99,3 +99,31 @@ describe("键位表与提示文本", () => {
     expect(new Set(letters).size).toBe(letters.length);
   });
 });
+
+/**
+ * L06：键位可改 —— 提示文本与判定必须**同时**跟着改。
+ *
+ * 之前这张表是写死的常量，界面与判定各读一处；自定义之后如果还各读一份，
+ * 就会出现"左栏写着 Ctrl J、按下去却到不了首页"。
+ */
+describe("L06：自定义键位", () => {
+  const custom = { palette: "Mod+J", newChat: "Mod+Shift+H", scheduled: "" };
+
+  it("提示文本跟着键位表变（不是永远读常量）", () => {
+    expect(shortcutFor("home", custom)).toBe("Ctrl Shift H");
+    expect(shortcutFor("scheduled", custom), "解绑了就不显示角标").toBe("");
+  });
+
+  it("判定与提示同源：自定义的键真的到那个视图", () => {
+    expect(matchShortcut(ev("h", { ctrlKey: true, shiftKey: true }), custom)).toBe("home");
+    expect(matchShortcut(ev("n", { ctrlKey: true }), custom), "旧默认键不该再命中").toBeNull();
+  });
+
+  it("解绑的动作按什么都不命中", () => {
+    expect(matchShortcut(ev("t", { ctrlKey: true, shiftKey: true }), custom)).toBeNull();
+  });
+
+  it("命令面板不在这张表里（它在输入框里也要能按，由 Workbench 单独判）", () => {
+    expect(matchShortcut(ev("j", { ctrlKey: true }), custom)).toBeNull();
+  });
+});
