@@ -24,6 +24,8 @@
 @import "./styles/firstrun.css";
 /* 模型选择 UX（U07，2026-10-18） */
 @import "./styles/models.css";
+/* 命令面板（G13，2026-10-18） */
+@import "./styles/palette.css";
 @import "./styles/theme.css";
 @import "./styles/panels.css";
 @import "./styles/features.css";

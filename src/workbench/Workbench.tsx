@@ -53,6 +53,7 @@ import { NavSidebar } from "./NavSidebar";
 import { TaskView } from "./TaskView";
 import { HomeView } from "./HomeView";
 import { FirstRunGuide } from "./FirstRunGuide";
+import { CommandPalette } from "./CommandPalette";
 import { SummaryPanel } from "./SummaryPanel";
 
 export default function Workbench() {
@@ -71,6 +72,8 @@ export default function Workbench() {
    * 仓库里同样的取舍见 `theme.ts`（"改主题的唯一收口"）。
    */
   const [summaryCollapsed, setSummaryCollapsed] = useState(true);
+  /* G13：命令面板（Ctrl/Cmd+K） */
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // 定时任务的调度器（阶段 11.6）：整个应用生命周期只启动一次
   useEffect(() => startScheduler(), []);
@@ -141,6 +144,21 @@ export default function Workbench() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setView]);
+
+  /*
+   * **Ctrl/Cmd+K 开合命令面板**（G13）：它在输入框里也要能按 ——
+   * 那正是"随手跳走"的用法（导航快捷键那条"输入框里让开"的规矩不适用于它）。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      if (e.key.toLowerCase() !== "k") return;
+      e.preventDefault();
+      setPaletteOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /*
    * Esc 收起右侧面板（2026-10-15，M0 工单 2）。
@@ -287,6 +305,7 @@ export default function Workbench() {
       </main>
       {/* 收起态由工作台持有（Esc 只在这一处判定，见上面的 Esc 处理） */}
       <SummaryPanel collapsed={summaryCollapsed} onCollapsedChange={setSummaryCollapsed} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       {/* 悬浮助手窗挂应用级：云盘文件行的「问问豆包」也要能调起它 */}
       {floatOpen ? <FloatingAssistant onClose={closeFloat} seed={floatSeed} /> : null}
       {/*

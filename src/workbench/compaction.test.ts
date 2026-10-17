@@ -120,13 +120,14 @@ describe("compactPrompt", () => {
     expect(user).toBe("用户：我要日报\n\n助手：好");
   });
 
-  it("⭐ 只保留四类东西，且明说不要编造", () => {
+  it("⭐ 结构化八段（G01）：目标/要求/决定/进度/下一步/文件/上下文/未决", () => {
     const { system } = compactPrompt([msg("user", "x")]);
-    expect(system).toContain("决定");
-    expect(system).toContain("数字");
-    expect(system).toContain("约束");
-    expect(system).toContain("尚未完成");
+    for (const section of ["Objective", "Requirements", "Decisions", "Work State", "Next Move", "Relevant Files", "Important Context", "Open Questions"]) {
+      expect(system, `缺了 ${section} 这一段`).toContain(section);
+    }
     expect(system).toContain("不要编造");
+    /* 空段写「无」—— 否则读的人分不清"没有"与"漏了" */
+    expect(system).toContain("无");
   });
 });
 

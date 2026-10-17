@@ -57,11 +57,25 @@ export { KEEP_RECENT_TOKENS as KEEP_TOKENS, estimateTokens, totalTokens, shouldC
  * @returns `system` 与 `user`（走同一个 AI 通道，不另配渠道）
  */
 export function compactPrompt(older: readonly ChatMessage[]): { system: string; user: string } {
+  /*
+   * **结构化 checkpoint**（G01，2026-10-18）。
+   *
+   * 原来是"四类要点、最多 200 字" —— 短是短，但**没有"下一步做什么"与"改过哪些文件"**，
+   * 而这两条正是长任务压缩之后最容易丢、也最贵的信息（用户下一句往往就是"接着做"）。
+   * 现在固定八段；空段写「无」（不许省掉那一段，否则读的人分不清"没有"与"漏了"）。
+   */
   const system = [
-    "你把一段较早的对话压缩成要点，供后续对话继续使用。",
-    "**只保留**这四类：已确定的决定、出现过的数字与专有名词、用户提出的约束与偏好、尚未完成的事。",
-    "不要写寒暄、不要写过程与客套。用要点，最多 200 字。",
-    "⚠️ 不要编造原文里没有的内容；看不清就不写。",
+    "你把一段较早的对话压缩成**结构化检查点**，供后续对话接着做。",
+    "严格按下面八段输出（每段一两行；空段写「无」）：",
+    "1. Objective：这次要达成什么",
+    "2. Requirements：用户明确提出的要求与约束",
+    "3. Decisions：已经定下来的做法（含被否决的方案与原因）",
+    "4. Work State：做到哪一步（完成 / 进行中 / 未开始）",
+    "5. Next Move：下一步具体要做什么",
+    "6. Relevant Files：改过或要改的文件（最多 15 个，一行一个）",
+    "7. Important Context：数字、专有名词、外部依赖、踩过的坑",
+    "8. Open Questions：还没答案的问题",
+    "不要写寒暄与客套；不要编造原文里没有的内容（看不清就写「无」）。",
   ].join("\n");
   const user = older.map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.content}`).join("\n\n");
   return { system, user };

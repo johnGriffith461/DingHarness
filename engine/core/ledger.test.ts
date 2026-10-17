@@ -15,7 +15,11 @@ import type { LogRecord } from "./events";
 const T = (n: number) => 1_700_000_000_000 + n;
 
 /** 造一轮（request + done）。 */
-function turn(n: number, usage?: { inputTokens?: number; outputTokens?: number }, model = "deepseek-chat"): LogRecord[] {
+function turn(
+  n: number,
+  usage?: { inputTokens?: number; outputTokens?: number; noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+  model = "deepseek-chat",
+): LogRecord[] {
   return [
     {
       seq: n,
@@ -245,5 +249,40 @@ describe("3.4 · 成本分摊（按人算得清）", () => {
     ] as unknown as LogRecord[];
     const usage = rollup(ledgerOf(records, "s"), "member")[0]?.usage;
     expect(usage).toMatchObject({ inputTokens: 100, outputTokens: 5, cacheReadTokens: 60, cacheWriteTokens: 10 });
+  });
+});
+
+/* ============================================================
+ * G02（2026-10-18）：缓存计价
+ * ============================================================ */
+describe("缓存计价（G02）", () => {
+  it("⭐ 命中缓存的输入按 cacheRead 价算（不再按原价）", () => {
+    const info = () => ({ registered: true, priceIn: 1, priceOut: 2, priceCacheRead: 0.1 });
+    const usage = {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      noCacheTokens: 400_000,
+      cacheReadTokens: 600_000,
+    };
+    const [row] = rollup(ledgerOf(turn(1, usage, "known"), "s1"), "model", (k) => k, info);
+    /* 40 万 × $1 + 60 万 × $0.1 = 0.4 + 0.06 = $0.46 */
+    expect(row!.estimatedCost).toBe(0.46);
+  });
+
+  it("写缓存按 priceCacheWrite（目录没给就按原价，至少不低估）", () => {
+    const withPrice = () => ({ registered: true, priceIn: 1, priceOut: 0, priceCacheWrite: 0.25 });
+    const [row] = rollup(
+      ledgerOf(turn(1, { inputTokens: 1_000_000, cacheWriteTokens: 1_000_000 }, "known"), "s1"),
+      "model",
+      (k) => k,
+      withPrice,
+    );
+    expect(row!.estimatedCost).toBe(0.25);
+  });
+
+  it("没有缓存明细时口径不变（全部输入按原价）", () => {
+    const info = () => ({ registered: true, priceIn: 1, priceOut: 0, priceCacheRead: 0.1 });
+    const [row] = rollup(ledgerOf(turn(1, { inputTokens: 1_000_000 }, "known"), "s1"), "model", (k) => k, info);
+    expect(row!.estimatedCost).toBe(1);
   });
 });

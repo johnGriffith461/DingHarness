@@ -162,6 +162,7 @@ export function modelInfoOf(id: string): ModelInfo {
     ...(spec.priceIn === undefined ? {} : { priceIn: spec.priceIn }),
     ...(spec.priceOut === undefined ? {} : { priceOut: spec.priceOut }),
     ...(spec.priceCacheRead === undefined ? {} : { priceCacheRead: spec.priceCacheRead }),
+    ...(spec.priceCacheWrite === undefined ? {} : { priceCacheWrite: spec.priceCacheWrite }),
   };
 }
 

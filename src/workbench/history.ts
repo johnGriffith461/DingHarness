@@ -1,5 +1,6 @@
 import type { ChatMessage } from "@shared/ipc";
 import { KEEP_RECENT_TOKENS as KEEP_TOKENS, omittedNote, planContext } from "@engine/core/context";
+import { pruneMessages } from "@engine/core/pruner";
 import type { ToolTrace } from "@shared/agentTools";
 import type { TaskStep } from "./task";
 
@@ -169,12 +170,19 @@ export function buildHistory(
    */
   const { older, recent } = planContext(all, opts.keepTokens ?? KEEP_TOKENS, { factor: opts.factor ?? 1 });
   /*
+   * G01：**发送给模型的那一份**再裁一次超长单条（头 4k + 尾 1k）。
+   *
+   * `planContext` 只在消息边界切 —— 一条 3 万字的工具输出会自己把预算吃光，
+   * 把其余历史全挤掉。裁的是**模型视图**：`all` / `older` 仍是原文（日志与摘要用得到）。
+   */
+  const prunedRecent = pruneMessages(recent).messages;
+  /*
    * 三个出口都留着（V6-1c）：原来只返回 `recent`，于是调用方拿到的已经是
    * 切过的历史，再对它调 `shouldCompact` **恒为假** —— 摘要那条路形同虚设，
    * 被切掉的 `older` 只留下一句"已省略"就没了。现在旧内容可交给 ICM
    * 决定"压成摘要"还是"生成索引"。
    */
-  return { messages: recent, truncated: older.length > 0, all, older };
+  return { messages: prunedRecent, truncated: older.length > 0, all, older };
 }
 
 /**

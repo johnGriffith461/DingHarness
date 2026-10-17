@@ -1,0 +1,85 @@
+/*
+ * 命令面板（G13，2026-10-18）。
+ *
+ * 一层半透明遮罩 + 居中的输入框与结果列表。遮罩点击关闭；
+ * 键盘（Esc / ↑↓ / Enter）由组件自己处理。
+ */
+
+.wb-palette-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: var(--scrim);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+}
+
+.wb-palette {
+  width: min(560px, calc(100vw - 48px));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.wb-palette-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 12px 14px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.wb-palette-list {
+  max-height: min(360px, 52vh);
+  overflow: auto;
+  padding: 6px;
+}
+
+.wb-palette-item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-palette-item.is-active {
+  background: var(--surface-soft);
+}
+
+.wb-palette-label {
+  font-size: 13px;
+}
+
+.wb-palette-hint {
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+
+.wb-palette-empty {
+  padding: 14px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.wb-palette-foot {
+  border-top: 1px solid var(--line-soft);
+  padding: 6px 12px;
+  color: var(--fg-faint);
+  font-size: 11px;
+}

@@ -69,6 +69,7 @@ export type ModelInfo = {
   priceIn?: number;
   priceOut?: number;
   priceCacheRead?: number;
+  priceCacheWrite?: number;
 };
 
 /** 汇总里的一行。 */
@@ -230,11 +231,35 @@ function estimateCost(list: readonly LedgerEntry[], modelInfo?: (id: string) => 
   let any = false;
   for (const entry of list) {
     const info = modelInfo(entry.model || "");
-    const inTokens = entry.usage.inputTokens;
-    const outTokens = entry.usage.outputTokens;
+    const u = entry.usage;
+    const inTokens = u.inputTokens;
+    const outTokens = u.outputTokens;
     if (!info.registered || typeof info.priceIn !== "number" || typeof info.priceOut !== "number") continue;
     if (typeof inTokens !== "number" && typeof outTokens !== "number") continue;
-    total += ((inTokens ?? 0) * info.priceIn + (outTokens ?? 0) * info.priceOut) / 1e6;
+
+    /*
+     * **缓存计价**（G02，2026-10-18）：在这之前只算 priceIn/priceOut，
+     * 于是"命中缓存的那一大段输入"被按原价算 —— 账单会明显偏高，
+     * 而界面上的"缓存读取"永远是装饰。
+     *
+     * 口径（拿不到明细就退回原口径，**不编**）：
+     * - 有明细时：未命中部分按 priceIn、命中部分按 priceCacheRead、
+     *   写缓存部分按 priceCacheWrite（目录没给就按 priceIn —— 至少不低估）；
+     * - 没有明细时：全部输入按 priceIn（旧行为）。
+     */
+    const hasDetail =
+      typeof u.noCacheTokens === "number" || typeof u.cacheReadTokens === "number" || typeof u.cacheWriteTokens === "number";
+    const noCache = hasDetail
+      ? (u.noCacheTokens ??
+          Math.max(0, (inTokens ?? 0) - (u.cacheReadTokens ?? 0) - (u.cacheWriteTokens ?? 0)))
+      : (inTokens ?? 0);
+    const cacheRead = hasDetail ? (u.cacheReadTokens ?? 0) : 0;
+    const cacheWrite = hasDetail ? (u.cacheWriteTokens ?? 0) : 0;
+    const readPrice = typeof info.priceCacheRead === "number" ? info.priceCacheRead : info.priceIn;
+    const writePrice = typeof info.priceCacheWrite === "number" ? info.priceCacheWrite : info.priceIn;
+
+    total +=
+      (noCache * info.priceIn + cacheRead * readPrice + cacheWrite * writePrice + (outTokens ?? 0) * info.priceOut) / 1e6;
     any = true;
   }
   return any ? Math.round(total * 1e4) / 1e4 : undefined;
