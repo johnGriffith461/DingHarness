@@ -15,6 +15,7 @@ import { manifestDrifted, readManifestFromDir, type InstalledPlugin } from "../a
 import { PRODUCT_VERSION } from "../../shared/product";
 import { engineIncompatibility } from "./pluginIndex";
 import { checkManifest } from "./plugins";
+import { dependencyProblems } from "./pluginDeps";
 import type { HooksPort } from "../ports/hooks";
 
 /**
@@ -347,8 +348,26 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
 export async function loadEnabledPlugins(installed: readonly InstalledPlugin[]): Promise<LoadedPlugin[]> {
   runners.clear();
   const out: LoadedPlugin[] = [];
+  /*
+   * 依赖门（L04）：依赖没装/关着/版本不符 → **不装载**，但把原因放进
+   * `problems` 让界面与 `plugins list` 说出来。静默少一个插件比报错更坏。
+   */
+  const facts = installed.map((p) => ({ name: p.name, version: p.version, enabled: p.enabled }));
   for (const plugin of installed) {
     if (!plugin.enabled) continue;
+    const missing = dependencyProblems(plugin.manifest, facts);
+    if (missing.length) {
+      out.push({
+        name: plugin.name,
+        version: plugin.version,
+        dir: plugin.dir,
+        entries: [],
+        hooks: {},
+        withheld: [],
+        problems: missing.map((one) => `依赖未满足，已跳过装载：${one}`),
+      });
+      continue;
+    }
     out.push(await loadPlugin(plugin));
   }
   loaded = out;

@@ -33,6 +33,7 @@ import {
   type PluginIndex,
   type PluginIndexEntry,
 } from "../../engine/runtime/pluginIndex";
+import { checkIndexTrust, indexPinsFileOf, readIndexPins, writeIndexPins } from "../../engine/runtime/pluginIndexTrust";
 import { loadEnabledPlugins, loadedPlugins, withheldCapabilities } from "../../engine/runtime/pluginHost";
 import { ENFORCED_PERMISSIONS, PLUGIN_PERMISSIONS, checkManifest, type PluginPermission } from "../../engine/runtime/plugins";
 import { flag, type Parsed } from "./args";
@@ -55,30 +56,51 @@ function defaultPluginIndex(): string | null {
   return null;
 }
 
-/** 读一份索引（本地文件或 http(s) URL）。 */
+/** 读一份索引（本地文件或 http(s) URL），并做信任判定（L04）。 */
 async function loadPluginIndex(
-  source?: string,
-): Promise<{ index: PluginIndex; problems: string[]; from: string; baseDir: string; remote: boolean } | { error: string }> {
+  source: string | undefined,
+  dataDir: string,
+  acceptChange: boolean,
+): Promise<
+  { index: PluginIndex; problems: string[]; from: string; baseDir: string; remote: boolean; trustNote: string } | { error: string }
+> {
   const target = source ?? defaultPluginIndex();
   if (!target) return { error: "没有市场索引：用 --index <文件|URL> 指一份，或在仓库根放 plugin-market/index.json" };
   try {
     let text: string;
-    if (/^https?:\/\//i.test(target)) {
+    const remote = /^https?:\/\//i.test(target);
+    if (remote) {
       const response = await fetch(target, { signal: AbortSignal.timeout(8000) });
       if (!response.ok) return { error: `索引下载失败：HTTP ${response.status}（${target}）` };
       text = await response.text();
     } else {
       text = await fs.readFile(path.resolve(target), "utf8");
     }
-    const parsed = parsePluginIndex(JSON.parse(text));
+    const raw = JSON.parse(text) as unknown;
+
+    /*
+     * 信任门（L04）：签名索引验签；未签名索引**钉住摘要**，内容变了就拒。
+     * 钉按来源区分 —— 同一个内容放在两个路径下是两份索引。
+     */
+    const pinsFile = indexPinsFileOf(pluginPaths(dataDir).root);
+    const verdict = checkIndexTrust({
+      source: remote ? target : path.resolve(target),
+      raw,
+      pins: readIndexPins(pinsFile),
+      acceptChange,
+    });
+    if (!verdict.verdict.ok) return { error: verdict.verdict.message };
+    writeIndexPins(pinsFile, verdict.pins);
+
+    const parsed = parsePluginIndex(raw);
     if (!parsed.ok) return { error: `索引不合法：${parsed.errors.join("；")}` };
-    const remote = /^https?:\/\//i.test(target);
     return {
       index: parsed.index,
       problems: parsed.problems,
       from: target,
       baseDir: remote ? "" : path.dirname(path.resolve(target)),
       remote,
+      trustNote: verdict.verdict.note,
     };
   } catch (error) {
     return { error: `读索引失败：${String((error as Error)?.message ?? error).slice(0, 160)}` };
@@ -113,6 +135,20 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
       const granted = item.granted.length ? item.granted.join(" / ") : "无";
       console.log(`${item.name}@${item.version}　${item.enabled ? "开着" : "关着"}　权限：${granted}`);
       console.log(`    ${item.description}`);
+      /*
+       * 签名/信任与依赖要能一眼看到（L04）：
+       * `unsigned` 不是错误（v1 插件照样能用），但用户有权知道"没人担保"。
+       */
+      const sig =
+        item.signature.trust === "unsigned"
+          ? "未签名"
+          : `已签名（${item.signature.publisher.id}，${item.signature.trust === "trusted" ? "同一把钥匙" : "首次见到"}）`;
+      console.log(`    签名：${sig}`);
+      const deps = item.manifest.dependencies ?? {};
+      const depText = Object.entries(deps)
+        .map(([dep, range]) => `${dep} ${range}`)
+        .join(" / ");
+      if (depText) console.log(`    依赖：${depText}`);
     }
     const { missing } = auditLedger(paths);
     if (missing.length) console.error(`⚠️ 这些插件的目录不在了：${missing.join(" / ")}`);
@@ -132,7 +168,7 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
    */
   if (sub === "search") {
     const query = p.args.slice(1).join(" ");
-    const loaded = await loadPluginIndex(flag(p, "index"));
+    const loaded = await loadPluginIndex(flag(p, "index"), dataDir, p.flags.has("accept-index-change"));
     if ("error" in loaded) {
       console.error(loaded.error);
       return 1;
@@ -142,11 +178,12 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     }
     const hits = searchPluginIndex(loaded.index, query, PRODUCT_VERSION);
     if (p.flags.has("json")) {
-      console.log(JSON.stringify({ from: loaded.from, hits }, null, 2));
+      console.log(JSON.stringify({ from: loaded.from, trust: loaded.trustNote, hits }, null, 2));
       return 0;
     }
     if (!hits.length) {
       console.log(`「${query || "(全部)"}」没有命中（索引：${loaded.from}，共 ${loaded.index.plugins.length} 条）`);
+      console.log(`索引信任：${loaded.trustNote}`);
       return 0;
     }
     for (const hit of hits) {
@@ -160,13 +197,17 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
       if (!hit.compatible) console.log(`    ${hit.incompatibility}`);
     }
     console.log("");
+    console.log(`索引信任：${loaded.trustNote}`);
     console.log(`装一个：ding plugins install index:<id> --yes`);
     return 0;
   }
 
   if (sub === "install") {
     if (!name) {
-      console.error("用法：ding plugins install <目录|npm:包名|index:id> [--yes] [--grant tools:register,hooks:register] [--index <文件|URL>]");
+      console.error(
+        "用法：ding plugins install <目录|npm:包名|index:id> [--yes] [--grant tools:register,hooks:register] " +
+          "[--index <文件|URL>] [--accept-index-change] [--allow-missing-deps]",
+      );
       return 2;
     }
     /*
@@ -177,7 +218,7 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     let fromIndex: PluginIndexEntry | undefined;
     if (name.startsWith("index:")) {
       const id = name.slice("index:".length).trim();
-      const loaded = await loadPluginIndex(flag(p, "index"));
+      const loaded = await loadPluginIndex(flag(p, "index"), dataDir, p.flags.has("accept-index-change"));
       if ("error" in loaded) {
         console.error(loaded.error);
         return 1;
@@ -239,6 +280,11 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     if (declaredOnly.length) {
       console.log(`  · 这几项 v1 **拦不住**（插件与宿主同进程同权限）—— 是"知情"不是"限制"：${declaredOnly.join(" / ")}`);
     }
+    const deps = m.dependencies ?? {};
+    if (Object.keys(deps).length) {
+      console.log(`  它依赖：${Object.entries(deps).map(([dep, range]) => `${dep} ${range}`).join(" / ")}`);
+    }
+    if (m.publisher) console.log(`  签名：${m.publisher.id}（安装时会验签，换钥匙一律拒）`);
 
     if (!p.flags.has("yes")) {
       console.error("");
@@ -253,9 +299,20 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
           .map((x) => x.trim())
           .filter((x): x is PluginPermission => PLUGIN_PERMISSIONS.includes(x as PluginPermission))
       : undefined;
+    const allowMissingDeps = p.flags.has("allow-missing-deps");
     const got = isNpm
-      ? installFromNpm({ paths, spec: installName.slice(4), ...(granted ? { granted } : {}) })
-      : installFromDir({ paths, from: path.resolve(installName), ...(granted ? { granted } : {}) });
+      ? installFromNpm({
+          paths,
+          spec: installName.slice(4),
+          ...(granted ? { granted } : {}),
+          ...(allowMissingDeps ? { allowMissingDeps: true } : {}),
+        })
+      : installFromDir({
+          paths,
+          from: path.resolve(installName),
+          ...(granted ? { granted } : {}),
+          ...(allowMissingDeps ? { allowMissingDeps: true } : {}),
+        });
     if (!got.ok) {
       console.error("装不上：");
       for (const e of got.errors) console.error(`  · ${e}`);
@@ -263,6 +320,11 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     }
     console.log("");
     console.log(`✓ 装好了：${got.plugin.name}@${got.plugin.version} → ${got.plugin.dir}`);
+    console.log(
+      got.plugin.signature.trust === "unsigned"
+        ? "  签名：未签名（v1 插件照样能跑 —— 但没人担保这份代码）"
+        : `  签名：有效（发布者 ${got.plugin.signature.publisher.id}，${got.plugin.signature.trust === "trusted" ? "与上次同一把钥匙" : "首次见到，已钉住公钥"}）`,
+    );
     return 0;
   }
 

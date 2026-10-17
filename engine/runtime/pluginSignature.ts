@@ -43,13 +43,13 @@ const SKIP_DIRS = new Set(["node_modules", ".git"]);
 export const SIGNED_MANIFEST_FILE = "ding-plugin.json";
 
 /** 规范化 JSON：键排序、递归（同一份内容只有一种写法，否则"同一个清单"会有两个摘要）。 */
-function canonical(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([, v]) => v !== undefined)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`);
+    .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`);
   return `{${entries.join(",")}}`;
 }
 
@@ -82,7 +82,7 @@ export function digestOfPluginDir(dir: string, rawManifest: unknown, publisherKe
 
   const manifest = { ...((rawManifest ?? {}) as Record<string, unknown>) };
   delete manifest.signature;
-  const canonicalBody = JSON.stringify({ v: 1, files, manifest: JSON.parse(canonical(manifest)), publisher: publisherKey });
+  const canonicalBody = JSON.stringify({ v: 1, files, manifest: JSON.parse(canonicalJson(manifest)), publisher: publisherKey });
   return createHash("sha256").update(`ding-plugin-sig/1\u0000${canonicalBody}`).digest("hex");
 }
 
@@ -91,6 +91,51 @@ export type SignatureVerdict =
   | { ok: true; digest: string }
   /** `bad-key`：公钥读不出来；`bad-signature`：验不过（改过文件 / 不是这把钥匙签的）。 */
   | { ok: false; reason: "bad-key" | "bad-signature"; message: string };
+
+/**
+ * 验一份"摘要的分离签名"（签名覆盖的是摘要字符串本身）。
+ *
+ * 插件清单与市场索引共用这一段：两边的摘要算法不同，但**钥匙解析与验签语义
+ * 必须完全一致** —— 各写一遍迟早会漂，而漂了只有用户装不上时才会发现。
+ *
+ * @param input.publisher 发布者（`{id, key(base64 SPKI DER)}`）
+ * @param input.signature base64 签名
+ * @param input.digest 被签的摘要（十六进制字符串）
+ * @returns 结论；验不过时 `message` 要能直接给用户看
+ */
+export function verifyPublisherDigest(input: {
+  publisher: PluginPublisher;
+  signature: string;
+  digest: string;
+}): SignatureVerdict {
+  let publicKey;
+  try {
+    publicKey = createPublicKey({ key: Buffer.from(input.publisher.key, "base64"), format: "der", type: "spki" });
+  } catch {
+    return {
+      ok: false,
+      reason: "bad-key",
+      message: "发布者公钥读不出来（publisher.key 应该是 base64 的 ed25519 公钥，SPKI DER 格式）—— 这份签名没法验",
+    };
+  }
+
+  let ok = false;
+  try {
+    ok = verifyBytes(null, Buffer.from(input.digest, "utf8"), publicKey, Buffer.from(input.signature, "base64"));
+  } catch {
+    ok = false;
+  }
+  if (!ok) {
+    return {
+      ok: false,
+      reason: "bad-signature",
+      message:
+        `签名验不过（发布者 ${input.publisher.id}）：要么内容在签名之后被改过，` +
+        `要么这不是这把钥匙签的。拒绝使用 —— 请向发布者要一份未被改动的版本。`,
+    };
+  }
+  return { ok: true, digest: input.digest };
+}
 
 /**
  * 验一次插件签名。
@@ -107,31 +152,21 @@ export function verifyPluginSignature(input: {
   publisher: PluginPublisher;
   signature: string;
 }): SignatureVerdict {
-  let publicKey;
-  try {
-    publicKey = createPublicKey({ key: Buffer.from(input.publisher.key, "base64"), format: "der", type: "spki" });
-  } catch {
-    return {
-      ok: false,
-      reason: "bad-key",
-      message: "发布者公钥读不出来（publisher.key 应该是 base64 的 ed25519 公钥，SPKI DER 格式）—— 这份签名没法验",
-    };
-  }
-
   const digest = digestOfPluginDir(input.dir, input.rawManifest, input.publisher.key);
-  let ok = false;
-  try {
-    ok = verifyBytes(null, Buffer.from(digest, "utf8"), publicKey, Buffer.from(input.signature, "base64"));
-  } catch {
-    ok = false;
-  }
-  if (!ok) {
+  const verdict = verifyPublisherDigest({
+    publisher: input.publisher,
+    signature: input.signature,
+    digest,
+  });
+  if (!verdict.ok) {
     return {
       ok: false,
-      reason: "bad-signature",
+      reason: verdict.reason,
       message:
-        `签名验不过（发布者 ${input.publisher.id}）：要么文件（或清单）在签名之后被改过，` +
-        `要么这不是这把钥匙签的。拒绝安装 —— 请向发布者要一份未被改动的包。`,
+        verdict.reason === "bad-key"
+          ? verdict.message
+          : `签名验不过（发布者 ${input.publisher.id}）：要么文件（或清单）在签名之后被改过，` +
+            `要么这不是这把钥匙签的。拒绝安装 —— 请向发布者要一份未被改动的包。`,
     };
   }
   return { ok: true, digest };

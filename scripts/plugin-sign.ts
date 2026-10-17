@@ -28,6 +28,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { digestOfPluginDir } from "../engine/runtime/pluginSignature";
+import { indexDigest } from "../engine/runtime/pluginIndexTrust";
 
 const argv = process.argv.slice(2);
 const flag = (name: string, fallback = ""): string => {
@@ -36,7 +37,9 @@ const flag = (name: string, fallback = ""): string => {
 };
 const command = argv[0];
 
-const USAGE = "用法：pnpm plugin-sign keygen --out <前缀> | sign --dir <插件目录> --publisher <id> --key <私钥.pem> [--name 显示名]";
+const USAGE =
+  "用法：pnpm plugin-sign keygen --out <前缀> | sign --dir <插件目录> --publisher <id> --key <私钥.pem> [--name 显示名] | " +
+  "sign-index --file <index.json> --publisher <id> --key <私钥.pem> [--name 显示名]";
 
 if (command === "keygen") {
   const out = flag("out", "ding-publisher-key");
@@ -85,6 +88,44 @@ if (command === "sign") {
   console.log(`  发布者：${publisherId}${name ? `（${name}）` : ""}`);
   console.log(`  摘要：${digest.slice(0, 16)}…（sha256，覆盖 ${dir} 下所有文件）`);
   console.log(`\n⚠️ 之后改任何文件（含这份清单）都要**重新签** —— 否则验签会失败。`);
+  process.exit(0);
+}
+
+if (command === "sign-index") {
+  /*
+   * 给**市场索引**签名（L04）：`publisher` + `signature` 写回索引文件。
+   * 摘要覆盖「除 signature 之外的全部内容 + 公钥」—— 换钥匙/改条目都会变。
+   * 未签名索引也能用（首次钉摘要），但签名索引能自动接受发布者的正常更新。
+   */
+  const file = path.resolve(flag("file", "plugin-market/index.json"));
+  const publisherId = flag("publisher");
+  const keyFile = flag("key");
+  const name = flag("name");
+  if (!publisherId || !keyFile) {
+    console.error(USAGE);
+    process.exit(1);
+  }
+  if (!existsSync(file)) {
+    console.error(`没找到索引文件：${file}`);
+    process.exit(1);
+  }
+  const index = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  const privateKey = createPrivateKey(readFileSync(keyFile, "utf8"));
+  const publicKeyB64 = Buffer.from(createPublicKey(privateKey).export({ type: "spki", format: "der" })).toString("base64");
+
+  index.publisher = { id: publisherId, ...(name ? { name } : {}), key: publicKeyB64 };
+  delete index.signature;
+  writeFileSync(file, `${JSON.stringify(index, null, 2)}\n`, "utf8");
+
+  const digest = indexDigest(index, publicKeyB64);
+  const signature = signBytes(null, Buffer.from(digest, "utf8"), privateKey).toString("base64");
+  index.signature = signature;
+  writeFileSync(file, `${JSON.stringify(index, null, 2)}\n`, "utf8");
+
+  console.log(`已签名：${file}`);
+  console.log(`  发布者：${publisherId}${name ? `（${name}）` : ""}`);
+  console.log(`  摘要：${digest.slice(0, 16)}…（sha256，覆盖索引除 signature 外的全部内容）`);
+  console.log(`\n⚠️ 之后改索引里任何条目都要**重新签**。`);
   process.exit(0);
 }
 

@@ -25,6 +25,8 @@
  * "这个插件要读文件、要联网"，就能决定装不装 —— 那是**知情**，不是**限制**。
  */
 
+import { parseDependencies } from "./pluginDeps";
+
 /** 插件可以申请的能力。 */
 export type PluginPermission =
   /* ── 能力注入类（v1 真的拦） ── */
@@ -81,6 +83,14 @@ export type PluginManifest = {
   permissions: readonly PluginPermission[];
   /** 兼容的宿主版本（`engines.ding`，语义化范围，例如 `>=0.2.0`）。 */
   engines: { ding: string };
+  /**
+   * 依赖的其他插件（L04）：`插件名 → 版本范围`。
+   *
+   * 依赖必须**已安装且开着**；安装时缺依赖直接拒，装载时缺依赖不装载
+   * （原因会显示在 `plugins list` / doctor 里）。不做自动递归安装 ——
+   * 每一次下载都该是用户看过的。
+   */
+  dependencies?: Record<string, string>;
   /**
    * **发布者与签名**（V5-4 4.4；可选 —— 不给就是 v1 插件，照样能装能跑）。
    *
@@ -229,6 +239,10 @@ export function checkManifest(raw: unknown): ManifestCheck {
     errors.push("engines.ding 必填（说明它兼容的宿主版本，例如 \">=0.2.0\"）");
   }
 
+  /* 依赖（L04）：形状校验；是否满足要在安装/装载时对台账判 */
+  const parsedDeps = parseDependencies(m.dependencies);
+  errors.push(...parsedDeps.errors);
+
   if (errors.length) return { ok: false, errors };
   return {
     ok: true,
@@ -240,6 +254,7 @@ export function checkManifest(raw: unknown): ManifestCheck {
       ...(hooks.length ? { hooks } : {}),
       permissions,
       engines: { ding: (engines as { ding: string }).ding },
+      ...(Object.keys(parsedDeps.deps).length ? { dependencies: parsedDeps.deps } : {}),
       ...(publisher ? { publisher } : {}),
       ...(publisher && typeof m.signature === "string" ? { signature: m.signature.trim() } : {}),
       ...(main ? { main } : {}),

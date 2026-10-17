@@ -7,6 +7,7 @@ import { PRODUCT_VERSION } from "../../shared/product";
 import { engineIncompatibility } from "../runtime/pluginIndex";
 import { checkManifest, type PluginManifest, type PluginPermission, type PluginPublisher } from "../runtime/plugins";
 import { verifyPluginSignature } from "../runtime/pluginSignature";
+import { dependencyProblems } from "../runtime/pluginDeps";
 import { rememberPublisher } from "./pluginTrust";
 
 /**
@@ -176,6 +177,13 @@ export function installFromDir(input: {
   paths: PluginPaths;
   from: string;
   granted?: readonly PluginPermission[];
+  /**
+   * 缺少依赖时是否仍然安装（L04）。
+   *
+   * 默认 **false**：缺依赖就拒。要装一组互相依赖的插件时，按依赖顺序逐个装；
+   * 确实要先装上再补依赖的，显式传 `true`（CLI 是 `--allow-missing-deps`）。
+   */
+  allowMissingDeps?: boolean;
   now?: number;
 }): InstallResult {
   const { paths, from } = input;
@@ -196,6 +204,25 @@ export function installFromDir(input: {
    */
   const incompatible = engineIncompatibility(manifest.engines.ding, PRODUCT_VERSION);
   if (incompatible) return { ok: false, errors: [incompatible] };
+
+  /*
+   * **依赖门**（L04）：依赖必须已安装且开着。不做递归安装 ——
+   * 那会替用户在网上多取几个包，而每一次下载都该是他看过的。
+   */
+  if (!input.allowMissingDeps) {
+    const facts = readLedger(paths).ledger.installed.map((p) => ({
+      name: p.name,
+      version: p.version,
+      enabled: p.enabled,
+    }));
+    const problems = dependencyProblems(manifest, facts);
+    if (problems.length) {
+      return {
+        ok: false,
+        errors: [...problems, "（确实要先装再补依赖的话，加 --allow-missing-deps；但它在依赖补齐前不会装载）"],
+      };
+    }
+  }
 
   /*
    * ⚠️ 入口文件必须在。**"装了但跑不起来"**比"装不上"坏得多 ——
@@ -284,6 +311,7 @@ export function installFromTarball(input: {
   paths: PluginPaths;
   tgz: string;
   granted?: readonly PluginPermission[];
+  allowMissingDeps?: boolean;
   now?: number;
 }): InstallResult {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "dh-plugin-tgz-"));
@@ -309,6 +337,7 @@ export function installFromTarball(input: {
       paths: input.paths,
       from: pkgDir,
       ...(input.granted ? { granted: input.granted } : {}),
+      ...(input.allowMissingDeps ? { allowMissingDeps: true } : {}),
       ...(input.now === undefined ? {} : { now: input.now }),
     });
   } finally {
@@ -388,6 +417,7 @@ export function installFromNpm(input: {
   paths: PluginPaths;
   spec: string;
   granted?: readonly PluginPermission[];
+  allowMissingDeps?: boolean;
   timeoutMs?: number;
 }): InstallResult {
   const tmp = makePackDir();
@@ -398,6 +428,7 @@ export function installFromNpm(input: {
       paths: input.paths,
       tgz: packed.tgz,
       ...(input.granted ? { granted: input.granted } : {}),
+      ...(input.allowMissingDeps ? { allowMissingDeps: true } : {}),
     });
   } finally {
     rmSync(tmp, { recursive: true, force: true });

@@ -181,6 +181,9 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "retry-failed",
   /* `ding approvals --watch`：盯着通知流（不给就看一眼列一遍） */
   "watch",
+  /* `ding plugins ...`（L04）：显式接受未签名索引的内容变化 / 先装再补依赖 */
+  "accept-index-change",
+  "allow-missing-deps",
 ]);
 
 /** 全部认识的旗标（值旗标 ∪ 开关）。入口按它拒"不认识"的。 */

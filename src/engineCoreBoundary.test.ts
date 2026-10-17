@@ -79,8 +79,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * ⚠️ 2026-10-18（G06–G08）56 → 59：`runtime/streamFrames.ts`（续传帧）、
  * `runtime/jobs.ts`（后台任务记录）、`runtime/skills.ts`（技能发现与预算）。
  * 三者都是纯逻辑（IO 由调用方注入路径），且属于运行协调层。
+ *
+ * ⚠️ 2026-10-18（L04）59 → 60：`runtime/pluginIndexTrust.ts`（索引钉摘要 + 验签）。
+ * 摘要与验签是插件的信任地基，必须与 `pluginSignature.ts` 同一份；其余
+ * `pluginDeps.ts` 不在闭包里（只被插件适配器引用）。
  */
-const CLOSURE_BUDGET = 59;
+const CLOSURE_BUDGET = 60;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

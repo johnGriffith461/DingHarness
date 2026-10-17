@@ -50,6 +50,28 @@ ding plugins install index:word-count --yes --index plugin-market/index.json
 （`engine/runtime/pluginSignature.ts`、`engine/adapters/pluginTrust.ts`）：
 索引里写"官方"没有任何意义，装的时候验不过就是装不上。
 
+### 索引自己的信任（L04）
+
+索引本身也可能被换掉（尤其是远程索引）。两条路：
+
+1. **签名索引**（推荐线上市场用）：顶层加 `publisher` 与 `signature`，用
+   `pnpm plugin-sign sign-index --file plugin-market/index.json --publisher <id> --key <私钥.pem>`
+   签。宿主会验签；同一个发布者**换公钥一律拒**（TOFU，与插件发布者同一套）。
+2. **未签名索引**：第一次见到就钉住内容摘要（`<数据目录>/plugin-index-pins.json`）。
+   之后内容一变就拒，确认来源可信后加 `--accept-index-change` 放行。
+
+## 依赖
+
+插件的 `ding-plugin.json` 可以声明依赖的其他插件：
+
+```json
+{ "dependencies": { "word-count": "^1.0.0" } }
+```
+
+依赖必须**已安装且开着**：安装时缺依赖直接拒（显式 `--allow-missing-deps`
+可先装后补，但补齐前不会装载）；装载时缺依赖会跳过并在
+`ding plugins list` 里说明原因。不做自动递归安装 —— 每一次下载都该是用户看过的。
+
 ## 兼容门
 
 `enginesDing` 会被真的比较（`engine/runtime/pluginIndex.ts`）：
