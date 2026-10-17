@@ -110,16 +110,18 @@ describe("normalizeHistory（磁盘不可信）", () => {
     expect(normalizeHistory("x").skills).toEqual([]);
   });
 
-  it("空历史是**两个空数组**（不是 undefined —— 界面会直接 .map）", () => {
+  it("空历史是**三个空数组**（不是 undefined —— 界面会直接 .map）", () => {
     const empty = emptyHistory();
     expect(Array.isArray(empty.skills)).toBe(true);
     expect(Array.isArray(empty.files)).toBe(true);
+    expect(Array.isArray(empty.sessions)).toBe(true);
   });
 });
 
 describe("hasHistory", () => {
   it("有才显示那一段", () => {
-    expect(hasHistory({ skills: ["看板"], files: [] }, "skills")).toBe(true);
-    expect(hasHistory({ skills: ["看板"], files: [] }, "files")).toBe(false);
+    expect(hasHistory({ skills: ["看板"], files: [], sessions: [] }, "skills")).toBe(true);
+    expect(hasHistory({ skills: ["看板"], files: [], sessions: [] }, "files")).toBe(false);
+    expect(hasHistory({ skills: [], files: [], sessions: ["报错"] }, "sessions")).toBe(true);
   });
 });

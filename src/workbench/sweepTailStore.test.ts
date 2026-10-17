@@ -104,7 +104,7 @@ describe("P271：搜索历史落盘要排队", () => {
     let maxInFlight = 0;
     installShell({
       searchHistory: {
-        load: async () => ({ skills: [], files: [] }),
+        load: async () => ({ skills: [], files: [], sessions: [] }),
         save: async (h: unknown) => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -116,7 +116,7 @@ describe("P271：搜索历史落盘要排队", () => {
         },
       },
     });
-    useSearchHistoryStore.setState({ history: { skills: [], files: [] }, loaded: true });
+    useSearchHistoryStore.setState({ history: { skills: [], files: [], sessions: [] }, loaded: true });
     useSearchHistoryStore.getState().record("skills", "第一");
     useSearchHistoryStore.getState().record("skills", "第二");
     /* 排队的写盘是异步的，给它几拍 */

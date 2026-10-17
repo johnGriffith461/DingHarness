@@ -35,8 +35,16 @@ export const SEARCH_HISTORY_LABELS = {
   clear: "清空",
 } as const;
 
-/** 搜索范围（两处搜索各自一份历史）。 */
-export type HistoryScope = "skills" | "files";
+/**
+ * 搜索范围（每处搜索各自一份历史）。
+ *
+ * `sessions`（V6-2a）：左栏的会话全文搜索。它原来**完全不写历史** ——
+ * 搜过的词刷新就没了，而这颗键是旧搜索框转正来的，用户会期待"最近搜过什么"。
+ */
+export type HistoryScope = "skills" | "files" | "sessions";
+
+/** 全部范围（归一化与清空都遍历这一份，别再手写数组）。 */
+export const HISTORY_SCOPES: readonly HistoryScope[] = ["skills", "files", "sessions"];
 
 /** 每个范围最多留几条（再多也没人看，还会把文件撑大）。 */
 export const HISTORY_LIMIT = 10;
@@ -49,7 +57,7 @@ export type SearchHistory = Record<HistoryScope, string[]>;
 
 /** 空历史。 */
 export function emptyHistory(): SearchHistory {
-  return { skills: [], files: [] };
+  return { skills: [], files: [], sessions: [] };
 }
 
 /**
@@ -96,7 +104,7 @@ export function normalizeHistory(raw: unknown, limit = HISTORY_LIMIT): SearchHis
   const out = emptyHistory();
   if (!raw || typeof raw !== "object") return out;
   const src = raw as Record<string, unknown>;
-  for (const scope of ["skills", "files"] as const) {
+  for (const scope of HISTORY_SCOPES) {
     const list = src[scope];
     if (!Array.isArray(list)) continue;
     const kept: string[] = [];
@@ -126,5 +134,7 @@ export function hasHistory(history: SearchHistory, scope: HistoryScope): boolean
 
 /** 范围的中文名（历史段落的小标题用）。 */
 export function scopeLabel(scope: HistoryScope): string {
-  return scope === "skills" ? "技能" : "云盘";
+  if (scope === "skills") return "技能";
+  if (scope === "sessions") return "会话";
+  return "云盘";
 }

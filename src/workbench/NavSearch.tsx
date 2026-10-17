@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 
-import type { SessionSearchHit } from "@shared/ipc";
+import type { SessionSearchHit, ShellBridge } from "@shared/ipc";
+import { splitTurns, type LogRecord } from "@engine/core/events";
 
 import { useWorkbenchStore } from "./store";
+import { useSearchHistoryStore } from "./searchHistoryStore";
 import { hitKindLabel, openableTaskId, searchSessions } from "./sessionSearch";
 
 /**
@@ -15,11 +17,15 @@ import { hitKindLabel, openableTaskId, searchSessions } from "./sessionSearch";
  * V5 开工前清尾的口径是「真做」—— 接 Phase 12.4 的会话全文检索（基础设施早就有：
  * store 层的 FTS + LIKE 并集，CLI 的 `ding sessions --search` 一直在用同一个口子）。
  *
- * ## 结果的三种归宿（诚实优先）
+ * ## 结果的三种归宿（V6-2a 起不再有"点了没反应"）
  *
  * · `task-<id>` 且任务还在 → **可打开**（点了进那个任务）；
  * · 任务已被删掉 → 只给片段（不给一个"打开就报任务不存在"的假入口）；
- * · `chat-` / `cli-` 记录 → 只给片段（本机版没有它们的查看页，不做假按钮）。
+ * · `chat-` / `cli-` 记录 → **应用内预览**（点了在下面展开逐轮正文；
+ *   以前是死 div，理由是"没有查看页"——现在有了，虽然只是一个预览面板）。
+ *
+ * 另外：搜过的词会进 `sessions` 搜索历史（回车或点中结果时记），
+ * 下次打开搜索框能直接点回来。
  *
  * 检索的是**会话记录正文**（不是标题）—— 空态文案里写清楚，免得用户以为坏了。
  */
@@ -35,10 +41,40 @@ export function NavSearch() {
   const [loading, setLoading] = useState(false);
   const [hits, setHits] = useState<SessionSearchHit[]>([]);
   const [error, setError] = useState("");
+  /** 非任务会话的预览（V6-2a：点了能看见逐轮正文，不再是一个点不动的 div）。 */
+  const [peek, setPeek] = useState<{ id: string; lines: { role: string; text: string }[] } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const tasks = useWorkbenchStore((s) => s.tasks);
   const openTask = useWorkbenchStore((s) => s.openTask);
+  const sessionHistory = useSearchHistoryStore((s) => s.history.sessions);
+  const recordSearch = useSearchHistoryStore((s) => s.record);
+  const loadHistory = useSearchHistoryStore((s) => s.load);
+
+  /* 打开搜索框时把历史读进来（磁盘是权威；读失败不影响搜索本身） */
+  useEffect(() => {
+    if (open) void loadHistory();
+  }, [open, loadHistory]);
+
+  /** 读一段非任务会话并展开（chat- / cli-）。 */
+  const openPeek = async (sessionId: string): Promise<void> => {
+    const api = (globalThis as { shell?: ShellBridge }).shell;
+    if (!api?.session) return;
+    try {
+      const got = await api.session.load(sessionId);
+      const turns = splitTurns((got.records ?? []) as LogRecord[]);
+      const lines: { role: string; text: string }[] = [];
+      for (const turn of turns) {
+        const user = [...(turn.request?.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "";
+        if (user) lines.push({ role: "user", text: user });
+        if (turn.view.text) lines.push({ role: "assistant", text: turn.view.text });
+      }
+      setPeek({ id: sessionId, lines });
+      setError("");
+    } catch (err) {
+      setError(`打不开这段会话：${String((err as Error)?.message ?? err)}`);
+    }
+  };
 
   /* 点外面 / Esc 关掉 —— 与 SkillPanel / AccountMenu 同一条手感规矩 */
   useEffect(() => {
@@ -88,10 +124,16 @@ export function NavSearch() {
     };
   }, [query]);
 
+  const remember = (word: string): void => {
+    if (word.trim().length >= MIN_CHARS) recordSearch("sessions", word.trim());
+  };
+
   const pick = (id: string): void => {
+    remember(query);
     openTask(id);
     setOpen(false);
     setQuery("");
+    setPeek(null);
   };
 
   const q = query.trim();
@@ -115,11 +157,38 @@ export function NavSearch() {
             placeholder="搜索会话记录…"
             value={query}
             autoFocus
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPeek(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") remember(q);
+            }}
           />
           <div className="wb-navsearch-list" data-testid="wb-navsearch-list">
             {q.length < MIN_CHARS ? (
-              <div className="wb-navsearch-empty">输入至少 {MIN_CHARS} 个字开始搜索（检索的是会话记录正文）</div>
+              sessionHistory.length ? (
+                <div data-testid="wb-navsearch-history" style={{ padding: "6px 8px" }}>
+                  <div className="wb-navsearch-empty" style={{ marginBottom: 4 }}>
+                    最近搜过
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {sessionHistory.map((word) => (
+                      <button
+                        key={word}
+                        type="button"
+                        className="wb-chip"
+                        data-testid={`wb-navsearch-history-${word}`}
+                        onClick={() => setQuery(word)}
+                      >
+                        {word}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="wb-navsearch-empty">输入至少 {MIN_CHARS} 个字开始搜索（检索的是会话记录正文）</div>
+              )
             ) : loading ? (
               <div className="wb-navsearch-empty">搜索中…</div>
             ) : error ? (
@@ -152,18 +221,47 @@ export function NavSearch() {
                     {body}
                   </button>
                 ) : (
-                  /* 只读行：不是一个控件（不给点不动的假按钮），但内容如实给出 */
-                  <div
+                  /* 非任务会话（chat- / cli-）：点开在应用内预览逐轮正文（V6-2a） */
+                  <button
                     key={h.sessionId}
-                    className="wb-navsearch-hit is-readonly"
+                    className="wb-navsearch-hit"
                     data-testid={`wb-navsearch-hit-${h.sessionId}`}
+                    title="查看这段会话的正文"
+                    onClick={() => {
+                      remember(q);
+                      void openPeek(h.sessionId);
+                    }}
                   >
                     {body}
-                  </div>
+                  </button>
                 );
               })
             )}
           </div>
+          {peek ? (
+            <div
+              className="wb-navsearch-peek"
+              data-testid="wb-navsearch-peek"
+              style={{ borderTop: "1px solid var(--line, #ddd)", padding: "6px 8px", maxHeight: 240, overflow: "auto" }}
+            >
+              <div className="wb-navsearch-head" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <b>{peek.id}</b>
+                <button type="button" className="wb-chip" data-testid="wb-navsearch-peek-close" onClick={() => setPeek(null)}>
+                  收起
+                </button>
+              </div>
+              {peek.lines.length ? (
+                peek.lines.map((line, index) => (
+                  <div key={`${line.role}-${index}`} style={{ marginTop: 4 }}>
+                    <em className="wb-navsearch-kind">{line.role === "user" ? "用户" : "助手"}</em>{" "}
+                    <span style={{ whiteSpace: "pre-wrap" }}>{line.text}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="wb-navsearch-empty">这段会话没有可显示的正文字（可能只有工具事件）。</div>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
