@@ -83,6 +83,10 @@ jobs:
         # `--prod` 只看运行时依赖（开发依赖的漏洞不发给用户）。
         run: pnpm audit --audit-level=high --prod
 
+      - name: 供给链纪律（V6-3b）
+        # 版本钉住 / 构建脚本白名单 / 锁文件版本 / minimumReleaseAge / CLI 包依赖一致
+        run: pnpm verify:supply-chain
+
       - name: 单测
         # ⚠️ 2026-10-16（审计 G97）**更正**：这里原来写着"include 只有 `src/` 下的测试"——
         # 那是旧事实。`vitest.config.ts` 早就把 include 扩到了 `src` / `engine` / `hosts` / `shared`，

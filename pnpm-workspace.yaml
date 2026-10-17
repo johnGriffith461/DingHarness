@@ -1,0 +1,6 @@
+# pnpm 10 也把这里当**配置**读（不只是 workspace 包列表）。
+#
+# minimumReleaseAge（分钟）：新发布的包先"放一放"再进依赖树 ——
+# 供应链攻击的典型窗口是"发布后几小时内没人发现"。1440 = 1 天。
+# 与 frozen lockfile 互补：锁文件防"悄悄升级"，这一条防"刚被投毒的版本"。
+minimumReleaseAge: 1440
