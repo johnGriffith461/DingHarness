@@ -732,6 +732,15 @@ export type ShellBridge = {
      * 不是渲染层那份带视图状态的会话列表 —— 规矩因此只有一条：列得出来的就能共享。
      */
     shareableSessions: () => Promise<Array<{ sessionId: string; title: string; owner: string; updatedAt: number }>>;
+    /**
+     * **授权他人批**（C3 3.7b）：把某条待决的裁决权授给一个成员。
+     *
+     * 只有**当前的审批人**能授（判定与 HTTP 那条路同一份实现）；落一条 `approval-grant`
+     * 记录 —— "谁能批"要可复盘。重复授不算错，也不再记一条。
+     */
+    authorizeApprover: (input: { sessionId: string; toolCallId: string; target: string }) => Promise<
+      { ok: true; approvers: string[]; added: boolean; line: string } | { ok: false; error: string }
+    >;
     /** 发一张配对码（`roles` 缺省 = 只读起步）。 */
     invite: (roles?: string[]) => Promise<unknown>;
     /** 替他入团（主人兑码拿口令）—— 返回里那一次性的 `token`。 */

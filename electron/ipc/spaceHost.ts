@@ -3,6 +3,8 @@ import { app, ipcMain } from "electron";
 import type { MemberRole } from "../../engine/core/members";
 import { normalizeRoles } from "../../engine/core/members";
 import { memberView, newPairingCode, redeemPairingCode, removeFromSpace, rolesIn, setMemberRoles } from "../../engine/core/space";
+import { approversFor, authorizeApprover, grantLine, grantRecord, GRANT_ALREADY_NOTE } from "../../engine/core/gates";
+import { LOCAL_USER } from "../../engine/core/events";
 import { createSpaceStore, emptySpaceFile, issueToken, type SpaceFile } from "../../engine/adapters/spaceStore";
 import { ledgerOf, rollup } from "../../engine/core/ledger";
 import { sumUsage } from "../../shared/cost";
@@ -28,6 +30,8 @@ export const SPACE_CHANNEL = {
   state: "space:state",
   /** 可以共享的会话（界面上的共享入口要用它挑一段）—— 与 `ding space share <id>` 同一个来源。 */
   sessions: "space:sessions",
+  /** 授权他人批（C3 3.7b 的流转那一半）：把某条待决的裁决权授给一个成员。 */
+  authorize: "space:authorize",
   invite: "space:invite",
   join: "space:join",
   setRoles: "space:setRoles",
@@ -138,10 +142,42 @@ export async function shareableSessions(): Promise<ShareableSession[]> {
   }));
 }
 
+/**
+ * **把一条待决的裁决权授给一个成员**（C3 3.7b 的流转那一半；界面上那颗「授权他人批」）。
+ *
+ * 规矩与 `POST /v1/approvals/:session/:call`（`authorize`）**同一份实现**：
+ * 只有**当前的审批人**能授（`authorizeApprover` 判定）、重复授不算错也不再记一条、
+ * 落一条 `approval-grant` 记录（"谁能批"要可复盘 —— 只写索引表的话重放说不清）。
+ *
+ * @returns 授权之后的审批人集合
+ */
+export async function authorizePendingApprover(input: {
+  sessionId: string;
+  toolCallId: string;
+  target: string;
+}): Promise<{ ok: true; approvers: string[]; added: boolean; line: string } | { ok: false; error: string }> {
+  const store = desktopSessionStore();
+  const { records } = await store.load(input.sessionId);
+  const approvers = approversFor(records, input.toolCallId);
+  const got = authorizeApprover({ approvers, byActorId: LOCAL_USER.id, targetId: input.target });
+  if (!got.ok) return { ok: false, error: got.message };
+  if (!got.added) return { ok: true, approvers: got.approvers, added: false, line: GRANT_ALREADY_NOTE };
+  const line = grantLine({ by: LOCAL_USER.id, target: input.target });
+  await store.append(input.sessionId, [{ ...grantRecord({ toolCallId: input.toolCallId, by: LOCAL_USER.id, target: input.target, approvers: got.approvers, line }), actor: LOCAL_USER } as never]);
+  return { ok: true, approvers: got.approvers, added: true, line };
+}
+
 /** 注册这一族的 IPC。 */
 export function registerSpaceIpc(): void {
   ipcMain.handle(SPACE_CHANNEL.state, () => spaceStateView());
   ipcMain.handle(SPACE_CHANNEL.sessions, () => shareableSessions());
+  ipcMain.handle(SPACE_CHANNEL.authorize, (_event, request: { sessionId?: string; toolCallId?: string; target?: string } = {}) =>
+    authorizePendingApprover({
+      sessionId: String(request.sessionId ?? ""),
+      toolCallId: String(request.toolCallId ?? ""),
+      target: String(request.target ?? ""),
+    }),
+  );
 
   ipcMain.handle(SPACE_CHANNEL.invite, (_event, request: { roles?: string[] } = {}): SpaceActionResult => {
     const space = readSpace();

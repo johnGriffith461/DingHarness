@@ -31,6 +31,9 @@ const handlers = new Map<string, (...args: unknown[]) => unknown>();
 let sessionStoreMock: {
   list: () => Promise<Array<{ sessionId: string; owner?: string }>>;
   load: (id: string) => Promise<{ records: unknown[] }>;
+  /** 追加进来的记录（"授权真的落了一条记录"这条判据要看它）。 */
+  appended: Array<{ sessionId: string; records: unknown[] }>;
+  append: (id: string, records: unknown[]) => Promise<unknown[]>;
 };
 vi.mock("../electron/ipc/sessionStore", () => ({
   desktopSessionStore: () => sessionStoreMock,
@@ -39,7 +42,15 @@ vi.mock("../electron/ipc/sessionStore", () => ({
 beforeEach(async () => {
   handlers.clear();
   env.userData = mkdtempSync(path.join(os.tmpdir(), "dh-space-host-"));
-  sessionStoreMock = { list: async () => [], load: async () => ({ records: [] }) };
+  sessionStoreMock = {
+    list: async () => [],
+    load: async () => ({ records: [] }),
+    appended: [],
+    append: async (id, records) => {
+      sessionStoreMock.appended.push({ sessionId: id, records });
+      return records;
+    },
+  };
   const { registerSpaceIpc } = await import("../electron/ipc/spaceHost");
   registerSpaceIpc();
 });
@@ -143,6 +154,11 @@ describe("桌面团队空间（IPC）", () => {
         { sessionId: "task-b", title: "", owner: "alice" },
       ],
       load: async () => ({ records: [] }),
+      appended: [],
+      append: async (id, records) => {
+        sessionStoreMock.appended.push({ sessionId: id, records });
+        return records;
+      },
     };
     const { shareableSessions } = await import("../electron/ipc/spaceHost");
     const rows = await shareableSessions();
@@ -152,9 +168,62 @@ describe("桌面团队空间（IPC）", () => {
     expect(rows[1]!.owner).toBe("alice");
   });
 
+  it("⭐ 授权他人批（审批卡片那颗）：落一条 approval-grant 记录，重复授不再记", async () => {
+    const pending = [
+      { requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "write_file", input: { path: "x.md" }, actor: { id: "main", kind: "agent" } },
+      {
+        requestId: "r1",
+        type: "tool-result",
+        toolCallId: "c1",
+        toolName: "write_file",
+        output: { pending: true, notice: "等确认", approvers: ["local"] },
+        actor: { id: "main", kind: "agent" },
+      },
+    ];
+    /*
+     * ⚠️ 这个假库要**有状态**：append 过的记录，之后的 load 得看得见 ——
+     * 不然"重复授权"那一条永远红（因为第二次读回来的还是那份没授权的记录），
+     * 而那不是产品的问题，是我的假库在说谎。
+     */
+    const live: unknown[] = [...pending];
+    sessionStoreMock = {
+      list: async () => [{ sessionId: "task-grant", owner: "local" }],
+      load: async () => ({ records: [...live] }),
+      appended: [],
+      append: async (id, records) => {
+        sessionStoreMock.appended.push({ sessionId: id, records });
+        live.push(...records);
+        return records;
+      },
+    };
+    const { authorizePendingApprover } = await import("../electron/ipc/spaceHost");
+
+    const first = await authorizePendingApprover({ sessionId: "task-grant", toolCallId: "c1", target: "bob" });
+    expect(first.ok, first.ok ? "" : first.error).toBe(true);
+    if (!first.ok) return;
+    expect(first.added).toBe(true);
+    expect(first.approvers).toEqual(["local", "bob"]);
+    /* 落的是**授权记录**（不是决策记录 —— 用拒绝表达授权会把那条待决误判成已处置） */
+    const written = sessionStoreMock.appended[0]!.records[0] as { type: string; by?: string; target?: string; approvers?: string[] };
+    expect(written.type).toBe("approval-grant");
+    expect(written.by).toBe("local");
+    expect(written.target).toBe("bob");
+    expect(written.approvers).toEqual(["local", "bob"]);
+
+    /* 重复授：不算错，也不再记一条 */
+    const again = await authorizePendingApprover({ sessionId: "task-grant", toolCallId: "c1", target: "bob" });
+    expect(again.ok && again.added === false, "重复授权该如实说「已经在名单里」").toBe(true);
+    expect(sessionStoreMock.appended, "重复授权不该再记一条").toHaveLength(1);
+  });
+
   it("⭐ 账本：按成员汇总读的是**真会话库**（数字只来自 provider 上报）", async () => {
     sessionStoreMock = {
       list: async () => [{ sessionId: "task-1", owner: "alice" }],
+      appended: [],
+      append: async (id, records) => {
+        sessionStoreMock.appended.push({ sessionId: id, records });
+        return records;
+      },
       load: async () => ({
         records: [
           { seq: 1, at: 1_700_000_000_000, requestId: "r1", type: "request", provider: "strata", model: "deepseek-flash", messages: [], actor: { id: "alice", kind: "user" } },

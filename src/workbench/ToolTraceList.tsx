@@ -27,13 +27,44 @@ export function ToolTraceList({
   actionPrefix = "wb-tool",
   /** 列表容器的 testid（配上这一步/这条消息的 id）。 */
   id,
+  /**
+   * 这段会话的 id（**授权记录要落在它里面**；不给 = 不画"授权他人批"那颗控件）。
+   * 工作台那条路给 task 的会话 id、聊天给对话 id —— 与 `onResolve` 那条路同一个来源。
+   */
+  grantSessionId,
 }: {
   traces: ToolTrace[];
   onResolve: (toolCallId: string, approve: boolean) => void;
   testIdPrefix?: string;
   actionPrefix?: string;
   id: string;
+  grantSessionId?: string;
 }) {
+  /**
+   * **名册**（"授权他人批"要挑人）。
+   *
+   * ⚠️ 只在这个列表里**真有待决**时才去读（没有待决就没有授权可谈）——
+   * 每一条消息都去问一次主进程是没必要的开销。
+   */
+  const [members, setMembers] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [grantNote, setGrantNote] = useState("");
+  const hasPending = traces.some((t) => t.pending === true);
+  useEffect(() => {
+    if (!hasPending) return;
+    const shell = (globalThis as unknown as { shell?: { space?: { state: () => Promise<{ members: Array<{ id: string; displayName: string; isOwner: boolean }> }> } } }).shell;
+    let alive = true;
+    void shell?.space
+      ?.state()
+      .then((got) => {
+        /* 主人不用列（他自己就能批）—— 列的是"可以授出去的人" */
+        if (alive) setMembers((got?.members ?? []).filter((m) => !m.isOwner).map((m) => ({ id: m.id, displayName: m.displayName })));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [hasPending]);
+
   /**
    * 已经点下去、还在等的那些调用（2026-10-16 审计 P48）。
    *
@@ -118,10 +149,47 @@ export function ToolTraceList({
               >
                 拒绝
               </button>
+              {/*
+                ⭐ **授权他人批**（C3 3.7b 的流转那一半）：把这条待决的裁决权授给一个成员 ——
+                他那边（HTTP `/v1/approvals` 或另一台设备）就能处置它。
+                没有成员可授时**不画这颗控件**（不为空名册画一个点了没用的按钮）。
+              */}
+              {members.length && t.toolCallId ? (
+                <select
+                  aria-label="授权他人批"
+                  data-testid={`${actionPrefix}-grant-${t.toolCallId}`}
+                  className="wb-tool-grant"
+                  defaultValue=""
+                  disabled={Boolean(busy[t.toolCallId])}
+                  onChange={(event) => {
+                    const target = event.target.value;
+                    if (!target) return;
+                    const ask = (globalThis as unknown as {
+                      shell?: { space?: { authorizeApprover: (i: { sessionId: string; toolCallId: string; target: string }) => Promise<{ ok: boolean; line?: string; error?: string }> } };
+                    }).shell?.space?.authorizeApprover;
+                    void ask?.({ sessionId: grantSessionId ?? "", toolCallId: t.toolCallId, target })
+                      .then((got) => setGrantNote(got?.ok ? (got.line ?? "已授权") : (got?.error ?? "授权失败")))
+                      .catch((error: unknown) => setGrantNote(String((error as Error)?.message ?? error)));
+                    event.target.value = "";
+                  }}
+                >
+                  <option value="">授权他人批…</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.displayName}（{m.id}）
+                    </option>
+                  ))}
+                </select>
+              ) : null}
             </span>
           ) : null}
         </span>
       ))}
+      {grantNote ? (
+        <div className="wb-tool-grant-note" data-testid="wb-tool-grant-note">
+          {grantNote}
+        </div>
+      ) : null}
     </div>
   );
 }

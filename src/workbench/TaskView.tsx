@@ -11,6 +11,7 @@ import { NavCollapseButton } from "./NavCollapseButton";
 import { useWorkbenchStore } from "./store";
 import { continueTargetOf, currentQuestion, progressLabel } from "./task";
 import { ToolTraceList } from "./ToolTraceList";
+import { taskSessionId } from "@engine/core/events";
 import { ArtifactCard } from "./ArtifactCard";
 
 import { useTick } from "./NavSidebar";
@@ -150,6 +151,8 @@ export function TaskView() {
                 id={step.id}
                 traces={step.tools ?? []}
                 onResolve={(toolCallId, approve) => void resolveTool(task.id, step.id, toolCallId, approve)}
+                /* 授权记录要落进这段会话（与 `resolveTool` 那条路同一个 id 口径，见 `store.ts`） */
+                grantSessionId={taskSessionId(task.id)}
               />
               {/*
                 这一步额外要说的一件事（§149）：目前用于"更早的对话已压缩为摘要"。

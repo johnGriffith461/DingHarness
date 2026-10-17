@@ -188,6 +188,7 @@ const api = {
   space: {
     state: () => ipcRenderer.invoke(SPACE_CHANNEL.state),
     shareableSessions: () => ipcRenderer.invoke(SPACE_CHANNEL.sessions),
+    authorizeApprover: (input: { sessionId: string; toolCallId: string; target: string }) => ipcRenderer.invoke(SPACE_CHANNEL.authorize, input),
     invite: (roles?: string[]) => ipcRenderer.invoke(SPACE_CHANNEL.invite, { roles }),
     join: (request: { code: string; memberId: string; displayName?: string }) => ipcRenderer.invoke(SPACE_CHANNEL.join, request),
     setRoles: (memberId: string, roles: string[]) => ipcRenderer.invoke(SPACE_CHANNEL.setRoles, { memberId, roles }),
