@@ -136,6 +136,22 @@ describe("桌面团队空间（IPC）", () => {
     expect(unshared.state!.holders["task-x"], "取消共享要连持有人一起清").toBeUndefined();
   });
 
+  it("⭐ 共享入口的候选清单：问的是**本机会话库**（列得出来的就能共享）", async () => {
+    sessionStoreMock = {
+      list: async () => [
+        { sessionId: "task-a", title: "甲对话", owner: "local" },
+        { sessionId: "task-b", title: "", owner: "alice" },
+      ],
+      load: async () => ({ records: [] }),
+    };
+    const { shareableSessions } = await import("../electron/ipc/spaceHost");
+    const rows = await shareableSessions();
+    expect(rows.map((r) => r.sessionId)).toEqual(["task-a", "task-b"]);
+    /* 没标题的用 id 顶上（界面上不能出现空行） */
+    expect(rows[1]!.title).toBe("task-b");
+    expect(rows[1]!.owner).toBe("alice");
+  });
+
   it("⭐ 账本：按成员汇总读的是**真会话库**（数字只来自 provider 上报）", async () => {
     sessionStoreMock = {
       list: async () => [{ sessionId: "task-1", owner: "alice" }],

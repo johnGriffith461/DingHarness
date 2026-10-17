@@ -26,6 +26,8 @@ import { desktopSessionStore } from "./sessionStore";
 
 export const SPACE_CHANNEL = {
   state: "space:state",
+  /** 可以共享的会话（界面上的共享入口要用它挑一段）—— 与 `ding space share <id>` 同一个来源。 */
+  sessions: "space:sessions",
   invite: "space:invite",
   join: "space:join",
   setRoles: "space:setRoles",
@@ -115,9 +117,31 @@ export async function spaceUsage(): Promise<{ turns: number; byMember: Array<{ k
   };
 }
 
+/** 一段"可以共享的会话"（界面挑它用）。 */
+export type ShareableSession = { sessionId: string; title: string; owner: string; updatedAt: number };
+
+/**
+ * 本机库里的会话（挑一段共享用）。
+ *
+ * ⚠️ 共享入口**自己拿列表**（不去依赖渲染层那份会话 store）：主进程本来就有
+ * `desktopSessionStore().list()`，而"界面上的会话列表"与"库里的会话"是两份东西
+ * （前者带着视图状态）。让入口跟库要，规矩就只有一条：**能列出来的就能共享**。
+ */
+export async function shareableSessions(): Promise<ShareableSession[]> {
+  const store = desktopSessionStore();
+  const rows = await store.list();
+  return rows.map((row) => ({
+    sessionId: row.sessionId,
+    title: row.title || row.sessionId,
+    owner: row.owner ?? "local",
+    updatedAt: row.updatedAt,
+  }));
+}
+
 /** 注册这一族的 IPC。 */
 export function registerSpaceIpc(): void {
   ipcMain.handle(SPACE_CHANNEL.state, () => spaceStateView());
+  ipcMain.handle(SPACE_CHANNEL.sessions, () => shareableSessions());
 
   ipcMain.handle(SPACE_CHANNEL.invite, (_event, request: { roles?: string[] } = {}): SpaceActionResult => {
     const space = readSpace();

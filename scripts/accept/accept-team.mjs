@@ -120,6 +120,11 @@ try {
   out.aliceGoneFromDisk = !(afterRemove?.roster?.members ?? []).some?.((m) => m.id === "alice");
   out.tokenGoneFromDisk = !afterRemove?.tokens?.alice;
 
+  /* ④b 共享入口：候选清单与按钮在（空库时如实说"还没有会话可以共享"） */
+  out.shareEntry = (await page.locator('[data-testid="wb-team-share-pick"]').count()) === 1 &&
+    (await page.locator('[data-testid="wb-team-share"]').count()) === 1;
+  out.shareEmptyNote = await page.evaluate(() => document.body.textContent?.includes("本机还没有会话可以共享") ?? false);
+
   /* ⑤ 账本按钮：真读一遍（表格出来） */
   await page.locator('[data-testid="wb-team-usage"]').click();
   await page.waitForTimeout(900);
@@ -150,6 +155,8 @@ try {
   if (!out.aliceGoneFromDisk) bad.push("移除没落盘");
   if (!out.tokenGoneFromDisk) bad.push("移除之后口令还在账上（那样撤权只是「以后不行」）");
   if (!out.usageTable) bad.push("账本按钮没出表");
+  if (!out.shareEntry) bad.push("共享入口（挑会话 + 共享按钮）不在页面上");
+  if (!out.shareEmptyNote) bad.push("空库时没有如实说「本机还没有会话可以共享」");
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
     console.error("✗ " + bad.join("；"));

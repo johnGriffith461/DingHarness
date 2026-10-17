@@ -725,6 +725,13 @@ export type ShellBridge = {
       pendingCodes: Array<{ code: string; roles: string[]; expiresAt: number }>;
       file: string;
     }>;
+    /**
+     * 可以共享的会话（界面上的共享入口挑一段用）。
+     *
+     * ⚠️ 它问的是**本机会话库**（与 `ding space share <id>` 同一个来源），
+     * 不是渲染层那份带视图状态的会话列表 —— 规矩因此只有一条：列得出来的就能共享。
+     */
+    shareableSessions: () => Promise<Array<{ sessionId: string; title: string; owner: string; updatedAt: number }>>;
     /** 发一张配对码（`roles` 缺省 = 只读起步）。 */
     invite: (roles?: string[]) => Promise<unknown>;
     /** 替他入团（主人兑码拿口令）—— 返回里那一次性的 `token`。 */

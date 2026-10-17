@@ -39,6 +39,7 @@ const ROLE_LABEL: Record<string, string> = {
 /** 主进程那三个接口（`window.ding.space.*`；preload 里挂的）。 */
 type SpaceApi = {
   state: () => Promise<SpaceState>;
+  shareableSessions: () => Promise<Array<{ sessionId: string; title: string; owner: string; updatedAt: number }>>;
   invite: (roles?: string[]) => Promise<ActionResult>;
   join: (request: { code: string; memberId: string; displayName?: string }) => Promise<ActionResult>;
   setRoles: (memberId: string, roles: string[]) => Promise<ActionResult>;
@@ -69,6 +70,9 @@ export function TeamPage() {
   const [memberId, setMemberId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [usage, setUsage] = useState<Awaited<ReturnType<SpaceApi["usage"]>> | null>(null);
+  /** 可以共享的会话（**问本机库要**，见 `spaceHost.shareableSessions` 的说明）。 */
+  const [candidates, setCandidates] = useState<Array<{ sessionId: string; title: string; owner: string }>>([]);
+  const [pick, setPick] = useState("");
 
   const refresh = useCallback(async () => {
     const api = spaceApi();
@@ -78,6 +82,7 @@ export function TeamPage() {
     }
     try {
       setState(await api.state());
+      setCandidates(await api.shareableSessions().catch(() => []));
       setError("");
     } catch (err) {
       setError(String((err as Error)?.message ?? err));
@@ -224,6 +229,42 @@ export function TeamPage() {
 
       {/* ── 共享与持有人 ──────────────────────────────── */}
       <h4>共享出去的会话（{state.shared.length}）</h4>
+      {/* 共享入口：挑一段本机会话 → 共享出去（成员就能读到，要写得先接管） */}
+      <div className="wb-card-row">
+        <select
+          aria-label="挑一段会话共享"
+          data-testid="wb-team-share-pick"
+          value={pick}
+          onChange={(e) => setPick(e.target.value)}
+        >
+          <option value="">挑一段会话…</option>
+          {candidates
+            .filter((c) => !state.shared.includes(c.sessionId))
+            .map((c) => (
+              <option key={c.sessionId} value={c.sessionId}>
+                {c.title}（{c.sessionId}）
+              </option>
+            ))}
+        </select>
+        <button
+          type="button"
+          className="wb-chip"
+          data-testid="wb-team-share"
+          disabled={!pick}
+          onClick={() => {
+            if (!api || !pick) return;
+            void api.share(pick).then((got) => {
+              setPick("");
+              apply(got);
+            });
+          }}
+        >
+          共享出去
+        </button>
+        <span className="wb-card-desc">
+          {candidates.length ? "（列的是本机库里的会话）" : "（本机还没有会话可以共享）"}
+        </span>
+      </div>
       {state.shared.length === 0 ? (
         <p className="wb-setpage-note">还没有共享任何会话（命令行那条路是 `ding space share` 加会话 id）。</p>
       ) : (
