@@ -1,4 +1,6 @@
 import { z } from "zod";
+
+import { COMPUTER_TOOL_SPECS } from "./computerTools";
 import { isMcpTool, parseMcpToolName } from "./mcp";
 import { MEMORY_TEXT_LIMIT } from "./memory";
 import { MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_VALUES } from "./schedule";
@@ -565,14 +567,7 @@ export function mergeToolTraces(existing: readonly ToolTrace[], incoming: readon
   return [...existing, ...incoming.filter((t) => !seen.has(t.toolCallId))];
 }
 
-/*
- * ⚠️ `list_files` 曾经**不在**这张表里（它只出现在 `electron/ipc/tools.ts` 手抄的那份对象里）。
- * Phase 1 D5 把那段手抄换成"注册表直接吃这张表"之后，它当场消失了 ——
- * 而且**什么都不报**：没有类型错误、没有测试红，只是模型少了一个工具。
- * 这是"两处各写一份"最典型的代价：删掉其中一处时，另一处不会喊。
- *
- * 现在补进来，并由 `engine/runtime/registry.test.ts` 盯着"表里的都在"与"在的都不少"。
- */
+/* ⚠️ `list_files` 曾漏登记过一次（两处各写一份的代价）；`registry.test.ts` 盯着"表里的都在"。 */
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: SPAWN_AGENTS_TOOL, description: SPAWN_AGENTS_DESC, schema: SPAWN_AGENTS_INPUT },
   { name: MEMORY_SAVE_TOOL, description: MEMORY_SAVE_DESC, schema: MEMORY_SAVE_INPUT },
@@ -588,6 +583,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: WRITE_FILE_TOOL, description: WRITE_FILE_DESC, schema: WRITE_FILE_INPUT },
   { name: EDIT_FILE_TOOL, description: EDIT_FILE_DESC, schema: EDIT_FILE_INPUT },
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
+  ...COMPUTER_TOOL_SPECS,
 ];
 
 /** 按名字取声明；没有就是 `undefined`（→ 走"未知工具"那条路）。 */
@@ -613,6 +609,7 @@ export function toolLabel(name: string): string {
   if (name === READ_FILE_TOOL) return "读文件";
   if (name === LIST_FILES_TOOL) return "列文件";
   if (name === SPAWN_AGENTS_TOOL) return "派小队";
+  if (name.startsWith("computer_")) return "电脑操作";
   if (name === WRITE_FILE_TOOL) return "写文件";
   if (name === EDIT_FILE_TOOL) return "改文件";
   if (name === LIST_DIR_TOOL) return "看目录";

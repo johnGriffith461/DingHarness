@@ -107,6 +107,15 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
    * 真隔离要靠系统级手段 —— 这是如实记下的边界，不是"已经有了"。
    */
   run_command: { kind: "write" },
+  /*
+   * Computer Use（V6-2n）：四个都按**写** —— 它们能移动真实鼠标、敲真实键盘、
+   * 截取屏幕。按需确认档下必须问；「全部允许」下也仍受 `computer-use.json`
+   * 的授权开关约束（默认关）。
+   */
+  computer_screenshot: { kind: "write" },
+  computer_click: { kind: "write" },
+  computer_type: { kind: "write" },
+  computer_key: { kind: "write" },
 };
 
 /** 取一个工具的策略；没声明就当只读。 */

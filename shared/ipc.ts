@@ -312,6 +312,22 @@ export type {
   WorkflowRunView,
 } from "./views";
 
+/** Computer Use 的审计条目（不含输入的文字）。 */
+export type ComputerAuditView = { at: number; kind: string; ok: boolean; detail: string };
+
+/** Computer Use 状态。 */
+export type ComputerStatusView = {
+  enabled: boolean;
+  platform: string;
+  supported: boolean;
+  log: ComputerAuditView[];
+};
+
+/** Computer Use 的动作结果。 */
+export type ComputerResultView =
+  | { ok: true; detail: string; path?: string; dataUrl?: string; width?: number; height?: number }
+  | { ok: false; error: string };
+
 export type ShellBridge = {
   ping: () => Promise<{
     ok: boolean;
@@ -729,6 +745,21 @@ export type ShellBridge = {
   preview: {
     open: (url: string) => Promise<{ ok: true; reused?: boolean } | { ok: false; error: string }>;
     close: () => Promise<{ ok: true }>;
+  };
+  /**
+   * Computer Use（V6-2n）：默认关闭；每个动作原生确认；留痕不含输入内容。
+   *
+   * `screenshot` 返回 `dataUrl`（界面直接显示）与落盘路径；其余动作只回一句结果。
+   */
+  computer: {
+    status: () => Promise<ComputerStatusView>;
+    enable: () => Promise<{ ok: true; enabled: true } | { ok: false; error: string }>;
+    disable: () => Promise<{ ok: true; enabled: false }>;
+    screenshot: () => Promise<ComputerResultView>;
+    click: (x: number, y: number, button?: "left" | "right") => Promise<ComputerResultView>;
+    type: (text: string) => Promise<ComputerResultView>;
+    key: (key: string) => Promise<ComputerResultView>;
+    log: () => Promise<ComputerAuditView[]>;
   };
   /**
    * 诊断包导出（2026-10-17）。

@@ -9,6 +9,7 @@ import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { STATS_CHANNEL } from "./ipc/stats";
 import { WORKFLOW_CHANNEL } from "./ipc/workflowStore";
 import { PREVIEW_CHANNEL } from "./ipc/preview";
+import { COMPUTER_CHANNEL } from "./ipc/computer";
 import { PLUGIN_CHANNEL } from "./ipc/pluginHost";
 import { SPACE_CHANNEL } from "./ipc/spaceHost";
 import { CANVAS_CHANNEL } from "./ipc/canvas";
@@ -368,6 +369,17 @@ const api = {
   preview: {
     open: (url: string) => ipcRenderer.invoke(PREVIEW_CHANNEL.open, url),
     close: () => ipcRenderer.invoke(PREVIEW_CHANNEL.close),
+  },
+  /** Computer Use（V6-2n）：默认关；每个动作原生确认；留痕不含输入内容。 */
+  computer: {
+    status: () => ipcRenderer.invoke(COMPUTER_CHANNEL.status),
+    enable: () => ipcRenderer.invoke(COMPUTER_CHANNEL.enable),
+    disable: () => ipcRenderer.invoke(COMPUTER_CHANNEL.disable),
+    screenshot: () => ipcRenderer.invoke(COMPUTER_CHANNEL.screenshot),
+    click: (x: number, y: number, button?: "left" | "right") => ipcRenderer.invoke(COMPUTER_CHANNEL.click, { x, y, button }),
+    type: (text: string) => ipcRenderer.invoke(COMPUTER_CHANNEL.type, text),
+    key: (key: string) => ipcRenderer.invoke(COMPUTER_CHANNEL.key, key),
+    log: () => ipcRenderer.invoke(COMPUTER_CHANNEL.log),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */

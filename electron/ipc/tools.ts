@@ -17,6 +17,7 @@ import {
   subagentPrompt,
   WRITE_FILE_TOOL,
 } from "../../shared/agentTools";
+import { COMPUTER_CLICK_TOOL, COMPUTER_KEY_TOOL, COMPUTER_SCREENSHOT_TOOL, COMPUTER_TYPE_TOOL } from "../../shared/computerTools";
 import type { ConfirmMode } from "../../shared/ipc";
 import { unknownToolNotice } from "../../engine/core/notices";
 import { buildToolSet, createToolRegistry, type ToolEntry } from "../../engine/runtime/registry";
@@ -44,6 +45,8 @@ import { runSubagent } from "../../engine/runtime/subagent";
 import { runTeam } from "../../engine/runtime/team";
 import { isPluginTool } from "../../engine/runtime/plugins";
 import { runPluginTool } from "../../engine/runtime/pluginHost";
+import { runComputerAction } from "./computer";
+import type { ComputerKey } from "../../shared/computer";
 
 /**
  * 工具的**执行**绑定（§141）。
@@ -297,6 +300,32 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       /* ⚠️ 字段名不能叫 `line`：那是留痕那一行用的键，重名会被静默覆盖 */
       ...(result.ok ? { path: result.path, replaced: result.replaced, atLine: result.line } : { error: result.error }),
     };
+  },
+
+  /*
+   * Computer Use（V6-2n）：工具那条路已经过**工具闸门**（策略表里是 write，按需确认会停下来问），
+   * 这里只再检查一次"用户是否授权了电脑操作"（默认关）。
+   */
+  [COMPUTER_SCREENSHOT_TOOL]: async () => {
+    const got = await runComputerAction({ kind: "screenshot" }, { requireEnabled: true, approvedBy: "tool-gate" });
+    return got.ok
+      ? { ok: true, line: got.detail, ...(got.path ? { path: got.path } : {}), ...(got.width ? { width: got.width, height: got.height } : {}) }
+      : { ok: false, error: got.error };
+  },
+  [COMPUTER_CLICK_TOOL]: async (input) => {
+    const { x, y, button } = input as { x: number; y: number; button?: "left" | "right" };
+    const got = await runComputerAction({ kind: "click", x, y, ...(button ? { button } : {}) }, { requireEnabled: true, approvedBy: "tool-gate" });
+    return got.ok ? { ok: true, line: got.detail } : { ok: false, error: got.error };
+  },
+  [COMPUTER_TYPE_TOOL]: async (input) => {
+    const { text } = input as { text: string };
+    const got = await runComputerAction({ kind: "type", text }, { requireEnabled: true, approvedBy: "tool-gate" });
+    return got.ok ? { ok: true, line: got.detail } : { ok: false, error: got.error };
+  },
+  [COMPUTER_KEY_TOOL]: async (input) => {
+    const { key } = input as { key: ComputerKey };
+    const got = await runComputerAction({ kind: "key", key }, { requireEnabled: true, approvedBy: "tool-gate" });
+    return got.ok ? { ok: true, line: got.detail } : { ok: false, error: got.error };
   },
 
   [RUN_COMMAND_TOOL]: async (input, env) => {

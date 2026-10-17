@@ -16,6 +16,7 @@ import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
 import { registerStatsIpc } from "./ipc/stats";
 import { registerWorkflowIpc } from "./ipc/workflowStore";
 import { registerPreviewIpc } from "./ipc/preview";
+import { registerComputerIpc } from "./ipc/computer";
 import { registerCanvasIpc } from "./ipc/canvas";
 import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
@@ -421,6 +422,8 @@ safeRegister("stats", () => registerStatsIpc(), logRegisterFailure);
 safeRegister("workflow", () => registerWorkflowIpc(), logRegisterFailure);
 /* 内置浏览器预览（V6-2m）：只允许本机地址、独立持久分区 */
 safeRegister("preview", () => registerPreviewIpc(), logRegisterFailure);
+/* Computer Use（V6-2n）：默认关；每个动作原生确认 + 留痕（不记输入内容） */
+safeRegister("computer", () => registerComputerIpc(() => win), logRegisterFailure);
 
 safeRegister("canvas", () => registerCanvasIpc(), logRegisterFailure);
 safeRegister("canvas-export", () => registerCanvasExportIpc(), logRegisterFailure);

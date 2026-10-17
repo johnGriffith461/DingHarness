@@ -3,6 +3,7 @@ import { useState } from "react";
 import { CONFIRM_MODES, type ConfirmMode } from "@shared/ipc";
 import { MEMBER_ROLES, ROLE_LABEL } from "@engine/core/members";
 import { NavCollapseButton } from "./NavCollapseButton";
+import { ComputerUseCard } from "./ComputerUseCard";
 import { VERDICT_LABEL, matrixRows, verdictHint, type Verdict } from "./permissionMatrix";
 
 /**
@@ -105,6 +106,8 @@ export function PermissionMatrixPage() {
         图例：放行 = 直接执行；要确认 = 这一次调用等用户/审批人点头；
         直接拒 = 不执行也不交审批（让模型尽早知道这条路走不通）；不给模型 = 工具没注入。
       </p>
+
+      <ComputerUseCard />
     </div>
   );
 }
