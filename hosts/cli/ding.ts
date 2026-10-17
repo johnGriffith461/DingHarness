@@ -28,6 +28,7 @@ import { cmdEval } from "./cmdEval";
 import { cmdFork } from "./cmdFork";
 import { cmdWorktree } from "./cmdWorktree";
 import { cmdKnowledge } from "./cmdKnowledge";
+import { cmdAcpDrive } from "./cmdAcpDrive";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
@@ -951,6 +952,7 @@ async function main(): Promise<void> {
     "fork",
     "worktree",
     "knowledge",
+    "acp-drive",
     "config",
     "agents",
   ]);
@@ -1009,6 +1011,8 @@ async function main(): Promise<void> {
                   ? await cmdWorktree(parsed)
                   : parsed.command === "knowledge"
                   ? await cmdKnowledge(parsed, dataDir())
+                  : parsed.command === "acp-drive"
+                  ? await cmdAcpDrive(parsed)
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"

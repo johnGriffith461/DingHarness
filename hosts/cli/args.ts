@@ -72,6 +72,11 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "domain",
   "owner",
   "limit",
+  /* `ding acp-drive`（V6-3f）：外部 agent 的命令/参数/提示词/超时 */
+  "cmd",
+  "arg",
+  "prompt",
+  "timeout",
   "out",
   "by",
   "kind",

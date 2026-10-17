@@ -163,6 +163,7 @@ pnpm ding restore <文件> [--list]              # 从备份恢复（只补不�
 pnpm ding recipe list|show|run|export|import   # 任务模板（可分享）
 pnpm ding serve [--port 8787]                  # Agent Server（REST + SSE；默认只绑回环）
 pnpm ding acp                                  # 作为 ACP agent 跑在 stdio 上（被外部宿主驱动）
+pnpm ding acp-drive --cmd <可执行> --prompt "…"  # 反过来：Ding 驱动外部 ACP agent
 pnpm ding plugins list|install|enable|disable|remove|doctor
 pnpm ding config [show|set <键> <值>|unset <键>] # 默认 provider / 模型 / 档位 / 目录
 ```

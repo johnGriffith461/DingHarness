@@ -41,6 +41,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding fork <会话 id> [--at-turn N | --at-seq N] [--into <新 id>] [--list]  # 从任一时点分叉",
       "  ding worktree start|list|merge|remove <名字> [--base <ref>] [--dir <仓库>] [--yes]  # git 工作树隔离",
       "  ding knowledge add|search|ask|list|remove … [--domain private|team] [--limit n]  # 本地知识库（带引用）",
+      "  ding acp-drive --cmd <可执行> [--arg <参数>…] --prompt \"任务\" [--cwd <目录>]  # 驱动外部 ACP agent",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|search <词>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",
