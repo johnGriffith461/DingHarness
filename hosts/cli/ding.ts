@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,7 @@ import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider, setCustomProviders } from "../../engine/runtime/providers";
+import { PRODUCT_VERSION } from "../../shared/product";
 import { describeBudget } from "../../engine/runtime/budget";
 import { budgetOf } from "../../engine/runtime/budget";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
@@ -617,6 +618,33 @@ async function main(): Promise<void> {
   if (parsed.problems?.length) {
     process.stderr.write(`${parsed.problems.map((line) => `参数不对：${line}`).join("\n")}\n`);
     process.exit(2);
+  }
+  if (parsed.flags.has("version")) {
+    /*
+     * 优先读**安装包自己的** package.json：CLI 可以有补丁版（例如 0.5.1 只修依赖），
+     * 而 `PRODUCT_VERSION` 跟着产品走。两者不一致时，用户问"我装的是哪一版"，
+     * 答案应该是装的那一个。
+     */
+    const candidates: string[] = [];
+    /* 先看**安装包自己**的（dist-cli/hosts/cli → 包根）；源码跑时 __dirname 不存在，再落到 cwd */
+    if (typeof __dirname === "string") {
+      candidates.push(path.join(__dirname, "..", "..", "..", "package.json"), path.join(__dirname, "..", "..", "package.json"));
+    }
+    candidates.push(path.join(process.cwd(), "package.json"));
+    let version = PRODUCT_VERSION;
+    for (const file of candidates) {
+      try {
+        const parsedPkg = JSON.parse(readFileSync(file, "utf8")) as { name?: unknown; version?: unknown };
+        if (parsedPkg.name === "ding-harness" && typeof parsedPkg.version === "string") {
+          version = parsedPkg.version;
+          break;
+        }
+      } catch {
+        /* 试下一个 */
+      }
+    }
+    process.stdout.write(`${version}\n`);
+    process.exit(0);
   }
   if (parsed.unknown?.length) {
     process.stderr.write(

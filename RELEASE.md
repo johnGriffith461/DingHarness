@@ -59,12 +59,12 @@
 
 ⚠️ **第 4 步要主人授权**（对外发布不可逆）。
 2026-10-18 的现状：引擎包 `ding-engine-core@0.1.0` / `ding-engine@0.1.0` 已发布；
-**CLI 主包 `@ding/cli` 已构建并校验、尚未发布**。卡点**只有作用域归属**：
-`@ding` 属于另一个真实 npm 用户（与引擎包当初同一个病），**不是 2FA**
-（账号没有开 2FA；本机 `~/.npmrc` 已有 `sunwenshan` 的可发布令牌）。
-「主仓 CLI 发不发 npm」仍按 2026-10-16 的决定**待主人拍**，拍板前不改名、不发布。
-详见 `packages/cli/PUBLISHING.md`。发布前把根 `package.json` 与
-`packages/cli/package.json` 的 `version` 对齐。
+**CLI 主包已改名并发布为 `ding-harness`（2026-10-18）**。改名原因是 `@ding`
+作用域属于另一个真实 npm 用户（与引擎包当初同一个病）——**不是 2FA**
+（账号没有开 2FA；本机 `~/.npmrc` 用的是 `sunwenshan` 的发布令牌）。
+发布版本 **`0.5.1`**（`0.5.0` 因依赖清单漏 `jszip`、DOCX 入库会失败，已弃用）。
+CLI 补丁版可以独立于产品版本（`PRODUCT_VERSION` 仍是 0.5.0）；`ding --version`
+读安装包自己的 `package.json`。详见 `packages/cli/PUBLISHING.md`。
 
 ## 六、stable / nightly 双轨
 

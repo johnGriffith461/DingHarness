@@ -149,6 +149,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "force",
   "h",
   "help",
+  /* `ding --version`：打印产品版本（与 package.json / PRODUCT_VERSION 同一份） */
+  "version",
   /* `ding bench run --docker`（V6-1a）：判分命令跑在容器里（需要本机有 Docker） */
   "docker",
   /* `ding doctor --fix`（V6-2h）：只做两类安全修复（建目录 / 重建检索索引） */

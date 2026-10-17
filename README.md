@@ -32,10 +32,12 @@ Electron 44 · React 19 · zustand · Vite 7 · React Flow v12 · Vercel AI SDK 
 ## 五分钟上手
 
 ```bash
-# ① 装（两条渠道，选一条）
-#    a. 不想装 Node：用单文件可执行（目标机器什么都不用装）
+# ① 装（三选一）
+#    a. 有 Node：从 npm 装（已发布 ding-harness@0.5.1）
+npm i -g ding-harness
+#    b. 不想装 Node：用单文件可执行（目标机器什么都不用装）
 pnpm cli:bin && node scripts/install-cli.mjs --bin
-#    b. 已经有 Node：装成全局命令
+#    c. 从源码装成全局命令
 node scripts/install-cli.mjs --link
 
 # ② 配（交互式向导：配 key → 选模型 → 选工作目录，全程四问）
@@ -236,7 +238,7 @@ CLI 有**两种装法**，验过的程度不一样 —— 分开说，别混成�
 
 | 跑法 | 是什么 | 谁在验它 |
 |---|---|---|
-| **npm 那条路**（`npm i -g @ding/cli` → `dist-cli/`） | 发布包在 `packages/cli`（`pnpm cli:pkg` 生成），`bin.ding` 指向 `dist-cli/hosts/cli/ding.js`，要目标机器**有 Node**；**尚未发布**——卡点是 `@ding` 作用域归属（不属于本账号），**不是 2FA**；且「发不发」待定，见 [`packages/cli/PUBLISHING.md`](packages/cli/PUBLISHING.md) | `pnpm cli:build` + `pnpm cli:pkg:check` + `node scripts/verify-cli-npm.mjs`（在 `pnpm build` 链里，也在 CI 的 `gates` 里） |
+| **npm 那条路**（`npm i -g ding-harness` → `dist-cli/`） | 发布包在 `packages/cli`（`pnpm cli:pkg` 生成），`bin.ding` 指向 `dist-cli/hosts/cli/ding.js`，要目标机器**有 Node**；包名 `ding-harness`（`@ding` 作用域属于别人，发不了；**与 2FA 无关**） | `pnpm cli:build` + `pnpm cli:pkg:check` + `node scripts/verify-cli-npm.mjs`（在 `pnpm build` 链里，也在 CI 的 `gates` 里） |
 | **单二进制那条路**（`dist-bin/ding-<平台>`） | Bun 编出来的单文件，**不需要目标机器装 Node** | `pnpm cli:release`（= `cli:bin` + `verify-cli-bin.mjs`），CI 里是独立一个 `cli-bin` job |
 | 开发态 | `pnpm ding`（tsx 直接跑源码） | `pnpm test` 里的引擎/宿主测试 |
 

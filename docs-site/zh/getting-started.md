@@ -2,10 +2,9 @@
 
 目标：**干净的机器 → 一条命令装好 → 配一个模型 → 跑完第一轮**。
 
-> 发布状态如实说：`@ding/cli` 包已构建并校验，但**尚未发布到 npm**。
-> 卡点是 **`@ding` 作用域归属**（属于另一个真实 npm 用户，与引擎包当初同一个病），
-> **不是 2FA**；「发不发」也还没拍板（见 `packages/cli/PUBLISHING.md`）。
-> 在发布之前，用下面的「源码跑法」，它跑的是同一条代码路径。
+> 发布状态：CLI 已以 **`ding-harness`** 发布到 npm（`@ding` 作用域属于另一个
+> 真实用户，所以包名不带作用域；**与 2FA 无关**）。也可以走下面的「源码跑法」，
+> 它跑的是同一条代码路径。
 
 ## 源码跑法（现在就能用）
 
@@ -21,7 +20,7 @@ pnpm ding run "把 demo 里的 md 整理成一份纪要" --dir ./demo
 ## 装好之后（npm 路线，发布后）
 
 ```bash
-npm i -g @ding/cli
+npm i -g ding-harness
 ding doctor
 ding init
 ding run "…" --dir ./你的目录

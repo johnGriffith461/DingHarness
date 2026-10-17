@@ -22,16 +22,15 @@ the same approval gates on both.
 ## Install (when published)
 
 ```bash
-npm i -g @ding/cli     # placeholder name: @ding scope belongs to another npm user
+npm i -g ding-harness   # published as ding-harness (the @ding scope belongs to another user)
 ding doctor
 ding init
 ding run "summarize ./docs into memo.md" --dir ./docs
 ```
 
-The CLI package is built and verified but **not published yet**. The blocker is
-**scope ownership**, not 2FA: the `@ding` npm scope belongs to another real user
-(the same problem the engine packages had). Whether to publish at all is still a
-pending owner decision.
+The CLI is published as **`ding-harness`** on npm. The `@ding` scope belongs to
+another real user (the same problem the engine packages had), so the package name
+is unscoped — this had nothing to do with 2FA.
 Desktop builds are Windows-first; see the platform table in the Chinese README.
 
 ## What is not done

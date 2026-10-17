@@ -85,4 +85,4 @@ const walk = (dir) => {
 };
 walk(dist);
 console.log(`✓ packages/cli 可发布：${pkg.name}@${pkg.version}，${files} 个文件 / ${(bytes / 1024 / 1024).toFixed(1)} MB`);
-console.log("  真实发布：先定发布决定并解决 @ding 作用域归属（见 packages/cli/PUBLISHING.md）");
+console.log(`  发布：cd packages/cli && npm publish（包名 ${pkg.name}，见 PUBLISHING.md）`);
