@@ -139,7 +139,14 @@ export async function syncSession(opts: SyncOptions): Promise<SyncReport> {
       }
       const got = await call("POST", `/v1/streams/${encodeURIComponent(sessionId)}/push`, { producerId, epoch, events });
       if (got.json.ok) {
-        pushed += events.length;
+        /*
+         * ⚠️ 计数用中继报的 **`accepted`**（真进去几条），不是"我发了几条"：
+         * 重发同一批时中继回 `accepted: 0, duplicates: N`，而"推了 1 条"是句假话
+         * （测试里就是这么显出来的 —— 第三轮什么都没变，却报"推了 1 条"）。
+         */
+        const accepted = Number(got.json.accepted ?? events.length);
+        pushed += accepted;
+        /* 游标按"**发出去多少**"推进（含被去重的）：去重的那批内容已经在流里了 */
         pushedSeq = from + events.length;
         return { ok: true };
       }
@@ -196,6 +203,36 @@ export async function syncSession(opts: SyncOptions): Promise<SyncReport> {
   }
 }
 
+/**
+ * **常驻同步**：按间隔反复跑（`rounds: "forever"` = 一直跑，Ctrl+C 停）。
+ *
+ * 拆成"轮数 + 间隔 + 每轮回调"是为了**能测**：常驻本身没有可断言的行为，
+ * 但"跑了几轮、每轮结果、间隔对不对"有。CLI 传 `"forever"`。
+ *
+ * ⚠️ 这不是"实时推送"（两端各有本地库，日志只追加）—— 它只是"隔一会儿对一次账"。
+ * 真要毫秒级协作，那是热协作（ADR-0016 §6，V6 的议题）。
+ */
+export async function syncLoop(input: {
+  opts: SyncOptions;
+  rounds: number | "forever";
+  intervalMs: number;
+  /** 睡眠（可注入 —— 测试里给个立刻返回的）。 */
+  sleep?: (ms: number) => Promise<void>;
+  onRound?: (report: SyncReport, index: number) => void;
+}): Promise<SyncReport[]> {
+  const sleep = input.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const out: SyncReport[] = [];
+  for (let index = 0; input.rounds === "forever" || index < input.rounds; index += 1) {
+    const report = await syncSession(input.opts);
+    out.push(report);
+    input.onRound?.(report, index);
+    /* 间隔 = **轮与轮之间**（有限轮数也照睡：语义一致，测试也能注入一个假的睡眠） */
+    const more = input.rounds === "forever" || index + 1 < input.rounds;
+    if (more) await sleep(input.intervalMs);
+  }
+  return out;
+}
+
 /** 短哈希（生产者的默认 id 用；只是要个稳定的名字，不是密码学）。 */
 function hashOf(text: string): number {
   let hash = 0x811c9dc5;
@@ -221,8 +258,19 @@ export async function cmdSync(parsed: Parsed, dataDir: string): Promise<number> 
     return 1;
   }
   const json = parsed.flags.has("json");
+  /*
+   * `--every <秒>` = **常驻**（隔一会儿对一次账，Ctrl+C 停）。
+   * 不给就跑一轮 —— 两种形态共用一个 `syncSession`，没有第二条实现。
+   */
+  const everyRaw = parsed.flags.get("every")?.[0];
+  const everySec = everyRaw ? Number(everyRaw) : 0;
+  if (everyRaw && (!Number.isFinite(everySec) || everySec < 1)) {
+    process.stderr.write(`--every 要给一个 ≥1 的秒数（收到 ${JSON.stringify(everyRaw)}）
+`);
+    return 1;
+  }
   try {
-    const report = await syncSession({
+    const base: SyncOptions = {
       dataDir,
       sessionId,
       to,
@@ -230,7 +278,24 @@ export async function cmdSync(parsed: Parsed, dataDir: string): Promise<number> 
       ...(parsed.flags.get("owner")?.[0] ? { owner: parsed.flags.get("owner")![0]! } : {}),
       ...(parsed.flags.get("producer")?.[0] ? { producerId: parsed.flags.get("producer")![0]! } : {}),
       ...(roomKey ? { roomKey } : {}),
-    });
+    };
+    if (everySec) {
+      process.stdout.write(`常驻同步：每 ${everySec} 秒一轮（Ctrl+C 停）\n`);
+      const reports = await syncLoop({
+        opts: base,
+        rounds: "forever",
+        intervalMs: everySec * 1000,
+        onRound: (report, index) => {
+          process.stdout.write(
+            json
+              ? `${JSON.stringify(report)}\n`
+              : `第 ${index + 1} 轮：推 ${report.pushed} / 拉 ${report.pulled} / 合并 ${report.applied}　本地 ${report.localBefore} → ${report.localAfter}\n`,
+          );
+        },
+      });
+      return reports.length ? 0 : 1;
+    }
+    const report = await syncSession(base);
     if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     else
       process.stdout.write(

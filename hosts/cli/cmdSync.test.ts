@@ -7,7 +7,7 @@ import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { createSyncRelay } from "../../engine/sync/relay";
 import { chatSessionId, type LogInput } from "../../engine/core/events";
 import { boot, cleanupDirs, stopEverything } from "../server/testKit";
-import { syncSession } from "./cmdSync";
+import { syncLoop, syncSession } from "./cmdSync";
 
 /**
  * **`ding sync`：两端同步的产品客户端**（V5-2 的那半；ADR-0017）。
@@ -137,6 +137,38 @@ describe("ding sync（同步客户端）", () => {
     c.close();
     const noKey = await syncSession({ dataDir: dirC, sessionId: sid, to, token, producerId: "device-C" }).catch((error: Error) => error);
     expect(noKey instanceof Error && String(noKey.message).includes("没给房间密钥")).toBe(true);
+  });
+
+  it("⭐ 常驻同步（--every）：按轮数/间隔反复跑，每轮都对一次账", async () => {
+    const { port, token } = await boot({ relay: createSyncRelay() });
+    const sid = chatSessionId("cli-sync-loop");
+    const dirA = tmp();
+    const a = createSqliteSessionStore(dirA);
+    await a.append(sid, [{ requestId: "r1", type: "text", text: "第一轮该推上去" } as LogInput]);
+    a.close();
+
+    const slept: number[] = [];
+    const seen: number[] = [];
+    const reports = await syncLoop({
+      opts: { dataDir: dirA, sessionId: sid, to: `http://127.0.0.1:${port}`, token, producerId: "device-loop" },
+      rounds: 3,
+      intervalMs: 25,
+      /* 睡眠注入：测试不该真等（而且顺便量了"间隔有没有用上"） */
+      sleep: async (ms) => {
+        slept.push(ms);
+        /* 第二轮之前本地长一条 —— 证明**每一轮都重新算**（不是复用第一轮的结果） */
+        if (slept.length === 1) {
+          const store = createSqliteSessionStore(dirA);
+          await store.append(sid, [{ requestId: "r1", type: "text", text: "第二轮新的" } as LogInput]);
+          store.close();
+        }
+      },
+      onRound: (report, index) => seen.push(`#${index + 1}:${report.pushed}`),
+    });
+    expect(reports).toHaveLength(3);
+    expect(slept, "间隔没传下去（或者只睡了一次）").toEqual([25, 25]);
+    expect(seen, "每轮的结果没回调出来").toEqual(["#1:1", "#2:1", "#3:0"]);
+    expect(reports[2]!.applied, "第三轮没有新东西了（幂等）").toBe(0);
   });
 
   it("⭐ 本地没有这段会话：不猜归属（不给 --owner 就拒绝）", async () => {

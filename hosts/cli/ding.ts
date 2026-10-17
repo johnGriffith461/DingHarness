@@ -24,6 +24,7 @@ import { cmdResume } from "./cmdResume";
 import { cmdAcp, cmdServe } from "./cmdServe";
 import { cmdSpace } from "./cmdSpace";
 import { cmdSync } from "./cmdSync";
+import { cmdApprovals } from "./cmdApprovals";
 import { cmdRecipe } from "./cmdRecipe";
 import { cmdConnect } from "./cmdConnect";
 import { cmdHelp } from "./help";
@@ -801,6 +802,7 @@ async function main(): Promise<void> {
     "recipe",
     "space",
     "sync",
+    "approvals",
     "serve",
     "connect",
     "acp",
@@ -836,6 +838,8 @@ async function main(): Promise<void> {
                 ? await cmdPlugins(parsed)
                 : parsed.command === "recipe"
                   ? await cmdRecipe(parsed, dataDir())
+                  : parsed.command === "approvals"
+                    ? await cmdApprovals(parsed)
                   : parsed.command === "sync"
                     ? await cmdSync(parsed, dataDir())
                   : parsed.command === "space"
