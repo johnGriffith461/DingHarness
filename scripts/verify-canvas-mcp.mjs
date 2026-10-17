@@ -8,6 +8,8 @@
  * 3. `tools/call` 加一个节点 → 结果里带回节点 id；
  * 4. **读磁盘上的画布文档**：节点真在里面、revision 涨了（这一步是关键 ——
  *    不然"能调"只证明了协议，没证明画布真的被改了）；
+ * 4b. **事件也落了盘**（C6 3.9a）：`canvas_events` 里有对应的 `node.create`，
+ *    而且 `actor` 是 `mcp:<客户端名>`（"谁改的画布"要查得到）；
  * 5. 参数不合法时：回的是**工具层的结果**（`isError: true`）而不是协议错 ——
  *    与内核"错误即结果"同一个口径；
  * 6. 不认识的方法 → 协议错 `-32601`（协议层该守的规矩照守）。
@@ -23,6 +25,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bad = [];
@@ -122,6 +125,24 @@ try {
   ok(second.result?.isError !== true, "第二个节点也加上了");
   const doc2 = JSON.parse(readFileSync(docFile, "utf8"));
   ok(doc2.nodes.length === 2 && doc2.nodes[1].type === "code" && doc2.nodes[1].data.lang === "js", "两个节点都在，第二个是 code/js");
+
+  /* ④b 事件也落了盘（C6 3.9a）：画布终于有账了 —— 谁在什么时候加了哪个节点 */
+  const dbFile = path.join(dataDir, "sessions.db");
+  ok(existsSync(dbFile), "事件库（sessions.db）在数据目录里");
+  const db = new DatabaseSync(dbFile);
+  try {
+    const rows = db.prepare("SELECT seq, type, actor_id, actor_kind FROM canvas_events ORDER BY seq").all();
+    const types = rows.map((r) => String(r.type));
+    ok(types.includes("canvas.open") && types.filter((t) => t === "node.create").length === 2, `画布事件落了盘（${types.join(" / ")}）`);
+    ok(
+      rows.every((r) => String(r.actor_id) === "mcp:verify"),
+      `事件的 actor 是发起这次调用的客户端（${String(rows[0]?.actor_id)}，C5：谁改的要查得到）`,
+    );
+    /* 文档与事件流对得上（派生缓存与真相一致） */
+    ok(Number(db.prepare("SELECT current_revision AS r FROM canvases WHERE id = ?").get("canvas-default")?.r ?? 0) >= 2, "canvases 的修订位点跟着走");
+  } finally {
+    db.close();
+  }
 
   /* ⑤ 参数不合法：工具层的结果（不是协议错） */
   const badKind = await call("tools/call", { name: "canvas_add_node", arguments: { kind: "image", text: "x" } });

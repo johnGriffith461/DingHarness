@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createCanvasStore, type CanvasStore } from "../../engine/adapters/sqliteCanvasStore";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
 import {
   applyCanvasTool,
+  CANVAS_ID,
   canvasDataDir,
   canvasDocPath,
   canvasTools,
@@ -57,8 +59,18 @@ export function writeDoc(file: string, doc: CanvasDoc): void {
 
 type Rpc = { jsonrpc?: string; id?: unknown; method?: string; params?: unknown };
 
-/** 处理一条 JSON-RPC 消息；返回要回的那一条（通知返回 null）。 */
-export function handleMessage(raw: string, deps: { docFile: string; log?: (l: string) => void }): string | null {
+/**
+ * 处理一条 JSON-RPC 消息；返回要回的那一条（通知返回 null）。
+ *
+ * @param deps.docFile 画布文档（`document.json`）—— **派生缓存**，下面 `canvas` 才是真相
+ * @param deps.canvas 画布事件库（V5 收尾）。不给 = 只写那份 JSON（老行为）——
+ *   但那样"谁改的画布"就查不到，所以真实运行路径一定给（见文件尾的启动处）
+ * @param deps.actor 谁在改（MCP 客户端）—— 进事件流的 `actor`（C5）
+ */
+export function handleMessage(
+  raw: string,
+  deps: { docFile: string; log?: (l: string) => void; canvas?: CanvasStore; actor?: { id: string; kind: "user" } },
+): string | null {
   let msg: Rpc;
   try {
     msg = JSON.parse(raw) as Rpc;
@@ -103,6 +115,15 @@ export function handleMessage(raw: string, deps: { docFile: string; log?: (l: st
           /* 工具层的拒绝是**结果**不是协议错（与内核"错误即结果"同一个口径） */
           return ok({ content: [{ type: "text", text: applied.error }], isError: true });
         }
+        /*
+         * ⭐ **事件进日志，文档是派生缓存**（V5 收尾；C6 3.9a）：
+         * 外部客户端改了画布，这件事必须留痕（"谁在什么时候加了哪个节点"）——
+         * 光写 document.json 的话，审计与合作那两侧都看不见。
+         */
+        if (deps.canvas) {
+          const actor = deps.actor ?? { id: "mcp", kind: "user" as const };
+          deps.canvas.save({ canvasId: CANVAS_ID, doc: applied.doc, owner: "local", actor });
+        }
         writeDoc(deps.docFile, applied.doc);
         deps.log?.(`${name} → revision ${applied.doc.revision}（${applied.doc.nodes.length} 个节点）`);
         return ok(applied.result);
@@ -121,13 +142,31 @@ export function handleMessage(raw: string, deps: { docFile: string; log?: (l: st
 }
 
 /** 主循环：逐行读 stdin，把回应写 stdout。 */
-export function startServer(deps: { docFile: string }): Promise<void> {
+export function startServer(deps: { docFile: string; canvas?: CanvasStore }): Promise<void> {
   const rl = createInterface({ input: process.stdin, terminal: false });
+  /*
+   * 谁在改（C5）：握手时客户端会报名字 —— 记下来进事件的 `actor`
+   * （`mcp:<名字>` 一眼能看出这不是本机用户改的）。没握手就用 `mcp`。
+   */
+  let clientName = "mcp";
   return new Promise((resolve) => {
     rl.on("line", (line) => {
       const trimmed = line.trim();
       if (!trimmed) return;
-      const out = handleMessage(trimmed, { docFile: deps.docFile, log });
+      /* 从 initialize 里记下客户端名字（解析失败就算了 —— 那一条由 handleMessage 去答） */
+      try {
+        const peek = JSON.parse(trimmed) as { method?: string; params?: { clientInfo?: { name?: unknown } } };
+        const name = peek?.params?.clientInfo?.name;
+        if (peek?.method === "initialize" && typeof name === "string" && name.trim()) clientName = `mcp:${name.trim().slice(0, 40)}`;
+      } catch {
+        /* 不是 JSON：交给 handleMessage 去回 -32700 */
+      }
+      const out = handleMessage(trimmed, {
+        docFile: deps.docFile,
+        log,
+        ...(deps.canvas ? { canvas: deps.canvas } : {}),
+        actor: { id: clientName, kind: "user" },
+      });
       if (out !== null) process.stdout.write(`${out}\n`);
     });
     rl.on("close", () => resolve());
@@ -138,6 +177,8 @@ export function startServer(deps: { docFile: string }): Promise<void> {
 if (process.argv[1] && /canvasServer\.(ts|js)$/.test(process.argv[1].replace(/\\/g, "/"))) {
   const dataDir = canvasDataDir();
   const docFile = canvasDocPath(dataDir);
-  log(`画布文档：${docFile}`);
-  await startServer({ docFile });
+  /* 事件库就在同一个数据目录的会话库文件里（与桌面同一份 —— 环境变量指到同一个目录时） */
+  const canvas = createCanvasStore(dataDir, "sessions.db");
+  log(`画布文档：${docFile}（事件记进 ${dataDir}/sessions.db 的 canvas_events）`);
+  await startServer({ docFile, canvas });
 }

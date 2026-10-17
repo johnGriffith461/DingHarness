@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { CANVAS_VERSION, migrateCanvasDoc, type CanvasDocument, type CanvasSnapshotFile } from "../../shared/canvas";
+import { LOCAL_USER } from "../../engine/core/events";
+import { createCanvasStore, type CanvasStore } from "../../engine/adapters/sqliteCanvasStore";
 /**
  * 快照落盘（PLAN 4.2 / 4.3 / 4.5）。
  *
@@ -18,6 +20,33 @@ import { CANVAS_VERSION, migrateCanvasDoc, type CanvasDocument, type CanvasSnaps
 /** 快照目录。 */
 export function snapshotDir(): string {
   return path.join(app.getPath("userData"), "canvas");
+}
+
+/**
+ * **画布事件库**（V5 收尾；C6 3.9a）：`canvas_events` / `canvases` 两张表，
+ * 与会话库同一个文件（`userData/sessions.db`）。
+ *
+ * ⚠️ 懒建（`app.getPath("userData")` 在模块加载时可能还是默认目录 —— 与
+ * `desktopSessionStore()` 同一个坑，那边的注释里写着）。
+ *
+ * 一这份数据目录**一张画布**（`document.json` 是那一张）：所以 id 是常量。
+ * 多画布（一张一 id）是后面的事 —— 表是按 id 建的，随时能接。
+ */
+const DESKTOP_CANVAS_ID = "canvas-default";
+let canvasStore: CanvasStore | null = null;
+function desktopCanvasStore(): CanvasStore {
+  if (!canvasStore) canvasStore = createCanvasStore(app.getPath("userData"), "sessions.db");
+  return canvasStore;
+}
+
+/**
+ * 关掉画布事件库的句柄（**测试要它**：`env.userData` 每个用例换一个目录，
+ * 而缓存住的那个 store 还指着上一个 —— 不关的话下一个用例写的账落在旧目录里，
+ * 表现是"事件流是空的"，而其实写成功了）。
+ */
+export function closeDesktopCanvasStore(): void {
+  canvasStore?.close();
+  canvasStore = null;
 }
 
 function docPath(): string {
@@ -133,6 +162,24 @@ export function saveDocument(doc: CanvasDocument): SaveResult {
     // 写出去的一律盖上当前版本号（渲染侧给的 version 不作为事实来源，这里才是）
     const next: CanvasDocument = { ...doc, version: CANVAS_VERSION, updatedAt: savedAt };
     writeJsonAtomic(docPath(), next);
+
+    /*
+     * ⭐ **把这一步记成事件**（V5 收尾；C6 3.9a 的验收"画布操作产生可回放事件"）。
+     *
+     * `document.json` 从这一刻起是**派生缓存**：真相在 `canvas_events` 里
+     * （谁在什么时候加了哪个节点 —— 会话日志之外，画布终于也有账了）。
+     * 第一次见到这张画布 = 全量转成事件（存量只读旧写新，3.9d）；之后只追加变化的那几条。
+     *
+     * ⚠️ 事件写不进去**不影响**这次保存（与内核"记录写不进去 ≠ 这一轮没发生"同一个取舍），
+     * 但要**打出来** —— 静默丢事件的后果是"审计里少一截"，那种安静正是本项目最怕的。
+     */
+    try {
+      /* 归属：本机 = `local`（与 C1 的会话归属同一个 id 空间；共享/接管那条路以后接） */
+      const appended = desktopCanvasStore().save({ canvasId: DESKTOP_CANVAS_ID, doc: next, owner: "local", actor: LOCAL_USER });
+      if (appended.appended.length) console.log(`[canvas] 事件 +${appended.appended.length}（revision ${appended.revision}）`);
+    } catch (error) {
+      console.error("[canvas] 事件没写进去（画布文件已保存）：", error instanceof Error ? error.message : error);
+    }
     // 同时留一份"按 revision 命名"的历史，便于版本回溯与人工排查
     try {
       writeJsonAtomic(path.join(snapshotDir(), `rev-${doc.revision}.json`), next);
@@ -217,6 +264,18 @@ export function loadDocument(): LoadResult {
     }
   }
   if (migration.foreign) console.error("[canvas]", migration.note);
+
+  /*
+   * ⭐ 与**事件流**对一下账（V5 收尾）：`document.json` 是派生缓存，真相在 `canvas_events`。
+   * 对不上就**报出来**（有人手改了那份 JSON，或者上一次事件写失败过）——
+   * 不静默覆盖：静默覆盖会让"历史少了一截"这件事一点声音都没有。
+   */
+  try {
+    const drift = desktopCanvasStore().drift(DESKTOP_CANVAS_ID, doc);
+    if (drift) console.error("[canvas]", drift);
+  } catch {
+    /* 事件库读不动不该让画布打不开（它是账本，不是内容） */
+  }
 
   // 正常关闭：revision 已被 ack
   if (doc.confirmedRevision >= doc.revision) return { doc, recovered: false };

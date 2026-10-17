@@ -41,6 +41,12 @@ export function canvasDataDir(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(env.USERPROFILE ?? env.HOME ?? ".", ".ding");
 }
 
+/**
+ * 这份数据目录里的画布 id（一目录一张 —— 与桌面 `snapshotStore` 同一个口径；
+ * 多画布是后面的事，`canvas_events` / `canvases` 两张表都是按 id 建的）。
+ */
+export const CANVAS_ID = "canvas-default";
+
 /** 画布文档文件（与桌面 `snapshotStore.ts` 同一个相对位置）。 */
 export function canvasDocPath(dataDir: string): string {
   return path.join(dataDir, "canvas", "document.json");

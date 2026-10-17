@@ -4,8 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CANVAS_VERSION } from "@shared/canvas";
-import { documentStatus, loadDocument, saveDocument, snapshotDir } from "../electron/ipc/snapshotStore";
+import { closeDesktopCanvasStore, documentStatus, loadDocument, saveDocument, snapshotDir } from "../electron/ipc/snapshotStore";
 import { removeAll } from "./testFs";
+import { createCanvasStore } from "@engine/adapters/sqliteCanvasStore";
 
 /**
  * 画布快照的**坏文件处置**（P15）。
@@ -49,6 +50,8 @@ function doc(patch: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  /* 画布事件库是**缓存住**的（生产就该这样）：每个用例换目录时要先松开它 */
+  closeDesktopCanvasStore();
   env.userData = fs.mkdtempSync(path.join(os.tmpdir(), "dh-snap-"));
   fs.mkdirSync(snapshotDir(), { recursive: true });
 });
@@ -88,6 +91,61 @@ describe("画布快照：坏文件不许被当成「空画布」覆盖（P15）"
     const res = saveDocument(doc({ revision: 3 }));
     expect(res.ok).toBe(true);
     expect(documentStatus().revision).toBe(3);
+  });
+
+  it("⭐ 保存之后**画布事件也落了盘**（C6 3.9a）：事件流折回来 = 保存的那份；再存只追加差", () => {
+    const first = saveDocument(doc({ revision: 1, nodes: [{ id: "n1", type: "markdown", position: { x: 0, y: 0 }, data: { text: "甲" } }] }));
+    expect(first.ok).toBe(true);
+
+    const store = createCanvasStore(env.userData);
+    try {
+      const events = store.events("canvas-default");
+      /* 第一次见到这张画布 = 全量转换（存量只读旧写新）：open + 一个节点 */
+      expect(events.map((e) => e.type)).toEqual(["canvas.open", "node.create"]);
+      expect(store.docOf("canvas-default").nodes).toEqual([{ id: "n1", type: "markdown", position: { x: 0, y: 0 }, data: { text: "甲" } }]);
+      expect(store.ownerOf("canvas-default")).toBe("local");
+      /* 谁改的（C5）：桌面 = 本机用户 */
+      expect(events[0]!.actor).toEqual({ id: "local", kind: "user" });
+
+      /* 什么都没改再存一次：一条也不该多出来 */
+      saveDocument(doc({ revision: 1, nodes: [{ id: "n1", type: "markdown", position: { x: 0, y: 0 }, data: { text: "甲" } }] }));
+      expect(store.events("canvas-default")).toHaveLength(2);
+
+      /* 加一个节点：只追加一条 node.create */
+      saveDocument(
+        doc({
+          revision: 2,
+          nodes: [
+            { id: "n1", type: "markdown", position: { x: 0, y: 0 }, data: { text: "甲" } },
+            { id: "n2", type: "markdown", position: { x: 340, y: 0 }, data: { text: "乙" } },
+          ],
+        }),
+      );
+      const after = store.events("canvas-default");
+      expect(after).toHaveLength(3);
+      expect(after[2]!.type).toBe("node.create");
+      expect(store.docOf("canvas-default").nodes).toHaveLength(2);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("⭐ document.json 被手改之后：与事件流对不上要**报出来**（不静默覆盖）", () => {
+    saveDocument(doc({ revision: 1, nodes: [{ id: "n1", type: "markdown", position: { x: 0, y: 0 }, data: { text: "甲" } }] }));
+    /* 手改那份缓存：加一个事件流里没有的节点 */
+    fs.writeFileSync(
+      docFile(),
+      JSON.stringify(doc({ revision: 2, nodes: [{ id: "x", type: "markdown", position: { x: 0, y: 0 }, data: { text: "手改的" } }] })),
+      "utf8",
+    );
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.map(String).join(" ")));
+    try {
+      loadDocument();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.join(" ")).toContain("真相是事件流");
   });
 
   it("③ 文件**真的**不存在时仍算新装用户（不要把 missing 也当 corrupt）", () => {
