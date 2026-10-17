@@ -16,6 +16,8 @@ export type TurnTraceView = {
   output: number;
   ok: boolean;
   toolCalls: number;
+  /** 其中失败了几次（工具报错或被执行体拒绝）。L08 加的；老数据没有就当 0。 */
+  toolFailures?: number;
   error?: string;
 };
 

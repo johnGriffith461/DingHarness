@@ -79,7 +79,7 @@ export function readTurnTraces(dbFile: string, opts: { since: number; limit?: nu
     const rows = db
       .prepare(
         `SELECT session_id, seq, at, type, payload FROM events
-          WHERE at >= ? AND type IN ('request','done','error','tool-call')
+          WHERE at >= ? AND type IN ('request','done','error','tool-call','tool-result')
           ORDER BY session_id, seq`,
       )
       .all(opts.since) as { session_id?: string; seq?: number; at?: number; type?: string; payload?: string }[];
@@ -91,6 +91,7 @@ export function readTurnTraces(dbFile: string, opts: { since: number; limit?: nu
       request: Record<string, unknown>;
       at: number;
       tools: number;
+      toolFailures: number;
       done: boolean;
       error?: string;
       usage?: Usage;
@@ -110,6 +111,7 @@ export function readTurnTraces(dbFile: string, opts: { since: number; limit?: nu
         output: usage?.outputTokens ?? 0,
         ok: current.done && !current.error,
         toolCalls: current.tools,
+        toolFailures: current.toolFailures,
         ...(current.error ? { error: current.error } : {}),
       });
       current = null;
@@ -120,11 +122,13 @@ export function readTurnTraces(dbFile: string, opts: { since: number; limit?: nu
       if (!payload) continue;
       if (row.type === "request") {
         flush();
-        current = { sessionId: String(row.session_id ?? ""), request: payload, at: Number(row.at ?? 0), tools: 0, done: false };
+        current = { sessionId: String(row.session_id ?? ""), request: payload, at: Number(row.at ?? 0), tools: 0, toolFailures: 0, done: false };
         continue;
       }
       if (!current) continue;
       if (row.type === "tool-call") current.tools += 1;
+      /* L08：工具失败率（payload 里有 error 就算一次失败） */
+      else if (row.type === "tool-result" && typeof payload.error === "string" && payload.error) current.toolFailures += 1;
       else if (row.type === "done") {
         current.done = true;
         current.usage = payload.usage as Usage | undefined;

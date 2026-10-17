@@ -94,6 +94,13 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "resume",
   "out",
   "by",
+  /* `ding stats --days N`（L08） */
+  "days",
+  /* `ding board`（L02）：依赖、认领人、版本、说明、任务 id */
+  "after",
+  "id",
+  "rev",
+  "note",
   "kind",
   "export",
   /* `ding sessions --state <会话 id>`（U01）：回放运行态（运行中/等确认/暂停…） */
@@ -140,6 +147,10 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "yes",
   /* `ding run --background`（G06）：交给后台任务，父进程立刻返回 */
   "background",
+  /* `ding import --dry-run`（L09）：只报告会导入什么，不写盘 */
+  "dry-run",
+  /* `ding board inbox --ack`（L02）：把收件箱标记为已读 */
+  "ack",
   "dev",
   "continue",
   "update-baseline",

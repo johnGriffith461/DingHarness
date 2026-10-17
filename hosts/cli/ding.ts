@@ -34,6 +34,10 @@ import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdReview } from "./cmdReview";
 import { cmdJobs, cmdSteer, recordJobExit, spawnBackgroundRun } from "./cmdJobs";
+import { runTreeCommand } from "./cmdTree";
+import { cmdStats } from "./cmdStats";
+import { cmdExport, cmdImport } from "./cmdTransfer";
+import { cmdBoard } from "./cmdBoard";
 import { drainSteer } from "../../engine/runtime/inbox";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
 import { renderRecords } from "./renderRecords";
@@ -818,76 +822,54 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const code =
-    parsed.command === "run"
-      ? await cmdRun(parsed)
-      : parsed.command === "sessions"
-        ? await cmdSessions(parsed, dataDir())
-        : parsed.command === "review"
-          ? await cmdReview(parsed, dataDir())
-          : parsed.command === "jobs"
-            ? cmdJobs(parsed, dataDir())
-            : parsed.command === "steer"
-              ? cmdSteer(parsed, dataDir())
-          : parsed.command === "record"
-          ? await cmdRecord(parsed)
-          : parsed.command === "replay"
-            ? await cmdReplay(parsed)
-            : parsed.command === "models"
-              ? cmdModels(parsed)
-              : parsed.command === "plugins"
-                ? await cmdPlugins(parsed, dataDir())
-                : parsed.command === "recipe"
-                  ? await cmdRecipe(parsed, dataDir())
-                  : parsed.command === "approvals"
-                    ? await cmdApprovals(parsed)
-                  : parsed.command === "sync"
-                    ? await cmdSync(parsed, dataDir())
-                  : parsed.command === "space"
-                    ? await cmdSpace(parsed, dataDir())
-                  : parsed.command === "serve"
-                  ? await cmdServe(parsed, dataDir())
-                  : parsed.command === "connect"
-                  ? await cmdConnect(parsed)
-                  : parsed.command === "acp"
-                    ? await cmdAcp(parsed, dataDir())
-                    : parsed.command === "resume"
-                  ? await cmdResume(parsed, dataDir())
-                  : parsed.command === "backup"
-                  ? await cmdBackup(parsed, warnDesktopRoot(parsed))
-                  : parsed.command === "restore"
-                    ? await cmdRestore(parsed, warnDesktopRoot(parsed))
-                    : parsed.command === "doctor"
-                  ? cmdDoctor(parsed, dataDir())
-                  : parsed.command === "init"
-                    ? await cmdInit(parsed, dataDir())
-                    : parsed.command === "eval"
-                  ? await cmdEval(parsed)
-                  : parsed.command === "bench"
-                  ? await cmdBench(parsed)
-                  : parsed.command === "fork"
-                  ? await cmdFork(parsed, dataDir())
-                  : parsed.command === "worktree"
-                  ? await cmdWorktree(parsed)
-                  : parsed.command === "knowledge"
-                  ? await cmdKnowledge(parsed, dataDir())
-                  : parsed.command === "acp-drive"
-                  ? await cmdAcpDrive(parsed)
-                  : parsed.command === "providers"
-                  ? await cmdProviders(parsed, dataDir())
-                  : parsed.command === "schedule"
-                  ? await cmdSchedule(parsed, dataDir())
-                  : parsed.command === "im"
-                  ? await cmdIm(parsed, dataDir())
-                  : parsed.command === "memory"
-                  ? await cmdMemory(parsed, dataDir())
-                  : parsed.command === "workflow"
-                  ? await cmdWorkflow(parsed, dataDir())
-                  : parsed.command === "config"
-                  ? cmdConfig(parsed)
-                  : parsed.command === "agents"
-                    ? cmdAgents(parsed)
-                    : await cmdDefault(parsed, devMode);
+  /*
+   * 命令分派改成**查表**（L 系列收口）：原来那条三元链每加一条命令就深一层，
+   * 到二十几条时已经无法阅读（缩进也早就对不上）。表里没有的命令走 `cmdDefault`
+   * （帮助 / REPL）；"拼错要报错"那道守卫在上面，与这里无关。
+   */
+  const handlers: Record<string, () => number | Promise<number>> = {
+    run: () => cmdRun(parsed),
+    sessions: () => cmdSessions(parsed, dataDir()),
+    review: () => cmdReview(parsed, dataDir()),
+    stats: () => cmdStats(parsed, dataDir()),
+    board: () => cmdBoard(parsed, dataDir()),
+    export: () => cmdExport(parsed, dataDir(), PRODUCT_VERSION),
+    import: () => cmdImport(parsed, dataDir()),
+    tree: () => runTreeCommand(parsed, dataDir()),
+    jobs: () => cmdJobs(parsed, dataDir()),
+    steer: () => cmdSteer(parsed, dataDir()),
+    record: () => cmdRecord(parsed),
+    replay: () => cmdReplay(parsed),
+    models: () => cmdModels(parsed),
+    plugins: () => cmdPlugins(parsed, dataDir()),
+    recipe: () => cmdRecipe(parsed, dataDir()),
+    approvals: () => cmdApprovals(parsed),
+    sync: () => cmdSync(parsed, dataDir()),
+    space: () => cmdSpace(parsed, dataDir()),
+    serve: () => cmdServe(parsed, dataDir()),
+    connect: () => cmdConnect(parsed),
+    acp: () => cmdAcp(parsed, dataDir()),
+    resume: () => cmdResume(parsed, dataDir()),
+    backup: () => cmdBackup(parsed, warnDesktopRoot(parsed)),
+    restore: () => cmdRestore(parsed, warnDesktopRoot(parsed)),
+    doctor: () => cmdDoctor(parsed, dataDir()),
+    init: () => cmdInit(parsed, dataDir()),
+    eval: () => cmdEval(parsed),
+    bench: () => cmdBench(parsed),
+    fork: () => cmdFork(parsed, dataDir()),
+    worktree: () => cmdWorktree(parsed),
+    knowledge: () => cmdKnowledge(parsed, dataDir()),
+    "acp-drive": () => cmdAcpDrive(parsed),
+    providers: () => cmdProviders(parsed, dataDir()),
+    schedule: () => cmdSchedule(parsed, dataDir()),
+    im: () => cmdIm(parsed, dataDir()),
+    memory: () => cmdMemory(parsed, dataDir()),
+    workflow: () => cmdWorkflow(parsed, dataDir()),
+    config: () => cmdConfig(parsed),
+    agents: () => cmdAgents(parsed),
+  };
+  const handler = parsed.command ? handlers[parsed.command] : undefined;
+  const code = handler ? await handler() : await cmdDefault(parsed, devMode);
   /* 后台任务的子进程：把结束状态写回 jobs.jsonl（父进程那边只是兜底） */
   recordJobExit(dataDir(), code);
   process.exit(code);

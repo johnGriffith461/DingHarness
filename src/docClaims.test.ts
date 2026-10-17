@@ -448,9 +448,18 @@ describe("自述必须有判据 / 点名必须找得到（D9）", () => {
 
     /* 顶层派发：`parsed.command === "x"` */
     /* 命令名允许连字符（`acp-drive` / `run-due` 这类）；只认小写会把它截成 `acp` 然后误报 */
-    const dispatch = new Set(
-      [...ding.slice(ding.indexOf("async function main()")).matchAll(/parsed[.]command === "([a-z][a-z0-9-]*)"/g)].map((m) => m[1]!),
-    );
+    /*
+     * ⚠️ L 系列（2026-10-18）：派发从三元链改成了**查表**，命令名单也搬进了
+     * `hosts/cli/help.ts` 的 `KNOWN_COMMANDS`（帮助表与名单互为唯一真相）。
+     * 所以这里改从那份名单解析；仍保留旧的 `parsed.command ===` 作为兜底，
+     * 这样两种写法都不会让守卫失明。
+     */
+    const helpSource = readFileSync(path.join(ROOT, "hosts/cli/help.ts"), "utf8");
+    const knownBlock = /export const KNOWN_COMMANDS[\s\S]*?new Set\(\[([\s\S]*?)\]\)/.exec(helpSource)?.[1] ?? "";
+    const dispatch = new Set([
+      ...[...knownBlock.matchAll(/"([a-z][a-z0-9-]*)"/g)].map((m) => m[1]!),
+      ...[...ding.slice(ding.indexOf("async function main()")).matchAll(/parsed[.]command === "([a-z][a-z0-9-]*)"/g)].map((m) => m[1]!),
+    ]);
     expect(dispatch.size, "顶层命令派发解析不出来了").toBeGreaterThan(10);
 
     /*

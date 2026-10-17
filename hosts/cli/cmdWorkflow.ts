@@ -29,6 +29,7 @@ import path from "node:path";
 import { resolveSecret } from "../../engine/runtime/credentials";
 import { allProviders, firstAvailableProvider } from "../../engine/runtime/providers";
 import { runWorkflow } from "../../engine/workflow/run";
+import { parseWorkflowDsl } from "../../engine/workflow/dsl";
 import {
   STATUS_LABEL,
   newRun,
@@ -58,6 +59,30 @@ function readRun(file: string): WorkflowRun | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 读一份工作流定义：`.json` 走 JSON，其它（或内容不是 JSON）走 **DSL**（L03）。
+ *
+ * @param file 文件路径
+ * @returns 定义，或者一句说清的问题
+ */
+function readSpecFile(file: string): { spec: WorkflowSpec } | { error: string } {
+  const text = readFileSync(path.resolve(file), "utf8");
+  const trimmed = text.trimStart();
+  if (file.toLowerCase().endsWith(".json") || trimmed.startsWith("{")) {
+    try {
+      return { spec: JSON.parse(text) as WorkflowSpec };
+    } catch (error) {
+      return { error: `JSON 解析失败：${String((error as Error)?.message ?? error)}` };
+    }
+  }
+  const parsed = parseWorkflowDsl(text, { fallbackName: path.basename(file, path.extname(file)) });
+  if (!parsed.ok) {
+    const lines = parsed.problems.map((problem) => `  · ${problem}`).join(String.fromCharCode(10));
+    return { error: `DSL 有问题：` + String.fromCharCode(10) + lines };
+  }
+  return { spec: parsed.spec };
 }
 
 function resolveTarget(p: Parsed, dataDir: string): { provider: string; model?: string } | { error: string } {
@@ -106,7 +131,13 @@ export async function cmdWorkflow(p: Parsed, dataDir: string): Promise<number> {
       return 2;
     }
     try {
-      const spec = JSON.parse(readFileSync(path.resolve(file), "utf8")) as WorkflowSpec;
+      const loaded = readSpecFile(file);
+      if ("error" in loaded) {
+        process.stderr.write(`${loaded.error}
+`);
+        return 1;
+      }
+      const spec = loaded.spec;
       const errors = validateWorkflow(spec);
       if (errors.length) {
         process.stderr.write(`✗ 定义不合法：\n${errors.map((e) => `  · ${e}`).join("\n")}\n`);
