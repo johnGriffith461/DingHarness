@@ -134,6 +134,8 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   computer_windows: { kind: "read" },
   computer_elements: { kind: "read" },
   computer_invoke: { kind: "write" },
+  /* 知识库检索（G15）：只读 */
+  knowledge_search: { kind: "read" },
 };
 
 /** 取一个工具的策略；没声明就当只读。 */

@@ -72,6 +72,8 @@ export function createCliExecutor(opts: {
    * 写入仍然只认 `dirs` —— 这条边界不因为回读而放宽。
    */
   extraReadDirs?: readonly string[];
+  /** 知识库目录（G15；不给 = 这个宿主没有知识库，工具会如实说） */
+  knowledgeDir?: string;
 }): ToolExecutor {
   const { dirs, makeTools } = opts;
   const extraReadDirs = opts.extraReadDirs ?? [];
@@ -202,6 +204,23 @@ export function createCliExecutor(opts: {
             : { error: result.error }),
         };
         return { ok: result.ok, output, ...(result.ok ? {} : { error: result.error }) };
+      }
+
+      case "knowledge_search": {
+        if (!opts.knowledgeDir) {
+          return { ok: false, error: "这个宿主没有配置知识库（用 `ding knowledge add` 之后再试）" };
+        }
+        const { query, limit } = input as { query: string; limit?: number };
+        const { openKnowledgeStore } = await import("../../engine/rag/store");
+        const { describeHits } = await import("../../shared/knowledgeTools");
+        const store = openKnowledgeStore(opts.knowledgeDir);
+        try {
+          const hits = store.search(query, { limit: limit ?? 6 }).map((h) => ({ citation: h.citation ?? h.path ?? h.docId ?? "", text: h.text }));
+          const got = describeHits(hits);
+          return { ok: true, output: { ...got, count: hits.length } };
+        } finally {
+          store.close();
+        }
       }
 
       case "run_command": {

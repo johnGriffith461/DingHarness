@@ -144,6 +144,16 @@ export function withheldCapabilities(): { plugin: string; permissions: PluginPer
 }
 
 /**
+ * 插件工具的资源上限（G18，2026-10-18）。
+ *
+ * ⚠️ 这是**进程内**的上限，不是隔离：插件代码仍与应用同进程、同权限。
+ * 它能挡的是"卡住整轮"与"吐出一个吃爆上下文的巨大结果"，
+ * 挡不住"读任意文件"（要挡那个得把插件搬进独立进程 —— 那是 v2，见文件头）。
+ */
+export const PLUGIN_TOOL_TIMEOUT_MS = 30_000;
+export const PLUGIN_TOOL_MAX_CHARS = 64 * 1024;
+
+/**
  * 跑一个插件工具。
  *
  * @param name 带前缀的完整名字
@@ -153,7 +163,35 @@ export function withheldCapabilities(): { plugin: string; permissions: PluginPer
 export async function runPluginTool(name: string, input: unknown): Promise<unknown> {
   const run = runners.get(name);
   if (!run) throw new Error(`没有这个插件工具：${name}（插件可能被卸载或关掉了）`);
-  return run(input, {});
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`插件工具「${name}」${Math.round(PLUGIN_TOOL_TIMEOUT_MS / 1000)} 秒没有返回，已放弃这次调用`)),
+      PLUGIN_TOOL_TIMEOUT_MS,
+    );
+  });
+  try {
+    const result = await Promise.race([run(input, {}), timeout]);
+    /* 结果过大就**截断并说明**（不静默丢；也不把几十兆塞进上下文） */
+    const text = typeof result === "string" ? result : (() => {
+      try {
+        return JSON.stringify(result);
+      } catch {
+        return "";
+      }
+    })();
+    if (text.length > PLUGIN_TOOL_MAX_CHARS) {
+      return {
+        ok: true,
+        truncated: true,
+        text: text.slice(0, PLUGIN_TOOL_MAX_CHARS),
+        note: `插件结果过长（${text.length} 字符），只保留了前 ${PLUGIN_TOOL_MAX_CHARS} 字符`,
+      };
+    }
+    return result;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**

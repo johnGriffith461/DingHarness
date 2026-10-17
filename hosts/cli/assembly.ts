@@ -37,6 +37,7 @@ export const CLI_TOOLS = [
   "run_command",
   "spawn_agent",
   "spawn_agents",
+  "knowledge_search",
 ] as const;
 
 export type BuiltEngine = {
@@ -106,6 +107,7 @@ export async function buildEngine(
   const executor: ToolExecutor = createCliExecutor({
     dirs,
     extraReadDirs: [spill.dir],
+    knowledgeDir: dataDir,
     makeTools: (mode, depth, provider, signal, only) => {
       if (!makeTools) throw new Error("工具集还没装配好（不应该发生）");
       return makeTools(mode, depth, provider, signal, only);

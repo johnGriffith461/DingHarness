@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { BROWSER_TOOL_SPECS } from "./browserTools";
 import { UIA_TOOL_SPECS } from "./uiaTools";
+import { KNOWLEDGE_TOOL_SPECS } from "./knowledgeTools";
 import { COMPUTER_TOOL_SPECS } from "./computerTools";
 import { isMcpTool, parseMcpToolName } from "./mcp";
 import { MEMORY_TEXT_LIMIT } from "./memory";
@@ -591,6 +592,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   ...COMPUTER_TOOL_SPECS,
   ...BROWSER_TOOL_SPECS,
   ...UIA_TOOL_SPECS,
+  ...KNOWLEDGE_TOOL_SPECS,
 ];
 
 export function toolSpec(name: string): AgentToolSpec | undefined {
