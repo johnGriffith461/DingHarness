@@ -47,10 +47,21 @@ function currentSurface(): Record<string, string> {
     "schema.version": String(SCHEMA_VERSION),
     "schema.migrations": MIGRATIONS.map((m) => `v${m.version}:${m.name}`).join(" | "),
     "schema.tables": "sessions,events,schema_version,events_fts",
+    /* v6 的三张表（ADR-0015）—— 这条是**声明的**（算不出来，但改了必须有人解释） */
+    "schema.tables.v6": "canvases,canvas_events,approvals（+ idx_canvas_events_canvas / idx_approvals_state / idx_sessions_owner）",
+    /* "谁能批"的唯一读口径（ADR-0015）：载荷 + 之后的授权记录，后写覆盖 */
+    "gates.approversFor": "pending 载荷的 approvers + 之后每条 approval-grant 的 approvers（后写覆盖）",
     "record.request.keys": keysOf(
       logLine({ requestId: "r", type: "request", provider: "p", model: "m", messages: [{ role: "user", content: "x" }] } as never, 1, t),
     ),
     "record.text.keys": keysOf(logLine({ requestId: "r", type: "text", text: "x" } as never, 2, t)),
+    /*
+     * 授权记录（C3 3.7b 的流转那一半；ADR-0015）：形状也要冻住 ——
+     * "谁能批"的复盘靠的就是这条记录，它的键位变了等于审计面变了。
+     */
+    "record.approval-grant.keys": keysOf(
+      logLine({ type: "approval-grant", toolCallId: "c", by: "local", target: "bob", approvers: ["local", "bob"], line: "l" } as never, 4, t),
+    ),
     "record.approval.keys": keysOf(
       logLine({ type: "approval", toolCallId: "c", name: "write_file", approved: true, line: "l", decidedBy: "local", approvers: ["local"] } as never, 3, t),
     ),

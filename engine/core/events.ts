@@ -97,54 +97,6 @@ export type TurnRequest = {
   tools?: string[];
 };
 
-/**
- * 日志里的**决策记录**（INV-3）：用户批了还是拒了、放行之后结果如何。
- *
- * ## 为什么它必须进日志
- *
- * 批准/拒绝原来是**纯渲染进程状态**（`chatStore.ts` / `store.ts` 里的 `resolveTool`），
- * 主进程压根不知道 —— 于是：
- * - 重启之后**看不出那条调用到底谁批的**（"等确认"那条会原样回到界面上，用户以为没批过）；
- * - 批准这件事只有放行那次会路过主进程（`ai:runTool`），**拒绝连 IPC 都不发**。
- *
- * 记下来之后：一条被拦下的调用在日志里是"**拦下 → 谁批的 → 结果**"三段，
- * 重放日志就能把界面恢复到那一刻的样子（F3 的聊天历史恢复靠的正是这一条）。
- */
-export type ApprovalRecord = {
-  /**
-   * 哪一轮的调用。
-   *
-   * ⚠️ **可以不填**：批准往往发生在那一轮**结束之后**（用户看着「等你确认」想一会儿才点），
-   * 那时渲染层已经拿不到 requestId 了。真正的配对依据是 `toolCallId`
-   * —— 所以这里允许缺，而 `splitTurns` 会**回溯**把它应用到对应那一轮（见那里的注释）。
-   */
-  requestId?: string;
-  seq: number;
-  at: number;
-  type: "approval";
-  /**
-   * 谁批的（C5）。
-   *
-   * ⚠️ 本机单用户阶段写的是 `LOCAL_USER`；**V5-1 3.7（C3）会把它换成"真正的裁决人"**
-   * （审批人集合里的那一个成员）—— 那时这一格就是审计答案"谁批的"本身。
-   */
-  actor?: Actor;
-  /** 针对哪一次调用（与 `tool-call` / `tool-result` 同一个 id）。 */
-  toolCallId: string;
-  /** **谁批的**（C3，3.7b；老记录没有这一格 → 读回按 `"legacy"` 兜底，不编名字）。 */
-  decidedBy?: string;
-  /** 当时**待谁批**（成员 id 集合；也是可选的，老记录没有）。 */
-  approvers?: string[];
-  name: string;
-  /** 用户批了没有。 */
-  approved: boolean;
-  /** 放行执行的结果（拒绝时没有：拒绝不执行）。 */
-  ok?: boolean;
-  output?: unknown;
-  error?: string;
-  /** 界面上那一行（主进程生成，与放行时返回给界面的**同一句**）。 */
-  line: string;
-};
 
 /**
  * **是谁写下了这条记录**（C5）—— 形状与四种 kind 的取舍在 `./actor.ts`（拆出去的理由也写在那儿：
@@ -155,8 +107,22 @@ export type ApprovalRecord = {
 import { normalizeActor, type Actor } from "./actor";
 export { actorOf, normalizeActor, LEGACY_ACTOR, LOCAL_USER, MAIN_AGENT, SYSTEM_ACTOR, type Actor, type ActorKind } from "./actor";
 
+/*
+ * 两条审批记录（决策 / 授权）与它们的收窄函数也搬出去了（同一套理由：本文件顶着
+ * 巨石守卫的天花板）。**两型原样 re-export** —— 既有 import 一律不变，
+ * 契约面（`record.approval.keys` / `record.approval-grant.keys`）读的就是它们。
+ */
+import {
+  normalizeApprovalGrantRecord,
+  normalizeApprovalRecord,
+  type ApprovalGrantRecord,
+  type ApprovalRecord,
+} from "./records/approvals";
+export type { ApprovalGrantRecord, ApprovalRecord } from "./records/approvals";
+
+
 /** 日志里可能出现的一条记录。 */
-export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord;
+export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord | ApprovalGrantRecord;
 
 /**
  * 会话 id 的前缀：**会话日志要能分清"这是哪条路写下来的"**。
@@ -454,6 +420,13 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
     const delegations = idx >= 0 ? state.delegations.map((d, i) => (i === idx ? { ...next, at: d.at } : d)) : [...state.delegations, next];
     return { ...state, delegations };
   }
+
+  /*
+   * 授权记录**不改变这一轮的内容**（它改的是"谁能批"），所以投影里显式忽略 ——
+   * 写这一支不是多此一举：它把"这是刻意的"写在代码里，而不是靠下面那句兜底
+   * （兜底那条注释说的正是"不认识 ≠ 失败"，但**认识的也可以不改内容**）。
+   */
+  if (event.type === "approval-grant") return state;
 
   if (event.type === "error") return { ...state, done: true, error: event.message };
 
@@ -844,19 +817,9 @@ export function parseLogLine(line: string): LogRecord | null {
     if (!Array.isArray(o.messages)) return null;
     return o as TurnRequest;
   }
-  if (o.type === "approval") {
-    // 决策记录：id / 批没批 / 那一行 —— 少一样就不是一条能重放的记录
-    // ⚠️ 不要求 requestId：批准常常发生在那一轮结束之后（那时渲染层已拿不到它），见 ApprovalRecord
-    if (typeof o.toolCallId !== "string" || typeof o.approved !== "boolean") return null;
-    if (typeof o.line !== "string" || typeof o.name !== "string") return null;
-    /*
-     * C3 的两格（谁批的 / 当时待谁批）**可选**，但形状坏掉的要收窄掉 ——
-     * 留着 `decidedBy: 42` 会让读的人以为"有人批了"，而那个 id 谁都不是。
-     */
-    if (o.decidedBy !== undefined && (typeof o.decidedBy !== "string" || !o.decidedBy.trim())) delete o.decidedBy;
-    if (o.approvers !== undefined && (!Array.isArray(o.approvers) || !o.approvers.length)) delete o.approvers;
-    return o as ApprovalRecord;
-  }
+  /* 审批两型（决策 / 授权）的收窄在 `./records/approvals.ts` —— 形状规矩写在那边 */
+  if (o.type === "approval") return normalizeApprovalRecord({ ...o });
+  if (o.type === "approval-grant") return normalizeApprovalGrantRecord({ ...o });
   if (typeof o.requestId !== "string") return null;
   /*
    * 委派进度：`delegationId` / `agent` / `status` 少一样就不是一条能重放的记录

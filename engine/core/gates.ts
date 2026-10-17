@@ -1,4 +1,4 @@
-import { splitTurns, type ApprovalRecord, type LogRecord, type TurnChunk } from "./events";
+import { isPendingOutput, splitTurns, type ApprovalGrantRecord, type ApprovalRecord, type LogRecord, type TurnChunk } from "./events";
 
 /**
  * **审批闸门的语义**（Phase 1 D5 尾部）。
@@ -235,6 +235,69 @@ export function approvalRecord(decision: GateDecision): Omit<ApprovalRecord, "se
       : {}),
     line: decision.line,
   };
+}
+
+/**
+ * **一条待决的授权记录**（`authorizeApprover` 通过之后要落的那条，C3 3.7b）。
+ *
+ * 与 `approvalRecord` 分开两个工厂：一个记"批了/拒了"，一个记"把裁决权授出去了"。
+ * 合成一个的话，"授权"会被读成一次决策（`approved: true/false` 没有对应的语义），
+ * 而重放时那条待决会被误判成已处置。
+ *
+ * @param input.toolCallId 哪条待决
+ * @param input.by 谁授的权（必须是**当时**的审批人之一 —— 判定由 `authorizeApprover` 做）
+ * @param input.target 授给谁
+ * @param input.approvers **授权之后**的集合
+ * @param input.line 界面上那一行
+ * @returns 记录（落盘形态由 store 补 `seq`/`at`）
+ */
+export function grantRecord(input: {
+  toolCallId: string;
+  by: string;
+  target: string;
+  approvers: readonly string[];
+  line: string;
+}): Omit<ApprovalGrantRecord, "seq" | "at"> {
+  return {
+    type: "approval-grant",
+    toolCallId: input.toolCallId,
+    by: input.by,
+    target: input.target,
+    approvers: [...input.approvers],
+    line: input.line,
+  };
+}
+
+/**
+ * **这条待决现在归谁批**（C3 3.7b：pending 载荷 + 之后的授权记录）。
+ *
+ * 读路径的唯一口径，两条来源按顺序叠加：
+ *   ① pending 载荷里的 `approvers`（拦下那一刻定的；老载荷落默认，见 `approversOf`）；
+ *   ② 之后每一条 `approval-grant` 记录的 `approvers`（后写的覆盖前面的 —— 授权是累加的，
+ *      而记录下来的那一份就是"授权之后"的完整集合）。
+ *
+ * ⚠️ 与 `pendingGates`（按轮切好之后的留痕）**不是一回事**：那个给界面看"有哪些待办"，
+ * 这个回答"谁能批"（含运行期授权）—— 后者只有日志能回答（授权记录不属于任何一轮的正文）。
+ *
+ * @param records 整段会话日志（按 seq）
+ * @param toolCallId 哪次调用
+ * @returns 审批人 id（去重、保序；恒非空）
+ */
+export function approversFor(records: readonly LogRecord[], toolCallId: string): string[] {
+  let current: string[] | null = null;
+  for (const record of records) {
+    if (record.type !== "tool-result") continue;
+    if ((record as { toolCallId?: string }).toolCallId !== toolCallId) continue;
+    if (!isPendingOutput((record as { output?: unknown }).output)) continue;
+    current = approversOf((record as { output?: unknown }).output);
+  }
+  for (const record of records) {
+    if (record.type !== "approval-grant") continue;
+    if (record.toolCallId !== toolCallId) continue;
+    const list = [...new Set(record.approvers.filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim()))];
+    if (list.length) current = list;
+  }
+  return current ?? [DEFAULT_APPROVER];
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   type LogRecord,
 } from "../core/events";
 import type { AppendOptions, LoadOptions, LogInputAt, SearchHit, SessionKind, SessionStore } from "../ports/store";
+import { isPendingOutput } from "../core/events";
 import { excerptOf, prepareSearchIndex, searchBodyOf } from "./sqliteSearch";
 import { pendingMigrations, runMigrations } from "./sqliteSchema";
 import type { SessionSummary } from "../../shared/ipc";
@@ -274,6 +275,21 @@ export function createSqliteSessionStore(
      ON CONFLICT(id) DO UPDATE SET updated_at = ?, bytes = bytes + ?,
        title = CASE WHEN sessions.title = '' THEN excluded.title ELSE sessions.title END`,
   );
+  /*
+   * **审批索引的三条投影语句**（v6；C3 3.7b）。
+   *
+   * 真相仍是日志里那三条记录（`tool-result(pending)` / `approval` / `approval-grant`），
+   * 这三条语句只是把"谁在等批、归谁批、批了没有"做成一次索引查询能答的问题
+   * （见 `sqliteSchema.ts` v6 的说明）。写入方**只有**下面那处 append。
+   */
+  const upsertApproval = prep(
+    `INSERT INTO approvals(session_id, tool_call_id, name, approvers, state, created_at) VALUES(?, ?, ?, ?, 'pending', ?)
+     ON CONFLICT(session_id, tool_call_id) DO UPDATE SET name = excluded.name, approvers = excluded.approvers`,
+  );
+  const decideApproval = prep(
+    "UPDATE approvals SET state = ?, decided_by = ?, decided_at = ? WHERE session_id = ? AND tool_call_id = ?",
+  );
+  const grantApproval = prep("UPDATE approvals SET approvers = ? WHERE session_id = ? AND tool_call_id = ?");
   const selectEvents = prep("SELECT payload FROM events WHERE session_id = ? ORDER BY seq ASC");
   /** 这段会话归谁（C1）：不存在给 null。 */
   const ownerOf = prep("SELECT owner FROM sessions WHERE id = ?");
@@ -519,6 +535,46 @@ export function createSqliteSessionStore(
           bytes += rowBytes(payload, body);
           if (!title && record.type === "request") title = conversationTitle([{ seq, at, ...rest } as LogRecord]);
           stored.push(JSON.parse(payload) as LogRecord);
+
+          /*
+           * ⭐ **审批索引的投影**（v6）：真相是上面那条记录本身，这里只是把它记进索引表。
+           *
+           * 投影规则与读路径（`pendingFor` / `approversFor` / `decidedByOf`）**同一套**：
+           * 一致性由 `sqliteApprovals.test.ts` 的"索引 = 从日志现算"盯着 ——
+           * 两处各写一套的话，会让"列表里显示待批、点下去说已经批过了"这类事发生。
+           *
+           * ⚠️ 三支都只在**认得出来的形状**上动作；认不出来就什么都不做
+           * （不是"记一条空的"—— 那会让索引里多出一条谁也解释不了的待决）。
+           */
+          const typed = record as { toolCallId?: unknown; output?: unknown; approved?: unknown; decidedBy?: unknown };
+          const approvalId = typeof typed.toolCallId === "string" ? typed.toolCallId : "";
+          if (approvalId && record.type === "tool-result") {
+            /*
+             * ⚠️ "是不是待决"必须问**投影层**（`isPendingOutput`）—— 自己从 output 里
+             * 判一次就是第二份解析（`src/projectionGuard.test.ts` 盯着这件事，
+             * 它当场逮到了这一处）。
+             */
+            if (isPendingOutput(typed.output)) {
+              const approvers = (typed.output as { approvers?: unknown }).approvers;
+              upsertApproval.run(
+                sessionId,
+                approvalId,
+                String((record as { toolName?: unknown }).toolName ?? ""),
+                JSON.stringify(Array.isArray(approvers) ? approvers : []),
+                at,
+              );
+            }
+          } else if (approvalId && record.type === "approval") {
+            decideApproval.run(
+              typed.approved === true ? "approved" : "rejected",
+              typeof typed.decidedBy === "string" ? typed.decidedBy : null,
+              at,
+              sessionId,
+              approvalId,
+            );
+          } else if (approvalId && record.type === "approval-grant") {
+            grantApproval.run(JSON.stringify((record as { approvers?: unknown }).approvers ?? []), sessionId, approvalId);
+          }
         }
 
         /*

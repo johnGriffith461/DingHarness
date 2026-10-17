@@ -121,6 +121,49 @@ describe("三态：空库 / 旧库 / 已迁移库", () => {
     after.close();
   });
 
+  it("⭐ v6 的三张表在（画布事件 / 画布归属 / 审批索引），且旧库里的待决会被回填", () => {
+    const file = path.join(dir, "sessions.db");
+    const now = Date.now();
+    const raw = openSqlite(file);
+    /* 造一个**停在 v5** 的库：跑前五步，再塞进一条待决与一条决策 */
+    raw.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, owner TEXT NOT NULL DEFAULT 'local', forked_from TEXT);
+      CREATE TABLE events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, at INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', actor_id TEXT NOT NULL DEFAULT 'legacy', actor_kind TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY (session_id, seq));
+      CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+    `);
+    for (const step of MIGRATIONS.filter((m) => m.version <= 5)) {
+      raw.prepare("INSERT INTO schema_version(version, name, applied_at) VALUES(?,?,?)").run(step.version, step.name, new Date(now).toISOString());
+    }
+    const sid = chatSessionId("v5-with-pending");
+    const pending = JSON.stringify({
+      seq: 1,
+      at: now,
+      requestId: "r1",
+      type: "tool-result",
+      toolCallId: "c1",
+      toolName: "write_file",
+      output: { pending: true, notice: "等确认", approvers: ["local"] },
+    });
+    raw.prepare("INSERT INTO events(session_id, seq, at, type, payload) VALUES(?,?,?,?,?)").run(sid, 1, now, "tool-result", pending);
+    raw.prepare("INSERT INTO sessions(id, kind, title, updated_at, bytes, owner) VALUES(?,?,?,?,?,?)").run(sid, "chat", "", now, 0, "local");
+
+    expect(pendingMigrations(raw).map((m) => m.version), "停 v5 的库只该剩 v6 待跑").toEqual([6]);
+    const report = runMigrations(raw, now);
+    expect(report).toMatchObject({ from: 5, to: SCHEMA_VERSION, applied: [6] });
+
+    /* 三张表都在 */
+    for (const table of ["canvases", "canvas_events", "approvals"]) {
+      expect(Boolean(raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)), `缺表：${table}`).toBe(true);
+    }
+    /* 回填：旧库里那条待决进了索引（审批人照原样，不编） */
+    const row = raw.prepare("SELECT state, approvers FROM approvals WHERE session_id = ? AND tool_call_id = ?").get(sid, "c1") as
+      | { state?: string; approvers?: string }
+      | undefined;
+    expect(row?.state).toBe("pending");
+    expect(JSON.parse(String(row?.approvers))).toEqual(["local"]);
+    raw.close();
+  });
+
   it("⭐ 已迁移库：再跑一次**一个字节都不动**（幂等 —— 每次打开都会跑它）", async () => {
     /*
      * ⚠️ 自己建、自己关（不进 `opened` —— afterEach 会再关一次，第二次是

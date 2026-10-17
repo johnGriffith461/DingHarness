@@ -1,3 +1,4 @@
+import { isPendingOutput } from "../core/events";
 import type { SqliteDatabase } from "./sqliteDriver";
 import { adoptSearchBody } from "./sqliteSearch";
 
@@ -42,7 +43,7 @@ import { adoptSearchBody } from "./sqliteSearch";
  */
 
 /** 会话库的**表结构版本**（最后一步迁移的版本号）。 */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /** 一步迁移。 */
 export type MigrationStep = {
@@ -150,7 +151,139 @@ export const MIGRATIONS: readonly MigrationStep[] = [
       }
     },
   },
+  {
+    version: 6,
+    name: "画布事件表 + 审批索引表（C6 3.9a / C3 3.7b）",
+    apply: (db) => {
+      /*
+       * ⭐ **画布事件的落地**（C6 3.9a 的验收原话："画布操作产生可回放事件"）。
+       *
+       * 在这之前，画布是 `CanvasDocument`（一个 JSON 快照）——"谁在什么时候加了哪个节点"
+       * 在日志里查不到（见 `engine/core/canvasContract.ts` 的文件头）。契约（八类事件 +
+       * `foldCanvas` + 双向桥）在 V5-1 就冻好了，**缺的是"有一张真表在存它"**。
+       *
+       * `canvases` 是每张画布的归属与修订位点（与 `CanvasDocument.revision` /
+       * `confirmedRevision` 对齐 —— 3.9d 的"revision 平移为事件序号"）：
+       * 归属在**画布**上，节点随画布（3.9b），所以 owner 只在这一张表里记一次。
+       */
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS canvases (
+          id                 TEXT PRIMARY KEY,
+          owner              TEXT NOT NULL DEFAULT 'local',
+          current_revision   INTEGER NOT NULL DEFAULT 0,
+          confirmed_revision INTEGER NOT NULL DEFAULT 0,
+          updated_at         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS canvas_events (
+          canvas_id  TEXT NOT NULL,
+          seq        INTEGER NOT NULL,
+          at         INTEGER NOT NULL,
+          type       TEXT NOT NULL,
+          actor_id   TEXT NOT NULL DEFAULT 'legacy',
+          actor_kind TEXT NOT NULL DEFAULT 'legacy',
+          payload    TEXT NOT NULL,
+          PRIMARY KEY (canvas_id, seq)
+        );
+        CREATE INDEX IF NOT EXISTS idx_canvas_events_canvas ON canvas_events(canvas_id, seq);
+      `);
+
+      /*
+       * **审批索引表**（C3 3.7b；ADR-0008 把它记成 follow-up："独立审批表落地时再测性能"）。
+       *
+       * 它是**投影**不是真相：真相仍然是会话日志里那条 `tool-result`（`pending: true`）
+       * 与那条 `approval` 决策记录。这张表存在的唯一理由是**快**：
+       *   · 服务端回答"有哪些待决、归谁批、批了没有"要一次索引查询（不是把每个会话的
+       *     记录解一遍 JSON —— 成员一多就得扫全场）；
+       *   · 成员裁决（V5-3 3.7b）要有地方**读**"现在谁能批"（含主人授权出去的那几个）。
+       * 写入方只有一处：`sqliteStore` 的 `append`（与 actor/owner 两列同一个地方）。
+       * 与日志的一致性由 `sqliteApprovals.test.ts` 的"投影 = 从日志现算"盯着。
+       */
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS approvals (
+          session_id   TEXT NOT NULL,
+          tool_call_id TEXT NOT NULL,
+          name         TEXT NOT NULL DEFAULT '',
+          approvers    TEXT NOT NULL DEFAULT '[]',
+          state        TEXT NOT NULL DEFAULT 'pending',
+          decided_by   TEXT,
+          decided_at   INTEGER,
+          created_at   INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (session_id, tool_call_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_approvals_state ON approvals(state, session_id);
+      `);
+      /* 按 owner 找会话（"这个成员的待决"那条查询的第一步） */
+      db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner)");
+
+      backfillApprovals(db);
+    },
+  },
 ];
+
+/**
+ * 把**旧库里已有的待决**补进审批索引（v6 的一次性回填）。
+ *
+ * ⚠️ 回填要照着与运行时**同一套**投影规则走（`pendingFor` / `decidedByOf` 的口径）：
+ *   · `tool-result` 且载荷 `pending: true` → 一条待决（审批人从载荷的 `approvers` 取）；
+ *   · `approval` 记录 → 把那条待决置成批准/拒绝（`decidedBy` / `decided_at`）。
+ * 两处各写一份规则的话，"迁移之后查出来的待决"与"装载时现算的待决"会不一样 ——
+ * 而那种分叉在有人点错按钮之前看不出来。
+ */
+function backfillApprovals(db: SqliteDatabase): void {
+  const rows = queryAll(db, "SELECT session_id, seq, at, type, payload FROM events ORDER BY session_id, seq") as {
+    session_id?: string;
+    at?: number | bigint;
+    type?: string;
+    payload?: string;
+  }[];
+  for (const row of rows) {
+    const sessionId = String(row.session_id ?? "");
+    if (!sessionId || !row.payload) continue;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(row.payload) as Record<string, unknown>;
+    } catch {
+      continue; // 坏行跳过（与读回时的口径一致：一条坏行不该让整次迁移失败）
+    }
+    const at = Number(row.at ?? 0);
+    if (row.type === "tool-result") {
+      /* "是不是待决"问投影层（`isPendingOutput`）—— 不在这里自己判第二遍 */
+      if (!isPendingOutput(parsed.output)) continue;
+      const output = parsed.output as { approvers?: unknown } | undefined;
+      const toolCallId = String(parsed.toolCallId ?? "");
+      if (!toolCallId) continue;
+      const approvers = Array.isArray(output?.approvers) ? output.approvers.filter((x): x is string => typeof x === "string") : [];
+      /*
+       * 老载荷可能**没有** approvers（ADR-0008 的兼容口径：默认审批人 = `local`）。
+       * 这里存实际值（空数组），读的时候由 `approversOf` 落默认 —— 不在这里编一个 id 进去。
+       */
+      runOnce(
+        db,
+        "INSERT OR IGNORE INTO approvals(session_id, tool_call_id, name, approvers, state, created_at) VALUES(?, ?, ?, ?, 'pending', ?)",
+        sessionId,
+        toolCallId,
+        String(parsed.toolName ?? ""),
+        JSON.stringify(approvers),
+        at,
+      );
+      continue;
+    }
+    if (row.type === "approval") {
+      const toolCallId = String(parsed.toolCallId ?? "");
+      if (!toolCallId) continue;
+      const approved = parsed.approved === true;
+      runOnce(
+        db,
+        "UPDATE approvals SET state = ?, decided_by = ?, decided_at = ? WHERE session_id = ? AND tool_call_id = ?",
+        approved ? "approved" : "rejected",
+        typeof parsed.decidedBy === "string" ? parsed.decidedBy : null,
+        at,
+        sessionId,
+        toolCallId,
+      );
+    }
+  }
+}
 
 /**
  * 账本表（框架自己管，不算一步迁移 —— 它必须**先于**读版本存在）。

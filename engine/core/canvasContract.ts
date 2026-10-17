@@ -215,6 +215,138 @@ export function canvasDocToEvents(
   return events;
 }
 
+/** 两个元素是不是同一份（按 JSON 比 —— 画布元素必须可序列化，见 `shared/canvas.ts`）。 */
+function sameElement(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** 取 id（元素没有 id 就没法谈"改哪一个"）。 */
+function idOf(x: unknown): string {
+  const id = (x as { id?: unknown } | null | undefined)?.id;
+  return typeof id === "string" ? id : "";
+}
+
+/**
+ * **两个文档之间的差 → 事件**（V5-4 补：把产品路的画布操作接进事件流）。
+ *
+ * 这是"画布事件化"从契约走到产品的关键一跳：桌面与 MCP server 手里拿到的是
+ * **整份文档**（渲染层的真相就是那份 `CanvasDocument`），而事件流要的是"这一步做了什么"。
+ * 于是每次保存都算一次差，把差记成事件 —— 存量（第一次见到某张画布）走
+ * `canvasDocToEvents` 那一支（**只读旧写新**，3.9d）。
+ *
+ * 记账口径（逐条与 `foldCanvas` 对齐，不然"折回来"与"新文档"对不上）：
+ *   · 按 `id` 比对两侧的节点/边/标记：新增 → `*.create`；内容变了 → `node.update`（带 `patch`）；
+ *     少了 → `*.delete`；
+ *   · 视口变了 → 一条 `canvas.open`（契约里视口并进 `canvas.open` 的载荷，见 C6 的类型说明）；
+ *   · **只有变化才产事件**（"保存了但什么都没改"不该在日志里留痕 —— 那会让
+ *     "谁改了什么"淹没在一堆空事件里）。
+ *
+ * ⚠️ 顺序是刻意的：先 open（视口）→ 再增 → 再改 → 最后删。fold 之后与"直接应用差"等价，
+ * 这一条由 `canvasContract.test.ts` 的往返用例钉着。
+ *
+ * @param prev 修改之前的文档（没有 = 第一次见到这张画布 → 全量转换）
+ * @param next 修改之后的文档
+ * @param opts.canvasId 哪张画布（不给 = 与 `canvas.open` 对齐用 `prev/next` 里没有这个字段，调用方应给）
+ * @param opts.startSeq 从第几号开始编号（接在这张画布已有事件之后）
+ * @param opts.at / opts.actor 时刻与谁干的（C5：会话日志里记的就是它）
+ * @returns 事件序列（`seq` 从 `startSeq + 1` 连续）
+ */
+export function canvasDiffToEvents(
+  prev: Pick<CanvasDocument, "nodes" | "edges" | "markers" | "viewport"> | null,
+  next: Pick<CanvasDocument, "nodes" | "edges" | "markers" | "viewport">,
+  opts: { canvasId: string; startSeq?: number; at?: number; actor?: Actor; owner?: string },
+): CanvasEvent[] {
+  /* 第一次见到这张画布：全量展开（存量只读旧写新） */
+  if (!prev) {
+    const full = canvasDocToEvents(next, {
+      canvasId: opts.canvasId,
+      ...(opts.at === undefined ? {} : { at: opts.at }),
+      ...(opts.actor ? { actor: opts.actor } : {}),
+      ...(opts.owner ? { owner: opts.owner } : {}),
+    });
+    const base = opts.startSeq ?? 0;
+    return full.map((event) => ({ ...event, seq: event.seq + base }));
+  }
+
+  let seq = opts.startSeq ?? 0;
+  const events: CanvasEvent[] = [];
+  const base = {
+    canvasId: opts.canvasId,
+    at: opts.at ?? 0,
+    ...(opts.actor ? { actor: opts.actor } : {}),
+  };
+
+  if (!sameElement(prev.viewport, next.viewport)) {
+    events.push({ ...base, type: "canvas.open", seq: (seq += 1), viewport: { ...(next.viewport ?? DEFAULT_CANVAS_VIEWPORT) } });
+  }
+
+  /*
+   * 一类元素的差。**三类各自的表达能力不一样，按契约那张类型表来**（不发明类型）：
+   *
+   * | 类 | 新增 | 改 | 删 | 说明 |
+   * |---|---|---|---|---|
+   * | 节点 | `node.create` | `node.update`（带 patch） | `node.delete` | 三种都有 |
+   * | 边 | `edge.create` | 用「删 + 建」表达（**没有 `edge.update`**） | `edge.delete` | 边很小，重建代价可忽略 |
+   * | 标记 | `marker.add` | **表达不了** | **表达不了** | C6 的类型表里没有 `marker.update/delete` |
+   *
+   * ⚠️ 标记那两格是**如实记下的边界**（不是漏做）：要支持就得改 `CANVAS_EVENT_TYPES`
+   * —— 那是一次契约变更，得带 ADR（见文件头"与 V6 的边界"）。在那之前，
+   * 标记的改动**不产事件**，而这件事必须写在代码里（不写的话下一个人会以为
+   * "标记也能删，只是我没试"）。
+   */
+  const diff = (
+    before: readonly unknown[],
+    after: readonly unknown[],
+    kind: "node" | "edge" | "marker",
+  ): void => {
+    const oldById = new Map(before.map((x) => [idOf(x), x]));
+    const newById = new Map(after.map((x) => [idOf(x), x]));
+    const created = (element: unknown): void => {
+      const type: CanvasEventType = kind === "node" ? "node.create" : kind === "edge" ? "edge.create" : "marker.add";
+      events.push({ ...base, type, seq: (seq += 1), [kind === "node" ? "node" : kind === "edge" ? "edge" : "marker"]: element } as CanvasEvent);
+    };
+    const deleted = (id: string): void => {
+      /* 标记没有"删"这一类事件（见上表）—— 跳过，不发明类型 */
+      if (kind === "marker") return;
+      const type: CanvasEventType = kind === "node" ? "node.delete" : "edge.delete";
+      events.push({ ...base, type, seq: (seq += 1), id } as CanvasEvent);
+    };
+
+    for (const [id, element] of newById) {
+      if (!id) continue; // 没有 id 的元素单独处理（见下）
+      const previous = oldById.get(id);
+      if (previous === undefined) {
+        created(element);
+        continue;
+      }
+      if (sameElement(previous, element)) continue;
+      if (kind === "node") {
+        events.push({ ...base, type: "node.update", seq: (seq += 1), id, patch: element as Record<string, unknown> });
+      } else if (kind === "edge") {
+        /* 边改内容 = 删 + 建（契约里没有 `edge.update`） */
+        deleted(id);
+        created(element);
+      }
+      /* 标记改了内容：表达不了 —— 什么都不产（边界见上表） */
+    }
+    for (const id of oldById.keys()) {
+      if (id && !newById.has(id)) deleted(id);
+    }
+
+    /* 没有 id 的元素：按出现顺序，多出来的那几条算新增（少的没法定位，跳过） */
+    const anonymous = (list: readonly unknown[]): unknown[] => list.filter((x) => !idOf(x));
+    const beforeAnon = anonymous(before);
+    const afterAnon = anonymous(after);
+    for (let i = beforeAnon.length; i < afterAnon.length; i += 1) created(afterAnon[i]);
+  };
+
+  diff(prev.nodes ?? [], next.nodes ?? [], "node");
+  diff(prev.edges ?? [], next.edges ?? [], "edge");
+  diff(prev.markers ?? [], next.markers ?? [], "marker");
+
+  return events;
+}
+
 /**
  * 事件序列 → `CanvasDocument`（折叠 + 补上文档自己的那几格）。
  *
