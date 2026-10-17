@@ -26,7 +26,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
       "  ding doctor [--json]                           # 一键自检（每项失败都给下一步）",
       "  ding recipe list|show|run|export|import            # 任务模板（可分享的「提示词 + 工具范围 + 档位」）",
-      "  ding space [invite|join|members|roles|remove|share|unshare|takeover|usage|audit]   # 团队空间（配对码 / 名册 / 共享 / 接管 / 账本）",
+      "  ding space [invite|join|members|roles|remove|share|unshare|takeover|rooms|room|usage|audit]   # 团队空间（配对码 / 名册 / 共享 / 接管 / 账本）",
       "  ding serve [--port 8787] [--bind <地址> --token <口令>] [--member <id>:<口令>]…  # Agent Server（默认只绑回环；--member 给成员身份）",
       "  ding connect <url> [任务] [--token <口令>]           # 连到远端 agent 跑一轮（Phase 17 的另一半）",
       "  ding acp                                       # 作为 ACP agent 跑在标准输入输出上（被外部宿主驱动）",

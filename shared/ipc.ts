@@ -743,6 +743,14 @@ export type ShellBridge = {
      */
     shareableSessions: () => Promise<Array<{ sessionId: string; title: string; owner: string; updatedAt: number }>>;
     /**
+     * **给一段已共享的会话建端到端加密房间**（V5-2 2.4 的产品入口）。
+     *
+     * 三条口径：账本里**只存房间号**（密钥永不落盘、永不发给服务端）；
+     * 密钥**只在这次返回里给一次**（`fragment` 是 `#密钥`，拼进链接给小端）；
+     * 房间只能建在**已共享**的会话上。
+     */
+    openRoom: (sessionId: string) => Promise<{ ok: true; roomId: string; fragment: string; note: string } | { ok: false; error: string }>;
+    /**
      * **授权他人批**（C3 3.7b）：把某条待决的裁决权授给一个成员。
      *
      * 只有**当前的审批人**能授（判定与 HTTP 那条路同一份实现）；落一条 `approval-grant`

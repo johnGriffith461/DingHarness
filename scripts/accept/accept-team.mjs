@@ -125,6 +125,11 @@ try {
     (await page.locator('[data-testid="wb-team-share"]').count()) === 1;
   out.shareEmptyNote = await page.evaluate(() => document.body.textContent?.includes("本机还没有会话可以共享") ?? false);
 
+  /* ④c 加密房间那一节：入口在、空态如实说 */
+  out.roomEntry = (await page.locator('[data-testid="wb-team-room-pick"]').count()) === 1 &&
+    (await page.locator('[data-testid="wb-team-room-open"]').count()) === 1;
+  out.roomEmptyNote = await page.evaluate(() => document.body.textContent?.includes("还没有房间") ?? false);
+
   /* ⑤ 账本按钮：真读一遍（表格出来） */
   await page.locator('[data-testid="wb-team-usage"]').click();
   await page.waitForTimeout(900);
@@ -157,6 +162,8 @@ try {
   if (!out.usageTable) bad.push("账本按钮没出表");
   if (!out.shareEntry) bad.push("共享入口（挑会话 + 共享按钮）不在页面上");
   if (!out.shareEmptyNote) bad.push("空库时没有如实说「本机还没有会话可以共享」");
+  if (!out.roomEntry) bad.push("加密房间那一节的入口不在页面上");
+  if (!out.roomEmptyNote) bad.push("没有房间时没有如实说「还没有房间」");
   if (out.error) bad.push("异常: " + out.error);
   if (bad.length) {
     console.error("✗ " + bad.join("；"));

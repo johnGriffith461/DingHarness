@@ -4,6 +4,7 @@ import type { MemberRole } from "../../engine/core/members";
 import { normalizeRoles } from "../../engine/core/members";
 import { memberView, newPairingCode, redeemPairingCode, removeFromSpace, rolesIn, setMemberRoles } from "../../engine/core/space";
 import { approversFor, authorizeApprover, grantLine, grantRecord, GRANT_ALREADY_NOTE } from "../../engine/core/gates";
+import { newRoomSecret } from "../../engine/sync/e2ee";
 import { LOCAL_USER } from "../../engine/core/events";
 import { createSpaceStore, emptySpaceFile, issueToken, type SpaceFile } from "../../engine/adapters/spaceStore";
 import { ledgerOf, rollup } from "../../engine/core/ledger";
@@ -32,6 +33,8 @@ export const SPACE_CHANNEL = {
   sessions: "space:sessions",
   /** 授权他人批（C3 3.7b 的流转那一半）：把某条待决的裁决权授给一个成员。 */
   authorize: "space:authorize",
+  /** 给一段已共享的会话建**端到端加密房间**（密钥只回一次、账本只存房间号）。 */
+  openRoom: "space:openRoom",
   invite: "space:invite",
   join: "space:join",
   setRoles: "space:setRoles",
@@ -63,6 +66,8 @@ export type SpaceStateView = {
   holders: Record<string, string>;
   /** 还没用掉的配对码（**码本身要给界面**：主人要在 10 分钟内把它发出去）。 */
   pendingCodes: Array<{ code: string; roles: string[]; expiresAt: number }>;
+  /** 端到端加密房间：**只有房间号**（密钥在链接的 fragment 里，不在账本里）。 */
+  rooms: Array<{ sessionId: string; roomId: string }>;
   /** 账本文件的位置（排错用）。 */
   file: string;
 };
@@ -96,6 +101,8 @@ export function spaceStateView(space: SpaceFile = readSpace()): SpaceStateView {
     pendingCodes: space.roster.codes
       .filter((c) => !c.usedBy)
       .map((c) => ({ code: c.code, roles: [...c.roles], expiresAt: c.expiresAt })),
+    /* 端到端加密房间（**只有房间号** —— 密钥不在这里，也永远不在账本里） */
+    rooms: Object.entries(space.rooms).map(([sessionId, room]) => ({ sessionId, roomId: room.roomId })),
     file: spaceStoreNow().file(),
   };
 }
@@ -167,10 +174,43 @@ export async function authorizePendingApprover(input: {
   return { ok: true, approvers: got.approvers, added: true, line };
 }
 
+/**
+ * **给一段已共享的会话建一个端到端加密房间**（V5-2 2.4 的产品入口）。
+ *
+ * ## 三条口径（与 `engine/sync/e2ee.ts` 同一套）
+ *
+ * 1. **账本里只存房间号**（`rooms[sessionId] = {roomId}`）—— 密钥**永不落盘**、
+ *    也永不发给服务端（零知识的全部意义就在这里）；
+ * 2. 密钥**只在这次返回里给一次**（与配对口令同一个口径：能再读一次就等于泄露即冒充）；
+ * 3. 房间必须建在**已共享**的会话上（没共享就没有"另一端"，房间无从谈起）。
+ *
+ * 桌面上不知道"服务地址"（那是 `ding serve` 的事），所以返回的是**零件**：
+ * 房间号 + `#密钥` 片段 + 一句怎么拼链接的说明。拼好的链接由知道地址的那一方给
+ * （`ding space room <会话 id> --server <地址>`）。
+ */
+export function openRoomFor(input: { sessionId: string }): { ok: true; roomId: string; fragment: string; note: string } | { ok: false; error: string } {
+  const space = readSpace();
+  const sessionId = String(input.sessionId ?? "").trim();
+  if (!sessionId) return { ok: false, error: "要给哪一段会话建房间？" };
+  if (!space.shared.includes(sessionId)) return { ok: false, error: "这段会话还没共享出去（房间是给另一端进的）" };
+  /* 房间号：短、给人念得出来的那种（与配对口令无关 —— 它公开，密钥才是凭证） */
+  const secret = newRoomSecret(`r-${Math.random().toString(36).slice(2, 10)}`);
+  commit({ ...space, rooms: { ...space.rooms, [sessionId]: { roomId: secret.roomId } } }, `已为 ${sessionId} 建房间 ${secret.roomId}`);
+  return {
+    ok: true,
+    roomId: secret.roomId,
+    fragment: `#${secret.key}`,
+    note:
+      `房间号 ${secret.roomId}，密钥片段 ${`#${secret.key}`}（**只显示这一次**）。` +
+      "把它拼成链接给另一端：<服务地址>/r/<房间号>#<密钥> —— 密钥在 # 之后，服务端收不到。",
+  };
+}
+
 /** 注册这一族的 IPC。 */
 export function registerSpaceIpc(): void {
   ipcMain.handle(SPACE_CHANNEL.state, () => spaceStateView());
   ipcMain.handle(SPACE_CHANNEL.sessions, () => shareableSessions());
+  ipcMain.handle(SPACE_CHANNEL.openRoom, (_event, request: { sessionId?: string } = {}) => openRoomFor({ sessionId: String(request.sessionId ?? "") }));
   ipcMain.handle(SPACE_CHANNEL.authorize, (_event, request: { sessionId?: string; toolCallId?: string; target?: string } = {}) =>
     authorizePendingApprover({
       sessionId: String(request.sessionId ?? ""),

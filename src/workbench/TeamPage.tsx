@@ -24,6 +24,8 @@ type SpaceState = {
   shared: string[];
   holders: Record<string, string>;
   pendingCodes: Array<{ code: string; roles: string[]; expiresAt: number }>;
+  /** 端到端加密房间：**只有房间号**（密钥在链接的 # 后面，账本里没有） */
+  rooms: Array<{ sessionId: string; roomId: string }>;
   file: string;
 };
 
@@ -40,6 +42,7 @@ const ROLE_LABEL: Record<string, string> = {
 type SpaceApi = {
   state: () => Promise<SpaceState>;
   shareableSessions: () => Promise<Array<{ sessionId: string; title: string; owner: string; updatedAt: number }>>;
+  openRoom: (sessionId: string) => Promise<{ ok: true; roomId: string; fragment: string; note: string } | { ok: false; error: string }>;
   invite: (roles?: string[]) => Promise<ActionResult>;
   join: (request: { code: string; memberId: string; displayName?: string }) => Promise<ActionResult>;
   setRoles: (memberId: string, roles: string[]) => Promise<ActionResult>;
@@ -308,6 +311,54 @@ export function TeamPage() {
           ))}
         </ul>
       )}
+
+      {/* ── 端到端加密房间（V5-2 2.4 的产品面）────────── */}
+      <h4>端到端加密房间（{state.rooms.length}）</h4>
+      {state.rooms.length === 0 ? (
+        <p className="wb-setpage-note">
+          还没有房间。房间里传的内容是**端到端加密**的（密钥只在链接的 # 后面，服务端收不到）；
+          而审批、接管这类控制事件保持明文 —— 它们要能被路由。
+        </p>
+      ) : (
+        <ul className="wb-card wb-team-rooms" data-testid="wb-team-rooms">
+          {state.rooms.map((room) => (
+            <li key={room.sessionId} className="wb-card-row" data-testid={`wb-team-room-${room.sessionId}`}>
+              <code>{room.roomId}</code>
+              <span className="wb-card-desc">E2EE　会话 {room.sessionId}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="wb-card-row">
+        <select aria-label="给哪段会话建房间" data-testid="wb-team-room-pick" value={pick} onChange={(e) => setPick(e.target.value)}>
+          <option value="">挑一段已共享的会话…</option>
+          {state.shared
+            .filter((id) => !state.rooms.some((room) => room.sessionId === id))
+            .map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+        </select>
+        <button
+          type="button"
+          className="wb-chip"
+          data-testid="wb-team-room-open"
+          disabled={!pick}
+          onClick={() => {
+            if (!api || !pick) return;
+            void api.openRoom(pick).then((got) => {
+              setPick("");
+              if (got.ok) {
+                setNote(got.note);
+                void refresh();
+              } else setError(got.error);
+            });
+          }}
+        >
+          建一个加密房间
+        </button>
+      </div>
 
       {/* ── 账本（按成员）────────────────────────────── */}
       <h4>成本账本</h4>

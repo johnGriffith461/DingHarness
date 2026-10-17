@@ -13,6 +13,7 @@ import { createSpaceStore, emptySpaceFile, issueToken, type SpaceFile, type Spac
 import { auditOf, auditQuery, auditSummary } from "../../engine/core/audit";
 import { ledgerOf, rollup } from "../../engine/core/ledger";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
+import { newRoomSecret, roomLink } from "../../engine/sync/e2ee";
 import { sumUsage } from "../../shared/cost";
 import type { Parsed } from "./args";
 
@@ -44,6 +45,7 @@ import type { Parsed } from "./args";
  * ding space roles <成员 id> <角色,…>             # 改角色（owner/admin/specialist/viewer）
  * ding space remove <成员 id>                    # 移除（口令一并作废）
  * ding space share <会话 id> | unshare <会话 id>
+ * ding space rooms | room <会话 id> [--server <服务地址>]   # 端到端加密房间（密钥只显示一次）
  * ding space takeover <会话 id> --as <成员 id>
  * ding space usage [--by member|day|account]     # 成本账本（数字只来自 provider 上报）
  * ding space audit [--member <id>] [--limit n]   # 成员操作留痕（请求/审批两类）
@@ -185,6 +187,46 @@ export async function cmdSpace(parsed: Parsed, dataDir: string): Promise<number>
     const { [memberId]: _gone, ...tokens } = space.tokens;
     store.write({ ...space, roster: got.roster, tokens });
     return emit({ ok: true, memberId }, [`${memberId} 已移除（口令同时作废 —— 他下一个请求就 401）`]);
+  }
+
+  /* ── 端到端加密房间（V5-2 2.4 的产品入口）────────────── */
+  if (sub === "rooms" || sub === "room") {
+    if (sub === "rooms") {
+      const rows = Object.entries(space.rooms).map(([sessionId, room]) => ({ sessionId, roomId: room.roomId }));
+      return emit(
+        { rooms: rows },
+        rows.length
+          ? rows.map((r) => `${r.roomId}　会话 ${r.sessionId}　（端到端加密：密钥在链接的 # 后面）`)
+          : ["还没有房间。建一个：ding space room <会话 id> --server <服务地址>"],
+      );
+    }
+    const sessionId = parsed.args[1] ?? "";
+    if (!sessionId) {
+      process.stderr.write(`用法：ding space room <会话 id> --server <服务地址>（${"`"}--server${"`"} 用来拼出完整链接）
+`);
+      return 1;
+    }
+    if (!space.shared.includes(sessionId)) {
+      process.stderr.write(`这段会话还没共享出去：${sessionId}（先 ding space share ${sessionId}）
+`);
+      return 1;
+    }
+    const secret = newRoomSecret(`r-${Math.random().toString(36).slice(2, 10)}`);
+    store.write({ ...space, rooms: { ...space.rooms, [sessionId]: { roomId: secret.roomId } } });
+    /* ⚠️ 密钥**只在这里给一次**，账本里只存房间号（零知识：服务端收不到密钥） */
+    const server = parsed.flags.get("server")?.[0] ?? "";
+    const link = server ? roomLink(server, secret) : "";
+    return emit(
+      { roomId: secret.roomId, key: secret.key, link: link || undefined },
+      [
+        `房间号：${secret.roomId}　会话：${sessionId}`,
+        `密钥：${secret.key}`,
+        ...(link
+          ? [`链接：${link}`, "（密钥在 # 之后 —— 服务端收不到它；把整条链接发给另一端）"]
+          : ["把它拼成链接给另一端：<服务地址>/r/<房间号>#<密钥>（--server <地址> 可以直接拼出来）"]),
+        "⚠️ 密钥只显示这一次：账本里只存房间号，丢了就重建一个房间。",
+      ],
+    );
   }
 
   /* ── 共享 / 取消 ──────────────────────────────────────── */

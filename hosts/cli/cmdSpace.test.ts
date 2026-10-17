@@ -175,6 +175,35 @@ describe("ding space（本机入口）", () => {
     expect(audit.out).toContain("alice");
   });
 
+  it("⭐ 房间：账本只存房间号、密钥在输出里给一次、--server 能拼出完整链接", async () => {
+    const dir = tmpDir();
+    const sessionId = chatSessionId("cli-space-room");
+    /* 先共享（房间是给另一端进的） */
+    expect((await run(dir, ["share", sessionId])).code).toBe(0);
+
+    /* 没共享的会话建不了房间 */
+    const tooEarly = await run(dir, ["room", chatSessionId("cli-space-other")], { server: "https://example.test" });
+    expect(tooEarly.code).toBe(1);
+
+    const made = await run(dir, ["room", sessionId], { server: "https://example.test" });
+    expect(made.code).toBe(0);
+    const roomId = /房间号：(r-[a-z0-9]+)/.exec(made.out)?.[1] ?? "";
+    const key = /密钥：([A-Za-z0-9_-]+)/.exec(made.out)?.[1] ?? "";
+    expect(roomId).toMatch(/^r-/);
+    expect(key).not.toBe("");
+    /* 链接：密钥在 **#** 之后（服务端收不到） */
+    expect(made.out).toContain(`https://example.test/r/${roomId}#${key}`);
+
+    /* 账本里只有房间号 —— 把整份账本序列化也找不到密钥 */
+    const stored = JSON.stringify(spaceNow(dir));
+    expect(stored).toContain(roomId);
+    expect(stored.includes(key), "密钥落进账本了（零知识就没了）").toBe(false);
+
+    /* 列出来看得到 */
+    const listed = await run(dir, ["rooms"]);
+    expect(listed.out).toContain(roomId);
+  });
+
   it("不认识的子命令：退出码非零 + 把可用的列出来", async () => {
     const dir = tmpDir();
     const errors: string[] = [];

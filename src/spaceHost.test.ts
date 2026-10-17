@@ -168,6 +168,39 @@ describe("桌面团队空间（IPC）", () => {
     expect(rows[1]!.owner).toBe("alice");
   });
 
+  it("⭐ 建加密房间：账本里**只有房间号**（密钥绝不落盘），链接里能拿回密钥", async () => {
+    const code = call<Result>(SPACE_CHANNEL.invite, {}).code!;
+    call<Result>(SPACE_CHANNEL.join, { code, memberId: "alice" });
+    call<Result>(SPACE_CHANNEL.share, "task-room");
+
+    const { openRoomFor } = await import("../electron/ipc/spaceHost");
+    /* 没共享不能建（房间是给另一端进的） */
+    expect(openRoomFor({ sessionId: "task-other" }).ok).toBe(false);
+
+    const got = openRoomFor({ sessionId: "task-room" });
+    expect(got.ok, got.ok ? "" : got.error).toBe(true);
+    if (!got.ok) return;
+    expect(got.roomId).toMatch(/^r-/);
+    expect(got.fragment).toMatch(/^#[A-Za-z0-9_-]+$/);
+
+    /* ① 账本里只有房间号：**把整个账本序列化也找不到密钥** */
+    const stored = JSON.stringify(spaceOnDisk());
+    expect(stored).toContain(got.roomId);
+    expect(stored.includes(got.fragment.slice(1)), "密钥落进账本了（零知识就没了）").toBe(false);
+
+    /* ② 收端拿完整链接能取回房间号与密钥（`parseRoomLink` 只认 fragment） */
+    const { parseRoomLink } = await import("@engine/sync/e2ee");
+    const link = `https://example.test/r/${got.roomId}${got.fragment}`;
+    const parsed = parseRoomLink(link);
+    expect(parsed?.roomId).toBe(got.roomId);
+    expect(`#${parsed?.key}`).toBe(got.fragment);
+    /* query 里那份**不算**（会进服务端日志） */
+    expect(parseRoomLink(`https://example.test/r/${got.roomId}?key=${got.fragment.slice(1)}`)).toBeNull();
+
+    /* ③ 状态视图里只有房间号（界面拿得到的那一份也不含密钥） */
+    expect(call<State>(SPACE_CHANNEL.state).rooms).toEqual([{ sessionId: "task-room", roomId: got.roomId }]);
+  });
+
   it("⭐ 授权他人批（审批卡片那颗）：落一条 approval-grant 记录，重复授不再记", async () => {
     const pending = [
       { requestId: "r1", type: "tool-call", toolCallId: "c1", toolName: "write_file", input: { path: "x.md" }, actor: { id: "main", kind: "agent" } },
