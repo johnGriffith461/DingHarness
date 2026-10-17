@@ -311,3 +311,55 @@ describe("权限规则接在执行点上（U03）", () => {
     expect(ran).toBe(0);
   });
 });
+
+/* ============================================================
+ * 工具搜索接在下发点上（G03，2026-10-18）
+ * ============================================================ */
+describe("工具搜索接在下发点上（G03）", () => {
+  const entries = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      name: `extra_${i}`,
+      source: "mcp" as const,
+      description: i === 3 ? "往 Slack 频道发消息" : "杂项工具",
+      inputSchema: {} as never,
+    }));
+
+  it("⭐ 给了 query 且工具超阈值：只下发核心 + 相关的", () => {
+    const registry = createToolRegistry({ extra: entries(60) });
+    const tools = buildToolSet({
+      registry,
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true }) },
+      ctx: { mode: "全部允许", provider: "p" },
+      query: "帮我往 Slack 发消息",
+    });
+    const names = Object.keys(tools);
+    expect(names).toContain("read_file");
+    expect(names).toContain("extra_3");
+    expect(names.length).toBeLessThan(registry.list().length);
+  });
+
+  it("不给 query 时全量（老行为）", () => {
+    const registry = createToolRegistry({ extra: entries(60) });
+    const tools = buildToolSet({
+      registry,
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true }) },
+      ctx: { mode: "全部允许", provider: "p" },
+    });
+    expect(Object.keys(tools)).toHaveLength(registry.list().length);
+  });
+
+  it("⭐ 角色白名单仍然优先于搜索（搜索放大不了角色本来没有的工具）", () => {
+    const registry = createToolRegistry({ extra: entries(60) });
+    const tools = buildToolSet({
+      registry,
+      mode: "全部允许",
+      executor: { run: async () => ({ ok: true }) },
+      ctx: { mode: "全部允许", provider: "p" },
+      only: ["read_file"],
+      query: "往 Slack 发消息",
+    });
+    expect(Object.keys(tools)).toEqual(["read_file"]);
+  });
+});

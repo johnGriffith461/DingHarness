@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { McpServerConfig } from "../../shared/mcp";
+import { wrapExternalContent } from "../../shared/untrusted";
 
 /**
  * MCP 客户端（stdio 传输，2026-10-14）。
@@ -267,7 +268,15 @@ export class McpClient implements McpConnection {
       if (res.error) return { ok: false, error: `服务端报错：${res.error.message ?? "未说明"}` };
       const result = (res.result ?? {}) as { content?: unknown; isError?: unknown };
       const text = contentToText(result.content, (mime, data, kind) => this.saveAttachment(mime, data, kind));
-      return { ok: true, text: text || "（这个工具没有返回文本）", isError: result.isError === true };
+      /*
+       * G19：连接器返回的是**外部内容**，进上下文前标注来源并做注入提示。
+       * 它仍然是工具结果（不拒绝、不改写），只是不让模型把它当成用户指令。
+       */
+      return {
+        ok: true,
+        text: wrapExternalContent("mcp", text || "（这个工具没有返回文本）"),
+        isError: result.isError === true,
+      };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
@@ -600,7 +609,15 @@ export class HttpMcpClient implements McpConnection {
     if (reply.error) return { ok: false, error: `服务端报错：${reply.error.message ?? "未说明"}` };
     const result = (reply.result ?? {}) as { content?: unknown; isError?: unknown };
     const text = contentToText(result.content, (mime, data, kind) => this.saveAttachment(mime, data, kind));
-    return { ok: true, text: text || "（这个工具没有返回文本）", isError: result.isError === true };
+    /*
+     * G19：连接器返回的是**外部内容**，进上下文前标注来源并做注入提示。
+     * 它仍然是工具结果（不拒绝、不改写），只是不让模型把它当成用户指令。
+     */
+    return {
+      ok: true,
+      text: wrapExternalContent("mcp", text || "（这个工具没有返回文本）"),
+      isError: result.isError === true,
+    };
   }
 
   /** HTTP 没有子进程可收 —— 只清会话（下次 start 重新握手）。 */

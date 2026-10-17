@@ -17,6 +17,7 @@ import type { ExecutorContext, ToolExecutor } from "../ports/executor";
 import { noopHooks, type HooksPort } from "../ports/hooks";
 import type { SpillPort } from "../ports/spill";
 import { applySpill } from "./spill";
+import { selectToolNames } from "./toolSearch";
 
 /**
  * **工具注册表**（Phase 1 D5）。
@@ -206,6 +207,15 @@ export function buildToolSet(input: {
    * 在「全部允许」下也会被抬成 `ask`（除非有显式 allow 规则）。
    */
   rules?: readonly PermissionRule[];
+  /**
+   * **工具搜索**（G03）：这一轮用户说了什么。
+   *
+   * 给了、且工具数超过 `deferThreshold` 时，只下发"核心 + BM25 相关的"，
+   * 其余不注入（模型看不到就不会浪费上下文）。省略 = 全量（老行为）。
+   */
+  query?: string;
+  /** 工具数不超过它就全量（默认 40）。 */
+  deferThreshold?: number;
 }): ToolSet {
   const { registry, mode, executor, ctx } = input;
   const hooks = input.hooks ?? noopHooks;
@@ -220,6 +230,14 @@ export function buildToolSet(input: {
     kept.delete(SPAWN_AGENT_TOOL);
     // 一支小队同理：到顶就不给（模型看不到，就不会试）
     kept.delete(SPAWN_AGENTS_TOOL);
+  }
+  /*
+   * 工具搜索（G03）：工具太多时按这一轮的话做 deferred exposure。
+   * ⚠️ `only`（角色白名单）在它**之前**生效 —— 搜索放大不了一个角色本来就没有的工具。
+   */
+  if (input.query && input.query.trim()) {
+    const injected = new Set(selectToolNames(registry.list(), input.query, { threshold: input.deferThreshold }));
+    for (const name of [...kept]) if (!injected.has(name)) kept.delete(name);
   }
 
   const out: ToolSet = {};

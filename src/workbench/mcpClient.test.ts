@@ -122,7 +122,12 @@ describe("握手 → 列工具 → 调用", () => {
     const client = new McpClient(cfg("fake.mjs"), fast);
     await client.start();
     const res = await client.call("echo", { text: "你好" });
-    expect(res).toEqual({ ok: true, text: "echo:你好", isError: false });
+    /* G19：结果被标成不可信块（连接器返回的是数据，不是指令），正文仍在里面 */
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.text).toContain("echo:你好");
+    expect(res.text).toContain("[untrusted: 连接器");
+    expect(res.isError).toBe(false);
     client.stop();
   }, 20000);
 
@@ -133,7 +138,7 @@ describe("握手 → 列工具 → 调用", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.isError).toBe(true);
-    expect(res.text).toBe("坏了");
+    expect(res.text).toContain("坏了");
     client.stop();
   }, 20000);
 
@@ -152,7 +157,7 @@ describe("握手 → 列工具 → 调用", () => {
     const ok = await client.start();
     expect(ok, client.errorText()).toBe(true);
     const res = await client.call("echo", { text: "x" });
-    expect(res.ok && res.text === "echo:x").toBe(true);
+    expect(res.ok && res.text.includes("echo:x")).toBe(true);
     client.stop();
   }, 20000);
 });

@@ -23,6 +23,7 @@ import { noopHooks, type HooksPort } from "./ports/hooks";
 import type { SpillPort } from "./ports/spill";
 import type { PermissionRule } from "./core/permissionRules";
 import type { SessionStore } from "./ports/store";
+import { selectToolNames } from "./runtime/toolSearch";
 import type { ConfirmMode } from "../shared/ipc";
 import {
   buildToolSet,
@@ -369,6 +370,18 @@ export function createEngine(ports: EnginePorts): Engine {
        * `only` 传给 `offeredToolNames`（不然日志会为"下发了全套"作证，而实际只下发了几件）。
        */
       const messages = [...(request.history ?? []), ...request.messages];
+      /**
+       * 这一轮**真的**下发了哪些工具（G03）：基础名单过一遍工具搜索，
+       * 与 `buildToolSet` 的判定**同一个函数** —— 日志不能为"下发了全套"作证，
+       * 而实际只发了几件（审计 P126 的同一条口径）。
+       */
+      const queryText = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+      const namesActuallyOffered = (): string[] => {
+        const base = offeredToolNames(registry, request.mode, 0, request.only);
+        if (!queryText.trim()) return base;
+        const selected = new Set(selectToolNames(registry.list(), queryText));
+        return base.filter((n) => selected.has(n));
+      };
       await record({
         requestId,
         type: "request",
@@ -378,7 +391,7 @@ export function createEngine(ports: EnginePorts): Engine {
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         toolPolicy: request.mode,
         ...(request.useTools ? { useTools: true } : {}),
-        tools: request.useTools ? offeredToolNames(registry, request.mode, 0, request.only) : [],
+        tools: request.useTools ? namesActuallyOffered() : [],
       });
 
       const events: TurnEvent[] = [];
@@ -442,6 +455,11 @@ export function createEngine(ports: EnginePorts): Engine {
                   hooks,
                   ...(ports.spill ? { spill: ports.spill } : {}),
                   ...(ports.rules?.length ? { rules: ports.rules } : {}),
+                  /* G03：把这一轮用户说的话作为工具搜索的查询（工具少时不影响） */
+                  ...(() => {
+                    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+                    return lastUser ? { query: lastUser.content } : {};
+                  })(),
                 }),
                 maxSteps: request.maxSteps ?? 4,
               }

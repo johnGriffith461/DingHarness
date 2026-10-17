@@ -66,8 +66,11 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  *
  * ⚠️ 2026-10-18（U09）51 → 52：`engine/core/unfinishedTools.ts`（"结果未知"留痕的
  * 形状构造）。它由 `events.ts` 在恢复路径里调用，是纯函数。
+ *
+ * ⚠️ 2026-10-18（G03）52 → 53：`engine/runtime/toolSearch.ts`（BM25 工具选择）。
+ * 注入决策属于内核（"哪些工具下发给模型"），必须在最小面里。
  */
-const CLOSURE_BUDGET = 52;
+const CLOSURE_BUDGET = 53;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =
