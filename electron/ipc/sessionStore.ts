@@ -3,6 +3,7 @@ import path from "node:path";
 import { app } from "electron";
 
 import { parseLog, type LogInput } from "../../engine/core/events";
+import { forkSession } from "../../engine/core/fork";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import type { SessionStore } from "../../engine/ports/store";
 
@@ -65,6 +66,8 @@ export function safeSessionId(raw: unknown): string | null {
 export const SESSION_CHANNEL = {
   /** 列聊天会话（F3：重启后把对话列表恢复出来）。 */
   list: "session:list",
+  /** 会话分叉（"从这一刻分叉"）：源记录原样复制成一段**独立会话**。 */
+  fork: "session:fork",
   /** 读回一整段会话的记录（渲染层自己投影成消息）。 */
   load: "session:load",
   /** 全文检索会话记录（Phase 12.4；左栏搜索框走它）。 */
@@ -189,6 +192,31 @@ export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
     if (kind === "chat" || kind === "task" || kind === "cli") return desktopSessionStore().list({ kind });
     return desktopSessionStore().list({ kind: "chat" });
   });
+  /*
+   * ⭐ **从这一刻分叉**（C6/V5-2 2.5 的产品入口，2026-10-17 补）。
+   *
+   * `forkSession` 是纯函数（剥 seq、留 at、带副作用警示语），这里只做三件事：
+   * 读源记录 → 定新会话 id → 用**同一个 store 端口**写进去（归属跟源走，
+   * `forked_from` 记下来源）。裸 `ipcMain.handle` 里不做任何判定逻辑 ——
+   * 分叉的语义在 `engine/core/fork.ts`（桌面/CLI 将来共用同一份）。
+   */
+  ipcMain.handle(SESSION_CHANNEL.fork, async (_event, sourceId: unknown) => {
+    const source = safeSessionId(sourceId);
+    if (!source) return { ok: false, error: "会话 id 形状不对" };
+    try {
+      const store = desktopSessionStore();
+      const { records } = await store.load(source);
+      if (!records.length) return { ok: false, error: "这段会话没有可复制的记录（是不是已经被收口了？）" };
+      /* 新 id：与源同一族（task-x / chat-x），后缀带时间戳 —— 名字本身说明它是副本 */
+      const intoId = `${source}-fork-${Date.now().toString(36)}`;
+      const plan = forkSession(records, { source: { sessionId: source }, into: { sessionId: intoId } });
+      await store.append(intoId, plan.records, { forkedFrom: source });
+      return { ok: true, sessionId: intoId, note: plan.note, records: plan.records.length };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle(SESSION_CHANNEL.load, async (_event, sessionId: unknown) => {
     await ready();
     const id = safeSessionId(sessionId);

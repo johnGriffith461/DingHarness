@@ -654,6 +654,16 @@ export type ShellBridge = {
     list: (kind?: "chat" | "task" | "cli" | "all") => Promise<SessionSummary[]>;
     load: (sessionId: string) => Promise<{ records: unknown[]; skipped: number }>;
     /**
+     * **从这一刻分叉**（C6/V5-2 2.5 的产品入口，2026-10-17 补）：源记录原样复制成
+     * 一段**独立会话** —— 剥 `seq` 重发号、留 `at`（"什么时候说的"是事实）；
+     * 归属跟源走、`forked_from` 记下来源。
+     *
+     * 语义在 `engine/core/fork.ts`（纯函数），主进程那条只是"读源 → 写新"。
+     * 副作用警示随 `note` 一起回（回看这些记录不产生副作用；要让模型接着跑是**显式**动作）。
+     */
+    fork: (sourceSessionId: string) =>
+      Promise<{ ok: true; sessionId: string; note: string; records: number } | { ok: false; error: string }>;
+    /**
      * 全文检索会话记录（Phase 12.4；左栏那颗搜索键走的就是它）。
      *
      * 检索的是**会话记录正文**（不是标题），FTS + LIKE 并集在 store 层做完，

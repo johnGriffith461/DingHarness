@@ -6,6 +6,7 @@ import { groupThreads, summaryOf } from "./threadGroups";
 import { useLibraryStore } from "./libraryStore";
 import { useWorkbenchStore } from "./store";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
+import { taskSessionId } from "@engine/core/events";
 
 /**
  * 「管理历史对话」页 —— 对应本体路由 `chat/thread/list`。
@@ -41,6 +42,8 @@ export default function ThreadListPage() {
   const pin = useLibraryStore((s) => s.pin);
 
   const [menu, setMenu] = useState<{ task: WorkTask; x: number; y: number } | null>(null);
+  /** 分叉的回执（新会话 id + 那句副作用说明）—— 分叉这件事必须**看得见**（否则像什么都没发生）。 */
+  const [forkNote, setForkNote] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** 「今天」以**打开这一页的时刻**为准，钉住一次：页面开着跨零点不该跳档。 */
@@ -50,6 +53,12 @@ export default function ThreadListPage() {
 
   return (
     <div className="wb-threads" data-testid="wb-threads">
+      {/* 分叉的回执（新会话 id + 副作用说明）：分叉这件事要看得见 */}
+      {forkNote ? (
+        <div className="wb-threads-note" data-testid="wb-threads-forknote" role="status">
+          {forkNote}
+        </div>
+      ) : null}
       <div className="wb-threads-head">
         <NavCollapseButton />
         <button className="wb-icon" aria-label="新工作任务" title="新工作任务" data-testid="wb-threads-new" onClick={() => setView("home")}>
@@ -136,6 +145,26 @@ export default function ThreadListPage() {
                 setDraft(menu.task.title);
                 setEditing(menu.task.id);
                 setMenu(null);
+              },
+            },
+            /*
+             * ⭐ **从这一刻分叉**（C6/V5-2 2.5 的产品入口）：源记录原样复制成一段
+             * **独立会话**（剥 seq 重发号、留 at；归属跟源走、记下来源）。
+             * 回执里带上那句副作用说明 —— 分叉出来的那段与源此后互不影响，
+             * 而"让模型接着跑"是**另一个显式动作**（这里只复制）。
+             */
+            {
+              label: "从这一刻分叉",
+              run: () => {
+                const session = (globalThis as unknown as {
+                  shell?: { session?: { fork: (id: string) => Promise<{ ok: boolean; sessionId?: string; note?: string; error?: string }> } };
+                }).shell?.session;
+                const sourceId = taskSessionId(menu.task.id);
+                setMenu(null);
+                void session
+                  ?.fork(sourceId)
+                  .then((got) => setForkNote(got?.ok ? `已分叉成 ${got.sessionId}：${got.note ?? ""}` : `分叉失败：${got?.error ?? "未知原因"}`))
+                  .catch((error: unknown) => setForkNote(`分叉失败：${String((error as Error)?.message ?? error)}`));
               },
             },
             {

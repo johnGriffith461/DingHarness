@@ -1310,3 +1310,7 @@ html:not([data-kb="1"])
 /* 审批卡片上的「授权他人批」（C3 3.7b）：与允许/拒绝同一排，但它是**选人**不是决定 */
 .wb-tool-grant { font-size: 12px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--fg); }
 .wb-tool-grant-note { margin-top: 6px; font-size: 12.5px; color: var(--fg-dim); }
+
+/* 分叉的回执（对话列表顶部）：新会话 id + 副作用说明 —— 分叉要看得见 */
+.wb-threads-note { margin: 0 8px 8px; padding: 6px 8px; font-size: 12.5px; color: var(--fg-dim);
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
