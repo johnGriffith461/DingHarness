@@ -23,6 +23,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "",
       '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
+      "  ding sessions --state <会话 id>                # 回放运行态（运行中/等你确认/已暂停…）",
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
       "  ding doctor [--json] [--fix]                   # 一键自检（--fix 只修建目录/检索索引两类）",
       "  ding recipe list|show|run|export|import            # 任务模板（可分享的「提示词 + 工具范围 + 档位」）",

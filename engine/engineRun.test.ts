@@ -255,3 +255,37 @@ describe("C1：会话归属（ownerActor / resume 校验）", () => {
     expect((await engine.resume("c1-read")).denied).toBeUndefined();
   });
 });
+
+/**
+ * U01：运行态写进日志（2026-10-18）。
+ *
+ * 判据：开跑落 `running`、收尾落终态，回放能拿到终态；进程被杀（日志停在 running）
+ * 时冷启动判成 `error` 并给"继续"入口 —— 这条由 `runState` 的 fold 单测覆盖。
+ */
+describe("U01：运行态", () => {
+  it("⭐ 一轮成功后日志里是 running → finished，且结果带终态", async () => {
+    const store = memoryStore();
+    const out = await engineWith(store).run(baseRequest("u01-ok"));
+    expect(out.state).toBe("finished");
+    const states = store
+      .all()
+      .filter((r) => (r as { type?: string }).type === "run-state")
+      .map((r) => (r as { state?: string }).state);
+    expect(states).toEqual(["running", "finished"]);
+  }, 20_000);
+
+  it("中止时终态是 error（不是 finished）", async () => {
+    const store = memoryStore();
+    const controller = new AbortController();
+    controller.abort();
+    const out = await engineWith(store).run({ ...baseRequest("u01-abort"), abortSignal: controller.signal });
+    expect(out.state).toBe("error");
+  }, 20_000);
+
+  it("⭐ 回放这段日志，冷启动不会把 finished 判死", async () => {
+    const store = memoryStore();
+    await engineWith(store).run(baseRequest("u01-replay"));
+    const { foldRunState } = await import("./core/runState");
+    expect(foldRunState(store.all(), { coldStart: true }).state).toBe("finished");
+  }, 20_000);
+});

@@ -5,6 +5,7 @@
  */
 import { formatTotal, ledgerOf, localDay, rollup, type LedgerEntry } from "../../engine/core/ledger";
 import { logLine } from "../../engine/core/events";
+import { RUN_STATE_LABEL, foldRunState } from "../../engine/core/runState";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { modelInfoOf } from "../../engine/runtime/models";
 import { softLimitNotice } from "../../engine/core/notices";
@@ -103,6 +104,43 @@ export async function cmdSessions(p: Parsed, dataDir: string): Promise<number> {
   }
 
   if (p.flags.has("cost")) return cmdCost(p, dataDir);
+  /*
+   * `--state <会话 id>`（U01）：回放这段会话的运行态。
+   *
+   * 冷启动口径在这里用掉：`running` 一律报成 `error`（那个进程已经不在了），
+   * 并说清楚"可以从最后一步继续" —— 而不是让用户看着一个永远转圈的"运行中"。
+   */
+  const stateId = flag(p, "state");
+  if (stateId) {
+    const store = createSqliteSessionStore(dataDir);
+    try {
+      const { records, skipped, denied } = await store.load(stateId);
+      if (denied) {
+        process.stderr.write("没有可给你的内容（这段会话不属于当前身份）。\n");
+        return 1;
+      }
+      if (!records.length) {
+        process.stderr.write(`没有这段会话：${stateId}${skipped ? `（跳过 ${skipped} 条坏行）` : ""}\n`);
+        return 1;
+      }
+      const view = foldRunState(records, { coldStart: true });
+      if (p.flags.has("json")) {
+        process.stdout.write(`${JSON.stringify(view, null, 2)}\n`);
+        return 0;
+      }
+      process.stdout.write(`状态：${RUN_STATE_LABEL[view.state]}（${view.state}）\n`);
+      if (view.reason) process.stdout.write(`原因：${view.reason}\n`);
+      if (view.pending.length) {
+        process.stdout.write(`还在等确认的调用（${view.pending.length}）：\n`);
+        for (const item of view.pending) {
+          process.stdout.write(`  · ${item.name}（${item.toolCallId}）${item.summary ? `：${item.summary}` : ""}\n`);
+        }
+      }
+      return 0;
+    } finally {
+      store.close();
+    }
+  }
   const store = createSqliteSessionStore(dataDir);
   try {
     const kind = flag(p, "kind");

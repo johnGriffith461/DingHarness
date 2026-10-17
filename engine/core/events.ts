@@ -120,9 +120,17 @@ import {
 } from "./records/approvals";
 export type { ApprovalGrantRecord, ApprovalRecord } from "./records/approvals";
 
+/*
+ * 运行态记录（U01，2026-10-18）：与审批决策同一层 —— 它不是流事件
+ * （没有 `requestId`），因为它可以在那一轮结束很久之后才写。
+ */
+import { foldRunState, normalizeRunStateRecord, type RunStateRecord } from "./runState";
+export type { RunPendingApproval, RunState, RunStateRecord } from "./runState";
+export { PENDING_TTL_MS, RUN_STATE_LABEL, RUN_STATES, canTransition, endStateOf, foldRunState } from "./runState";
+
 
 /** 日志里可能出现的一条记录。 */
-export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord | ApprovalGrantRecord;
+export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord | ApprovalGrantRecord | RunStateRecord;
 
 /**
  * 会话 id 的前缀：**会话日志要能分清"这是哪条路写下来的"**。
@@ -428,6 +436,9 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
    */
   if (event.type === "approval-grant") return state;
 
+  /* 运行态（U01）：改的是"这一段跑到哪了"，不改这一轮的正文/工具/用量。 */
+  if (event.type === "run-state") return state;
+
   if (event.type === "error") return { ...state, done: true, error: event.message };
 
   /*
@@ -726,6 +737,14 @@ export type ResumedSession = {
    */
   runningDelegations: DelegationView[];
   /**
+   * **回放出来的运行态**（U01，2026-10-18；加法）。
+   *
+   * `coldStart` 口径已经在这里用掉了：读日志恢复之后，`running` 一律是 `error`
+   * （那个进程已经不在了），而 `waiting_for_confirmation` / `paused` 保持原样，
+   * 宿主据此给出"继续"入口。
+   */
+  runState?: import("./runState").RunStateView;
+  /**
    * **归属校验没过**（C1，V5-1 3.5）：这段会话是别人的，所以上面三个字段都是空的。
    *
    * ⚠️ 为什么要有这个字段而不是"回空对象就完事"：空会话与"不是你的"在界面上
@@ -765,7 +784,7 @@ export function resumeSession(records: readonly LogRecord[], opts: ProjectOption
       if (d.status === "started") runningDelegations.push(d);
     }
   }
-  return { turns, pending: pendingGates(turns), runningDelegations };
+  return { turns, pending: pendingGates(turns), runningDelegations, runState: foldRunState(records, { coldStart: true }) };
 }
 
 /* ────────────────────── 落盘：一行一条 ────────────────────── */
@@ -820,6 +839,8 @@ export function parseLogLine(line: string): LogRecord | null {
   /* 审批两型（决策 / 授权）的收窄在 `./records/approvals.ts` —— 形状规矩写在那边 */
   if (o.type === "approval") return normalizeApprovalRecord({ ...o });
   if (o.type === "approval-grant") return normalizeApprovalGrantRecord({ ...o });
+  /* 运行态（U01）：形状规矩在 `runState.ts` 的 normalizeRunStateRecord */
+  if (o.type === "run-state") return normalizeRunStateRecord(o);
   if (typeof o.requestId !== "string") return null;
   /*
    * 委派进度：`delegationId` / `agent` / `status` 少一样就不是一条能重放的记录

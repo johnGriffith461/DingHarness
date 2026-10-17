@@ -139,6 +139,11 @@ export function interruptedTurns(records: readonly LogRecord[]): InterruptedTurn
       if (!order.includes(r.requestId)) order.push(r.requestId);
       continue;
     }
+    /*
+     * 运行态记录（U01）**没有 requestId** —— 它说的是"这一段会话现在到哪了"，
+     * 不是某一次请求的片段。跳过它（它不是任何一次回合的材料）。
+     */
+    if (r.type === "run-state") continue;
     const rid = r.requestId;
     const slot = rid ? open.get(rid) : undefined;
     if (!slot) continue;

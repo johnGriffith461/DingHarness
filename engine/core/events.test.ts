@@ -642,7 +642,13 @@ describe("resume · 从日志还原会话", () => {
   });
 
   it("空日志还原成空会话（不是报错）", () => {
-    expect(resumeSession([])).toEqual({ turns: [], pending: [], runningDelegations: [] });
+    /* U01：`runState` 是加法字段 —— 空日志回放出来是 idle（不是"没有状态"） */
+    expect(resumeSession([])).toEqual({
+      turns: [],
+      pending: [],
+      runningDelegations: [],
+      runState: { state: "idle", pending: [] },
+    });
   });
 });
 

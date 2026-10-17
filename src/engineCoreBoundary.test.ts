@@ -52,8 +52,11 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * `engine/ports/spill.ts`（端口类型）与 `engine/runtime/spill.ts`（策略 + 回注文案）。
  * 它们没有 `node:*`、不读全局路径，所以留在最小面里是对的；
  * 真正的文件写法在 `engine/adapters/spillStore.ts`（**不在**闭包里，由宿主注入）。
+ *
+ * ⚠️ 2026-10-18（U01）47 → 48：`engine/core/runState.ts`（状态迁移 + 回放）。
+ * 它同样是纯逻辑（不碰 IO），而且是主循环收尾时必须写的记录 —— 必须在最小面里。
  */
-const CLOSURE_BUDGET = 47;
+const CLOSURE_BUDGET = 48;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

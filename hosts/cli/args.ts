@@ -96,6 +96,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "by",
   "kind",
   "export",
+  /* `ding sessions --state <会话 id>`（U01）：回放运行态（运行中/等确认/暂停…） */
+  "state",
   "grant",
   "search",
   "hook",

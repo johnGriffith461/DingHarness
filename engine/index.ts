@@ -1,12 +1,17 @@
 import {
   LOCAL_USER,
   MAIN_AGENT,
+  PENDING_TTL_MS,
+  endStateOf,
+  fold,
   resumeSession,
   type Actor,
   type LogInput,
   type LogRecord,
   type ResumedSession,
+  type RunState,
 } from "./core/events";
+import { toolArgsSummary } from "../shared/agentTools";
 import { diffSnapshot, snapshotOf, type Snapshot, type SnapshotDiff } from "./core/snapshot";
 import type { MemberRole } from "./core/members";
 import type { ExecutorContext, ToolExecutor } from "./ports/executor";
@@ -194,8 +199,15 @@ export type EngineRunResult = {
   events: TurnEvent[];
   /** 这一轮落盘的记录（含首行 `request`）。 */
   records: LogRecord[];
-  /** 这一次请求的 id（宿主按它归并流片段）。 */
+  /** 这一轮请求的 id（宿主按它归并流片段）。 */
   requestId: string;
+  /**
+   * 这一轮收尾时的**运行态**（U01，2026-10-18；加法）。
+   *
+   * 宿主不必自己从事件里推：`waiting_for_confirmation` 与 `finished` 的区别
+   * 就是"有没有人还在等确认"，那件事内核算得最准（它知道 pending 明细）。
+   */
+  state?: RunState;
   /**
    * 落盘失败的原因（**一条都不许静默丢**，2026-10-16，审计 P38）。
    *
@@ -313,6 +325,15 @@ export function createEngine(ports: EnginePorts): Engine {
 
       const events: TurnEvent[] = [];
 
+      /*
+       * 运行态（U01）：开跑先落一条 `running`。
+       *
+       * ⚠️ 它必须在**第一块输出之前**写下去：崩溃恢复靠的是"日志里最后一条运行态"，
+       * 如果等到收尾才写，被杀进程的那一轮在日志里根本不存在（那正是原来"看不出
+       * 上一轮跑到哪"的原因）。
+       */
+      await record({ requestId, type: "run-state", state: "running" } as LogInput);
+
       // 钩子：会话开始（Phase 8.3）。只看不改，异常不会影响这一轮
       await hooks.run("session:start", { sessionId: request.sessionId, provider: request.provider, model: request.model });
 
@@ -409,12 +430,44 @@ export function createEngine(ports: EnginePorts): Engine {
 
       await hooks.run("turn:end", { sessionId: request.sessionId, ok: outcome.ok, aborted: outcome.aborted });
 
+      /*
+       * 收尾运行态（U01）：`pending>0` 时是 `waiting_for_confirmation`，
+       * 否则按成败给 `finished` / `error`。
+       *
+       * ⚠️ 待确认明细要**写进状态**（工具名 + 调用 id + 参数摘要），
+       * 不是只写一个状态名 —— 否则重开之后用户看到"在等你确认"却不知道在等哪一次。
+       */
+      /*
+       * 待确认明细走**投影**（不是自己扫事件流）：`fold` 是唯一 reducer，
+       * 它已经在 `traces` 里标好了 `pending`（`src/projectionGuard.test.ts` 挡的就是
+       * "另造一份解析"——那样界面与日志迟早在"哪条算待确认"上分叉）。
+       */
+      const view = fold(events);
+      const pendingTraces = view.traces
+        .filter((trace) => trace.pending)
+        .map((trace) => ({
+          toolCallId: trace.toolCallId,
+          name: trace.name,
+          ...(toolArgsSummary(trace.name, trace.input) ? { summary: toolArgsSummary(trace.name, trace.input) } : {}),
+          since: Date.now(),
+          expiresAt: Date.now() + PENDING_TTL_MS,
+        }));
+      const end = endStateOf({ ok: outcome.ok, aborted: outcome.aborted, pending: pendingTraces.length });
+      await record({
+        requestId,
+        type: "run-state",
+        state: end.state,
+        ...(end.reason ? { reason: end.reason } : {}),
+        ...(pendingTraces.length ? { pending: pendingTraces } : {}),
+      } as LogInput);
+
       return {
         ok: outcome.ok,
         ...(outcome.error ? { error: outcome.error } : {}),
         aborted: outcome.aborted,
         provider: outcome.provider,
         model: outcome.model,
+        state: end.state,
         events,
         records,
         requestId,
