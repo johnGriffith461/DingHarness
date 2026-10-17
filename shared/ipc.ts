@@ -79,6 +79,8 @@ export type ChatRequest = {
    * 见本文件 :115 的说明与 `engine/core/policy.ts`）。也就是说：漏传字段**不会**让工具全放开。
    */
   toolPolicy?: ConfirmMode;
+  /* 工具白名单（L05）：省略 = 不限制；给了就一路传到内核的 `only`。 */
+  only?: string[];
   /**
    * 是否把工具交给模型（**显式 opt-in，默认不带**）。
    *
@@ -335,7 +337,7 @@ import type { PermissionRuleWire, ReviewListResult, ReviewRevertResult } from ".
 export type { PermissionRuleWire, ReviewChangeWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type ShellBridge = {
   skills: import("./skillsWire").SkillsBridge; /* G08：形状在 skillsWire.ts */
-  /* 逐文件变更审阅（U08）：本体在 engine，这里只是接线。 */
+  /* 审阅（U08）：本体在 engine。 */
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;
     revert: (sessionId: string, path: string) => Promise<ReviewRevertResult>;
@@ -492,11 +494,7 @@ export type ShellBridge = {
     listArtifacts: () => Promise<Array<{ filePath: string; name: string; bytes: number }>>;
   };
   /**
-   * 本机版应用设置（§183）。
-   *
-   * 走主进程的原子写（不走 localStorage —— §156 的教训：硬杀进程就没了）。
-   *
-   * ## 字段
+   * 本机版应用设置（§183）—— 主进程原子写（不走 localStorage，§156 的教训）。
    *
    * · `pinnedModel`：钉住的默认通道（空串 = 记忆上次）；
    * · `navCollapsed`：左侧导航栏收起来了没有（2026-10-16，审计 P187 / P191）。

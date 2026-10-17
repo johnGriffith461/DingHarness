@@ -204,3 +204,34 @@ describe("normalizeAgentFile（⭐ 把「当前选中的」也收窄成合法值
     expect(normalizeAgentFile({ agents: [], selected: 42 }).selected).toBe("");
   });
 });
+
+/* ============================================================
+ * L05（2026-10-18）：Agent Builder 的白名单与档位
+ * ============================================================ */
+describe("智能体的工具白名单与档位（L05）", () => {
+  const base = {
+    id: "a1",
+    name: "研究员",
+    description: "只查资料",
+    background: [],
+    characteristic: [],
+    hobby: [],
+    setting: [],
+    createdAt: 1,
+  };
+
+  it("⭐ 归一化保留 tools / mode；坏值丢掉", () => {
+    const [ok] = normalizeAgents([{ ...base, tools: ["read_file", "search_files"], mode: "按需确认" }]);
+    expect(ok?.tools).toEqual(["read_file", "search_files"]);
+    expect(ok?.mode).toBe("按需确认");
+    const [bad] = normalizeAgents([{ ...base, tools: [], mode: "乱写" }]);
+    expect(bad?.tools).toBeUndefined();
+    expect(bad?.mode).toBeUndefined();
+  });
+
+  it("旧数据（没有这两个字段）照常读出来（零迁移）", () => {
+    const [old] = normalizeAgents([base]);
+    expect(old?.tools).toBeUndefined();
+    expect(old?.mode).toBeUndefined();
+  });
+});

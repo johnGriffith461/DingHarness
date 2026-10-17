@@ -155,7 +155,12 @@ export const useAgentStore = create<AgentState>()((set, get) => {
  * @returns 提示词片段；没选或已不存在时返回空串
  */
 export function agentPromptBlock(): string {
-  const { agents, selectedId } = useAgentStore.getState();
-  const agent = agents.find((a) => a.id === selectedId);
+  const agent = selectedAgentNow();
   return agent ? agentSystemPrompt(agent) : "";
+}
+
+/** 当前选中的智能体（接线用：工具白名单与档位都要它）。 */
+export function selectedAgentNow(): Agent | undefined {
+  const { agents, selectedId } = useAgentStore.getState();
+  return agents.find((a) => a.id === selectedId);
 }

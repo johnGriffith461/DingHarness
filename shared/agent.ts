@@ -82,6 +82,20 @@ export type Agent = {
   hobby: string[];
   setting: string[];
   createdAt: number;
+  /**
+   * **工具白名单**（L05，2026-10-18）。
+   *
+   * 给了就只把这个智能体**能看到**的工具下发给模型（内核的 `only` 同一条路）；
+   * 省略 = 不限制（老行为，零迁移）。
+   */
+  tools?: string[];
+  /**
+   * 这个智能体的**审批档位**（L05）。省略 = 沿用会话当前档位。
+   *
+   * ⚠️ 它只能**更严**不能更松：档位是用户选的旋钮，智能体是角色 ——
+   * 所以 `taskRuntime` 取"更严的那个"（见那里的 `stricterMode`）。
+   */
+  mode?: "全部允许" | "按需确认" | "每步确认";
 };
 
 /**
@@ -175,6 +189,8 @@ export function normalizeAgents(raw: unknown): Agent[] {
       hobby: list(a.hobby),
       setting: list(a.setting),
       createdAt: typeof a.createdAt === "number" ? a.createdAt : 0,
+      ...(Array.isArray(a.tools) && a.tools.length ? { tools: list(a.tools) } : {}),
+      ...(a.mode === "全部允许" || a.mode === "按需确认" || a.mode === "每步确认" ? { mode: a.mode } : {}),
     });
   }
   return out.sort((x, y) => x.createdAt - y.createdAt);

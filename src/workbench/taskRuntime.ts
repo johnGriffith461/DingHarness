@@ -46,7 +46,8 @@ import { buildHistory } from "./history";
 import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
 
 import { readSavedRoute } from "@/ai/route";
-import { agentPromptBlock } from "./agentStore";
+import { agentPromptBlock, selectedAgentNow } from "./agentStore";
+import { skillsBlockFor, stricterMode } from "./runInputs";
 import { memoryPromptBlock } from "@shared/memory";
 import { useMemoryStore } from "./memoryStore";
 import { resolveChatRoute } from "@/ai/route";
@@ -218,20 +219,6 @@ async function enabledBlock(): Promise<string> {
     // 用 findItemIn 而不是 findItem：自定义能力不在内置目录里，
     // 只查目录会让它们进了 enabled 也拿不到名字 —— 等于装了没用。
     return enabledPromptBlock(lib, (id) => findItemIn(lib, id));
-  } catch {
-    return "";
-  }
-}
-
-/**
- * 这一轮的技能提示（G08）：**走主进程**读技能目录（渲染层没有 fs）。
- *
- * 失败/没配就返回空串 —— 技能是增强，不该让一轮跑不起来。
- */
-async function skillsBlockFor(text: string): Promise<string> {
-  const shell = (globalThis as unknown as { shell?: { skills?: { block: (t: string) => Promise<string> } } }).shell;
-  try {
-    return (await shell?.skills?.block?.(text)) ?? "";
   } catch {
     return "";
   }
@@ -532,6 +519,14 @@ export async function runStream(
    * 放在能力说明**之前**：人设是"你是谁"，能力是"你能用什么"。
    */
   const persona = agentPromptBlock();
+  /*
+   * L05：智能体的工具白名单与档位。
+   * 档位只能**更严**（用户选的旋钮不能被一个角色定义放宽）——
+   * 与 `engine/workflow/types.ts` 里"步骤只能更严"同一条口径。
+   */
+  const agent = selectedAgentNow();
+  const agentOnly = agent?.tools?.length ? agent.tools : undefined;
+  const mode = stricterMode(readConfirmMode(), agent?.mode);
   // 记下"这一轮发出去的东西"的估算量（补完④），收尾时与真实 usage 一起算系数
   const extra = await enabledBlock();
   /*
@@ -586,7 +581,9 @@ export async function runStream(
         messages,
         system: fullSystem,
         // 审批档位随请求过界（§143）：模式选择在这侧，工具执行在那侧
-        toolPolicy: readConfirmMode(),
+        toolPolicy: mode,
+        /* L05：这个智能体只该用这些工具（省略 = 不限制） */
+        ...(agentOnly ? { only: agentOnly } : {}),
         // 思考强度（2026-10-16）：没选过就是 undefined，一个字段都不多发
         ...(readReasoningEffort() === undefined ? {} : { reasoningEffort: readReasoningEffort() }),
 

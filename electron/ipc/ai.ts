@@ -391,6 +391,8 @@ export function registerAiIpc(): void {
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           mode: request.toolPolicy ?? "按需确认",
           ...(request.useTools ? { useTools: true } : {}),
+          /* L05：智能体的工具白名单（模型看不到白名单外的工具） */
+          ...(request.only?.length ? { only: request.only } : {}),
           abortSignal: controller.signal,
           /*
            * ⚠️ 这个出口只负责**上屏**：请求记录、每一次工具调用、用量、中止与错误
