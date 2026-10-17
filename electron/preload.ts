@@ -1,9 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AiStreamEvent, CanvasCommand, SessionSummary, ShellBridge } from "../shared/ipc";
+import type { AiStreamEvent, CanvasCommand, PermissionRuleWire, SessionSummary, ShellBridge } from "../shared/ipc";
 import { AI_CHANNEL } from "./ipc/ai";
 import { CLIPBOARD_CHANNEL } from "./ipc/clipboard";
 import { CODING_CHANNEL } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
+import { REVIEW_CHANNEL } from "./ipc/review";
 import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { STATS_CHANNEL } from "./ipc/stats";
@@ -284,11 +285,23 @@ const api = {
     clear: (): Promise<unknown> => ipcRenderer.invoke(MEMORY_CHANNEL.clear),
   },
   appSettings: {
-    /* 与 `electron/ipc/appSettings.ts` 的 `AppSettings` 对齐（`navCollapsed` = 左栏收起态） */
-    read: (): Promise<{ pinnedModel: string; navCollapsed?: boolean }> =>
+    /* 与 `electron/ipc/appSettings.ts` 的 `AppSettings` 对齐（navCollapsed = 左栏收起态；rules = 权限规则） */
+    read: (): Promise<{ pinnedModel: string; navCollapsed?: boolean; rules?: PermissionRuleWire[] }> =>
       ipcRenderer.invoke(APP_SETTINGS_CHANNEL.read),
-    write: (next: { pinnedModel: string; navCollapsed?: boolean }): Promise<{ pinnedModel: string; navCollapsed?: boolean }> =>
+    write: (next: {
+      pinnedModel: string;
+      navCollapsed?: boolean;
+      rules?: PermissionRuleWire[];
+    }): Promise<{ pinnedModel: string; navCollapsed?: boolean; rules?: PermissionRuleWire[] }> =>
       ipcRenderer.invoke(APP_SETTINGS_CHANNEL.write, next),
+  },
+  /** 逐文件改动审阅（U08）：读改动清单 / 回滚某个文件 */
+  review: {
+    list: (sessionId: string) => ipcRenderer.invoke(REVIEW_CHANNEL.list, sessionId) as ReturnType<
+      ShellBridge["review"]["list"]
+    >,
+    revert: (sessionId: string, target: string) =>
+      ipcRenderer.invoke(REVIEW_CHANNEL.revert, sessionId, target) as ReturnType<ShellBridge["review"]["revert"]>,
   },
   /** 诊断包导出（2026-10-17）：写盘 + 在文件管理器里定位，返回真实路径。 */
   diagnostics: {

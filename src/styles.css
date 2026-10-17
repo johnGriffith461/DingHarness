@@ -18,6 +18,8 @@
 @import "./styles/navsearch.css";
 /* 首页工作模式（D02，2026-10-18）：同样因为 workbench.css 贴着 1500 行上限而独立成文件 */
 @import "./styles/home.css";
+/* 逐文件改动审阅（U08，2026-10-18）：同一理由独立成文件 */
+@import "./styles/review.css";
 @import "./styles/theme.css";
 @import "./styles/panels.css";
 @import "./styles/features.css";

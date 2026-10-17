@@ -49,6 +49,7 @@ import { runComputerAction } from "./computer";
 import type { ComputerKey } from "../../shared/computer";
 import { app } from "electron";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
+import { currentPermissionRules } from "./appSettings";
 
 /**
  * 工具结果落盘目录（U02）：`<userData>/tool-results`。
@@ -632,6 +633,11 @@ export function agentTools(env: ToolEnv): ToolSet {
     },
     /* 落盘（U02）：超限结果写进 userData，回注路径让模型能回读 */
     spill: spillStore(),
+    /*
+     * 权限规则（U03）：用户在审批卡片上点过「总是允许」的那些 ——
+     * 从设置缓存同步读（`agentTools` 是同步装配，规则在写盘成功时已进缓存）。
+     */
+    ...(currentPermissionRules().length ? { rules: currentPermissionRules() } : {}),
   });
 }
 

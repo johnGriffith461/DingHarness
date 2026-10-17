@@ -59,8 +59,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * ⚠️ 2026-10-18（U03）48 → 50：`commandRisk.ts`（命令分词 + 风险规则）与
  * `permissionRules.ts`（规则评估 + glob）。权限判定必须在最小面里 ——
  * 它是**执行点**上的判定，宿主不应该各写一份。
+ *
+ * ⚠️ 2026-10-18（U08）50 → 51：`shared/review.ts`（审阅的线路形状）。
+ * `shared/ipc.ts` 引了它（从 900 行上限里搬出去的），而 `ConfirmMode` 的
+ * 类型链本来就会把 `shared/ipc.ts` 带进闭包 —— 纯类型文件，没有任何 IO。
  */
-const CLOSURE_BUDGET = 50;
+const CLOSURE_BUDGET = 51;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

@@ -41,7 +41,7 @@ function fakeDisk(initial: Record<string, unknown>): { writes: Array<Record<stri
 }
 
 beforeEach(() => {
-  useAppSettings.setState({ pinnedModel: "", navCollapsed: false, loaded: false, note: "" });
+  useAppSettings.setState({ pinnedModel: "", navCollapsed: false, rules: [], loaded: false, note: "" });
 });
 
 describe("收起态进得去、回得来（P187 / P191）", () => {
@@ -178,5 +178,82 @@ describe("接线：盘上的值灌进界面状态、界面一变就写回", () =
     ui.press(true);
     for (let i = 0; i < 4; i += 1) await new Promise((r) => setTimeout(r, 0));
     expect(writes).toHaveLength(0);
+  });
+});
+
+/* ============================================================
+ * 权限规则（U03 桌面那一半，2026-10-18）
+ *
+ * 「总是允许」必须**重启仍在**：规则进同一份 settings.json，
+ * 而且写规则时不能把另外两个字段抹掉（那是这份设置的老坑）。
+ * ============================================================ */
+describe("权限规则跟着设置一起落盘（U03）", () => {
+  it("⭐ 加一条规则：写盘带齐三个字段（不把钉住的模型/收起态抹掉）", async () => {
+    const { writes } = fakeDisk({ pinnedModel: "deepseek/deepseek-chat", navCollapsed: true });
+    await useAppSettings.getState().load();
+    const ok = await useAppSettings.getState().addRule({
+      action: "run_command",
+      resource: "git status",
+      effect: "allow",
+      note: "测试",
+    });
+    expect(ok).toBe(true);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.pinnedModel).toBe("deepseek/deepseek-chat");
+    expect(writes[0]!.navCollapsed).toBe(true);
+    expect(writes[0]!.rules).toEqual([
+      { action: "run_command", resource: "git status", effect: "allow", note: "测试" },
+    ]);
+  });
+
+  it("⭐ 重启之后规则还在（load 把 rules 读回来）", async () => {
+    fakeDisk({
+      pinnedModel: "",
+      rules: [{ action: "write_file", resource: "src/**", effect: "allow" }],
+    });
+    await useAppSettings.getState().load();
+    expect(useAppSettings.getState().rules).toEqual([
+      { action: "write_file", resource: "src/**", effect: "allow" },
+    ]);
+  });
+
+  it("同一条规则不重复加（点两次「总是允许」不该攒两条）", async () => {
+    const { writes } = fakeDisk({ pinnedModel: "" });
+    await useAppSettings.getState().load();
+    const rule = { action: "run_command", resource: "ls", effect: "allow" as const };
+    await useAppSettings.getState().addRule(rule);
+    await useAppSettings.getState().addRule(rule);
+    expect(useAppSettings.getState().rules).toHaveLength(1);
+    expect(writes).toHaveLength(1);
+  });
+
+  it("写盘失败 → 回滚内存里的规则并留说明（界面上不该显示一条不存在的规则）", async () => {
+    installShell({
+      appSettings: {
+        read: async () => ({ pinnedModel: "" }),
+        write: async () => {
+          throw new Error("磁盘只读");
+        },
+      },
+    });
+    await useAppSettings.getState().load();
+    const ok = await useAppSettings.getState().addRule({ action: "run_command", effect: "allow" });
+    expect(ok).toBe(false);
+    expect(useAppSettings.getState().rules).toEqual([]);
+    expect(useAppSettings.getState().note).toContain("没能记住");
+  });
+
+  it("盘上的坏规则被丢掉（缺 action / 坏 effect）", async () => {
+    fakeDisk({
+      pinnedModel: "",
+      rules: [
+        { action: "ok_tool", effect: "allow" },
+        { action: "", effect: "allow" },
+        { action: "x", effect: "maybe" },
+        null,
+      ],
+    });
+    await useAppSettings.getState().load();
+    expect(useAppSettings.getState().rules).toEqual([{ action: "ok_tool", effect: "allow" }]);
   });
 });

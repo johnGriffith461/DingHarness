@@ -328,7 +328,18 @@ export type ComputerResultView =
   | { ok: true; detail: string; path?: string; dataUrl?: string; width?: number; height?: number }
   | { ok: false; error: string };
 
+/* 审阅的线路形状在 `./review.ts`（本文件顶着 900 行上限）；re-export 保持既有 import 不变。 */
+import type { PermissionRuleWire, ReviewListResult, ReviewRevertResult } from "./review";
+export type { PermissionRuleWire, ReviewChangeWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type ShellBridge = {
+  /**
+   * **逐文件变更审阅**（U08）：能力本体在 engine（`fileReview.ts`），这里只是接线。
+   * `before/after` 是日志里记下的原文 —— 界面据此画 diff，回滚也只依赖它们。
+   */
+  review: {
+    list: (sessionId: string) => Promise<ReviewListResult>;
+    revert: (sessionId: string, path: string) => Promise<ReviewRevertResult>;
+  };
   ping: () => Promise<{
     ok: boolean;
     platform: string;
@@ -498,10 +509,11 @@ export type ShellBridge = {
    * 让"老文件读出来就报缺字段"变成一次迁移事故是本末倒置。
    */
   appSettings: {
-    read: () => Promise<{ pinnedModel: string; navCollapsed?: boolean }>;
-    write: (next: { pinnedModel: string; navCollapsed?: boolean }) => Promise<{
+    read: () => Promise<{ pinnedModel: string; navCollapsed?: boolean; rules?: PermissionRuleWire[] }>;
+    write: (next: { pinnedModel: string; navCollapsed?: boolean; rules?: PermissionRuleWire[] }) => Promise<{
       pinnedModel: string;
       navCollapsed?: boolean;
+      rules?: PermissionRuleWire[];
     }>;
   };
   /** 创作广场的「喜欢」（§180）：只存名字，不编点赞数。 */

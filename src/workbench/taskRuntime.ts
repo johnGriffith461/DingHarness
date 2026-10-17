@@ -876,3 +876,4 @@ export function abortRunning(port: StorePort, sessionId?: string): void {
   }
   syncRunningFlag(port);
 }
+

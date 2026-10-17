@@ -134,3 +134,17 @@ describe("权限规则（contextBudget 同级的加法）", () => {
     expect(describeConfig({})).toContain("没有");
   });
 });
+
+describe("单会话预算上限（U01）", () => {
+  it("读回来只认正数（0 / 负数 / 乱值一律丢掉）", () => {
+    expect(normalizeConfig({ maxBudgetUsd: 2.5 }).maxBudgetUsd).toBe(2.5);
+    expect(normalizeConfig({ maxBudgetUsd: 0 }).maxBudgetUsd).toBeUndefined();
+    expect(normalizeConfig({ maxBudgetUsd: -1 }).maxBudgetUsd).toBeUndefined();
+    expect(normalizeConfig({ maxBudgetUsd: "5" }).maxBudgetUsd).toBeUndefined();
+  });
+
+  it("describeConfig 说得出来", () => {
+    expect(describeConfig({ maxBudgetUsd: 3 })).toContain("$3");
+    expect(describeConfig({})).toContain("不限");
+  });
+});

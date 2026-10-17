@@ -49,6 +49,14 @@ export type CliConfig = {
    */
   softLimitUsd?: number;
   /**
+   * **单会话花费上限**（U01，2026-10-18）：超过就暂停，不再调模型。
+   *
+   * 与 `softLimitUsd` 的区别是**硬闸 vs 提示**：软限额只打印一句话；
+   * 这个会让这一段会话停成 `paused`，加预算（改配置）之后才能继续。
+   * 同样是"没设就不起作用" —— 替用户定一个他没同意的预算比不设更糟。
+   */
+  maxBudgetUsd?: number;
+  /**
    * 自定义 provider（V6-2j）：端点/协议/密钥引用都是**配置**，不是代码。
    *
    * 与内置表严格分开：内置表是"我们验过的那些"；这里是"你自己接的那些"。
@@ -84,7 +92,7 @@ export function configPaths(dataDir: string): { primary: string; legacy: string 
  * 就永远报"合法"—— 而用户看到的表现是"我明明配了啊"。
  * （2026-10-17 从 doctor 搬到这里：配置的合法键属于配置模块，自检只借它用。）
  */
-export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "providers", "contextBudget", "rules"] as const;
+export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "maxBudgetUsd", "providers", "contextBudget", "rules"] as const;
 
 /** 收窄从磁盘读回来的配置（**磁盘不可信**：坏值一律丢掉，别让它影响一次真实运行）。 */
 export function normalizeConfig(raw: unknown): CliConfig {
@@ -101,6 +109,9 @@ export function normalizeConfig(raw: unknown): CliConfig {
   }
   if (typeof o.softLimitUsd === "number" && Number.isFinite(o.softLimitUsd) && o.softLimitUsd > 0) {
     out.softLimitUsd = o.softLimitUsd;
+  }
+  if (typeof o.maxBudgetUsd === "number" && Number.isFinite(o.maxBudgetUsd) && o.maxBudgetUsd > 0) {
+    out.maxBudgetUsd = o.maxBudgetUsd;
   }
   if (Array.isArray(o.dirs)) {
     const dirs = o.dirs.filter((d): d is string => typeof d === "string" && d.trim() !== "");
@@ -213,6 +224,7 @@ export function describeConfig(config: CliConfig): string {
     `档位：${config.mode ?? "（没设，默认「按需确认」）"}（可选：${CONFIRM_MODES.join(" / ")}）`,
     `上下文预算：${config.contextBudget ?? "（没设，默认 long：按模型窗口推导）"}（可选：${CONTEXT_BUDGET_MODES.join(" / ")}）`,
     `权限规则：${config.rules?.length ? `${config.rules.length} 条（ding config set rules '<JSON 数组>' 覆盖）` : "（没有；未命中规则时回落档位判定）"}`,
+    `单会话预算上限：${typeof config.maxBudgetUsd === "number" ? `$${config.maxBudgetUsd}（超了就暂停）` : "（没设，不限）"}`,
     `工作目录：${config.dirs?.length ? config.dirs.join(" / ") : "（没设，用当前目录）"}`,
   ];
   return lines.join("\n");

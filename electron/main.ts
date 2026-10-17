@@ -15,6 +15,7 @@ import { registerSpaceIpc } from "./ipc/spaceHost";
 import { registerSessionIpc, desktopSessionStore } from "./ipc/sessionStore";
 import { registerStatsIpc } from "./ipc/stats";
 import { registerWorkflowIpc } from "./ipc/workflowStore";
+import { registerReviewIpc } from "./ipc/review";
 import { registerPreviewIpc } from "./ipc/preview";
 import { registerComputerIpc } from "./ipc/computer";
 import { registerCanvasIpc } from "./ipc/canvas";
@@ -420,6 +421,8 @@ safeRegister("session", () => registerSessionIpc(ipcMain), logRegisterFailure);
 safeRegister("stats", () => registerStatsIpc(), logRegisterFailure);
 /* 工作流（V6-2l）：只读列定义/运行 + 存定义；运行在 CLI（不在这里再装配一套引擎） */
 safeRegister("workflow", () => registerWorkflowIpc(), logRegisterFailure);
+/* 逐文件改动审阅（U08）：从会话库还原改动、按文件回滚（路径走 ownedDirs 白名单） */
+safeRegister("review", () => registerReviewIpc(ipcMain), logRegisterFailure);
 /* 内置浏览器预览（V6-2m）：只允许本机地址、独立持久分区 */
 safeRegister("preview", () => registerPreviewIpc(), logRegisterFailure);
 /* Computer Use（V6-2n）：默认关；每个动作原生确认 + 留痕（不记输入内容） */
@@ -464,6 +467,13 @@ safeRegister(
 app.whenReady().then(() => {
   /* 没抢到单实例锁的进程已经在退出路上，别再建窗口 / 注册（P39） */
   if (!isPrimaryInstance) return;
+  /*
+   * 先把设置读一次（U03）：权限规则要进主进程缓存，而 `agentTools()` 是同步装配 ——
+   * 不预热的话，用户点过「总是允许」的规则在第一轮里读不到（表现是又问一次）。
+   */
+  void loadAppSettings().catch((error: unknown) => {
+    console.error("[settings] 启动时读设置失败（用默认值继续）：", error);
+  });
   /*
    * 注册系统密钥保护（Phase 14.2）——safeStorage 要 app ready 之后才可用。
    * 注册之后 `engine/adapters/secretStore` 才知道"这台机器上能不能加密地存 key"。

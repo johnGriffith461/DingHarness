@@ -11,7 +11,8 @@ import { taskSessionId } from "@engine/core/events";
 import { fabricatedCost } from "@shared/cost";
 import { branchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";
-import { HOME_MODE_KEY, parseHomeMode, pickSuggestions, suggestionsFor, type HomeMode } from "./copy";
+import { pickSuggestions, HOME_MODE_KEY, parseHomeMode, suggestionsFor, type HomeMode } from "./copy";
+import { rememberAlwaysAllow } from "./permissionRules";
 import {
   restoreTasks as restoreTasksIn,
   startTaskPersistence as startTaskPersistenceIn,
@@ -232,7 +233,14 @@ export type WorkbenchState = {
    * @param toolCallId 哪一次调用（一次回复里可能有多**次**）
    * @param approve true = 允许并执行；false = 拒绝（只留痕，不动磁盘）
    */
-  resolveTool: (taskId: string, stepId: string, toolCallId: string, approve: boolean) => Promise<void>;
+  resolveTool: (
+    taskId: string,
+    stepId: string,
+    toolCallId: string,
+    approve: boolean,
+    /** `remember=true` = 同时记一条「总是允许」规则（U03 的按钮走这条）。 */
+    opts?: { remember?: boolean },
+  ) => Promise<void>;
   /** 生成整段对话的 Markdown（分享/导出用）。 */
   transcript: () => string;
   /**
@@ -490,7 +498,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
    * ⚠️ 结果**落回那一条 trace 上**（改它的文案与状态），不是"在旁边飘一个提示" ——
    * 飘提示的话刷新就没了，用户回头再看这条回复会以为"当时就执行了"。
    */
-  resolveTool: async (taskId, stepId, toolCallId, approve) => {
+  resolveTool: async (taskId, stepId, toolCallId, approve, opts) => {
     /*
      * ⚠️⚠️ **同一次调用只许处置一遍**（2026-10-16 审计 P48 的根因那一半）。
      *
@@ -573,6 +581,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         ...(result.output !== undefined ? { output: result.output } : {}),
         ...(result.error ? { error: result.error } : {}),
       });
+      /*
+       * 「总是允许」（U03）：**执行成功之后**才记规则。
+       *
+       * 顺序是刻意的：这条规则承诺的是"这类以后都不问"，
+       * 如果这次执行本身失败了（路径不在白名单、命令报错），
+       * 记下一条 allow 会让下一轮更难解释 —— 先做成，再记住。
+       */
+      if (opts?.remember && result.ok) {
+        /* 设置那一侧的事交给 `taskRuntime`（store 不许自己读写 appSettings，见那条守卫） */
+        await rememberAlwaysAllow(before.name, before.input);
+      }
     } finally {
       resolvingTools.delete(guardKey);
     }

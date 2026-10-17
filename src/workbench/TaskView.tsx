@@ -11,6 +11,7 @@ import { NavCollapseButton } from "./NavCollapseButton";
 import { useWorkbenchStore } from "./store";
 import { continueTargetOf, currentQuestion, progressLabel } from "./task";
 import { ToolTraceList } from "./ToolTraceList";
+import { ChangeReviewPanel } from "./ChangeReviewPanel";
 import { taskSessionId } from "@engine/core/events";
 import { ArtifactCard } from "./ArtifactCard";
 
@@ -104,6 +105,8 @@ export function TaskView() {
           )}
           <em>AI 生成可能有误 请核实</em>
         </div>
+        {/* 本段对话的逐文件改动（U08）：默认收起，展开才读日志 */}
+        <ChangeReviewPanel sessionId={taskSessionId(task.id)} />
         {/*
           顶栏右侧那一排图标。实机第 3 个是**弹出悬浮助手窗**（独立可拖拽的快速问答面板）。
           其余几个（电话/定时/设备）是远端能力，这里只做图标占位，不做假功能。
@@ -151,6 +154,8 @@ export function TaskView() {
                 id={step.id}
                 traces={step.tools ?? []}
                 onResolve={(toolCallId, approve) => void resolveTool(task.id, step.id, toolCallId, approve)}
+                /* 「总是允许」（U03）：放行这一次并记一条长期规则（重启仍生效） */
+                onAlwaysAllow={(toolCallId) => void resolveTool(task.id, step.id, toolCallId, true, { remember: true })}
                 /* 授权记录要落进这段会话（与 `resolveTool` 那条路同一个 id 口径，见 `store.ts`） */
                 grantSessionId={taskSessionId(task.id)}
               />

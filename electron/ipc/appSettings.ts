@@ -1,5 +1,6 @@
 import { app } from "electron";
 import { normalizePinnedModel } from "../../shared/settings";
+import { normalizeRules, type PermissionRule } from "../../engine/core/permissionRules";
 import path from "node:path";
 
 import { createJsonStore } from "./jsonStore";
@@ -49,7 +50,17 @@ export function appSettingsPath(): string {
  * 会在**没写进去或读回来**时把它丢掉 —— 表现是"界面以为记住了、重启仍然忘"，
  * 而且假桥（单测）不经过主进程，测试**查不出来**。所以收窄与类型两处一起加。
  */
-export type AppSettings = { pinnedModel: string; navCollapsed?: boolean };
+export type AppSettings = {
+  pinnedModel: string;
+  navCollapsed?: boolean;
+  /**
+   * **权限规则**（U03 桌面那一半，2026-10-18）。
+   *
+   * 用户在审批卡片上点「总是允许」时生成一条；`agentTools()` 每轮从这里读，
+   * 于是**重启之后仍然生效**（与 CLI 的 `config.rules` 同一套语义、同一份实现）。
+   */
+  rules?: PermissionRule[];
+};
 
 /**
  * 磁盘上这份设置**允许**出现的键（与 `AppSettings` 一一对应）。
@@ -58,7 +69,7 @@ export type AppSettings = { pinnedModel: string; navCollapsed?: boolean };
  * 手写进去的坏键会被 `normalizeAppSettings` 静默丢掉，而"我明明设了啊"就是从这里来的
  * （与 CLI 那边 `CONFIG_KEYS` 同一个理由，审计 P202）。
  */
-export const APP_SETTINGS_KEYS = ["pinnedModel", "navCollapsed"] as const;
+export const APP_SETTINGS_KEYS = ["pinnedModel", "navCollapsed", "rules"] as const;
 
 /**
  * 把落盘的（不可信）值收窄。
@@ -69,11 +80,38 @@ export const APP_SETTINGS_KEYS = ["pinnedModel", "navCollapsed"] as const;
 export function normalizeAppSettings(raw: unknown): AppSettings {
   const s = (raw ?? {}) as Record<string, unknown>;
   /* 收窄那半放在 `shared/settings.ts`（那里能单测，这里只负责读写文件） */
-  return {
+  const out: AppSettings = {
     pinnedModel: normalizePinnedModel(s.pinnedModel),
     /* 只认真正的 `true`（落盘的不可信：字符串 "false" 之类一律当"没收起"） */
     navCollapsed: s.navCollapsed === true,
   };
+  /*
+   * 规则走**引擎那一份** `normalizeRules`（不是在这里另写一遍）：
+   * 它是"哪些规则算数"的唯一口径，CLI 与桌面必须同一份 ——
+   * 否则同一条规则在命令行生效、在桌面被丢掉（或反过来）。
+   */
+  const rules = normalizeRules(s.rules);
+  if (rules.length) out.rules = rules;
+  return out;
+}
+
+/**
+ * 当前生效的权限规则（**同步**读缓存）。
+ *
+ * 为什么要有缓存：`agentTools()` 是同步装配（每轮工具集构造时调），
+ * 而设置是异步读盘。所以在启动时灌一次、每次写盘时更新 —— 与
+ * `src/workbench/appSettings.ts` 的"内存缓存"同一个取舍。
+ */
+let rulesCache: PermissionRule[] = [];
+
+/** 更新缓存（写盘成功之后调一次）。 */
+export function setPermissionRulesCache(rules: readonly PermissionRule[]): void {
+  rulesCache = [...rules];
+}
+
+/** 读当前规则（给 `agentTools()` 用；没有就是空表 → 回落档位判定）。 */
+export function currentPermissionRules(): readonly PermissionRule[] {
+  return rulesCache;
 }
 
 /** 落盘器（C1：原子写 + 重试 + 信封版本，全部在 `./jsonStore` 里一份）。 */
@@ -92,6 +130,8 @@ export async function loadAppSettings(): Promise<AppSettings> {
   const got = await store.read();
   // 读不动（磁盘上是更新的版本）只报一声：这里给的是默认值兜底，界面照常起得来
   if (got.foreign) console.error("[settings] 磁盘上的设置读不动（保留原样）：", got.note);
+  /* 顺手把规则灌进缓存（`agentTools()` 同步读它） */
+  setPermissionRulesCache(got.data.rules ?? []);
   return got.data;
 }
 
@@ -126,5 +166,7 @@ export async function saveAppSettings(next: unknown): Promise<AppSettings> {
     console.error("[settings] 落盘失败（重试过）：", res.error);
     throw new Error(`设置落盘失败：${res.error}`);
   }
+  /* 写成功才更新缓存（失败时内存与盘上要保持一致 —— 都还是旧值） */
+  setPermissionRulesCache(clean.rules ?? []);
   return clean;
 }

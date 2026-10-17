@@ -263,6 +263,9 @@ async function cmdRun(p: Parsed): Promise<number> {
     mode,
     useTools: true,
     maxSteps: steps.value,
+    ...(typeof config.maxBudgetUsd === "number" && config.maxBudgetUsd > 0
+      ? { maxBudgetUsd: config.maxBudgetUsd }
+      : {}),
   };
 
   /*
@@ -307,6 +310,7 @@ async function cmdRun(p: Parsed): Promise<number> {
           aborted: outcome.aborted,
           provider: outcome.provider,
           model: outcome.model,
+          ...(outcome.state ? { state: outcome.state } : {}),
           sessionId,
           text: view?.text ?? "",
           traces: (view?.traces ?? []).map((t) => ({ name: t.name, ok: t.ok, pending: t.pending === true, line: t.line })),
@@ -322,6 +326,14 @@ async function cmdRun(p: Parsed): Promise<number> {
   close();
 
   if (!outcome.ok && !outcome.aborted) {
+    /*
+     * 预算暂停（U01）不是"失败"：它是用户设的上限到了，加预算就能继续。
+     * 所以文案与退出码都分开 —— 脚本能靠 `"state":"paused"` 或退出码 4 认出来。
+     */
+    if (outcome.state === "paused") {
+      process.stderr.write(`\n\x1b[33m已暂停：${outcome.error ?? "达到预算上限"}\x1b[0m\n`);
+      return 4;
+    }
     process.stderr.write(`\n\x1b[31m没跑完：${outcome.error ?? "未知原因"}\x1b[0m\n`);
     return 1;
   }
@@ -486,11 +498,11 @@ function cmdConfig(p: Parsed): number {
     const key = p.args[1];
     const value = p.args.slice(2).join(" ").trim();
     if (!key || !value) {
-      console.error("用法：ding config set <provider|model|mode|dirs|contextBudget|rules> <值>（dirs 用逗号分隔）");
+      console.error("用法：ding config set <provider|model|mode|dirs|contextBudget|rules|maxBudgetUsd> <值>（dirs 用逗号分隔）");
       return 2;
     }
-    if (!["provider", "model", "mode", "dirs", "contextBudget", "rules"].includes(key)) {
-      console.error(`不认识的键：${key}（可用：provider / model / mode / dirs / contextBudget / rules）`);
+    if (!["provider", "model", "mode", "dirs", "contextBudget", "rules", "maxBudgetUsd"].includes(key)) {
+      console.error(`不认识的键：${key}（可用：provider / model / mode / dirs / contextBudget / rules / maxBudgetUsd）`);
       return 2;
     }
     const current = readConfig(dir).config;
@@ -528,6 +540,13 @@ function cmdConfig(p: Parsed): number {
         return 2;
       }
       next.rules = rules;
+    } else if (key === "maxBudgetUsd") {
+      const amount = Number(value);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        console.error(`「${value}」不是有效的金额（要正数，单位美元）`);
+        return 2;
+      }
+      next.maxBudgetUsd = amount;
     } else if (key === "provider") next.provider = value;
     else next.model = value;
 
@@ -540,8 +559,8 @@ function cmdConfig(p: Parsed): number {
 
   if (sub === "unset") {
     const key = p.args[1] as keyof CliConfig | undefined;
-    if (!key || !["provider", "model", "mode", "dirs", "contextBudget", "rules"].includes(key)) {
-      console.error("用法：ding config unset <provider|model|mode|dirs|contextBudget|rules>");
+    if (!key || !["provider", "model", "mode", "dirs", "contextBudget", "rules", "maxBudgetUsd"].includes(key)) {
+      console.error("用法：ding config unset <provider|model|mode|dirs|contextBudget|rules|maxBudgetUsd>");
       return 2;
     }
     const current = { ...readConfig(dir).config };

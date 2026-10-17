@@ -13,6 +13,8 @@ import {
 } from "./core/events";
 import { toolArgsSummary } from "../shared/agentTools";
 import { diffSnapshot, snapshotOf, type Snapshot, type SnapshotDiff } from "./core/snapshot";
+import { ledgerOf, rollup } from "./core/ledger";
+import { modelInfoOf } from "./runtime/models";
 import type { MemberRole } from "./core/members";
 import type { ExecutorContext, ToolExecutor } from "./ports/executor";
 import type { HealthStore } from "./ports/health";
@@ -193,6 +195,14 @@ export type EngineRunRequest = {
    * 这种能分辨"产品坏了"与"本机那会儿回环不通"的信息。见 `TurnRequestInput.onRawError`。
    */
   onRawError?: (raw: string) => void;
+  /**
+   * **单会话花费上限**（U01 的"预算超限 → 暂停"那一半，2026-10-18）。
+   *
+   * 给了正数才生效：开跑前已超 → 直接回 `paused`（不调模型）；
+   * 跑完这一轮之后累计超了 → 终态写 `paused` 并说明"加预算后可以继续"。
+   * 单位是美元，按目录单价估算（未登记模型不估算 —— 宁可不判，也不编一个花费）。
+   */
+  maxBudgetUsd?: number;
 };
 
 /** 一轮的结局。 */
@@ -277,6 +287,19 @@ export function createEngine(ports: EnginePorts): Engine {
       const requester: Actor = request.actor ?? LOCAL_USER;
 
       /**
+       * 这段会话已经花了多少（美元，按目录单价估算）。
+       *
+       * 拿不到（没有登记过单价 / 没有用量）就返回 `undefined` ——
+       * **不把"不知道"当成 0**，否则预算闸会永远不触发（那比不设更糟：
+       * 用户以为设了上限）。
+       */
+      const spentUsd = async (sessionId: string): Promise<number | undefined> => {
+        const loaded = await ports.store.load(sessionId);
+        const rows = rollup(ledgerOf(loaded.records, sessionId), "session", (key) => key, modelInfoOf);
+        return rows.find((row) => row.key === sessionId)?.estimatedCost;
+      };
+
+      /**
        * 落一条记录（**发事件与记日志是同一个出口** —— 两处各写一份必然漂移）。
        *
        * ⭐ **拒绝在这里就被接住**（2026-10-16，审计 P38）：调用方一律 `void record(...)`
@@ -308,6 +331,34 @@ export function createEngine(ports: EnginePorts): Engine {
           console.error(`[engine] 会话记录落盘失败（不影响本轮，但这段日志缺一条）：${why}`);
         }
       };
+
+      /*
+       * 预算闸（U01）：**开跑前已经超了就直接暂停**，一次模型调用都不发。
+       *
+       * 口径是"暂停"而不是"失败"：它不是一个错误，是用户设的上限到了 ——
+       * 加一点预算就能继续，所以状态必须可恢复（`paused` 的迁移表里有 → running）。
+       *
+       * ⚠️ 位置在 `record` 定义**之后**：暂停这件事本身也要进日志（否则重开时
+       * 用户看到的还是上一轮的状态，不知道这次为什么没跑）。
+       */
+      if (request.sessionId && typeof request.maxBudgetUsd === "number" && request.maxBudgetUsd > 0) {
+        const spent = await spentUsd(request.sessionId);
+        if (typeof spent === "number" && spent >= request.maxBudgetUsd) {
+          const reason = `这段会话已花 $${spent.toFixed(4)}，达到预算上限 $${request.maxBudgetUsd.toFixed(2)} —— 加预算后可以继续`;
+          await record({ requestId, type: "run-state", state: "paused", reason } as LogInput);
+          return {
+            ok: false,
+            error: reason,
+            aborted: false,
+            provider: request.provider,
+            model: request.model ?? "",
+            state: "paused",
+            events: [],
+            records,
+            requestId,
+          };
+        }
+      }
 
       /*
        * 首行：这一轮**模型实际看见了什么**（不变量 1）。
@@ -460,7 +511,27 @@ export function createEngine(ports: EnginePorts): Engine {
           since: Date.now(),
           expiresAt: Date.now() + PENDING_TTL_MS,
         }));
-      const end = endStateOf({ ok: outcome.ok, aborted: outcome.aborted, pending: pendingTraces.length });
+      let end = endStateOf({ ok: outcome.ok, aborted: outcome.aborted, pending: pendingTraces.length });
+      /*
+       * 预算闸的**收尾那一半**（U01）：这一轮花完之后超了预算 → 终态改成 `paused`。
+       *
+       * 只在"本来会是 finished"时改：已经 error / waiting 的轮次，
+       * 把它说成"暂停"会掩盖真正的原因（错误优先，用户先要知道哪里坏了）。
+       */
+      if (
+        end.state === "finished" &&
+        request.sessionId &&
+        typeof request.maxBudgetUsd === "number" &&
+        request.maxBudgetUsd > 0
+      ) {
+        const spent = await spentUsd(request.sessionId);
+        if (typeof spent === "number" && spent >= request.maxBudgetUsd) {
+          end = {
+            state: "paused",
+            reason: `这段会话已花 $${spent.toFixed(4)}，达到预算上限 $${request.maxBudgetUsd.toFixed(2)} —— 加预算后可以继续`,
+          };
+        }
+      }
       await record({
         requestId,
         type: "run-state",

@@ -289,3 +289,46 @@ describe("U01：运行态", () => {
     expect(foldRunState(store.all(), { coldStart: true }).state).toBe("finished");
   }, 20_000);
 });
+
+/**
+ * U01 的预算闸（2026-10-18）：超了就 **paused**（不是 error），且一次模型调用都不发。
+ *
+ * 判据用"预置一段已经花过钱的日志"来造，而不是等真跑出花费 ——
+ * 那样测的是**闸本身**，与 provider 是否上报 usage 无关。
+ */
+describe("U01：预算超限 → paused", () => {
+  it("⭐ 开跑前已超预算：直接 paused，不发任何模型调用", async () => {
+    const store = memoryStore();
+    /* 先造一段花了 $1 的记录（deepseek-flash: $0.15/$0.6 per 1M） */
+    await store.append(
+      "u01-budget",
+      [
+        { requestId: "old", type: "request", provider: "strata", model: "deepseek-flash", messages: [{ role: "user", content: "x" }] },
+        { requestId: "old", type: "done", usage: { inputTokens: 10_000_000, outputTokens: 0 } },
+      ] as never,
+      {},
+    );
+    const events: string[] = [];
+    const out = await engineWith(store).run({
+      ...baseRequest("u01-budget"),
+      maxBudgetUsd: 0.5,
+      onEvent: (e) => events.push(e.type),
+    });
+    expect(out.state).toBe("paused");
+    expect(out.error).toContain("预算上限");
+    expect(out.events, "暂停的轮次不该有任何事件（没发请求）").toEqual([]);
+    expect(events.length).toBe(0);
+    /* 暂停本身要进日志，重开时能看到为什么没跑 */
+    const states = store
+      .all()
+      .filter((r) => (r as { type?: string }).type === "run-state")
+      .map((r) => (r as { state?: string }).state);
+    expect(states.at(-1)).toBe("paused");
+  }, 20_000);
+
+  it("没设上限时行为不变（照常跑完）", async () => {
+    const store = memoryStore();
+    const out = await engineWith(store).run(baseRequest("u01-nobudget"));
+    expect(out.state).toBe("finished");
+  }, 20_000);
+});

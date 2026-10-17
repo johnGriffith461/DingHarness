@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ShellBridge } from "@shared/ipc";
+import type { PermissionRuleWire, ShellBridge } from "@shared/ipc";
 
 /**
  * 本机版设置（§183）。
@@ -25,6 +25,12 @@ type State = {
   pinnedModel: string;
   /** 左侧导航栏收起来了没有。 */
   navCollapsed: boolean;
+  /**
+   * **权限规则**（U03）：「总是允许」攒出来的那些。
+   *
+   * 与另外两个字段**一起读写**：单独写一项会把别的从盘上抹掉（见文件头）。
+   */
+  rules: PermissionRuleWire[];
   loaded: boolean;
   /** 上一次写盘的说明（成功为空串；失败时给一句人话，界面据此如实提示）。 */
   note: string;
@@ -32,12 +38,15 @@ type State = {
   setPinned: (value: string) => Promise<void>;
   /** 收起 / 展开左栏（持久化：重启之后还是收起的样子）。 */
   setNavCollapsed: (value: boolean) => Promise<void>;
+  /** 追加一条「总是允许」规则（与已有规则一模一样就不重复加）。 */
+  addRule: (rule: PermissionRuleWire) => Promise<boolean>;
 };
 
 /** 磁盘上那份（不可信）→ 干净的设置对象。 */
-function readSettings(raw: { pinnedModel?: unknown; navCollapsed?: unknown } | undefined): {
+function readSettings(raw: { pinnedModel?: unknown; navCollapsed?: unknown; rules?: unknown } | undefined): {
   pinnedModel: string;
   navCollapsed: boolean;
+  rules: PermissionRuleWire[];
 } {
   return {
     pinnedModel: typeof raw?.pinnedModel === "string" ? raw.pinnedModel : "",
@@ -46,12 +55,33 @@ function readSettings(raw: { pinnedModel?: unknown; navCollapsed?: unknown } | u
      * 一律回落到"展开"—— 左栏莫名其妙收起来，用户找不到导航。
      */
     navCollapsed: raw?.navCollapsed === true,
+    /*
+     * 规则只做**形状**收窄（主进程那侧还会用引擎的 `normalizeRules` 再洗一遍）：
+     * 坏条目必须在这里就丢掉，否则渲染层会拿着一条没有 action 的规则去显示。
+     */
+    rules: Array.isArray(raw?.rules)
+      ? raw.rules.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const r = item as Record<string, unknown>;
+          if (typeof r.action !== "string" || !r.action.trim()) return [];
+          if (r.effect !== "allow" && r.effect !== "deny" && r.effect !== "ask") return [];
+          const rule: PermissionRuleWire = {
+            action: r.action.trim(),
+            effect: r.effect,
+            ...(typeof r.resource === "string" && r.resource.trim() ? { resource: r.resource.trim() } : {}),
+            ...(typeof r.expiresAt === "number" && Number.isFinite(r.expiresAt) ? { expiresAt: r.expiresAt } : {}),
+            ...(typeof r.note === "string" && r.note.trim() ? { note: r.note.trim() } : {}),
+          };
+          return [rule];
+        })
+      : [],
   };
 }
 
 export const useAppSettings = create<State>()((set, get) => ({
   pinnedModel: "",
   navCollapsed: false,
+  rules: [],
   loaded: false,
   note: "",
 
@@ -64,7 +94,12 @@ export const useAppSettings = create<State>()((set, get) => ({
     try {
       const got = await shell.appSettings.read();
       const clean = readSettings(got);
-      set({ pinnedModel: clean.pinnedModel, navCollapsed: clean.navCollapsed, loaded: true });
+      set({
+        pinnedModel: clean.pinnedModel,
+        navCollapsed: clean.navCollapsed,
+        rules: clean.rules,
+        loaded: true,
+      });
     } catch {
       set({ loaded: true });
     }
@@ -83,7 +118,11 @@ export const useAppSettings = create<State>()((set, get) => ({
      * 取舍与 `codingLikes.ts` 的 `toggle` 一致：失败就回到改动前那个值，并如实说一句。
      */
     try {
-      await bridge()?.appSettings?.write({ pinnedModel: value, navCollapsed: get().navCollapsed });
+      await bridge()?.appSettings?.write({
+        pinnedModel: value,
+        navCollapsed: get().navCollapsed,
+        rules: get().rules,
+      });
     } catch (error) {
       set({
         pinnedModel: before,
@@ -97,12 +136,44 @@ export const useAppSettings = create<State>()((set, get) => ({
     set({ navCollapsed: value, note: "" });
     /* 同 `setPinned` 的取舍：失败回滚 + 如实说一句（不回滚的话界面收起、盘上没记，重启自己弹回来） */
     try {
-      await bridge()?.appSettings?.write({ pinnedModel: get().pinnedModel, navCollapsed: value });
+      await bridge()?.appSettings?.write({
+        pinnedModel: get().pinnedModel,
+        navCollapsed: value,
+        rules: get().rules,
+      });
     } catch (error) {
       set({
         navCollapsed: before,
         note: `没能记住左栏的收起态：${error instanceof Error ? error.message : String(error)}`,
       });
+    }
+  },
+
+  /**
+   * 加一条「总是允许」规则（U03）。
+   *
+   * 返回**是否真的写进去了**：调用方（审批卡片）据此说"以后这类不再问"
+   * 还是"这次做了，但没记住"。写失败就回滚内存里的那份，别让界面显示一条不存在的规则。
+   */
+  addRule: async (rule) => {
+    const key = (r: PermissionRuleWire) => `${r.action}|${r.resource ?? "*"}|${r.effect}`;
+    if (get().rules.some((r) => key(r) === key(rule))) return true;
+    const before = get().rules;
+    const next = [...before, rule];
+    set({ rules: next, note: "" });
+    try {
+      await bridge()?.appSettings?.write({
+        pinnedModel: get().pinnedModel,
+        navCollapsed: get().navCollapsed,
+        rules: next,
+      });
+      return true;
+    } catch (error) {
+      set({
+        rules: before,
+        note: `没能记住这条权限规则：${error instanceof Error ? error.message : String(error)}`,
+      });
+      return false;
     }
   },
 }));

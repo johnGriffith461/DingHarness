@@ -35,6 +35,12 @@ export function ToolTraceList({
    * 工作台那条路给 task 的会话 id、聊天给对话 id —— 与 `onResolve` 那条路同一个来源。
    */
   grantSessionId,
+  /**
+   * **总是允许**（U03，2026-10-18）：把这一次放行，并记住"以后这类别再问"。
+   *
+   * 不给 = 不画那颗键（例如子智能体上交的待批项不在这里做长期决定）。
+   */
+  onAlwaysAllow,
 }: {
   traces: ToolTrace[];
   onResolve: (toolCallId: string, approve: boolean) => void;
@@ -42,6 +48,7 @@ export function ToolTraceList({
   actionPrefix?: string;
   id: string;
   grantSessionId?: string;
+  onAlwaysAllow?: (toolCallId: string) => void;
 }) {
   /**
    * **名册**（"授权他人批"要挑人）。
@@ -152,6 +159,27 @@ export function ToolTraceList({
               >
                 拒绝
               </button>
+              {/*
+                ⭐ **总是允许**（U03）：放行这一次，并把「这个工具 + 这个资源」记成 allow 规则。
+                规则写进应用设置（主进程那侧每轮读缓存），所以**重启之后仍然生效**。
+                只对"能说清资源"的调用有意义（命令原文 / 文件所在目录）——
+                说不出资源的工具不画这颗键（否则会变成"所有工具都放行"）。
+              */}
+              {onAlwaysAllow && t.toolCallId && t.input !== undefined ? (
+                <button
+                  className="wb-tool-btn"
+                  data-testid={`${actionPrefix}-always-${t.toolCallId}`}
+                  disabled={Boolean(busy[t.toolCallId])}
+                  title="以后这类调用不再询问（可在设置里清掉）"
+                  onClick={() => {
+                    if (busy[t.toolCallId]) return;
+                    setBusy((current) => ({ ...current, [t.toolCallId]: true }));
+                    onAlwaysAllow(t.toolCallId);
+                  }}
+                >
+                  总是允许
+                </button>
+              ) : null}
               {/*
                 ⭐ **授权他人批**（C3 3.7b 的流转那一半）：把这条待决的裁决权授给一个成员 ——
                 他那边（HTTP `/v1/approvals` 或另一台设备）就能处置它。
