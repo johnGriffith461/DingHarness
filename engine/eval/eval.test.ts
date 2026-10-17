@@ -129,18 +129,27 @@ describe("评测集（Phase 10：离线回放 + 基线棘轮）", () => {
       console.log(`（还没有基线文件 ${path.relative(process.cwd(), BASELINE)}：本次通过率 ${report.rate}%）`);
       return;
     }
-    const baseline = JSON.parse(fs.readFileSync(BASELINE, "utf8")) as { rate: number; total: number };
+    const baseline = JSON.parse(fs.readFileSync(BASELINE, "utf8")) as {
+      rate: number;
+      total: number;
+      byCategory?: Record<string, { total: number; passed: number }>;
+    };
     /*
      * ⚠️ 2026-10-16（审计 G76）：这里原来写的是 `report.rate >= baseline.rate - 5`
      * —— "跌超 5% 即红"。可 ③ 已经要求 **0 失败**：走到 ④ 时通过率必然是 100%，
      * 那条容忍度**永远不可能成为先红的那个门**（恒真的判据 = 没有判据）。
      *
-     * 改成棘轮真正能管的两件事：
+     * 改成棘轮真正能管的三件事：
      *   · **用例只增不减** —— 删掉用例来"提高通过率"是漂移；
+     *   · **逐类只增不减** —— 只锁总数挡不住"这一类删 5 条、另一类补 5 条"；
      *   · **基线本身必须是 100%** —— 拿一次半绿的运行去 `--update-baseline`
      *     等于把及格线调低，那正是"全绿"这个词被稀释的方式。
      */
     expect(report.total, `基线有 ${baseline.total} 条，现在只剩 ${report.total} 条`).toBeGreaterThanOrEqual(baseline.total);
+    for (const [category, was] of Object.entries(baseline.byCategory ?? {})) {
+      const now = report.byCategory[category]?.total ?? 0;
+      expect(now, `「${category}」这一类基线有 ${was.total} 条，现在只剩 ${now} 条`).toBeGreaterThanOrEqual(was.total);
+    }
     expect(baseline.rate, `基线记的是 ${baseline.rate}% 而不是 100% —— 及格线被调低过`).toBe(100);
   });
 });

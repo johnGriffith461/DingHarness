@@ -1,11 +1,31 @@
 {
   "rate": 100,
-  "total": 9,
+  "total": 63,
   "byCategory": {
     "纯对话": {
       "total": 9,
       "passed": 9
+    },
+    "工具调用": {
+      "total": 13,
+      "passed": 13
+    },
+    "闸门审批": {
+      "total": 9,
+      "passed": 9
+    },
+    "子智能体": {
+      "total": 8,
+      "passed": 8
+    },
+    "多 agent 协作": {
+      "total": 8,
+      "passed": 8
+    },
+    "上下文压缩": {
+      "total": 16,
+      "passed": 16
     }
   },
-  "generatedAt": "2026-10-16T15:25:56.080Z"
+  "generatedAt": "2026-10-17T13:24:02.027Z"
 }

@@ -206,8 +206,10 @@ pnpm sandbox:build   # 编命令沙箱（Rust；零外部依赖）
 node scripts/verify-acceptances.mjs   # 免模型验收批跑（68 条）
 ```
 
-**改完东西请顺手跑一次 `pnpm eval`**：它是"行为有没有变"的最快信号，
-跌超 5 个百分点 `pnpm test` 会红（基线在 `engine/eval/baseline.json`）。
+**改完东西请顺手跑一次 `pnpm eval`**：它是"行为有没有变"的最快信号。
+`pnpm test` 的门是**任何一条产品失败或装置不可达都红**；基线（`engine/eval/baseline.json`）
+另外锁住两件事：**用例只增不减**，且基线本身必须记的是 100%（拿半绿的运行去
+`--update-baseline` 等于把及格线调低）。
 
 ## 写插件
 
