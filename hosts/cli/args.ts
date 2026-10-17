@@ -107,6 +107,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "force",
   "h",
   "help",
+  /* `ding approvals --watch`：盯着通知流（不给就看一眼列一遍） */
+  "watch",
 ]);
 
 /** 全部认识的旗标（值旗标 ∪ 开关）。入口按它拒"不认识"的。 */
