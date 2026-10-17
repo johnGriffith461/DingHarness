@@ -1,6 +1,7 @@
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { createCursorJournal } from "../../engine/adapters/syncCursorJournal";
 import { appliedNote, frameOf, planMerge } from "../../engine/sync/merge";
+import { openFrame, sealFrame } from "../../engine/sync/sealed";
 import type { StreamRecord } from "../../engine/sync/relay";
 import type { LogInput } from "../../engine/core/events";
 import type { Parsed } from "./args";
@@ -47,6 +48,11 @@ export type SyncOptions = {
   producerId?: string;
   /** 本地没有这段会话时用它建（不给就拒绝）。 */
   owner?: string;
+  /**
+   * **房间密钥**（base64url；从房间链接的 `#` 后面取）。
+   * 给了 → 内容类记录**封起来**再推（中继只看到密文），控制类（审批/接管）仍明文可路由。
+   */
+  roomKey?: string;
   /** 拉一页的上限（默认 200）。 */
   pageSize?: number;
   fetchImpl?: typeof fetch;
@@ -125,7 +131,12 @@ export async function syncSession(opts: SyncOptions): Promise<SyncReport> {
     const pending = records.filter((r) => r.seq > pushedSeq);
     const pushOnce = async (items: typeof pending, from: number): Promise<{ ok: boolean; code?: string }> => {
       if (!items.length) return { ok: true };
-      const events = items.map((record, index) => ({ ...frameOf(sessionId, record), seq: from + index + 1 }));
+      /* 帧 id 掺密钥（见 `frameIdOf`）；内容类再封一层 —— 中继看到的就只是密文 */
+      const events = [];
+      for (const [index, record] of items.entries()) {
+        const frame = await sealFrame(frameOf(sessionId, record, opts.roomKey ? { key: opts.roomKey } : {}), opts.roomKey);
+        events.push({ ...frame, seq: from + index + 1 });
+      }
       const got = await call("POST", `/v1/streams/${encodeURIComponent(sessionId)}/push`, { producerId, epoch, events });
       if (got.json.ok) {
         pushed += events.length;
@@ -149,9 +160,15 @@ export async function syncSession(opts: SyncOptions): Promise<SyncReport> {
     /* ③ 拉 + 合并（内容 id 认"是不是我的"） */
     const pageSize = opts.pageSize ?? 200;
     const pulledPage = await call("GET", `/v1/streams/${encodeURIComponent(sessionId)}/pull?from=${pulledOffset}&limit=${pageSize}`);
-    const events = (pulledPage.json.events ?? []) as StreamRecord[];
+    const rawEvents = (pulledPage.json.events ?? []) as StreamRecord[];
+    /* 一条一条开（明文帧原样过；密文帧没密钥就**如实报错**，不静默丢） */
+    const events = [];
+    for (const event of rawEvents) {
+      const opened = await openFrame(event, opts.roomKey);
+      events.push({ ...event, ...opened });
+    }
     const nextOffset = Number(pulledPage.json.nextOffset ?? pulledOffset);
-    const plan = planMerge({ sessionId, local: records, pulled: events });
+    const plan = planMerge({ sessionId, local: records, pulled: events, ...(opts.roomKey ? { key: opts.roomKey } : {}) });
     if (plan.apply.length) {
       await store.append(
         sessionId,
@@ -195,6 +212,7 @@ export async function cmdSync(parsed: Parsed, dataDir: string): Promise<number> 
   const to = parsed.flags.get("to")?.[0] ?? "";
   const tokenEnv = process.env.DH_SYNC_TOKEN?.trim() ?? "";
   const token = parsed.flags.get("token")?.[0] ?? tokenEnv;
+  const roomKey = parsed.flags.get("key")?.[0] ?? process.env.DH_SYNC_KEY?.trim();
   if (!sessionId || !to || !token) {
     process.stderr.write(
       "用法：ding sync <会话 id> --to <服务地址> --token <口令> [--owner <成员 id>] [--producer <id>]\n" +
@@ -211,6 +229,7 @@ export async function cmdSync(parsed: Parsed, dataDir: string): Promise<number> 
       token,
       ...(parsed.flags.get("owner")?.[0] ? { owner: parsed.flags.get("owner")![0]! } : {}),
       ...(parsed.flags.get("producer")?.[0] ? { producerId: parsed.flags.get("producer")![0]! } : {}),
+      ...(roomKey ? { roomKey } : {}),
     });
     if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     else
@@ -220,6 +239,7 @@ export async function cmdSync(parsed: Parsed, dataDir: string): Promise<number> 
           `  推上去 ${report.pushed} 条　拉回来 ${report.pulled} 条`,
           `  合并进本地 ${report.applied} 条（跳过自己的 ${report.skippedMine} 条，形状不认的 ${report.skippedBadShape} 条）`,
           `  本地记录：${report.localBefore} → ${report.localAfter}`,
+          `  内容层：${roomKey ? "端到端加密（中继只见密文）" : "明文（没给 --key）"}`,
           `  ${report.note}`,
         ].join("\n") + "\n",
       );

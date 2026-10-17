@@ -36,12 +36,12 @@ export type SyncPayload = { record: unknown; at: number };
  * @param record 本地记录（带 `seq`/`at`）
  * @param producerId 谁在推（去重三元组的一半；也是 id 的作用域，见 `frameIdOf`）
  */
-export function frameOf(sessionId: string, record: { seq: number; at: number }): {
-  id: string;
-  type: "record";
-  payload: SyncPayload;
-} {
-  return { id: frameIdOf(sessionId, record), type: "record", payload: { record, at: record.at } };
+export function frameOf(
+  sessionId: string,
+  record: { seq: number; at: number },
+  opts: { key?: string } = {},
+): { id: string; type: "record"; payload: SyncPayload } {
+  return { id: frameIdOf(sessionId, record, opts), type: "record", payload: { record, at: record.at } };
 }
 
 /**
@@ -71,9 +71,16 @@ export function frameOf(sessionId: string, record: { seq: number; at: number }):
  * ⚠️ FNV-1a 不是密码学哈希（不必是：它只用来去重，不承担防篡改 ——
  * 防篡改是签名与 E2EE 那一层的事）。零依赖、确定性，够用。
  */
-export function frameIdOf(sessionId: string, record: unknown): string {
+export function frameIdOf(sessionId: string, record: unknown, opts: { key?: string } = {}): string {
   const { seq: _seq, ...rest } = (record ?? {}) as Record<string, unknown>;
-  return `sync#${sessionId}#${fnv1a(canonicalJson(rest))}`;
+  /*
+   * ⚠️ **给了房间密钥就把它掺进哈希**（V5-2 2.4）：不然 id 是明文的指纹 ——
+   * 一个能猜内容的人（比如"这条消息可能是『好的』"）可以用同一个函数算一遍来**确认**。
+   * 掺了密钥之后，没有密钥的人连 id 都算不出来，而两端（都持有密钥）算出来的一致。
+   * 没给密钥时行为不变（明文房间）。
+   */
+  const salt = opts.key ? `${opts.key}|` : "";
+  return `sync#${sessionId}#${fnv1a(`${salt}${canonicalJson(rest)}`)}`;
 }
 
 /** 键排序的规范化 JSON：同一份内容只有一种写法（否则 id 会因键序不同而不同）。 */
@@ -129,13 +136,15 @@ export function planMerge(input: {
   sessionId: string;
   local: readonly unknown[];
   pulled: readonly StreamRecord[];
+  /** 房间密钥（给了就按"掺密钥的内容 id"判"是不是我的"；见 `frameIdOf`）。 */
+  key?: string;
 }): MergePlan {
   /*
    * "是不是我的"= **本地库里有没有这份内容**（内容寻址的直接好处）：
    * 自己的、以及**经别人转手回来的自己的**，id 都一样 → 一并跳过。
    * 不需要单独的"已应用账本"：应用过的内容就在本地库里。
    */
-  const mine = new Set(input.local.map((record) => frameIdOf(input.sessionId, record)));
+  const mine = new Set(input.local.map((record) => frameIdOf(input.sessionId, record, input.key ? { key: input.key } : {})));
   const already = new Set<string>();
   const plan: MergePlan = { apply: [], skippedMine: 0, skippedApplied: 0, skippedBadShape: 0 };
 

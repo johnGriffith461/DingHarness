@@ -52,6 +52,8 @@ function currentSurface(): Record<string, string> {
     /* 同步帧 id 与合并规则（ADR-0017）：声明的两项 —— 改了必须有人解释 */
     "sync.frame.id": "sync#<会话 id>#<FNV-1a(canonical(记录去掉 seq))>（内容寻址）",
     "sync.merge.rules": "跳过内容相同的（本地已有）+ 跳过形状不认的（如实计数）+ at 用记录自己的",
+    /* 内容层加密的分工（ADR-0018）：一句话冻住"哪一类加密" */
+    "sync.sealed.split": "内容类（request/text/tool-call/tool-result/done/error/delegation）封；控制类（approval/approval-grant + CONTROL_EVENT_TYPES）明文",
     /* "谁能批"的唯一读口径（ADR-0015）：载荷 + 之后的授权记录，后写覆盖 */
     "gates.approversFor": "pending 载荷的 approvers + 之后每条 approval-grant 的 approvers（后写覆盖）",
     "record.request.keys": keysOf(

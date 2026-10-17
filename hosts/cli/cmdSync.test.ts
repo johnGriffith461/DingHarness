@@ -88,6 +88,57 @@ describe("ding sync（同步客户端）", () => {
     expect((await read(dirB)).length).toBe(4);
   });
 
+  it("⭐ 给了房间密钥：**中继只看到密文**，另一端用同一把密钥解得开（内容一致）", async () => {
+    const { port, token } = await boot({ relay: createSyncRelay() });
+    const sid = chatSessionId("cli-sync-e2ee");
+    const dirA = tmp();
+    const dirB = tmp();
+    const KEY = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI"; // 32 字节 base64url（测试固定值）
+
+    const a = createSqliteSessionStore(dirA);
+    await a.append(sid, [{ requestId: "r1", type: "text", text: "这句不该被服务端看见" } as LogInput]);
+    a.close();
+    const b = createSqliteSessionStore(dirB);
+    await b.append(sid, [{ requestId: "r1", type: "request", provider: "strata", model: "m", messages: [{ role: "user", content: "B 的明文" }] } as LogInput]);
+    b.close();
+
+    const to = `http://127.0.0.1:${port}`;
+    const fromA = await syncSession({ dataDir: dirA, sessionId: sid, to, token, producerId: "device-A", roomKey: KEY });
+    expect(fromA.pushed).toBe(1);
+
+    /* ⭐ 判据：**中继那条流里读不到明文**（服务端看不见内容） */
+    const streamRaw = await fetch(`${to}/v1/streams/${encodeURIComponent(sid)}/pull?from=0&limit=50`, {
+      headers: { authorization: `Bearer ${token}` },
+    }).then((r) => r.text());
+    expect(streamRaw.includes("这句不该被服务端看见"), "明文进了中继").toBe(false);
+    /* 用 toBeGreaterThan 让自定义说明一定打出来（`toBe` 只回一句通用话） */
+    const sealedHits = (streamRaw.match(/sealed/g) ?? []).length;
+    expect(sealedHits, `流里 sealed 出现 ${sealedHits} 次；流开头：${streamRaw.slice(0, 200)}`).toBeGreaterThan(0);
+
+    /* B 用同一把密钥拉：解得开、合并进去（内容与 A 一致） */
+    const fromB = await syncSession({ dataDir: dirB, sessionId: sid, to, token, producerId: "device-B", roomKey: KEY });
+    expect(fromB.applied, "B 没解开 A 那条").toBe(1);
+    const read = (dir: string) => {
+      const store = createSqliteSessionStore(dir);
+      return store.load(sid).then((r) => {
+        store.close();
+        return r.records.map((x) => ({ type: x.type, text: (x as { text?: string }).text ?? null }));
+      });
+    };
+    expect(await read(dirB)).toContainEqual({ type: "text", text: "这句不该被服务端看见" });
+
+    /*
+     * 不给密钥的第三方（**另一台设备**：复用 B 的目录没用 —— 它的游标已经拉过去了，
+     * 一条也拉不到就不会遇到密文帧。第一版就是这么写的，于是这条假绿）。
+     */
+    const dirC = tmp();
+    const c = createSqliteSessionStore(dirC);
+    await c.append(sid, [{ requestId: "r1", type: "request", provider: "strata", model: "m", messages: [{ role: "user", content: "C 的明文" }] } as LogInput]);
+    c.close();
+    const noKey = await syncSession({ dataDir: dirC, sessionId: sid, to, token, producerId: "device-C" }).catch((error: Error) => error);
+    expect(noKey instanceof Error && String(noKey.message).includes("没给房间密钥")).toBe(true);
+  });
+
   it("⭐ 本地没有这段会话：不猜归属（不给 --owner 就拒绝）", async () => {
     const { port, token } = await boot({ relay: createSyncRelay() });
     const dir = tmp();
