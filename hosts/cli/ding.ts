@@ -23,6 +23,7 @@ import { renderRecords } from "./renderRecords";
 import { cmdResume } from "./cmdResume";
 import { cmdAcp, cmdServe } from "./cmdServe";
 import { cmdSpace } from "./cmdSpace";
+import { cmdSync } from "./cmdSync";
 import { cmdRecipe } from "./cmdRecipe";
 import { cmdConnect } from "./cmdConnect";
 import { cmdHelp } from "./help";
@@ -799,6 +800,7 @@ async function main(): Promise<void> {
     "plugins",
     "recipe",
     "space",
+    "sync",
     "serve",
     "connect",
     "acp",
@@ -834,6 +836,8 @@ async function main(): Promise<void> {
                 ? await cmdPlugins(parsed)
                 : parsed.command === "recipe"
                   ? await cmdRecipe(parsed, dataDir())
+                  : parsed.command === "sync"
+                    ? await cmdSync(parsed, dataDir())
                   : parsed.command === "space"
                     ? await cmdSpace(parsed, dataDir())
                   : parsed.command === "serve"

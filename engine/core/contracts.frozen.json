@@ -87,6 +87,14 @@
     "gates.approversFor": {
       "value": "pending 载荷的 approvers + 之后每条 approval-grant 的 approvers（后写覆盖）",
       "adr": "0015-画布事件表与审批索引表.md"
+    },
+    "sync.frame.id": {
+      "value": "sync#<会话 id>#<FNV-1a(canonical(记录去掉 seq))>（内容寻址）",
+      "adr": "0017-同步客户端与合并语义.md"
+    },
+    "sync.merge.rules": {
+      "value": "跳过内容相同的（本地已有）+ 跳过形状不认的（如实计数）+ at 用记录自己的",
+      "adr": "0017-同步客户端与合并语义.md"
     }
   }
 }

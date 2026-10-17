@@ -49,6 +49,9 @@ function currentSurface(): Record<string, string> {
     "schema.tables": "sessions,events,schema_version,events_fts",
     /* v6 的三张表（ADR-0015）—— 这条是**声明的**（算不出来，但改了必须有人解释） */
     "schema.tables.v6": "canvases,canvas_events,approvals（+ idx_canvas_events_canvas / idx_approvals_state / idx_sessions_owner）",
+    /* 同步帧 id 与合并规则（ADR-0017）：声明的两项 —— 改了必须有人解释 */
+    "sync.frame.id": "sync#<会话 id>#<FNV-1a(canonical(记录去掉 seq))>（内容寻址）",
+    "sync.merge.rules": "跳过内容相同的（本地已有）+ 跳过形状不认的（如实计数）+ at 用记录自己的",
     /* "谁能批"的唯一读口径（ADR-0015）：载荷 + 之后的授权记录，后写覆盖 */
     "gates.approversFor": "pending 载荷的 approvers + 之后每条 approval-grant 的 approvers（后写覆盖）",
     "record.request.keys": keysOf(
