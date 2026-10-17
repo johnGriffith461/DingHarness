@@ -37,7 +37,7 @@ import { describeWriteResult, writeFileForModel } from "../../engine/runtime/too
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { nothingFoundNote } from "../../engine/runtime/tools/searchTool";
-import { createSerialQueue } from "../../engine/runtime/serialQueue";
+import { createSerialQueue, createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { callMcpTool, mcpToolBindings } from "./mcpStore";
 import { describeListDirResult, describeSearchResult, listDirForModel, searchFilesForModel } from "../../engine/runtime/tools/searchTool";
 import { listDrive, ownedDirs } from "./driveStore";
@@ -90,6 +90,17 @@ function spillStore(): ReturnType<typeof createFileSpillStore> {
  * （那是 jsonStore/后端该管的事，不在这里假装解决）。
  */
 const serializeWrite = createSerialQueue();
+
+/**
+ * **按目标路径**串行写/改（U05，2026-10-18）。
+ *
+ * 上一轮只把「记忆 / 定时任务」的整份读改写排了队；文件写没排 ——
+ * 模型在同一轮里连发 `write_file a.txt` + `edit_file a.txt` 时，两边读到的是同一份
+ * 旧内容，后落盘的把先落盘的改动盖掉，**而且不报错**。
+ *
+ * 只锁**同一个路径**：改十个不同文件仍然并行（全局队列会让重构变成十次串行磁盘往返）。
+ */
+const serializePathWrite = createKeyedSerialQueue();
 
 /**
  * 把一条内容存进记忆。
@@ -260,7 +271,7 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
    */
   [WRITE_FILE_TOOL]: async (input) => {
     const { path, content, overwrite } = input as { path: string; content: string; overwrite?: boolean };
-    const result = await writeFileForModel(path, content, ownedDirs(), overwrite === true);
+    const result = await serializePathWrite(path, () => writeFileForModel(path, content, ownedDirs(), overwrite === true));
     return {
       ok: result.ok,
       line: describeWriteResult(result, path),
@@ -321,7 +332,9 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       newText: string;
       replaceAll?: boolean;
     };
-    const result = await editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true);
+    const result = await serializePathWrite(path, () =>
+      editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true),
+    );
     return {
       ok: result.ok,
       line: describeEditResult(result, path),

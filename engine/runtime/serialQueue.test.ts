@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createSerialQueue } from "./serialQueue";
+import { createKeyedSerialQueue, createSerialQueue } from "./serialQueue";
 
 /**
  * 串行队列（**审计 P42**）。
@@ -58,5 +58,64 @@ describe("createSerialQueue", () => {
   it("返回值原样穿过排队（调用方拿到的是任务自己的结果）", async () => {
     const q = createSerialQueue();
     await expect(q(async () => 42)).resolves.toBe(42);
+  });
+});
+
+/* ============================================================
+ * 按 key 串行（U05，2026-10-18）
+ *
+ * 判据与全局队列那条同源，但多一件相反的事：**不同 key 必须能并行** ——
+ * 否则"改十个文件"会退化成十次串行磁盘往返，那是为了正确性付了不该付的代价。
+ * ============================================================ */
+describe("createKeyedSerialQueue", () => {
+  it("⭐ 同一个 key 不交错", async () => {
+    const q = createKeyedSerialQueue();
+    const log: string[] = [];
+    let running = 0;
+    let maxRunning = 0;
+    const step = (name: string, ms: number) =>
+      q("same.txt", async () => {
+        running += 1;
+        maxRunning = Math.max(maxRunning, running);
+        log.push(`${name}:start`);
+        await new Promise((r) => setTimeout(r, ms));
+        log.push(`${name}:end`);
+        running -= 1;
+      });
+    await Promise.all([step("a", 30), step("b", 1)]);
+    expect(maxRunning).toBe(1);
+    expect(log).toEqual(["a:start", "a:end", "b:start", "b:end"]);
+  });
+
+  it("⭐ 不同 key **并行**（不全局串行）", async () => {
+    const q = createKeyedSerialQueue();
+    let running = 0;
+    let maxRunning = 0;
+    const step = () =>
+      q(`file-${Math.random()}`, async () => {
+        running += 1;
+        maxRunning = Math.max(maxRunning, running);
+        await new Promise((r) => setTimeout(r, 20));
+        running -= 1;
+      });
+    await Promise.all([step(), step(), step()]);
+    expect(maxRunning, "不同文件被串起来了 —— 全局队列不该用在这里").toBeGreaterThan(1);
+  });
+
+  it("一段失败不堵住同 key 的下一段", async () => {
+    const q = createKeyedSerialQueue();
+    const boom = q("f", async () => {
+      throw new Error("坏了");
+    });
+    const after = q("f", async () => "照跑");
+    await expect(boom).rejects.toThrow("坏了");
+    await expect(after).resolves.toBe("照跑");
+  });
+
+  it("跑完清掉 key（长会话里 Map 不无限涨）", async () => {
+    const q = createKeyedSerialQueue();
+    await q("done", async () => 1);
+    /* 清没清看不到 Map，只能验"同一个 key 再跑仍然正确" */
+    await expect(q("done", async () => 2)).resolves.toBe(2);
   });
 });

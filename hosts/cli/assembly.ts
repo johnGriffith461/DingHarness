@@ -122,6 +122,11 @@ export async function buildEngine(
    * 这正是"三个来源统一注册"的落点（builtin / mcp / plugin 都在这张表里）。
    */
   const registry: ToolRegistry = createToolRegistry({ include: CLI_TOOLS, extra: pluginEntries });
+  /*
+   * 被拒收的外部工具要说出来（U05）：插件想占内置名时**不能静默丢弃** ——
+   * 用户会以为它装上了、能用。与插件装载失败放同一份 problems 里输出。
+   */
+  for (const r of registry.rejected()) plugins.push(`${r.source} 工具「${r.name}」没有登记：${r.why}`);
   makeTools = (mode, depth, provider, signal, only) =>
     buildToolSet({
       registry,

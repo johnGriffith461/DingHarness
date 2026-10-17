@@ -19,6 +19,7 @@ import {
 import { AGENT_READ_MAX_BYTES, describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
 import { describeWriteResult, writeFileForModel } from "../../engine/runtime/tools/writeTool";
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
+import { createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 
 /**
@@ -75,6 +76,15 @@ export function createCliExecutor(opts: {
   const { dirs, makeTools } = opts;
   const extraReadDirs = opts.extraReadDirs ?? [];
 
+  /**
+   * **按目标路径**串行写/改（U05）。
+   *
+   * 模型同一轮里连发 `write_file a` + `edit_file a` 时，两边读到同一份旧内容，
+   * 后落盘的把先落盘的盖掉（与 P42 同一类，只是这次按文件分）。
+   * 只锁同一个路径：改十个不同文件仍然并行。
+   */
+  const serializePathWrite = createKeyedSerialQueue();
+
   /** 逐个工具的实现（键就是 `AGENT_TOOLS` 里的名字）。 */
   const run = async (name: string, input: unknown, ctx: ExecutorContext): Promise<ToolResult> => {
     switch (name) {
@@ -123,7 +133,7 @@ export function createCliExecutor(opts: {
 
       case "write_file": {
         const { path: raw, content, overwrite } = input as { path: string; content: string; overwrite?: boolean };
-        const result = await writeFileForModel(raw, content, dirs, overwrite === true);
+        const result = await serializePathWrite(raw, () => writeFileForModel(raw, content, dirs, overwrite === true));
         const output = {
           ok: result.ok,
           line: describeWriteResult(result, raw),
@@ -141,7 +151,7 @@ export function createCliExecutor(opts: {
           newText: string;
           replaceAll?: boolean;
         };
-        const result = await editFileForModel(raw, oldText, newText, dirs, replaceAll === true);
+        const result = await serializePathWrite(raw, () => editFileForModel(raw, oldText, newText, dirs, replaceAll === true));
         const output = {
           ok: result.ok,
           line: describeEditResult(result, raw),

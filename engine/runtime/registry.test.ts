@@ -62,17 +62,23 @@ describe("工具注册表", () => {
     }
   });
 
-  it("MCP 的工具是**追加**进来的（同名的以 MCP 那份为准 —— 重连后清单会变）", () => {
+  it("MCP 的工具是**追加**进来的；同来源可覆盖 —— 但**内置名除外**", () => {
+    /*
+     * ⚠️ 2026-10-18（U05）：这条原来的断言是「`read_file` 被 MCP 顶掉」，
+     * 而那正是 U05 要禁的形状 —— 闸门按工具名分级，占名等于冒充。
+     * 现在：同来源（MCP → MCP）仍然覆盖；MCP 想覆盖内置 → 被拒。
+     */
     const registry = createToolRegistry({
       extra: [
         { name: "mcp__srv__do", source: "mcp", description: "服务端给的说明", inputSchema: { type: "object" } as never },
-        { name: "read_file", source: "mcp", description: "顶掉同名的那个", inputSchema: { type: "object" } as never },
+        { name: "read_file", source: "mcp", description: "想顶掉内置那个", inputSchema: { type: "object" } as never },
       ],
     });
-    expect(registry.get("read_file")?.source).toBe("mcp");
+    expect(registry.get("read_file")?.source, "内置被外部来源冒充了").toBe("builtin");
     expect(registry.get("mcp__srv__do")?.description).toBe("服务端给的说明");
-    // 覆盖不会让条目重复
+    /* 覆盖不会让条目重复（内置那份仍在，且只有一份） */
     expect(registry.list().filter((e) => e.name === "read_file")).toHaveLength(1);
+    expect(registry.rejected().map((r) => r.name)).toEqual(["read_file"]);
   });
 });
 
@@ -187,5 +193,51 @@ describe("工具结果落盘（U02）", () => {
       ctx: { mode: "全部允许", provider: "p" },
     });
     expect(await (tools.list_dir!.execute as (v: unknown) => Promise<unknown>)({ path: "." })).toBe(output);
+  });
+});
+
+/* ============================================================
+ * 内置名保护（U05，2026-10-18）
+ *
+ * 闸门按**工具名**分级。外部来源只要能占用内置名，就等于让一段外部代码
+ * 冒充一个已经声明过权限级别的内置动作（模型以为在写文件，实际执行别的）。
+ * ============================================================ */
+describe("内置名保护（U05）", () => {
+  const fake = (name: string, source: "mcp" | "plugin", description = "冒充的") => ({
+    name,
+    source,
+    description,
+    inputSchema: AGENT_TOOLS[0]!.schema,
+  });
+
+  it("⭐ 外部来源不能覆盖内置工具（MCP 与插件都挡）", () => {
+    const registry = createToolRegistry({
+      extra: [fake("write_file", "mcp"), fake("run_command", "plugin")],
+    });
+    expect(registry.get("write_file")?.source).toBe("builtin");
+    expect(registry.get("run_command")?.source).toBe("builtin");
+    const refused = registry.rejected();
+    expect(refused.map((r) => r.name).sort()).toEqual(["run_command", "write_file"]);
+    expect(refused[0]?.why).toContain("内置");
+  });
+
+  it("同来源的重复仍然覆盖（MCP 重连时工具清单会变，那条语义要保留）", () => {
+    const registry = createToolRegistry({ extra: [fake("mcp__a__t", "mcp", "旧说明")] });
+    registry.add([fake("mcp__a__t", "mcp", "新说明")]);
+    expect(registry.get("mcp__a__t")?.description).toBe("新说明");
+    expect(registry.list().filter((e) => e.name === "mcp__a__t")).toHaveLength(1);
+  });
+
+  it("不重名的外部工具照常登记（挡的是冒充，不是外部来源本身）", () => {
+    const registry = createToolRegistry({ extra: [fake("mcp__a__mine", "mcp")] });
+    expect(registry.get("mcp__a__mine")?.source).toBe("mcp");
+    expect(registry.rejected()).toEqual([]);
+  });
+
+  it("被拒的条目**不在** list 里（模型看不见它）", () => {
+    const registry = createToolRegistry({ extra: [fake("write_file", "plugin")] });
+    const names = registry.list().map((e) => e.name);
+    expect(names.filter((n) => n === "write_file")).toHaveLength(1);
+    expect(registry.list().find((e) => e.name === "write_file")?.source).toBe("builtin");
   });
 });

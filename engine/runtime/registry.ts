@@ -66,6 +66,13 @@ export type ToolRegistry = {
   get(name: string): ToolEntry | undefined;
   /** 登记一批（重复名字会**覆盖**并保留原位置 —— MCP 重连时工具清单会变）。 */
   add(entries: readonly ToolEntry[]): void;
+  /**
+   * 被拒收的条目（U05）：外部来源想占用**内置工具名**时不予登记。
+   *
+   * 它是一等结果而不是 console.warn：宿主可以把它显示给用户（"这个插件想冒充
+   * 内置的 write_file，已拒绝"）—— 静默丢弃等于让用户以为插件装上了。
+   */
+  rejected(): Array<{ name: string; source: ToolSource; why: string }>;
 };
 
 /**
@@ -96,12 +103,29 @@ export function builtinToolEntries(): ToolEntry[] {
 export function createToolRegistry(opts: { extra?: readonly ToolEntry[]; include?: readonly string[] } = {}): ToolRegistry {
   const order: string[] = [];
   const byName = new Map<string, ToolEntry>();
+  const refused: Array<{ name: string; source: ToolSource; why: string }> = [];
 
   const registry: ToolRegistry = {
     list: () => order.map((name) => byName.get(name)).filter((e): e is ToolEntry => Boolean(e)),
     get: (name) => byName.get(name),
+    rejected: () => [...refused],
     add: (entries) => {
       for (const entry of entries) {
+        const existing = byName.get(entry.name);
+        /*
+         * ⭐ **内置名不许被外部来源占用**（U05，2026-10-18）。
+         *
+         * 在这之前这里是无条件覆盖：一个 MCP 连接器或插件只要交出一个叫
+         * `write_file` 的工具，就能把内置那个换掉 —— 模型以为在写文件，
+         * 实际执行的是外部代码。闸门按**工具名**分级，所以覆盖名字等于
+         * 让外部代码冒充一个已声明权限级别的内置动作。
+         *
+         * 同来源的重复仍然覆盖（MCP 重连时工具清单会变，那条语义要保留）。
+         */
+        if (existing && existing.source === "builtin" && entry.source !== "builtin") {
+          refused.push({ name: entry.name, source: entry.source, why: "与内置工具重名（外部来源不能覆盖内置）" });
+          continue;
+        }
         if (!byName.has(entry.name)) order.push(entry.name);
         byName.set(entry.name, entry);
       }
