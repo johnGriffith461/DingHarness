@@ -291,6 +291,18 @@ ding connect 192.168.1.9:8787 "..." --token <口令>                    # 远端
 - 旧 JSONL 数据在启动时自动迁移，**迁移不删**旧文件；
   配置型数据从 Phase 12.1 起默认存 SQLite（`DSH_STORE_BACKEND=file` 可退回文件）。
 
+## 治理、隐私与支持
+
+| 文件 | 内容 |
+|---|---|
+| [`PRIVACY.md`](./PRIVACY.md) | **默认零遥测**：本机存什么、什么时候联网、怎么删 |
+| [`SECURITY.md`](./SECURITY.md) | 漏洞披露（私密渠道）、AI 生成报告政策、已知安全边界 |
+| [`GOVERNANCE.md`](./GOVERNANCE.md) | 谁定什么、ADR 流程、不可协商的四条 |
+| [`SUPPORT.md`](./SUPPORT.md) | 去哪问、提问带什么、响应预期 |
+| [`AGENTS.md`](./AGENTS.md) | 给 agent 协作者的项目说明书（架构地图与规矩） |
+| [`BENCHMARKS.md`](./BENCHMARKS.md) | 公开评测/基准成绩、方法论与失败分类 |
+| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | 提 PR 的路（四道门、六条规矩） |
+
 ## 许可
 
 [Apache-2.0](./LICENSE)（含明确的专利授权；`package.json` 的 `license` 与它是同一件事）
