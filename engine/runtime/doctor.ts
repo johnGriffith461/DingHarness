@@ -5,7 +5,8 @@ import { credentialsPath, hasSecret, resolveSecret } from "./credentials";
 import { allProviders, firstAvailableProvider, getProvider } from "./providers";
 import { MODEL_CATALOG, STALE_DAYS, UNKNOWN_MODEL_BUDGET, isStale } from "./models";
 import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
-import { sqliteRuntimeName } from "../adapters/sqliteDriver";
+import { openSqlite, sqliteRuntimeName } from "../adapters/sqliteDriver";
+import { prepareSearchIndex } from "../adapters/sqliteSearch";
 import { probeSandbox } from "../adapters/sandbox";
 import { credentialProtection, secretsEncrypted } from "../adapters/secretStore";
 import { createSqliteSessionStore } from "../adapters/sqliteStore";
@@ -451,6 +452,78 @@ export function doctorReport(checks: readonly Check[]): { ok: boolean; failed: n
   };
 }
 
+/** 一项自修的结果。 */
+export type DoctorFixResult = {
+  name: string;
+  ok: boolean;
+  /** 做了什么 / 为什么做不了（人话）。 */
+  detail: string;
+};
+
+/**
+ * `doctor --fix`：**只做两类安全修复**（V6-2h）。
+ *
+ * | 修什么 | 为什么安全 |
+ * |---|---|
+ * | 数据目录 / 配置里的工作目录不存在 | 只是 `mkdir`，不覆盖任何东西；目录不存在时工具本来也写不进去 |
+ * | 会话库的全文检索索引缺失 | 索引是**派生数据**，可从事件正文重建；重建失败不删原表 |
+ *
+ * ⚠️ 明确**不做**的（列出来是让人知道边界）：不改配置、不删会话、不动凭据、不装依赖、
+ * 不碰权限位。那些要么不可逆，要么该由用户自己决定。
+ *
+ * @param input 数据目录与配置里的工作目录
+ * @returns 每一项做了什么（没做的类别不出现在结果里）
+ */
+export function applyDoctorFixes(input: { dataDir: string; dirs?: readonly string[] }): DoctorFixResult[] {
+  const out: DoctorFixResult[] = [];
+
+  /* ① 数据目录（doctor 本身也会建，这里显式记一笔"我做了"） */
+  try {
+    const existed = fs.existsSync(input.dataDir);
+    fs.mkdirSync(input.dataDir, { recursive: true });
+    if (!existed) out.push({ name: "数据目录", ok: true, detail: `已创建：${input.dataDir}` });
+  } catch (error) {
+    out.push({ name: "数据目录", ok: false, detail: `建不了：${(error as Error)?.message?.slice(0, 120) ?? "未知原因"}` });
+  }
+
+  /* ② 配置里的工作目录（不存在时工具会一律报"不在可写范围内"） */
+  for (const dir of input.dirs ?? []) {
+    const target = String(dir ?? "").trim();
+    if (!target || fs.existsSync(target)) continue;
+    try {
+      fs.mkdirSync(target, { recursive: true });
+      out.push({ name: `工作目录 ${target}`, ok: true, detail: "已创建" });
+    } catch (error) {
+      out.push({
+        name: `工作目录 ${target}`,
+        ok: false,
+        detail: `建不了：${(error as Error)?.message?.slice(0, 120) ?? "未知原因"}`,
+      });
+    }
+  }
+
+  /* ③ 检索索引（派生数据：缺了就重建，坏不了原表） */
+  const dbFile = path.join(input.dataDir, "sessions.db");
+  if (fs.existsSync(dbFile)) {
+    let db: ReturnType<typeof openSqlite> | null = null;
+    try {
+      db = openSqlite(dbFile);
+      const fts = prepareSearchIndex(db);
+      out.push({
+        name: "检索索引",
+        ok: fts,
+        detail: fts ? "FTS5 索引已就绪（缺失的已重建；已有的不动）" : "这个 SQLite 构建不支持 FTS5 —— 检索退化为子串匹配",
+      });
+    } catch (error) {
+      out.push({ name: "检索索引", ok: false, detail: `打不开会话库：${(error as Error)?.message?.slice(0, 120) ?? "未知原因"}` });
+    } finally {
+      db?.close();
+    }
+  }
+
+  return out;
+}
+
 /** 把自检结果写成给人看的文本。 */
 export function formatDoctor(checks: readonly Check[], opts: { json: boolean }): string {
   if (opts.json) {
@@ -486,4 +559,6 @@ export function doctorSummary(checks: readonly Check[]): string {
  * 于是它会在数据目录里留下一个 `sessions.db`。现在会话库那条改成"不存在就不 open"
  * （见 ③ 的注释），写下来的是**真的**剩下这两件事。
  */
-export const DOCTOR_NOTE = `doctor 只报告、不改你的设置：它至多做两件"碰一下机器"的事 —— 数据目录不存在时建它、往里面写一个探针文件（写完就删）。会话库不存在时它**不会**替你建（只在已有库时试打开）。`;
+export const DOCTOR_NOTE =
+  `doctor 默认只报告、不改你的设置：它至多做两件"碰一下机器"的事 —— 数据目录不存在时建它、往里面写一个探针文件（写完就删）。会话库不存在时它**不会**替你建（只在已有库时试打开）。` +
+  `\n\`--fix\` 只做两类安全修复：建缺失的目录、重建会话库的全文检索索引（派生数据）；不改配置、不删会话、不动凭据。`;

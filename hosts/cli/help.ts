@@ -24,7 +24,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
       "  ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）",
-      "  ding doctor [--json]                           # 一键自检（每项失败都给下一步）",
+      "  ding doctor [--json] [--fix]                   # 一键自检（--fix 只修建目录/检索索引两类）",
       "  ding recipe list|show|run|export|import            # 任务模板（可分享的「提示词 + 工具范围 + 档位」）",
       "  ding space [invite|join|members|roles|remove|share|unshare|takeover|rooms|room|usage|audit]   # 团队空间（配对码 / 名册 / 共享 / 接管 / 账本）",
       "  ding approvals --to <服务地址> --token <口令> [--watch]   # 审批：列一遍 / 盯着新处置（批后通知的消费端）",

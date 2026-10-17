@@ -9,6 +9,7 @@ import { noopHealth } from "../ports/health";
 import { envSecret, type SecretPort } from "../ports/secret";
 import { getProvider, protocolOf } from "./providers";
 import { adapterFor } from "./protocols";
+import { exportTurnTrace, type ToolSpanInput } from "./otlp";
 import { humanFailure } from "../../shared/errors";
 
 /**
@@ -107,6 +108,8 @@ export type TurnEvent =
  * （provider 自己的默认输出上限一直生效，不受这里影响。）
  */
 export type TurnRequestInput = {
+  /** 属于哪段会话（只用于 OTLP span 的归属；不给也能跑）。 */
+  sessionId?: string;
   provider: string;
   model?: string;
   system?: string;
@@ -354,6 +357,30 @@ export async function runTurn(
   const onUserAbort = () => watchdog.abort();
   input.abortSignal?.addEventListener("abort", onUserAbort, { once: true });
 
+  /*
+   * OTLP 旁路（V6-2h）：收集工具调用的时间片，收尾时一并导出。
+   *
+   * ⚠️ 状态声明在 `try` **外面**：catch 也要导出失败 span（变量在 try 里声明的话，
+   * catch 根本看不见它 —— TS 会直接报未定义）。
+   * 没配端点时这一段几乎零开销（只在内存里塞几条对象，不碰网络）。
+   */
+  const startedAt = Date.now();
+  const toolSpans: ToolSpanInput[] = [];
+  const toolStarts = new Map<string, { name: string; at: number }>();
+  const emitSpan = (ok: boolean, usage?: TurnUsage, error?: string) => {
+    void exportTurnTrace({
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      provider: provider.id,
+      model,
+      startedAt,
+      elapsedMs: Date.now() - startedAt,
+      ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } } : {}),
+      ok,
+      ...(error ? { error } : {}),
+      tools: toolSpans,
+    });
+  };
+
   try {
     /*
      * ⭐ **协议只在这里分一次**（Phase 5.2）。
@@ -367,11 +394,6 @@ export async function runTurn(
      */
     const adapter = adapterFor(protocolOf(provider.id));
     const client = adapter.createModel({ baseURL: provider.baseURL, apiKey, model });
-    /*
-     * 这一轮**真的**花了多久 —— 吞吐量（tok/s）的分母。
-     * 量的是"从发请求到 provider 把用量交回来"这一段；界面上那个数因此是实测，不是估的。
-     */
-    const startedAt = Date.now();
     const result = streamText({
       model: client,
       messages: input.messages,
@@ -401,6 +423,7 @@ export async function runTurn(
         continue;
       }
       if (part.type === "tool-call") {
+        toolStarts.set(part.toolCallId, { name: part.toolName, at: Date.now() });
         onEvent({ type: "tool-call", toolCallId: part.toolCallId, toolName: part.toolName, input: part.input });
         continue;
       }
@@ -411,6 +434,17 @@ export async function runTurn(
          * ⚠️ 子智能体那条原来**没有这一支** —— 于是它的工具报错会被整轮吞掉。
          */
         const failed = part.type === "tool-error";
+        const startedTool = toolStarts.get(part.toolCallId);
+        if (startedTool) {
+          toolSpans.push({
+            name: part.toolName || startedTool.name,
+            startedAt: startedTool.at,
+            endedAt: Date.now(),
+            ok: !failed,
+            toolCallId: part.toolCallId,
+          });
+          toolStarts.delete(part.toolCallId);
+        }
         onEvent({
           type: "tool-result",
           toolCallId: part.toolCallId,
@@ -469,6 +503,7 @@ export async function runTurn(
       input.onRawError?.(`no stream data for ${stallMs}ms`);
       health.markFailed(provider.id, message);
       onEvent({ type: "error", message });
+      emitSpan(false, undefined, message);
       return { ok: false, error: message, aborted: false, provider: provider.id, model };
     }
 
@@ -499,6 +534,8 @@ export async function runTurn(
       usage = undefined; // 拿不到就不给（**不编**）
     }
     onEvent({ type: "done", ...(usage ? { usage } : {}) });
+    /* OTLP 旁路：没配端点 = 不发（默认零遥测），失败也不影响这一轮 */
+    emitSpan(true, usage);
     // 真的跑通了 —— 把这家 provider 标成"已验证"（界面上才敢说可用）
     health.markOk(provider.id);
     return { ok: true, aborted: false, provider: provider.id, model };
@@ -512,6 +549,7 @@ export async function runTurn(
       input.onRawError?.(`no stream data for ${stallMs}ms`);
       health.markFailed(provider.id, message);
       onEvent({ type: "error", message });
+      emitSpan(false, undefined, message);
       return { ok: false, error: message, aborted: false, provider: provider.id, model };
     }
     const message = humanError(error);
@@ -520,6 +558,7 @@ export async function runTurn(
     const aborted = Boolean(input.abortSignal?.aborted);
     if (!aborted) health.markFailed(provider.id, message);
     onEvent({ type: "error", message });
+    emitSpan(false, undefined, message);
     return { ok: false, error: message, aborted, provider: provider.id, model };
   } finally {
     /* 两种出口（正常/异常）都要收拾定时器与监听，否则长会话里越堆越多 */

@@ -122,6 +122,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "help",
   /* `ding bench run --docker`（V6-1a）：判分命令跑在容器里（需要本机有 Docker） */
   "docker",
+  /* `ding doctor --fix`（V6-2h）：只做两类安全修复（建目录 / 重建检索索引） */
+  "fix",
   /* `ding approvals --watch`：盯着通知流（不给就看一眼列一遍） */
   "watch",
 ]);

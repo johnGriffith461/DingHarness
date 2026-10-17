@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { configIssues, doctorReport, runDoctor, type Check } from "./doctor";
+import { applyDoctorFixes, configIssues, doctorReport, runDoctor, type Check } from "./doctor";
 
 /**
  * 自检核心的**宿主中立那半边**（2026-10-17：桌面「反馈」导出诊断包复用同一套检查，
@@ -101,5 +101,46 @@ describe("自检核心（宿主中立半边）", () => {
     ];
     expect(doctorReport(checks)).toEqual({ ok: false, failed: 1, checks });
     expect(doctorReport([checks[0]!])).toEqual({ ok: true, failed: 0, checks: [checks[0]] });
+  });
+});
+
+describe("doctor --fix（V6-2h）：只做两类安全修复", () => {
+  it("建缺失的数据目录与工作目录，已有的不动", () => {
+    const base = freshDir();
+    const dataDir = path.join(base, "data");
+    const workA = path.join(base, "work-a");
+    const workB = path.join(base, "work-b");
+    fs.mkdirSync(workB, { recursive: true });
+
+    const fixes = applyDoctorFixes({ dataDir, dirs: [workA, workB] });
+    expect(fs.existsSync(dataDir)).toBe(true);
+    expect(fs.existsSync(workA)).toBe(true);
+    expect(fixes.find((f) => f.name === "数据目录")?.ok).toBe(true);
+    /* 已存在的目录不该出现在结果里（"我做了什么"只记真的做了的） */
+    expect(fixes.some((f) => f.name.includes("work-b"))).toBe(false);
+  });
+
+  it("没有会话库时不去建它（修复不等于造数据）", () => {
+    const base = freshDir();
+    const fixes = applyDoctorFixes({ dataDir: path.join(base, "data") });
+    expect(fs.existsSync(path.join(base, "data", "sessions.db"))).toBe(false);
+    expect(fixes.some((f) => f.name === "检索索引")).toBe(false);
+  });
+
+  it("有会话库时重建检索索引（派生数据；成功或如实说不支持）", async () => {
+    const base = freshDir();
+    const dataDir = path.join(base, "data");
+    fs.mkdirSync(dataDir, { recursive: true });
+    /* 用一个真库：store 打开时会建表（索引由 prepareSearchIndex 补） */
+    const { createSqliteSessionStore } = await import("../adapters/sqliteStore");
+    const store = createSqliteSessionStore(dataDir);
+    await store.append("chat-1", [{ requestId: "r1", type: "text", text: "可被检索的正文" } as never]);
+    store.close();
+
+    const fixes = applyDoctorFixes({ dataDir });
+    const search = fixes.find((f) => f.name === "检索索引");
+    expect(search, "有库却没有修检索索引这一项").toBeTruthy();
+    /* FTS5 可用时 ok=true；不可用时如实 false（两种都是正确行为，不强制环境） */
+    expect(typeof search!.detail).toBe("string");
   });
 });

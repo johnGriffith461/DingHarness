@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { credentialsPath } from "../../engine/runtime/credentials";
 import { configPaths, readConfig } from "./config";
+import { applyDoctorFixes } from "../../engine/runtime/doctor";
 import { formatDoctor, runDoctor } from "./doctor";
 import { runWizard, type WizardIo } from "./wizard";
 import type { Parsed } from "./args";
@@ -188,6 +189,23 @@ export function cmdDoctor(p: Parsed, dataDir: string): number {
   const dir = dataDir;
   const paths = configPaths(dir);
   const read = readConfig(dir);
+
+  /*
+   * `--fix`（V6-2h）：先修，再跑同一套检查。
+   *
+   * 顺序是"修 → 再看"，不是"看 → 修 → 自己宣布好了"：
+   * 修复结果可能只解决一部分（或一类根本不支持），最终结论仍由 doctor 的检查项给。
+   */
+  if (p.flags.has("fix")) {
+    const fixes = applyDoctorFixes({ dataDir: dir, dirs: read.config.dirs });
+    if (!p.flags.has("json")) {
+      process.stdout.write("doctor --fix（只做两类安全修复：建目录 / 重建检索索引）\n");
+      if (!fixes.length) process.stdout.write("  没有需要修的东西。\n");
+      for (const fix of fixes) process.stdout.write(`  ${fix.ok ? "✓" : "✗"} ${fix.name}：${fix.detail}\n`);
+      process.stdout.write("\n");
+    }
+  }
+
   const checks = runDoctor({
     dataDir: dir,
     configPath: paths.primary,

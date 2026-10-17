@@ -332,6 +332,7 @@ export function createEngine(ports: EnginePorts): Engine {
       };
       const outcome = await runTurn(
         {
+          ...(request.sessionId ? { sessionId: request.sessionId } : {}),
           provider: request.provider,
           ...(request.model ? { model: request.model } : {}),
           ...(request.system ? { system: request.system } : {}),
