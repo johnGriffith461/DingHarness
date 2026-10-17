@@ -1,0 +1,1 @@
+{"at":"2026-10-17T13:47:56.929Z","label":"基线：V6-1 首批（ICM + 失败分类 + pass@k）","gitSha":"355fb82","changedFiles":0,"samples":1,"train":{"passed":4,"total":4,"rate":100},"test":{"passed":3,"total":3,"rate":100},"decision":"baseline","reason":"第一轮（没有可比的上一轮）"}
