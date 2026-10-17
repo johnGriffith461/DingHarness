@@ -1,5 +1,5 @@
 import { KEEP_RECENT_TOKENS, calibrationOf, estimateTokens, omittedNote, planContext, shouldCompact, totalTokens } from "../core/context";
-import { KEEP_RATIO, KEEP_RECENT_TOKENS_MIN, MAX_KEEP_TOKENS, budgetOf, describeBudget, keepTokensFor } from "../runtime/budget";
+import { CONTEXT_BUFFER, OUTPUT_RESERVE_FALLBACK, OUTPUT_RESERVE_MAX, budgetOf, describeBudget, keepTokensFor } from "../runtime/budget";
 import { MODEL_CATALOG, UNKNOWN_MODEL_BUDGET, isStale } from "../runtime/models";
 import type { EvalCase } from "./types";
 
@@ -535,15 +535,25 @@ export const compaction2: EvalCase[] = [
     id: "compact-keep-registered",
     category: "上下文压缩",
     kind: "core",
-    title: "已登记模型的保留额度 = 上限 × 比例，且被上下限夹住",
+    /*
+     * 2026-10-18（D04）：判据从"窗口 × 50%，再封顶 20k"改成"按窗口推导"。
+     * 这里**独立重写一遍公式**（不 import keepForWindow）：如果实现改了而这条没改，
+     * 它就该红 —— 那正是回归守卫的作用。
+     */
+    title: "已登记模型的保留额度 = 窗口 − 输出预留 − buffer，且被窗口夹住",
     coreCheck: () => {
       for (const id of MODEL_IDS) {
         const spec = MODEL_CATALOG.find((m) => m.id === id);
         if (!spec) continue;
         const keep = keepTokensFor(id);
-        const raw = spec.contextWindow * KEEP_RATIO;
-        const want = Math.max(KEEP_RECENT_TOKENS_MIN, Math.min(raw, MAX_KEEP_TOKENS));
-        if (keep !== want) return `${id}：保留额度 ${keep} ≠ 期望 ${want}（上限 ${spec.contextWindow}）`;
+        const reserve = Math.max(
+          0,
+          Math.min(spec.outputLimit ?? OUTPUT_RESERVE_FALLBACK, OUTPUT_RESERVE_MAX, Math.floor(spec.contextWindow / 4)),
+        );
+        const hardCap = Math.max(0, spec.contextWindow - reserve);
+        const floor = Math.min(KEEP_RECENT_TOKENS, Math.floor(spec.contextWindow / 2), hardCap);
+        const want = Math.max(0, Math.min(hardCap, Math.max(floor, spec.contextWindow - reserve - CONTEXT_BUFFER)));
+        if (keep !== want) return `${id}：保留额度 ${keep} ≠ 期望 ${want}（窗口 ${spec.contextWindow}，输出预留 ${reserve}）`;
       }
       return null;
     },

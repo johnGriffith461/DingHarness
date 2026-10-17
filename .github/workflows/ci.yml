@@ -203,6 +203,11 @@ jobs:
           pnpm build:web
           pnpm electron:build
 
+      - name: 交付门前置：产物必须比源码新（D01）
+        # 2026-10-18 产品审计：`electron:build` 不重建 web，`dist/` 曾长期是旧的，
+        # 而单测全绿。这一步只比 web/electron 两份（CLI 在 gates 里刚建过）。
+        run: node scripts/check-build-freshness.mjs --only=web,electron
+
       - name: 开箱冒烟
         # 一次启动走完：启动 → 窗口（自绘标题栏 + 三个按钮）→ 左栏 → 右栏 → 画布 → 设置 → 主路径
         run: node scripts/accept/accept-smoke.mjs

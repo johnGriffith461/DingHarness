@@ -1,0 +1,37 @@
+/*
+ * 首页工作模式（D02，2026-10-18）。
+ *
+ * 单独一个区域文件，理由与 `navsearch.css` 相同：`workbench.css` 已经贴着
+ * 结构守卫的 1500 行上限（`src/structureGuard.test.ts`），新功能不再往里塞。
+ *
+ * 形态是一枚**分段开关**（segmented control），不是两个独立按钮 ——
+ * 它表达的是"二选一"，而不是"可以同时开两个"。
+ */
+
+.wb-home-mode {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.wb-home-mode-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 16px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out);
+}
+
+.wb-home-mode-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}

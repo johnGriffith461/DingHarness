@@ -18,6 +18,7 @@ import {
   type Viewport,
   type XYPosition,
 } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import type { NodeLookup } from "@xyflow/system";
 import type { ShellBridge } from "@shared/ipc";
 import { nodeTypes } from "./nodes";

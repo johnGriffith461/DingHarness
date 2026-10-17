@@ -8,7 +8,7 @@
 |---|---|---|
 | 发布状态 | **已发布 `0.5.1`（2026-10-18）** | registry `latest` = `0.5.1`；干净安装后 `--version` / `doctor` / DOCX 入库 / `eval` 都验过。`0.5.0` 已弃用（缺 `jszip`） |
 | 包名 | **`ding-harness`** | 不带作用域。`@ding` 作用域属于另一个真实 npm 用户（与引擎包当初同一个病），**404 ≠ 可发布** |
-| 版本 | **`0.5.1`** | CLI 的补丁版独立于产品版本（`PRODUCT_VERSION` 仍是 0.5.0）；`ding --version` 读**安装包自己**的 `package.json`，所以报 0.5.1 |
+| 版本 | **`0.5.1`** | 与根 `package.json` / `PRODUCT_VERSION` / `shared/version.json` **同一份**（D09，2026-10-18）；`ding --version` 优先读**安装包自己**的 `package.json`，所以装的是哪版就报哪版 |
 | npm 账号 | `sunwenshan` | `~/.npmrc` 里的发布令牌：`bypass_2fa=true`、`package:write`、all packages、到期 2027-01-15（`zcode-cli-publish`，id `09bb80`） |
 | 2FA | **未开** | 不是卡点：profile 显示 `Enable 2FA`，首页横幅也写明未启用。旧令牌 `zcode-cli`（`bypass_2fa=false`，id `f4a245`）不要再用于发布 |
 

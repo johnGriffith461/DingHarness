@@ -1,15 +1,22 @@
 import {
   BarChart3,
   Briefcase,
+  Bug,
   Cloud,
+  Code2,
   FileText,
+  FlaskConical,
   Frame,
+  GitBranch,
   Globe,
   MousePointerClick,
   Network,
   Presentation,
+  ScrollText,
   Sparkles,
   Table,
+  Terminal,
+  Wrench,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -40,6 +47,14 @@ const BY_TAG: Record<string, ComponentType<{ size?: number | string; className?:
   思维导图: Network,
   操作浏览器: MousePointerClick,
   一级市场公司评估: Briefcase,
+  /* 编码模式（D02）：每个类目各一枚，别让它们都回落成 ✨ */
+  代码: Code2,
+  修Bug: Bug,
+  测试: FlaskConical,
+  重构: Wrench,
+  终端: Terminal,
+  日志: ScrollText,
+  Git: GitBranch,
 };
 
 export function suggestionIcon(tag: string): ComponentType<{ size?: number | string; className?: string }> {

@@ -6,20 +6,41 @@
  */
 
 import { useWorkbenchStore } from "./store";
-import { splitSuggestion } from "./copy";
+import { HOME_MODES, HOME_TITLE, splitSuggestion } from "./copy";
 import { suggestionIcon } from "./suggestionIcon";
 
 import { Composer } from "./Composer";
 
 export function HomeView() {
   const suggestions = useWorkbenchStore((s) => s.suggestions);
+  const homeMode = useWorkbenchStore((s) => s.homeMode);
+  const setHomeMode = useWorkbenchStore((s) => s.setHomeMode);
   const createTask = useWorkbenchStore((s) => s.createTask);
 
   return (
     <section className="wb-home" data-testid="wb-home">
       <div className="wb-home-scroll">
         <div className="wb-blob" aria-hidden />
-        <h1 className="wb-home-title">今天有什么工作要处理?</h1>
+        {/*
+          D02（2026-10-18）：首屏先问"你是哪种工作"。
+          原来只有一句"今天有什么工作要处理?"，推荐卡里一半是 PPT/Word、
+          一半是画布 —— 开发者和办公用户都觉得不像自己。选完模式再出卡片。
+        */}
+        <div className="wb-home-mode" role="group" aria-label="工作模式">
+          {HOME_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              className="wb-home-mode-btn"
+              data-testid={`wb-home-mode-${mode.id}`}
+              aria-pressed={homeMode === mode.id}
+              onClick={() => setHomeMode(mode.id)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+        <h1 className="wb-home-title">{HOME_TITLE[homeMode]}</h1>
         <div className="wb-home-label">为你推荐</div>
         <div className="wb-suggestions">
           {suggestions.map((raw) => {

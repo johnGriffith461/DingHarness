@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ARTIFACT_TITLE_GENERATING, COMPOSER_PLACEHOLDER, HOME_GREETING, SCHEDULED_RECOMMEND, SCHEDULED_SERVED_IDS, SCHEDULE_COMPOSER_PLACEHOLDER, SUGGESTION_COUNT, SUGGESTION_POOL, SUMMARY_TABS, TASK_TITLE_LIMIT, pickSuggestions, splitSuggestion } from "./copy";
+import { ARTIFACT_TITLE_GENERATING, CODING_SUGGESTION_POOL, COMPOSER_PLACEHOLDER, HOME_GREETING, HOME_MODES, HOME_MODE_KEY, HOME_TITLE, SCHEDULED_RECOMMEND, SCHEDULED_SERVED_IDS, SCHEDULE_COMPOSER_PLACEHOLDER, SUGGESTION_COUNT, SUGGESTION_POOL, SUMMARY_TABS, TASK_TITLE_LIMIT, parseHomeMode, pickSuggestions, splitSuggestion, suggestionsFor } from "./copy";
 
 /**
  * 文案表保真。
@@ -113,6 +113,57 @@ describe("pickSuggestions —— 首页推荐卡要真的会变", () => {
       expect(item.includes(" ")).toBe(true);
       expect(item.length).toBeLessThan(40);
     }
+  });
+});
+
+/* ============================================================
+ * 首页工作模式（D02，2026-10-18）
+ *
+ * 首屏先选「编码 / 办公」，推荐卡跟着模式走。这组断言挡两件事：
+ * ① 两个池子不能混（编码模式里出现 PPT 卡 = 没接上）；
+ * ② 编码池的每一条同样要能拆出「类目 + 指令」（否则图标与对齐会错）。
+ * ============================================================ */
+describe("首页工作模式（D02）", () => {
+  it("两种模式、顺序是 编码 → 办公", () => {
+    expect(HOME_MODES.map((m) => m.id)).toEqual(["coding", "office"]);
+    expect(HOME_MODES.map((m) => m.label)).toEqual(["编码", "办公"]);
+  });
+
+  it("⭐ 推荐卡真的跟着模式走（两个池子不混）", () => {
+    expect(suggestionsFor("coding")).toBe(CODING_SUGGESTION_POOL);
+    expect(suggestionsFor("office")).toBe(SUGGESTION_POOL);
+    // 编码池里不该出现办公类目 —— 那正是"没接上"的样子
+    for (const raw of suggestionsFor("coding")) {
+      expect(raw, `编码模式里混进了办公卡「${raw}」`).not.toMatch(/PPT|Word|Excel|云文档/);
+    }
+  });
+
+  it("磁盘读到的值不可信：只认 coding，其余一律 office", () => {
+    expect(parseHomeMode("coding")).toBe("coding");
+    expect(parseHomeMode("office")).toBe("office");
+    expect(parseHomeMode("CODING")).toBe("office");
+    expect(parseHomeMode(undefined)).toBe("office");
+    expect(parseHomeMode(42)).toBe("office");
+  });
+
+  it("首屏标题两种模式不同（否则切换看不出变化）", () => {
+    expect(HOME_TITLE.coding).not.toBe(HOME_TITLE.office);
+    expect(HOME_TITLE.office).toBe(HOME_GREETING);
+  });
+
+  it("编码池每条都能拆出非空的类目与指令，且池子够大", () => {
+    expect(CODING_SUGGESTION_POOL.length).toBeGreaterThan(SUGGESTION_COUNT);
+    expect(new Set(CODING_SUGGESTION_POOL).size).toBe(CODING_SUGGESTION_POOL.length);
+    for (const raw of CODING_SUGGESTION_POOL) {
+      const { tag, text } = splitSuggestion(raw);
+      expect(tag.length, `「${raw}」缺类目`).toBeGreaterThan(0);
+      expect(text.length, `「${raw}」缺指令`).toBeGreaterThan(0);
+      expect(tag.includes(" "), `「${raw}」的类目里有空格`).toBe(false);
+    }
+  });
+
+  it("持久化键带项目前缀（与画布那批一起可清理）", () => {
+    expect(HOME_MODE_KEY.startsWith("dsh-canvas.")).toBe(true);
   });
 });
 

@@ -11,7 +11,7 @@ import { taskSessionId } from "@engine/core/events";
 import { fabricatedCost } from "@shared/cost";
 import { branchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";
-import { pickSuggestions, SUGGESTION_POOL } from "./copy";
+import { HOME_MODE_KEY, parseHomeMode, pickSuggestions, suggestionsFor, type HomeMode } from "./copy";
 import {
   restoreTasks as restoreTasksIn,
   startTaskPersistence as startTaskPersistenceIn,
@@ -78,6 +78,10 @@ export type WorkbenchState = {
   runningRequestId: string | null;
   /** 首页推荐卡（原版会给，且内容会变）。 */
   suggestions: string[];
+  /** 首页工作模式（D02）：编码 / 办公；推荐卡跟着它走。 */
+  homeMode: HomeMode;
+  /** 切换工作模式（同时换一批推荐卡，并持久化到 localStorage）。 */
+  setHomeMode: (mode: HomeMode) => void;
   /** 重新抽一批推荐卡（进首页时调）。 */
   refreshSuggestions: () => void;
   /**
@@ -274,6 +278,20 @@ const nextId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(seq +=
  */
 const resolvingTools = new Set<string>();
 
+/**
+ * 读上次选的工作模式（D02）。
+ *
+ * `localStorage` 在测试环境/无痕模式下可能直接抛 —— 读不到就当 `office`，
+ * 这是"默认值"而不是"错误"：模式只影响首页展示。
+ */
+function readHomeMode(): HomeMode {
+  try {
+    return parseHomeMode(localStorage.getItem(HOME_MODE_KEY));
+  } catch {
+    return "office";
+  }
+}
+
 export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   view: "home",
   tasks: [],
@@ -327,7 +345,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     return draft;
   },
   // 实机的推荐卡**会变**；从池子里抽四条，每次进首页重新抽
-  suggestions: pickSuggestions(SUGGESTION_POOL),
+  homeMode: readHomeMode(),
+  suggestions: pickSuggestions(suggestionsFor(readHomeMode())),
 
   setView: (view) => {
     set({ view });
@@ -341,7 +360,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
    * 实机那几条每次进去都不一样（三次遍历看到三组不同的）。写死四条会露馅，
    * 而"只在启动时抽一次"也不够 —— 用户来回切两次就该看出来是固定的了。
    */
-  refreshSuggestions: () => set({ suggestions: pickSuggestions(SUGGESTION_POOL) }),
+  refreshSuggestions: () => set((s) => ({ suggestions: pickSuggestions(suggestionsFor(s.homeMode)) })),
+
+  /**
+   * 切换工作模式：换池子、立刻重抽，并记住。
+   *
+   * 持久化放 `localStorage`（与画布的 `compact-keep-tokens` 同一做法）：
+   * 它只影响首页展示，不该为它加一条 IPC 契约（那会让 `shared/ipc.ts` 的冻结面变大）。
+   * 读不到/写不进都不影响功能 —— 下次回落到 `office`。
+   */
+  setHomeMode: (mode) => {
+    try {
+      localStorage.setItem(HOME_MODE_KEY, mode);
+    } catch {
+      /* 无痕模式/测试环境：模式只在这次会话里有效，不影响功能 */
+    }
+    set({ homeMode: mode, suggestions: pickSuggestions(suggestionsFor(mode)) });
+  },
 
   /**
    * 打开一段已有对话。

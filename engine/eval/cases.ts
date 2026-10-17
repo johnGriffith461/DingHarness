@@ -1,5 +1,5 @@
 import { omittedNote, shouldCompact } from "../core/context";
-import { KEEP_RECENT_TOKENS_MIN, MAX_KEEP_TOKENS, keepTokensFor } from "../runtime/budget";
+import { KEEP_RECENT_TOKENS_MIN, keepTokensFor } from "../runtime/budget";
 import { MODEL_CATALOG } from "../runtime/models";
 import type { EvalCase } from "./types";
 import { compaction2, conversation2, gates2, subagents2, teams2, tools2 } from "./cases2";
@@ -488,11 +488,17 @@ const compaction: EvalCase[] = [
     id: "compact-keep-ceiling",
     category: "上下文压缩",
     kind: "core",
-    title: "保留量有上限：模型上下文再大也不跟着放大（那是静默的单轮成本）",
+    /*
+     * ⚠️ 2026-10-18（D04）**语义反转**：这条原来断的是"大模型也不许超过 20k"
+     * —— 而那正是审计点名的"1M 只留 20k"缺陷本身。现在断相反的事：
+     * **1M 窗口必须真的用起来**，否则用户买了大窗口却每轮只发两万。
+     * ID 保留是为了不打断既有基线；标题与判据都按新口径重写。
+     */
+    title: "大窗口要真的用起来：1M 模型保留 ≥ 900k（不再有全局 20k 上限）",
     coreCheck: () => {
       const biggest = MODEL_IDS.reduce((a, b) => (keepTokensFor(a) >= keepTokensFor(b) ? a : b), MODEL_IDS[0] ?? "");
       const keep = keepTokensFor(biggest);
-      if (keep > MAX_KEEP_TOKENS) return `保留量 ${keep} 超过了上限 ${MAX_KEEP_TOKENS}（${biggest}）`;
+      if (keep < 900_000) return `保留量 ${keep} 小于 900k（${biggest}）—— 大窗口被白白浪费`;
       return null;
     },
   },

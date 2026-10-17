@@ -18,6 +18,8 @@
     "moduleResolution": "node",
     "strict": true,
     "esModuleInterop": true,
+    /* D09：`shared/product.ts` 从 `shared/version.json` 读版本 —— CLI 产物要能带上它 */
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "rootDir": ".",
     "outDir": "dist-cli",

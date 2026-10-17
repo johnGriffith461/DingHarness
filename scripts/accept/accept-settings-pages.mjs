@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort } from "./harness.mjs";
 
-/** 验：设置里「标准套餐」→ 个人资料页、「账号」→ 账号页，且能返回。 */
+/** 验：设置里「本机档案」→ 个人资料页、「账号」→ 账号页，且能返回。 */
 const DATA = ".verify/setp-data";
 if (!(await freshDir(DATA))) {
   console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
@@ -37,7 +37,7 @@ try {
   await page.waitForTimeout(800);
 
   out.rowsVisible = await page.evaluate(() => ({
-    标准套餐: document.querySelectorAll('[data-testid="wb-set-标准套餐"]').length,
+    本机档案: document.querySelectorAll('[data-testid="wb-set-本机档案"]').length,
     账号: document.querySelectorAll('[data-testid="wb-set-账号"]').length,
     记忆: document.querySelectorAll('[data-testid="wb-set-记忆"]').length,
     /*
@@ -45,10 +45,12 @@ try {
      * 纪律**移除**（原来是一行 disabled + "需要账号服务端"）。这里钉住"它不该再出现"。
      */
     订阅额度残留: document.querySelectorAll('[data-testid="wb-set-订阅与额度管理"]').length,
+    /* D02（2026-10-18）：「标准套餐」是在承诺一个本机版没有的订阅商品，钉住它不该回来 */
+    标准套餐残留: document.querySelectorAll('[data-testid="wb-set-标准套餐"]').length,
   }));
 
-  // 点「标准套餐」→ profile
-  await page.locator('[data-testid="wb-set-标准套餐"]').click();
+  // 点「本机档案」→ profile
+  await page.locator('[data-testid="wb-set-本机档案"]').click();
   await page.waitForTimeout(700);
   out.profilePage = (await page.locator('[data-testid="wb-setpage-profile"]').count()) === 1;
   out.profileText = await page.evaluate(() => document.querySelector(".wb-setpage-body")?.textContent?.trim().slice(0, 40) ?? null);
@@ -75,7 +77,8 @@ try {
   if ((out.rowsVisible?.账号 ?? 0) !== 1) bad.push("没有「账号」行");
   /* §2.4 #8：那一行已移除（不是留灰） */
   if ((out.rowsVisible?.订阅额度残留 ?? -1) !== 0) bad.push("「订阅与额度管理」那一行还在（清尾口径：移除）");
-  if (!out.profilePage) bad.push("「标准套餐」没打开个人资料页");
+  if ((out.rowsVisible?.标准套餐残留 ?? -1) !== 0) bad.push("「标准套餐」又回来了（本机版没有订阅商品）");
+  if (!out.profilePage) bad.push("「本机档案」没打开个人资料页");
   /*
    * ⚠️ 2026-10-16：原来这里断言「子页开了主列表就该消失」—— 那是**弹窗**时代的口径。
    * 设置改成 ZCode 那种**整页两列**之后，左轨本来就该一直在（那正是两列的意思），

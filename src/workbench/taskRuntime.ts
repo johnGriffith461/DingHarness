@@ -43,7 +43,7 @@ import {
   type ContextSignals,
 } from "@engine/core/contextManager";
 import { buildHistory } from "./history";
-import { keepTokensFor } from "@engine/runtime/budget";
+import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock } from "./agentStore";
 import { memoryPromptBlock } from "@shared/memory";
@@ -223,9 +223,9 @@ async function enabledBlock(): Promise<string> {
 }
 
 /**
- * 保留额度（§149）。
+ * 保留额度（§149 / D04）。
  *
- * 正常就是 `KEEP_TOKENS = 20000`。**本地存储里那个键是给验收用的开关** ——
+ * 正常按**当前模型窗口 + 预算档位**推导（`budget.ts`）。**本地存储里那个键是给验收用的开关** ——
  * 不然要验证"压了之后还能答对"，得先造一段两万 token 的真实对话（十几次模型调用）。
  * 界面上没有入口，生产不会有人设它。
  *
@@ -239,13 +239,22 @@ function compactKeepTokens(): number {
     /* 读不到 localStorage（测试/异常）→ 走下面的默认 */
   }
   /*
-   * 没手动指定额度 → 按**当前模型的上限**算（Phase 1 D4）。
+   * 没手动指定额度 → 按**当前模型的上限 + 档位**算（D04）。
    *
-   * ⚠️ 未登记模型（含我们默认用的 deepseek-chat）返回的就是换代前那个固定值 ——
-   * **行为零漂移**；登记过的模型里，上限小的会少留一点（避免顶爆），
-   * 上限大的**封顶**在同一额度上（不静默把每轮成本放大，见 `budget.ts` 的说明）。
+   * 档位默认 `long`（按窗口推导，1M 模型约 966k）；`balanced` / `economy` 可在
+   * `~/.ding/config.json` 的 `contextBudget` 里显式选。
+   * 未登记模型仍然 20k —— 不拿估计窗口发请求。
    */
-  return keepTokensFor(readSavedRoute().model);
+  return keepTokensFor(readSavedRoute().model, Date.now(), readBudgetMode());
+}
+
+/** 桌面端读预算档位（与 CLI 配置同名同词；放 `localStorage` 是因为它只影响本机行为）。 */
+function readBudgetMode(): ContextBudgetMode {
+  try {
+    return parseBudgetMode(localStorage.getItem("dsh-canvas.context-budget"));
+  } catch {
+    return "long";
+  }
 }
 
 /**

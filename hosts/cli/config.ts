@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import path from "node:path";
 
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
+import { CONTEXT_BUDGET_MODES, parseBudgetMode, type ContextBudgetMode } from "../../engine/runtime/budget";
 import type { CustomProviderInput } from "../../engine/runtime/providers";
 
 /**
@@ -53,6 +54,13 @@ export type CliConfig = {
    * 同名会被拒绝（见 `setCustomProviders`），免得自定义悄悄覆盖内置定义。
    */
   providers?: CustomProviderInput[];
+  /**
+   * 上下文预算档位（D04）。
+   *
+   * `long`（默认）按模型窗口推导；`balanced` 取一半；`economy` 固定 5 万。
+   * 这是"花多少钱换多少连续性"的选择，所以做成显式配置，而不是替用户定死。
+   */
+  contextBudget?: ContextBudgetMode;
 };
 
 /** 配置文件位置。 */
@@ -68,7 +76,7 @@ export function configPaths(dataDir: string): { primary: string; legacy: string 
  * 就永远报"合法"—— 而用户看到的表现是"我明明配了啊"。
  * （2026-10-17 从 doctor 搬到这里：配置的合法键属于配置模块，自检只借它用。）
  */
-export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "providers"] as const;
+export const CONFIG_KEYS = ["provider", "model", "mode", "dirs", "softLimitUsd", "providers", "contextBudget"] as const;
 
 /** 收窄从磁盘读回来的配置（**磁盘不可信**：坏值一律丢掉，别让它影响一次真实运行）。 */
 export function normalizeConfig(raw: unknown): CliConfig {
@@ -78,6 +86,7 @@ export function normalizeConfig(raw: unknown): CliConfig {
   if (typeof o.provider === "string" && o.provider.trim()) out.provider = o.provider.trim();
   if (typeof o.model === "string" && o.model.trim()) out.model = o.model.trim();
   if (o.mode !== undefined) out.mode = normalizeConfirmMode(o.mode);
+  if (o.contextBudget !== undefined) out.contextBudget = parseBudgetMode(o.contextBudget);
   if (typeof o.softLimitUsd === "number" && Number.isFinite(o.softLimitUsd) && o.softLimitUsd > 0) {
     out.softLimitUsd = o.softLimitUsd;
   }
@@ -158,6 +167,7 @@ export function configFromEnv(): CliConfig {
   if (process.env.DH_PROVIDER?.trim()) out.provider = process.env.DH_PROVIDER.trim();
   if (process.env.DH_MODEL?.trim()) out.model = process.env.DH_MODEL.trim();
   if (process.env.DH_MODE?.trim()) out.mode = normalizeConfirmMode(process.env.DH_MODE.trim());
+  if (process.env.DH_CONTEXT_BUDGET?.trim()) out.contextBudget = parseBudgetMode(process.env.DH_CONTEXT_BUDGET.trim());
   if (process.env.DH_DIRS?.trim()) {
     const dirs = process.env.DH_DIRS.split(/[;,]/)
       .map((d) => d.trim())
@@ -189,6 +199,7 @@ export function describeConfig(config: CliConfig): string {
     `provider：${config.provider ?? "（没设，挑第一个有密钥的）"}`,
     `model：${config.model ?? "（没设，用该 provider 的第一个）"}`,
     `档位：${config.mode ?? "（没设，默认「按需确认」）"}（可选：${CONFIRM_MODES.join(" / ")}）`,
+    `上下文预算：${config.contextBudget ?? "（没设，默认 long：按模型窗口推导）"}（可选：${CONTEXT_BUDGET_MODES.join(" / ")}）`,
     `工作目录：${config.dirs?.length ? config.dirs.join(" / ") : "（没设，用当前目录）"}`,
   ];
   return lines.join("\n");

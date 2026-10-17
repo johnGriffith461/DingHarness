@@ -413,7 +413,7 @@ export function NavSidebar() {
         <span className="wb-avatar" />
         <span className="wb-account-text">
           <b>本机用户</b>
-          <em>标准套餐</em>
+          <em>本机模式</em>
         </span>
         <Settings size={14} />
       </button>

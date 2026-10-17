@@ -7,7 +7,7 @@
 
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useWorkbenchStore, restoreTasks, startTaskPersistence } from "./store";
 /*
  * ⚠️ C6-2：`pages.tsx` 已按组件拆成 `ScheduledPage.tsx` / `PluginsPage.tsx` / `PhonePage.tsx`
@@ -19,7 +19,14 @@ import { ScheduledPage } from "./ScheduledPage";
 import { InsightsPage } from "./InsightsPage";
 import { PermissionMatrixPage } from "./PermissionMatrixPage";
 import { WorkflowPage } from "./WorkflowPage";
-import CanvasRuntime from "@/canvas/CanvasRuntime";
+/*
+ * D06（2026-10-18）：画布**懒加载**。
+ *
+ * 在这之前 `CanvasRuntime` 是静态 import —— 即使 `canvasOpen` 是 false，
+ * `@xyflow/react` 与它的 CSS 也会在首屏被下载/执行。用户没打开画布也要付这份启动成本
+ * （产品审计量到桌面可操作 3540ms）。现在它只在一个动态 chunk 里。
+ */
+const CanvasRuntime = lazy(() => import("@/canvas/CanvasRuntimeHost"));
 import { startScheduler } from "./scheduleStore";
 import { useLibraryStore } from "./libraryStore";
 import { matchShortcut } from "./shortcuts";
@@ -264,7 +271,9 @@ export default function Workbench() {
               agent 手上就有 `canvas_add_node`（`canvasCommandHost.ts`）。
             */}
             <div className="wb-canvas-stage">
-              <CanvasRuntime />
+              <Suspense fallback={<div className="wb-canvas-loading">正在打开画布…</div>}>
+                <CanvasRuntime />
+              </Suspense>
             </div>
           </div>
         ) : null}

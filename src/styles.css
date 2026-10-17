@@ -16,6 +16,8 @@
  * （workbench.css 已贴着结构守卫的 1500 行上限）。**不动**既有那几行的顺序。
  */
 @import "./styles/navsearch.css";
+/* 首页工作模式（D02，2026-10-18）：同样因为 workbench.css 贴着 1500 行上限而独立成文件 */
+@import "./styles/home.css";
 @import "./styles/theme.css";
 @import "./styles/panels.css";
 @import "./styles/features.css";

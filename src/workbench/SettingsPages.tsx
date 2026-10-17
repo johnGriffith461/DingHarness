@@ -212,8 +212,8 @@ export default function SettingsPages({
             <em>本机模式</em>
           </div>
           <div className="wb-setpage-row">
-            <span className="wb-setpage-label">套餐</span>
-            <em>标准套餐</em>
+            <span className="wb-setpage-label">授权</span>
+            <em>本机（无订阅）</em>
           </div>
         </div>
       ) : null}

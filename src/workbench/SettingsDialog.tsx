@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Blocks, Sparkles, Brain, ChevronRight, Crown, Info, SlidersHorizontal, User, Users, X } from "lucide-react";
+import { Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -127,14 +127,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   })();
   const rows = [
     /*
-      标准套餐：对应本体 `chat/settings/profile`（独立页）。
+      本机档案：对应本体 `chat/settings/profile`（独立页）。
       它原来带 `todo`，而渲染里 `disabled={Boolean(r.todo)}` —— 于是整行点不动。
       `todo` 的语义是"这行为什么不可用"，这里不该用它：通道信息改成 `value` 的副标题。
+      ⚠️ 2026-10-18（D02）：原来叫「标准套餐」—— 本机版**没有任何订阅后端**，
+      这个名字是在承诺一个不存在的商品。改成如实说"本机档案"。
     */
     {
       group: 0,
-      icon: <Crown size={13} />,
-      label: "标准套餐",
+      icon: <Laptop size={13} />,
+      label: "本机档案",
       value: channel || "还没选模型通道",
     },
     /* 账号：对应本体 chat/settings/account（独立页） */
@@ -262,11 +264,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           return;
                         }
                         /*
-                          标准套餐 / 账号：本体里是**独立路由**
+                          本机档案 / 账号：本体里是**独立路由**
                           （`chat/settings/profile` / `chat/settings/account`），
                           我把它们做成了弹窗里的子页（同「记忆」那套做法）。
                         */
-                        if (r.label === "标准套餐") {
+                        if (r.label === "本机档案") {
                           setSubPage("profile");
                           return;
                         }
@@ -308,7 +310,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           {/* 左列底部：账号（照 ZCode 图二左下角那块） */}
           <div className="wb-setfull-account" data-testid="wb-setfull-account">
             <span className="wb-setfull-avatar" aria-hidden />
-            <span>本机用户 · 标准套餐</span>
+            <span>本机用户 · 本机模式</span>
           </div>
           <section className="wb-set-panel" data-testid="wb-set-panel">
             {/* 面包屑：告诉用户"我在哪一层"（ZCode 的 settings-header-breadcrumb） */}

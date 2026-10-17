@@ -7,9 +7,9 @@
 > *A local-first desktop agent workbench: AI workspace + infinite canvas.*
 
 Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无限画布」放在同一个工作台里。
-它本机运行、本机存数据，模型走你自己配置的 OpenAI 兼容通道——不依赖任何后端服务。
+它本机运行、本机存数据，模型走你自己配置的通道（OpenAI 兼容 / Anthropic / Google 三种协议）——不依赖任何后端服务。
 
-> 状态：**v0.3.0，早期版本**。目前仅提供 Windows 构建。
+> 状态：**v0.5.1**。目前仅提供 Windows 构建。
 
 ---
 
@@ -53,7 +53,7 @@ ding run "把这个目录里的文件列一遍，说清哪个最可能是配置"
 装完不放心就先看看它到底会动什么：`ding recipe list`（内置几个常用模板，
 `ding recipe show <id>` 看它要发什么提示词、用哪些工具）。
 
-**桌面端**：`pnpm dev:web` + `pnpm electron:dev`（见下），或者直接跑安装包。
+**桌面端**：`pnpm dev`（一条命令同时起 Vite 与 Electron），或者直接跑安装包。
 第一次打开会带你走同样的向导。
 
 ## 快速开始
@@ -64,25 +64,34 @@ ding run "把这个目录里的文件列一遍，说清哪个最可能是配置"
 pnpm install
 ```
 
-开发（两个终端）：
+开发（一条命令：同时起 Vite 与 Electron）：
 
 ```bash
-# 终端 1：Vite 开发服务器 → http://localhost:5173
-pnpm dev:web
+pnpm dev
+```
 
-# 终端 2：编译主进程并启动 Electron
-pnpm electron:build && pnpm exec electron .
+只想跑其中一半：
+
+```bash
+pnpm dev:web                      # Vite 开发服务器 → http://localhost:5173
+pnpm electron:build && pnpm start # 用已构建产物启动桌面端（会先查产物是否过期）
 ```
 
 打包（含 typecheck / lint / test 全门禁）：
 
 ```bash
-pnpm build   # → release/ding-harness-0.3.0-setup.exe
+pnpm build   # → release/ding-harness-<package.json 的 version>-setup.exe
+```
+
+交付前自检（门禁 + 产物新鲜度 + CLI 产物 + 开箱冒烟）：
+
+```bash
+pnpm verify
 ```
 
 ### 配置模型
 
-模型走 OpenAI 兼容接口，内置五个 provider：DeepSeek 官方、tokenrhythm 中转、apihub 中转、通义千问、本地端点。
+模型走三种协议（OpenAI 兼容 / Anthropic / Google），内置十个 provider：DeepSeek 官方、tokenrhythm / apiKeyFan / API_HUB 中转、通义千问、Anthropic、Google、OpenAI、OpenRouter、strata。
 密钥按以下优先级读取：
 
 1. 环境变量

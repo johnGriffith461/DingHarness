@@ -62,11 +62,20 @@ export type ModelSpec = {
   protocol: Protocol;
   /** 上下文窗口（输入+输出的总上限，token）。 */
   contextWindow: number;
+  /**
+   * 输出上限（token）。**只有核过才写** —— 写一个猜的值会让预算公式看起来精确，
+   * 实际上把输出额度算错（见 `budget.ts` 的 `reserve`）。
+   */
+  outputLimit?: number;
   /** 单价（美元 / 100 万 token）。给不出就不写 —— 不编。 */
   priceIn?: number;
   priceOut?: number;
   /** 命中缓存的读价。 */
   priceCacheRead?: number;
+  /** 缓存写入价（有的家单独计费；没有就不写）。 */
+  priceCacheWrite?: number;
+  /** 输入模态（有的模型能读图/音频/视频）。不写就从 `capabilities.attachment` 推导。 */
+  modalities?: Array<"text" | "image" | "audio" | "video">;
   /** 能力。 */
   capabilities: ModelCapabilities;
   /** 数据来源（URL）。 */

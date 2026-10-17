@@ -2,62 +2,98 @@ import { KEEP_RECENT_TOKENS } from "../core/context";
 import { UNKNOWN_MODEL_BUDGET, describeModel, findModel, isStale } from "./models";
 
 /**
- * **上下文预算策略**（Phase 5.1 收敛后：数据归数据、策略归策略）。
+ * **上下文预算策略**（D04，2026-10-18 重写）。
  *
  * 目录表本体在 `engine/runtime/models.ts`（协议、能力、来源、过期）；
  * 这个文件只回答一个问题：**这一轮给历史留多少额度**。
  *
- * ## 为什么未登记模型走的是原来那个数
+ * ## 为什么重写（产品审计的原话："1M 模型只留 20k"）
  *
- * 未登记 → `keepTokens` 用**换代前那个固定值**（`KEEP_RECENT_TOKENS`），
- * 并在账本/界面上标"未登记模型"。这是刻意的：对未登记的情况，
- * **行为与换代前一模一样**（零漂移），而不是"换了个更大的数、没人知道为什么"。
- * 想让它变更大，正确做法是把那个模型**登记进来**（带来源），不是调默认值。
+ * 上一版的规则是「窗口 × 50%，再封顶 20000」。它有两个问题：
+ *
+ * 1. **20k 是全局上限**：1M 的模型也只能用 2% 的窗口。用户以为买了大窗口，
+ *    实际每轮只发两万 token，长任务必然失忆。
+ * 2. **往下也不安全**：50% 不留输出额度，窗口 32k 的模型按 50% 留 16k，
+ *    再加上输出就可能顶爆。
+ *
+ * 现在按成熟 harness 的口径（ZCode parity，默认 `long`）：
+ *
+ * ```
+ * reserve  = min(outputLimit ?? 32_000, 21_000)      // 给输出留的位置
+ * buffer   = 13_000                                   // 工具 schema / 系统提示的余量
+ * keepLong = max(20_000, W - reserve - buffer)
+ * ```
+ *
+ * 并且**永不越过 `W - reserve`**（见 `keepForWindow`）。三档：
+ *
+ * | 档位 | 口径 | 1M 窗口 | 200k 窗口 |
+ * |---|---|---|---|
+ * | `long`（默认） | `max(20k, W - reserve - buffer)` | ~966k | ~166k |
+ * | `balanced` | `W × 50%` | 500k | 100k |
+ * | `economy` | `50k`（小窗口再被 `W - reserve` 压住） | 50k | 50k |
+ *
+ * ## 未登记模型仍然走 20k
+ *
+ * "不知道它的窗口"时，**不能**拿一个估计值去发请求 —— 那会直接打爆。
+ * 所以未登记 → 20k，并在界面上标"未登记模型"。
+ *
+ * ⚠️ 这个 20k 与上面公式里的 20k **不是一个东西**：公式里的是"大窗口的托底"，
+ * 这里是"未知模型的保守默认"。两者数值相同是巧合，语义不同（`UNKNOWN_MODEL_BUDGET`）。
  */
 
 /**
- * 保留额度的下限（防止"额度小到等于没有"）。
+ * 保留额度的**绝对下限**（防止"额度小到等于没有"）。
  *
- * ⚠️ 它是一个**上限受模型窗口约束**的下限（2026-10-16，审计 P54）：
- * 窗口小到放不下这个下限时，实际用的是"窗口的一半"，不是这个常数 ——
- * 否则额度会**超过模型容量**（额度算得比它的窗口还大 = 没有预算）。
- * 见 `keepTokensFor`。
+ * ⚠️ 它是"窗口够大时的托底"；窗口小到放不下时会被 `W - reserve` 压下去。
  */
 export const KEEP_RECENT_TOKENS_MIN = 2_000;
 
-/** 历史最多占上限的比例。 */
+/** `balanced` 档的窗口比例。 */
 export const KEEP_RATIO = 0.5;
 
+/** `economy` 档的固定额度。 */
+export const ECONOMY_KEEP_TOKENS = 50_000;
+
+/** 输出预留的**硬上限**（再大的输出上限也只留这么多，余下的窗口给历史）。 */
+export const OUTPUT_RESERVE_MAX = 21_000;
+
+/** 不知道模型输出上限时的保守假设（用于 `reserve`）。 */
+export const OUTPUT_RESERVE_FALLBACK = 32_000;
+
+/** 工具 schema / 系统提示的余量。 */
+export const CONTEXT_BUFFER = 13_000;
+
+/** 上下文预算档位。 */
+export const CONTEXT_BUDGET_MODES = ["long", "balanced", "economy"] as const;
+export type ContextBudgetMode = (typeof CONTEXT_BUDGET_MODES)[number];
+
+/** 默认档位（ZCode parity：按窗口推导）。 */
+export const DEFAULT_CONTEXT_BUDGET: ContextBudgetMode = "long";
+
 /**
- * 保留额度的**上限**：`KEEP_RECENT_TOKENS`（换代前那个固定值）。
+ * 磁盘/环境里的档位值不可信 → 只认三个词，其余回落到 `long`。
  *
- * ## 为什么不跟着模型一路放大（这一条是刻意的，别当 bug 改掉）
- *
- * "上限 × 比例"这条规则如果**只**看模型能力，会得到一个很危险的结果：
- * 1M 上限的模型按一半算就是每轮发 **50 万 token 历史**。
- *
- * ⚠️ 每轮都要把历史**重发一遍** —— 上下文额度直接乘在**每一轮的钱**上。
- * 从 2 万涨到 50 万是**单轮成本 ×25**，而且是**静默**发生的：
- * 用户只会看到账单变贵，看不出是这次改的。
- *
- * 所以这条规则的用法是**双向**的：
- * - **往下**跟着模型走（上限小的模型少留一点，别顶爆）—— 这一半立刻生效；
- * - **往上封顶**在我们自己定的额度上（花钱换连续性是个**决定**，不该由默认值替用户做）。
- *
- * 想留更多历史：把这里调大（Phase 9 的 `~/.ding/config` 已经能配）。那时它是个**明示**的选择。
+ * @param raw 原始值
  */
-export const MAX_KEEP_TOKENS = KEEP_RECENT_TOKENS;
+export function parseBudgetMode(raw: unknown): ContextBudgetMode {
+  return raw === "balanced" || raw === "economy" || raw === "long" ? raw : DEFAULT_CONTEXT_BUDGET;
+}
+
+/** 档位的中文说明（CLI/设置页共用一份口径）。 */
+export const BUDGET_MODE_LABEL: Record<ContextBudgetMode, string> = {
+  long: "长会话（按模型窗口推导，默认）",
+  balanced: "均衡（窗口的一半）",
+  economy: "省成本（固定 5 万）",
+};
 
 /**
  * 查一次预算的结果。
  *
  * ⚠️ `registered: false` 是**一等结果**（不是"没找到就 undefined"）：
  * 调用方必须显式处理"这个模型我们不知道"这件事 —— 要么走保守默认，要么标注出来。
- * 给 `undefined` 的话，最自然的写法是 `?.` 一路空过，
- * 于是"不知道"与"知道但没上限"就混在一起了。
  */
 export type BudgetLookup =
-  | { registered: true; contextWindow: number; stale: boolean }
+  | { registered: true; contextWindow: number; stale: boolean; outputLimit?: number }
   | { registered: false; contextWindow: number; stale: false };
 
 /**
@@ -69,38 +105,75 @@ export type BudgetLookup =
 export function budgetOf(modelId: string | undefined, now: number = Date.now()): BudgetLookup {
   const spec = findModel(modelId);
   if (!spec) return { registered: false, contextWindow: UNKNOWN_MODEL_BUDGET.contextWindow, stale: false };
-  return { registered: true, contextWindow: spec.contextWindow, stale: isStale(spec, now) };
+  return {
+    registered: true,
+    contextWindow: spec.contextWindow,
+    stale: isStale(spec, now),
+    ...(spec.outputLimit === undefined ? {} : { outputLimit: spec.outputLimit }),
+  };
+}
+
+/**
+ * 输出预留：给模型自己说话留多少。
+ *
+ * 三个上限取最小：
+ * - 模型自己的输出上限（核过才用）；
+ * - 全局硬上限 `OUTPUT_RESERVE_MAX`（21k）；
+ * - **窗口的四分之一**（小窗口不能用 21k 把历史挤没）。
+ *
+ * @param contextWindow 窗口
+ * @param outputLimit 模型输出上限（可无）
+ */
+export function outputReserveFor(contextWindow: number, outputLimit?: number): number {
+  const wanted = Math.min(outputLimit ?? OUTPUT_RESERVE_FALLBACK, OUTPUT_RESERVE_MAX);
+  return Math.max(0, Math.min(wanted, Math.floor(contextWindow / 4)));
+}
+
+/**
+ * 某个窗口 + 档位能给历史留多少（纯函数，便于单测覆盖五种窗口）。
+ *
+ * @param contextWindow 窗口
+ * @param mode 档位
+ * @param outputLimit 模型输出上限（可无）
+ */
+export function keepForWindow(
+  contextWindow: number,
+  mode: ContextBudgetMode = DEFAULT_CONTEXT_BUDGET,
+  outputLimit?: number,
+): number {
+  if (contextWindow <= 0) return 0;
+  const reserve = outputReserveFor(contextWindow, outputLimit);
+  /** 历史 + 输出不能超过窗口；再留一点余量都不行。 */
+  const hardCap = Math.max(0, contextWindow - reserve);
+  if (mode === "economy") return Math.min(ECONOMY_KEEP_TOKENS, hardCap);
+  if (mode === "balanced") return Math.min(Math.floor(contextWindow * KEEP_RATIO), hardCap);
+  /*
+   * long：托底 20k（窗口够大时），小窗口按窗口的一半托底，
+   * 最后仍被 `hardCap` 压住 —— 三层里最小/最大的关系都写在这里，别在别处再抄一遍。
+   */
+  const floor = Math.min(KEEP_RECENT_TOKENS, Math.floor(contextWindow / 2), hardCap);
+  const raw = contextWindow - reserve - CONTEXT_BUFFER;
+  return Math.max(0, Math.min(hardCap, Math.max(floor, raw)));
 }
 
 /**
  * 这一轮**该给历史留多少额度**。
  *
- * 两种情形：
- * - **登记过的模型**：上限的 `KEEP_RATIO`，再按 `MAX_KEEP_TOKENS` 封顶、按下限托底；
- * - **没登记**：`KEEP_RECENT_TOKENS`（换代前那个固定值）—— 行为零漂移，并标注"未登记模型"。
- *
- * ⚠️ 返回的数是**我们自己定的额度**，不是"模型的上限"（见 `core/context.ts` 文件头）。
+ * - 登记过：按窗口 + 档位推导（见文件头）；
+ * - 未登记：`KEEP_RECENT_TOKENS`（20k）—— **不拿估计值发请求**。
  *
  * @param modelId 模型 id
  * @param now 现在（测试用）
+ * @param mode 档位（默认 `long`）
  */
-export function keepTokensFor(modelId: string | undefined, now: number = Date.now()): number {
+export function keepTokensFor(
+  modelId: string | undefined,
+  now: number = Date.now(),
+  mode: ContextBudgetMode = DEFAULT_CONTEXT_BUDGET,
+): number {
   const found = budgetOf(modelId, now);
   if (!found.registered) return KEEP_RECENT_TOKENS;
-  const byModel = Math.floor(found.contextWindow * KEEP_RATIO);
-  /*
-   * ⭐ 下限也要**按这个模型自己的窗口压**（2026-10-16，审计 P54）。
-   *
-   * 原来直接 `Math.max(KEEP_RECENT_TOKENS_MIN, min(byModel, MAX))`：下限 2000 是**绝对**的。
-   * 小窗口模型（或用 `--model` 指到一个我们登记了但窗口很小的本地模型）上，
-   * 这个 `max` 会把额度**顶到超过模型真实上限** —— 额度算得比它的窗口还大，等于没有预算；
-   * 而这条"硬下限"是按大模型的经验定的，它不该对 1k/4k 的模型生效。
-   *
-   * 现在：下限取「2000」与「这个模型窗口的四分之一」里更小的那个 ——
-   * 窗口够大时与原来**逐字一致**，窗口小时不会越界。
-   */
-  const floor = Math.min(KEEP_RECENT_TOKENS_MIN, Math.floor(found.contextWindow / 4));
-  return Math.max(floor, Math.min(byModel, MAX_KEEP_TOKENS));
+  return keepForWindow(found.contextWindow, mode, found.outputLimit);
 }
 
 /**
@@ -108,9 +181,34 @@ export function keepTokensFor(modelId: string | undefined, now: number = Date.no
  *
  * @param modelId 模型 id
  * @param now 现在（测试用）
+ * @param mode 档位
  */
-export function describeBudget(modelId: string | undefined, now: number = Date.now()): string {
+export function describeBudget(
+  modelId: string | undefined,
+  now: number = Date.now(),
+  mode: ContextBudgetMode = DEFAULT_CONTEXT_BUDGET,
+): string {
   const found = budgetOf(modelId, now);
-  if (!found.registered) return describeModel(modelId);
-  return `${describeModel(modelId)}；我们按 ${keepTokensFor(modelId, now)} token 保留历史（封顶 ${MAX_KEEP_TOKENS}）`;
+  if (!found.registered) {
+    return `${describeModel(modelId)}；历史按保守默认 ${KEEP_RECENT_TOKENS} token 保留（未登记，不按估计窗口发请求）`;
+  }
+  const keep = keepTokensFor(modelId, now, mode);
+  const reserve = outputReserveFor(found.contextWindow, found.outputLimit);
+  return `${describeModel(modelId)}；窗口 ${found.contextWindow} / 输出预留 ${reserve} / 历史 ${keep}（档位 ${mode}：${BUDGET_MODE_LABEL[mode]}）`;
+}
+
+/** 一条预算记录的完整说明（`ding models --json` / 设置页用）。 */
+export function budgetBreakdown(
+  modelId: string | undefined,
+  now: number = Date.now(),
+  mode: ContextBudgetMode = DEFAULT_CONTEXT_BUDGET,
+): { mode: ContextBudgetMode; registered: boolean; contextWindow: number; outputReserve: number; keep: number } {
+  const found = budgetOf(modelId, now);
+  return {
+    mode,
+    registered: found.registered,
+    contextWindow: found.contextWindow,
+    outputReserve: found.registered ? outputReserveFor(found.contextWindow, found.outputLimit) : 0,
+    keep: keepTokensFor(modelId, now, mode),
+  };
 }

@@ -130,6 +130,70 @@ export function splitSuggestion(s: string): { tag: string; text: string } {
 export const SUGGESTION_COUNT = 4;
 
 /**
+ * **首页工作模式**（D02，2026-10-18）。
+ *
+ * 产品审计的原话是"首屏没有明确选编码/办公"：用户打开应用只有一句
+ * "今天有什么工作要处理?"，推荐卡里一半是 PPT/Word、一半是画布 —— 两个人都觉得不像自己。
+ * 所以首屏先让用户选一次模式，推荐卡跟着模式走：
+ *
+ * - `coding`：修 bug / 补测试 / 重构 / 读日志 —— 开发者第一眼看到的就是自己要干的事；
+ * - `office`：文档 / 表格 / 汇报 / 调研 —— 沿用原来那批卡片（那是办公场景的池子）。
+ *
+ * 默认 `office` 是刻意的：这是**办公工作台**起家的产品，默认不该把非开发者吓走。
+ */
+export type HomeMode = "coding" | "office";
+
+/** 存在 `localStorage` 里的键（与画布那批 `dsh-canvas.*` 同一前缀，便于一起清理）。 */
+export const HOME_MODE_KEY = "dsh-canvas.home-mode";
+
+/** 两种模式的展示顺序与文案。 */
+export const HOME_MODES: ReadonlyArray<{ id: HomeMode; label: string }> = [
+  { id: "coding", label: "编码" },
+  { id: "office", label: "办公" },
+];
+
+/** 编码模式的推荐卡池（每条都是「类目 指令」形态，类目要有图标）。 */
+export const CODING_SUGGESTION_POOL = [
+  "代码 找出这个仓库里最容易崩的地方",
+  "修Bug 跑一遍测试，把失败的那条修好",
+  "测试 给这个模块补几条会红的用例",
+  "重构 把重复的逻辑收成一处",
+  "终端 把构建命令跑一遍，失败就说清原因",
+  "日志 读这份日志，找回报错的根因",
+  "Git 看看最近几次提交改了什么、有没有风险",
+  "代码 给这个函数写清楚它为什么这么写",
+  "测试 把这条 bug 先复现成一条测试",
+  "重构 把这段回调改成 async/await",
+] as const;
+
+/** 办公模式的推荐卡池 = 原来那批（文档 / 表格 / 演示 / 调研）。 */
+export const OFFICE_SUGGESTION_POOL = SUGGESTION_POOL;
+
+/**
+ * 某个模式该用哪个池子。
+ *
+ * @param mode 模式
+ */
+export function suggestionsFor(mode: HomeMode): readonly string[] {
+  return mode === "coding" ? CODING_SUGGESTION_POOL : OFFICE_SUGGESTION_POOL;
+}
+
+/**
+ * 磁盘/`localStorage` 里的值不可信 → 只认这两个词，其余回落到 `office`。
+ *
+ * @param raw 读到的原始值
+ */
+export function parseHomeMode(raw: unknown): HomeMode {
+  return raw === "coding" ? "coding" : "office";
+}
+
+/** 首屏标题跟着模式走（原来那句话对开发者不成立）。 */
+export const HOME_TITLE: Record<HomeMode, string> = {
+  coding: "今天要写点什么?",
+  office: "今天有什么工作要处理?",
+};
+
+/**
  * 从池子里抽 `count` 条推荐卡。
  *
  * @param pool 候选池

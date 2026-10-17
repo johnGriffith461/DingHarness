@@ -1151,3 +1151,20 @@
   /* 标记工具条的滚动上限跟着视口走（原来固定 min(560px, 100% - 24px) 之外还有一层 100%） */
   .marker-toolbar { max-width: calc(100% - 12px); }
 }
+
+/*
+ * 懒加载画布的占位（D06，2026-10-18）。
+ *
+ * 画布现在是动态 chunk（`Workbench.tsx` 的 `lazy(() => import(...))`）：
+ * 正常情况下 chunk 已在本地、只会闪一下 —— 所以不放进度条
+ * （那会把"闪一下"变成"看起来卡住了"），只给一行安静的提示。
+ */
+.wb-canvas-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  font-size: 13px;
+}

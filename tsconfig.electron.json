@@ -6,6 +6,8 @@
     "moduleResolution": "node",
     "strict": true,
     "esModuleInterop": true,
+    /* D09：`shared/product.ts` 从 `shared/version.json` 读版本 —— 主进程产物也要带上它 */
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "outDir": "dist-electron",
     "types": ["node"],

@@ -261,6 +261,18 @@ export function customProviders(): readonly ProviderDef[] {
 }
 
 /**
+ * 这个 id 是不是**内置** provider（自定义不允许同名覆盖内置）。
+ *
+ * 用途：目录表要给模型标「数据来源是内置目录还是用户自己接的端点」。
+ * 判定直接读表本体 —— 别再在别处抄一份 id 清单（那会随加 provider 腐坏）。
+ *
+ * @param id provider id
+ */
+export function isBuiltinProviderId(id: string): boolean {
+  return PROVIDER_TABLE.some((p) => p.id === id);
+}
+
+/**
  * 全部 provider（**带上环境变量里的 baseURL 覆盖**）。
  *
  * 每次调用都现算：这一层读的是进程环境，而环境是可能变的（宿主切端点、测试指到假服务）。

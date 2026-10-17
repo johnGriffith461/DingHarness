@@ -9,10 +9,10 @@ import { createEngine, type Engine, type EngineRunRequest } from "../../engine/i
 import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
-import { allProviders, firstAvailableProvider, getProvider, setCustomProviders } from "../../engine/runtime/providers";
+import { allProviders, firstAvailableProvider, getProvider, isBuiltinProviderId, setCustomProviders } from "../../engine/runtime/providers";
 import { PRODUCT_VERSION } from "../../shared/product";
-import { describeBudget } from "../../engine/runtime/budget";
 import { budgetOf } from "../../engine/runtime/budget";
+import { capabilityOf, describeCapability, groupCatalog, recommendReason, type ModelCapability } from "../../engine/runtime/modelCatalog";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import { formatCount, usageTotal } from "../../shared/cost";
 import { buildEngine as buildEngineIn } from "./assembly";
@@ -125,6 +125,32 @@ function budgetInfo(modelId: string): Record<string, unknown> {
     contextWindow: got.contextWindow,
     stale: got.stale,
   };
+}
+
+/**
+ * 把 provider 表里的模型名**去重**成一条目录（D03）。
+ *
+ * 同一个模型会被好几家中转同时提供（`deepseek-chat` 出现在 4 家）。
+ * 按 provider 逐行列出来就是审计说的"28 行重复 20k"；目录应该按**模型**说话，
+ * provider 只作为「哪条路能到它」的参考。
+ *
+ * @param providerId 只取这一家的模型（不传 = 全部）
+ */
+function catalogRows(providerId?: string): ModelCapability[] {
+  const providers = allProviders().filter((p) => !providerId || p.id === providerId);
+  const seen = new Map<string, string>();
+  for (const provider of providers) {
+    for (const model of provider.models) {
+      if (!seen.has(model)) seen.set(model, provider.id);
+    }
+  }
+  return [...seen].map(([model, provider]) =>
+    capabilityOf(model, {
+      provider,
+      // 自定义 provider 里的模型即使目录里碰巧同名，也应该标成 custom
+      source: isBuiltinProviderId(provider) ? "builtin" : "custom",
+    }),
+  );
 }
 
 /* 装配（CLI_TOOLS / buildEngine / 注册表来源）已搬到 ./assembly.ts —— 见那里的说明。 */
@@ -357,27 +383,49 @@ async function cmdReplay(p: Parsed): Promise<number> {
  * 让人以为"这个数是模型的上限"，比不给这个数更坏（见 `engine/runtime/budget.ts`）。
  */
 function cmdModels(p: Parsed = { command: "", args: [], flags: new Map() }): number {
+  const rows = catalogRows();
+
   if (p.flags.has("json")) {
     console.log(
       JSON.stringify(
-        allProviders().map((provider) => ({
-          id: provider.id,
-          label: provider.label,
-          protocol: provider.protocol,
-          baseURL: provider.baseURL,
-          models: provider.models.map((m) => ({ id: m, ...budgetInfo(m) })),
-        })),
+        {
+          /*
+           * `providers` 保留原形状（兼容已有的脚本/文档）：那里仍然按 provider 列模型。
+           * `catalog` 是 D03 的新面：按**模型**去重，带能力/价格/分组。
+           */
+          providers: allProviders().map((provider) => ({
+            id: provider.id,
+            label: provider.label,
+            protocol: provider.protocol,
+            baseURL: provider.baseURL,
+            models: provider.models.map((m) => ({ id: m, ...budgetInfo(m) })),
+          })),
+          catalog: rows,
+          groups: groupCatalog(rows).map(({ group, items }) => ({ group, models: items.map((i) => i.id) })),
+        },
         null,
         2,
       ),
     );
     return 0;
   }
+
+  process.stdout.write("按**模型**列（不是按 provider）；同一个模型可出现在多个分组里。\n");
+  process.stdout.write("未登记模型只进「未登记」——我们不知道它的真实窗口，不拿估计值去花你的钱。\n");
+  for (const { group, items } of groupCatalog(rows)) {
+    process.stdout.write(`\n【${group}】\n`);
+    for (const cap of items) {
+      process.stdout.write(`  · ${describeCapability(cap)}\n`);
+      if (group === "推荐") {
+        const why = recommendReason(cap.id);
+        if (why) process.stdout.write(`      为什么推荐：${why}\n`);
+      }
+    }
+  }
+
+  process.stdout.write("\n【provider 怎么到达它们】\n");
   for (const provider of allProviders()) {
     process.stdout.write(`${provider.id.padEnd(12)} ${provider.label}  [${provider.models.join(", ")}]\n`);
-    for (const model of provider.models) {
-      process.stdout.write(`             · ${describeBudget(model)}\n`);
-    }
   }
   return 0;
 }
