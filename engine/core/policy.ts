@@ -116,6 +116,17 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   computer_click: { kind: "write" },
   computer_type: { kind: "write" },
   computer_key: { kind: "write" },
+  /*
+   * 浏览器 agent（G04）：六个动作都算**写** —— 它们会改内置浏览器里的页面状态
+   * （导航、点击、提交表单），而且页面是外部内容。按需确认档下要问；
+   * 「全部允许」下仍受地址策略约束（默认只开本机）。
+   */
+  browser_open: { kind: "write" },
+  browser_snapshot: { kind: "read" },
+  browser_click: { kind: "write" },
+  browser_type: { kind: "write" },
+  browser_scroll: { kind: "read" },
+  browser_screenshot: { kind: "read" },
 };
 
 /** 取一个工具的策略；没声明就当只读。 */

@@ -135,6 +135,18 @@ export function resourceOf(action: string, input: unknown): string {
   if (["write_file", "edit_file", "read_file", "list_dir", "search_files"].includes(action)) {
     return typeof obj.path === "string" ? obj.path : "";
   }
+  /*
+   * 浏览器（G04）：资源是**地址的 host**（不是整条 URL）——
+   * 规则写成 `browser_open ← example.com` 比"精确匹配某一条长 URL"实用得多。
+   */
+  if (action === "browser_open") {
+    const raw = typeof obj.url === "string" ? obj.url : "";
+    try {
+      return new URL(raw).host.toLowerCase();
+    } catch {
+      return raw;
+    }
+  }
   if (action.startsWith("mcp__")) {
     /* `mcp__<server>__<tool>` */
     const rest = action.slice("mcp__".length);

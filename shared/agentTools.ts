@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { BROWSER_TOOL_SPECS } from "./browserTools";
 import { COMPUTER_TOOL_SPECS } from "./computerTools";
 import { isMcpTool, parseMcpToolName } from "./mcp";
 import { MEMORY_TEXT_LIMIT } from "./memory";
@@ -587,9 +588,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: EDIT_FILE_TOOL, description: EDIT_FILE_DESC, schema: EDIT_FILE_INPUT },
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
   ...COMPUTER_TOOL_SPECS,
+  ...BROWSER_TOOL_SPECS,
 ];
 
-/** 按名字取声明；没有就是 `undefined`（→ 走"未知工具"那条路）。 */
 export function toolSpec(name: string): AgentToolSpec | undefined {
   return AGENT_TOOLS.find((t) => t.name === name);
 }

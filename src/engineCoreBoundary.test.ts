@@ -69,8 +69,11 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  *
  * ⚠️ 2026-10-18（G03）52 → 53：`engine/runtime/toolSearch.ts`（BM25 工具选择）。
  * 注入决策属于内核（"哪些工具下发给模型"），必须在最小面里。
+ *
+ * ⚠️ 2026-10-18（G04）53 → 54：`shared/browserTools.ts`（浏览器工具声明）。
+ * 由 `shared/agentTools.ts` 引进闭包；纯 schema 与快照脚本，没有 IO。
  */
-const CLOSURE_BUDGET = 53;
+const CLOSURE_BUDGET = 54;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

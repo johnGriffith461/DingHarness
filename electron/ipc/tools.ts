@@ -46,6 +46,16 @@ import { runTeam } from "../../engine/runtime/team";
 import { isPluginTool } from "../../engine/runtime/plugins";
 import { runPluginTool } from "../../engine/runtime/pluginHost";
 import { runComputerAction } from "./computer";
+import {
+  BROWSER_CLICK_TOOL,
+  BROWSER_OPEN_TOOL,
+  BROWSER_SCREENSHOT_TOOL,
+  BROWSER_SCROLL_TOOL,
+  BROWSER_SNAPSHOT_TOOL,
+  BROWSER_TYPE_TOOL,
+} from "../../shared/browserTools";
+import { browserClick, browserOpen, browserScreenshot, browserScroll, browserSnapshot, browserType, describeSnapshot } from "./browserHost";
+import { evaluateRules } from "../../engine/core/permissionRules";
 import type { ComputerKey } from "../../shared/computer";
 import { app } from "electron";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
@@ -368,6 +378,72 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const { key } = input as { key: ComputerKey };
     const got = await runComputerAction({ kind: "key", key }, { requireEnabled: true, approvedBy: "tool-gate" });
     return got.ok ? { ok: true, line: got.detail } : { ok: false, error: got.error };
+  },
+
+  /*
+   * 浏览器 agent（G04）。闸门已经判过"要不要问"；
+   * 这里只多一件事：**外网地址要有一条显式 allow 规则**才放行（默认只开本机）。
+   */
+  [BROWSER_OPEN_TOOL]: async (input) => {
+    const { url } = input as { url: string };
+    const rules = currentPermissionRules();
+    const host = (() => {
+      try {
+        return new URL(url).host.toLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+    /*
+     * 判"放行"用的是 `evaluateRules`（与闸门同一份实现），不是在这里另写一段匹配：
+     * 两处各判一套，迟早会出现"审批卡片说允许、执行体说不行"。
+     */
+    const allowed = host ? evaluateRules(rules, "browser_open", host) === "allow" : false;
+    const got = await browserOpen(url, { allowExternal: allowed });
+    if (!got.ok) return { ok: false, error: got.error };
+    return { ok: true, line: `打开了「${got.value.title || got.value.url}」`, url: got.value.url, title: got.value.title };
+  },
+  [BROWSER_SNAPSHOT_TOOL]: async (input) => {
+    const { maxElements, maxNodes } = input as { maxElements?: number; maxNodes?: number };
+    const got = await browserSnapshot({ ...(maxElements === undefined ? {} : { maxElements }), ...(maxNodes === undefined ? {} : { maxNodes }) });
+    if (!got.ok) return { ok: false, error: got.error };
+    const s = got.value;
+    return {
+      ok: true,
+      line: `取了快照（${s.elements.length} 个可交互元素${s.truncated.elements || s.truncated.nodes ? "，已截断" : ""}）`,
+      url: s.url,
+      title: s.title,
+      elements: s.elements.length,
+      text: describeSnapshot(s),
+    };
+  },
+  [BROWSER_CLICK_TOOL]: async (input) => {
+    const { ref } = input as { ref: string };
+    const got = await browserClick(ref);
+    return got.ok ? { ok: true, line: `点了 ${ref}「${got.value.name}」` } : { ok: false, error: got.error };
+  },
+  [BROWSER_TYPE_TOOL]: async (input) => {
+    const { ref, text, submit } = input as { ref: string; text: string; submit?: boolean };
+    const got = await browserType(ref, text, submit === true);
+    return got.ok
+      ? { ok: true, line: `在 ${ref} 输入了 ${got.value.chars} 字${submit ? "并回车" : ""}` }
+      : { ok: false, error: got.error };
+  },
+  [BROWSER_SCROLL_TOOL]: async (input) => {
+    const { deltaY } = input as { deltaY: number };
+    const got = await browserScroll(deltaY);
+    return got.ok ? { ok: true, line: `滚动到 y=${got.value.y}` } : { ok: false, error: got.error };
+  },
+  [BROWSER_SCREENSHOT_TOOL]: async () => {
+    const got = await browserScreenshot();
+    if (!got.ok) return { ok: false, error: got.error };
+    return {
+      ok: true,
+      line: `截图 ${got.value.width}×${got.value.height}`,
+      path: got.value.path,
+      width: got.value.width,
+      height: got.value.height,
+    };
   },
 
   [RUN_COMMAND_TOOL]: async (input, env) => {

@@ -31,6 +31,7 @@ import { registerAgentIpc } from "./ipc/agentStore";
 import { registerSearchHistoryIpc } from "./ipc/searchStore";
 import { loadWorkspaces, registerWorkspaceIpc } from "./ipc/workspaceStore";
 import { registerMcpIpc, startAllMcp, stopAllMcp } from "./ipc/mcpStore";
+import { closeBrowserHost } from "./ipc/browserHost";
 import { registerLibraryIpc } from "./ipc/libraryStore";
 import { registerTaskIpc } from "./ipc/taskStore";
 import { registerMemoryIpc } from "./ipc/memoryStore";
@@ -520,6 +521,12 @@ app.on("window-all-closed", () => {
 /* 退出前把连接器的子进程收掉，别在系统里留孤儿进程 */
 app.on("before-quit", () => {
   stopAllMcp();
+  /* G04：agent 浏览器窗口也不留（它是我们开的，用户没手动关就还在） */
+  try {
+    closeBrowserHost();
+  } catch {
+    /* 已经关了就算了 */
+  }
   /*
    * ⚠️ P142：也要**关掉数据库句柄**。原来这里只 `stopAllMcp()`：
    *   · `stores.db`（KV）的句柄在进程活着的整段时间里常开（缓存按目录存），
