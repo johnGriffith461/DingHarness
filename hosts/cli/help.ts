@@ -43,6 +43,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding knowledge add|search|ask|list|remove … [--domain private|team] [--limit n]  # 本地知识库（带引用）",
       "  ding acp-drive --cmd <可执行> [--arg <参数>…] --prompt \"任务\" [--cwd <目录>]  # 驱动外部 ACP agent",
       "  ding providers list|add|remove …                    # 自定义 provider（端点/协议/密钥引用）",
+      "  ding schedule add \"每天 9 点\" --title <名> --prompt <任务> | list | run-due [--every N]  # 定时任务常驻执行",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|search <词>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",

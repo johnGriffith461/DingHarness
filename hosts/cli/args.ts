@@ -82,6 +82,10 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "base-url",
   "protocol",
   "key-ref",
+  /* `ding schedule`（V6-2g）：标题 / 钟点 / 常驻间隔（`--every` 同步客户端也在用） */
+  "title",
+  "at",
+  "every",
   "out",
   "by",
   "kind",
@@ -143,6 +147,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "docker",
   /* `ding doctor --fix`（V6-2h）：只做两类安全修复（建目录 / 重建检索索引） */
   "fix",
+  /* `ding schedule run-due --once`（V6-2g）：只跑一轮，不常驻 */
+  "once",
   /* `ding approvals --watch`：盯着通知流（不给就看一眼列一遍） */
   "watch",
 ]);

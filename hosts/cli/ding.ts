@@ -30,6 +30,7 @@ import { cmdWorktree } from "./cmdWorktree";
 import { cmdKnowledge } from "./cmdKnowledge";
 import { cmdAcpDrive } from "./cmdAcpDrive";
 import { cmdProviders } from "./cmdProviders";
+import { cmdSchedule } from "./cmdSchedule";
 import { askMasked, cmdInit, cmdDoctor } from "./cmdSetup";
 import { cmdSessions } from "./cmdSessions";
 import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
@@ -967,6 +968,7 @@ async function main(): Promise<void> {
     "knowledge",
     "acp-drive",
     "providers",
+    "schedule",
     "config",
     "agents",
   ]);
@@ -1029,6 +1031,8 @@ async function main(): Promise<void> {
                   ? await cmdAcpDrive(parsed)
                   : parsed.command === "providers"
                   ? await cmdProviders(parsed, dataDir())
+                  : parsed.command === "schedule"
+                  ? await cmdSchedule(parsed, dataDir())
                   : parsed.command === "config"
                   ? cmdConfig(parsed)
                   : parsed.command === "agents"
