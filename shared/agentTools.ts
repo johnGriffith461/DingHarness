@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { BROWSER_TOOL_SPECS } from "./browserTools";
+import { UIA_TOOL_SPECS } from "./uiaTools";
 import { COMPUTER_TOOL_SPECS } from "./computerTools";
 import { isMcpTool, parseMcpToolName } from "./mcp";
 import { MEMORY_TEXT_LIMIT } from "./memory";
@@ -571,7 +572,7 @@ export function mergeToolTraces(existing: readonly ToolTrace[], incoming: readon
   return [...existing, ...incoming.filter((t) => !seen.has(t.toolCallId))];
 }
 
-/* ⚠️ `list_files` 曾漏登记过一次（两处各写一份的代价）；`registry.test.ts` 盯着"表里的都在"。 */
+/* ⚠️ `list_files` 曾漏登记过一次；`registry.test.ts` 盯着"表里的都在"。 */
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: SPAWN_AGENTS_TOOL, description: SPAWN_AGENTS_DESC, schema: SPAWN_AGENTS_INPUT },
   { name: MEMORY_SAVE_TOOL, description: MEMORY_SAVE_DESC, schema: MEMORY_SAVE_INPUT },
@@ -589,6 +590,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
   ...COMPUTER_TOOL_SPECS,
   ...BROWSER_TOOL_SPECS,
+  ...UIA_TOOL_SPECS,
 ];
 
 export function toolSpec(name: string): AgentToolSpec | undefined {
@@ -604,7 +606,6 @@ export function toolSpec(name: string): AgentToolSpec | undefined {
  * 性质不同，所以留在契约层。
  */
 
-/** 工具名 → 给人看的短标签（界面文案与测试共用一份）。 */
 export function toolLabel(name: string): string {
   if (name === MEMORY_SAVE_TOOL || name === MEMORY_LIST_TOOL) return "记忆";
   if (name === SCHEDULE_CREATE_TOOL || name === SCHEDULE_LIST_TOOL) return "定时任务";
@@ -638,13 +639,7 @@ export function toolLabel(name: string): string {
   return name;
 }
 
-/**
- * 把一次工具调用压成界面上的一行小字（**行内展示**，不抢正文）。
- *
- * 为什么要在界面上留一行：模型"调了工具"这件事用户应当看得见 ——
- * 否则"记忆被写进去了"就成了暗箱操作。这与本项目反复清的
- * "看着有、其实没用"是**反过来的**要求：**真做了的事要看得出来**。
- */
+/* 界面上那一行小字：**真做了的事要看得出来**（不做暗箱操作）。 */
 export function toolLine(name: string, ok: boolean, detail?: string): string {
   const label = toolLabel(name);
   if (!ok) return `⚙ ${label}失败${detail ? `：${detail}` : ""}`;

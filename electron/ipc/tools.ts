@@ -56,6 +56,11 @@ import {
 } from "../../shared/browserTools";
 import { browserClick, browserOpen, browserScreenshot, browserScroll, browserSnapshot, browserType, describeSnapshot } from "./browserHost";
 import { evaluateRules } from "../../engine/core/permissionRules";
+import { readComputerState } from "./computer";
+import { actOnUiaElement, listUiaWindows, snapshotUiaWindow, uiaSupported } from "./uia";
+import { describeUiaSnapshot } from "../../shared/uia";
+import { COMPUTER_ELEMENTS_TOOL, COMPUTER_INVOKE_TOOL, COMPUTER_WINDOWS_TOOL } from "../../shared/uiaTools";
+import { parseUiaAction, parseUiaRef } from "../../shared/uia";
 import type { ComputerKey } from "../../shared/computer";
 import { app } from "electron";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
@@ -378,6 +383,45 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const { key } = input as { key: ComputerKey };
     const got = await runComputerAction({ kind: "key", key }, { requireEnabled: true, approvedBy: "tool-gate" });
     return got.ok ? { ok: true, line: got.detail } : { ok: false, error: got.error };
+  },
+
+  /*
+   * 元素版 Computer Use（G05）：枚举是只读，执行动作要再过一道"电脑操作已授权"。
+   */
+  [COMPUTER_WINDOWS_TOOL]: async () => {
+    if (!readComputerState().enabled) return { ok: false, error: "电脑操作没有授权：先在「权限矩阵」页打开（默认关闭）" };
+    if (!uiaSupported()) return { ok: false, error: "元素定位目前只实现了 Windows" };
+    const wins = listUiaWindows();
+    return {
+      ok: true,
+      line: `找到 ${wins.length} 个窗口`,
+      count: wins.length,
+      text: wins.length ? wins.map((w) => w.name + " " + w.process).join(String.fromCharCode(10)) : "（没有可操作窗口）",
+    };
+  },
+  [COMPUTER_ELEMENTS_TOOL]: async (input) => {
+    if (!readComputerState().enabled) return { ok: false, error: "电脑操作没有授权：先在「权限矩阵」页打开（默认关闭）" };
+    const { window: win, max } = input as { window?: string; max?: number };
+    const got = snapshotUiaWindow(win, max ?? 200);
+    if (!got.ok) return { ok: false, error: got.error };
+    return {
+      ok: true,
+      line: `取了「${got.value.window}」的元素树（${got.value.elements.length} 个元素${got.value.truncated ? "，已截断" : ""}）`,
+      window: got.value.window,
+      elements: got.value.elements.length,
+      text: describeUiaSnapshot(got.value),
+    };
+  },
+  [COMPUTER_INVOKE_TOOL]: async (input) => {
+    if (!readComputerState().enabled) return { ok: false, error: "电脑操作没有授权：先在「权限矩阵」页打开（默认关闭）" };
+    const { window: win, ref, action, text } = input as { window?: string; ref: string; action: string; text?: string };
+    const index = parseUiaRef(ref);
+    if (index === null) return { ok: false, error: `ref 格式不对（要形如 #3）：${ref}` };
+    const act = parseUiaAction(action);
+    if (!act) return { ok: false, error: `不认识的动作：${action}` };
+    const got = actOnUiaElement(win, index, act, text ?? "");
+    if (!got.ok) return { ok: false, error: got.error };
+    return { ok: true, line: `${act} 「${got.name}」：${got.detail}` };
   },
 
   /*

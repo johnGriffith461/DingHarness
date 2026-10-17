@@ -72,8 +72,11 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  *
  * ⚠️ 2026-10-18（G04）53 → 54：`shared/browserTools.ts`（浏览器工具声明）。
  * 由 `shared/agentTools.ts` 引进闭包；纯 schema 与快照脚本，没有 IO。
+ *
+ * ⚠️ 2026-10-18（G05）54 → 56：`shared/uia.ts`（元素树形状与解析）与
+ * `shared/uiaTools.ts`（三条工具声明）。同样是纯逻辑，由工具表带进闭包。
  */
-const CLOSURE_BUDGET = 54;
+const CLOSURE_BUDGET = 56;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

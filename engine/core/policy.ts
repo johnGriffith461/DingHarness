@@ -127,6 +127,13 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   browser_type: { kind: "write" },
   browser_scroll: { kind: "read" },
   browser_screenshot: { kind: "read" },
+  /*
+   * 元素版 Computer Use（G05）：枚举窗口/元素是**只读**；执行动作是**写**
+   * （它真的会点按钮、写输入框）。两者分开，别让"看一眼窗口"也要点确认。
+   */
+  computer_windows: { kind: "read" },
+  computer_elements: { kind: "read" },
+  computer_invoke: { kind: "write" },
 };
 
 /** 取一个工具的策略；没声明就当只读。 */
