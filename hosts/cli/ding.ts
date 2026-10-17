@@ -22,6 +22,7 @@ import { cmdBackup, cmdRestore, desktopDataDir, resolveBackupDataDir } from "./c
 import { renderRecords } from "./renderRecords";
 import { cmdResume } from "./cmdResume";
 import { cmdAcp, cmdServe } from "./cmdServe";
+import { cmdSpace } from "./cmdSpace";
 import { cmdRecipe } from "./cmdRecipe";
 import { cmdConnect } from "./cmdConnect";
 import { cmdHelp } from "./help";
@@ -797,6 +798,7 @@ async function main(): Promise<void> {
     "models",
     "plugins",
     "recipe",
+    "space",
     "serve",
     "connect",
     "acp",
@@ -832,6 +834,8 @@ async function main(): Promise<void> {
                 ? await cmdPlugins(parsed)
                 : parsed.command === "recipe"
                   ? await cmdRecipe(parsed, dataDir())
+                  : parsed.command === "space"
+                    ? await cmdSpace(parsed, dataDir())
                   : parsed.command === "serve"
                   ? await cmdServe(parsed, dataDir())
                   : parsed.command === "connect"
