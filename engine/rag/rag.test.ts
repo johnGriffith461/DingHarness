@@ -62,8 +62,8 @@ describe("切块", () => {
 describe("检索与引用", () => {
   it("中文子串命中，引用带路径与段号", () => {
     const s = store();
-    s.addDocument({ path: "C:/docs/q1.md", title: "第一季度", text: "第一季度营收 120 万，成本 80 万。" });
-    s.addDocument({ path: "C:/docs/q2.md", title: "第二季度", text: "第二季度营收 150 万。" });
+    s.addDocument({ path: "C:/fixtures/q1.md", title: "第一季度", text: "第一季度营收 120 万，成本 80 万。" });
+    s.addDocument({ path: "C:/fixtures/q2.md", title: "第二季度", text: "第二季度营收 150 万。" });
 
     const hits = s.search("营收", { viewer: "local", limit: 5 });
     expect(hits.length).toBeGreaterThanOrEqual(2);

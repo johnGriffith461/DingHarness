@@ -38,3 +38,5 @@ packages/cli/README.md
 packages/cli/LICENSE
 # 文档站构建产物（pnpm docs:build）
 docs-site-dist/
+# ADR 只在本地（docs/ADR/）；万一有人在根目录重新建，也别入库
+ADR/

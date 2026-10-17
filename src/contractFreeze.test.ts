@@ -21,7 +21,7 @@ import { CANVAS_EVENT_TYPES, CANVAS_SURFACE } from "@engine/core/canvasContract"
  * **可计算的清单**（`engine/core/contracts.frozen.json`），并在这里对账：
  *
  *   ① 代码里现在的契约面 = 清单里的那一份（少了/变了 → 红）；
- *   ② 清单里每一项都带着**来历的那份 ADR**，而那份 ADR 必须真的在 `ADR/` 里；
+ *   ② 清单里每一项都带着**来历的那份 ADR**（本地 `docs/ADR/`；ADR 未入库）；
  *   ③ 清单里不留已经不在代码里的项（门也要诚实 —— 别让清单变成化石）。
  *
  * 改了契约怎么办（判词里也会写）：先加 ADR，再更新清单。
@@ -34,7 +34,12 @@ const ROOT = path.resolve(__dirname, "..");
 const FROZEN = path.join(ROOT, "engine/core/contracts.frozen.json");
 const EVENTS_SRC = path.join(ROOT, "engine/core/events.ts");
 const IPC_SRC = path.join(ROOT, "shared/ipc.ts");
-const ADR_DIR = path.join(ROOT, "ADR");
+/*
+ * ADR **不入库**（2026-10-17 用户裁定：不在 GitHub 展示，只留本地）。
+ * 公开 checkout 里这个目录不存在；存在时逐项对账，不存在时跳过这一条
+ * （"改契约必须留名"仍在：`adr` 字段必须非空）。
+ */
+const ADR_DIR = path.join(ROOT, "docs", "ADR");
 
 /** 现在代码里的契约面（能被计算的那些；每项是**值**，不是描述）。 */
 function currentSurface(): Record<string, string> {
@@ -170,9 +175,11 @@ describe("契约 diff 门（3.10b）：改契约必须留名（ADR + 清单一�
     ).toEqual([]);
   });
 
-  it("⭐ 每一项都带着来历的 ADR，且那份 ADR 真的在 ADR/ 里", () => {
+  it("⭐ 每一项都带着来历的 ADR（本地 ADR 存在时逐份对账）", () => {
+    const localAdr = existsSync(ADR_DIR);
     for (const [key, entry] of Object.entries(frozen.entries)) {
       expect(entry.adr, `${key} 没标它来历的 ADR`).toBeTruthy();
+      if (!localAdr) continue;
       const file = path.join(ADR_DIR, String(entry.adr));
       expect(existsSync(file), `${key} 指的 ADR 不存在：${String(entry.adr)}（改契约必须留名）`).toBe(true);
     }

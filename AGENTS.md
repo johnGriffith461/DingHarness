@@ -6,7 +6,7 @@
 ## 先读什么（按顺序，别跳）
 
 1. [`README.md`](README.md) —— 它是什么、怎么跑
-2. [`ADR/`](ADR/) —— **契约级决定**（事件模型、权限、fork、E2EE）；改这些之前必须读对应 ADR
+2. `docs/ADR/`（**本地**，不入库）—— **契约级决定**（事件模型、权限、fork、E2EE）；改这些之前必须读对应 ADR
 3. [`BENCHMARKS.md`](BENCHMARKS.md) —— 公开数字的口径（哪些能比、哪些不能）
 4. [`SAFETY.md`](SAFETY.md) —— 安全边界（别在报告里把"已知限制"说成"已支持"）
 
@@ -27,7 +27,7 @@
 
 ## 不可协商的规矩
 
-1. **只读旧写新不删旧**（兼容矩阵见 ADR/0010）；删公开面要 ADR + major。
+1. **只读旧写新不删旧**（兼容矩阵见本地 ADR-0010）；删公开面要 ADR + major。
 2. **契约冻结**：`packages/api.frozen.json` 加名字要补清单；删/改签名要 ADR。
 3. **不留死控件**：`disabled` + "还没/暂未" 会被 `src/deadControls.test.ts` 判红。
    三条出路：实现 / 移除 / 降级成静态文案。
@@ -62,7 +62,7 @@ pnpm build                     # 全链（typecheck/lint/test/打包/验收）
 | 一种新事件 | `engine/core/events.ts` 的 `LoggedEvent` + `applyEvent` | 投影、契约冻结测试、旧日志兼容（可选字段 + 默认值） |
 | 一条 CLI 命令 | `hosts/cli/cmdXxx.ts` + `ding.ts` 分派 + `help.ts` + `args.ts` 旗标表 | `args.test.ts` 会扫旗标，漏登记就红 |
 | 一个基准任务 | `bench/tasks/<id>/` + `bench/suites/harness.json` | 写清"挡的是哪一种坏"；红的时候要红得对 |
-| 一条 ADR | `ADR/NNNN-标题.md` | 只增不改；状态写"已决定/已落地/被取代" |
+| 一条 ADR | `docs/ADR/NNNN-标题.md`（本地，不入库） | 只增不改；状态写"已决定/已落地/被取代" |
 
 ## 测试写在哪
 

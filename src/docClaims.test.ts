@@ -35,7 +35,7 @@ import { HOOK_NAMES, PLUGIN_PERMISSIONS } from "@engine/runtime/plugins";
  *
  * - **`CHANGELOG.md` 与 `SAFETY.md` 不在扫面里**：前者是**历史记录**（它逐条描述当时的
  *   探针与旧文件名，"引用已经不存在的脚本"正是它的内容），后者不在本轮独占范围。
- *   `ADR/` **在**扫面里（它是入库的决策记录，指错路一样要治）。
+ *   `docs/ADR/` **不在**扫面里（2026-10-17 用户裁定 ADR 不入库，只留本地）。
  * - **路径按"整路径优先、再按文件名"解析**：注释里写的是短名（`cost.test.ts`）时按
  *   仓内同名文件认。宽一档是为了压住误报 —— 代价是"写错目录但同名"放行，如实记。
  * - **⑤ 只管完成态断言**（`已接入/接上/实现/修复/覆盖/生效/落地/补齐/钉住/只读不动`）。
@@ -47,7 +47,7 @@ import { HOOK_NAMES, PLUGIN_PERMISSIONS } from "@engine/runtime/plugins";
 const ROOT = path.resolve(__dirname, "..");
 
 /** 扫面（`.github/` 在里 —— 那里的注释同样会把人指丢）。 */
-const SCAN_DIRS = ["src", "engine", "hosts", "electron", "shared", "scripts", "sandbox", ".github", "ADR", "plugin-samples"];
+const SCAN_DIRS = ["src", "engine", "hosts", "electron", "shared", "scripts", "sandbox", ".github", "plugin-samples"];
 
 /** 根文档（`CHANGELOG.md`/`SAFETY.md` 有意不收，见文件头边界）。 */
 const ROOT_DOCS = ["README.md", "PLUGIN.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md"];
@@ -55,7 +55,7 @@ const ROOT_DOCS = ["README.md", "PLUGIN.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT
 const EXT = [".ts", ".tsx", ".mjs", ".js", ".rs", ".md", ".yml", ".yaml"];
 
 /** 入库的顶层目录（写这些前缀 = "仓里有一份"）。 */
-const REPO_PREFIX = ["src", "shared", "engine", "hosts", "electron", "scripts", "sandbox", "ADR", ".github", "plugin-samples"];
+const REPO_PREFIX = ["src", "shared", "engine", "hosts", "electron", "scripts", "sandbox", ".github", "plugin-samples"];
 
 /** 同一行里"它已经不在了"的说法（①用）。 */
 const GONE_MARK = /不存在|没有这个文件|压根没有|找不到|未入库|无法复核|原来|原本|曾经|已删|已退役|已拆|已移走|已搬|旧名|改名前|化石|待删|不再|写了但|从来没有/;

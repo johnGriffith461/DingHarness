@@ -154,8 +154,14 @@ const ZH_NAV = [
   ["governance.html", "治理"],
   ["support.html", "支持"],
   ["contributing.html", "贡献"],
-  ["adr.html", "ADR"],
 ];
+
+/*
+ * ADR **默认不进站**（2026-10-17 用户裁定：不在公开处展示，只留本地）。
+ * 想在本地翻的时候加 `--with-adr`；生成出来的站仍然是本地文件、不入库。
+ */
+const WITH_ADR = process.argv.includes("--with-adr");
+if (WITH_ADR) ZH_NAV.push(["adr.html", "ADR（本地）"]);
 
 /**
  * 源文件 basename（小写）→ 站内输出页。
@@ -312,9 +318,9 @@ for (const [outFile, title, source, lang] of pages) {
   built += 1;
 }
 
-/* ADR：索引页 + 每篇一页（公开仓里 ADR/ 本来就在） */
-const adrDir = path.join(ROOT, "ADR");
-const adrFiles = existsSync(adrDir) ? readdirSync(adrDir).filter((name) => name.endsWith(".md")).sort() : [];
+/* ADR：索引页 + 每篇一页（**只生成本地副本**；不加 --with-adr 就不生成） */
+const adrDir = path.join(ROOT, "docs", "ADR");
+const adrFiles = WITH_ADR && existsSync(adrDir) ? readdirSync(adrDir).filter((name) => name.endsWith(".md")).sort() : [];
 const adrItems = adrFiles
   .map((name) => {
     const stem = name.replace(/\.md$/, "");
@@ -322,31 +328,36 @@ const adrItems = adrFiles
     return `<li><a href="adr-${stem}.html">${escapeHtml(title)}</a></li>`;
   })
   .join("");
-for (const name of adrFiles) {
-  const stem = name.replace(/\.md$/, "");
+if (adrFiles.length) {
+  for (const name of adrFiles) {
+    const stem = name.replace(/\.md$/, "");
+    writeFileSync(
+      path.join(OUT, `adr-${stem}.html`),
+      page({
+        title: stem,
+        body: renderMarkdown(readFileSync(path.join(adrDir, name), "utf8")),
+        nav: ZH_NAV,
+        lang: "zh",
+        file: `docs/ADR/${name}（未入库）`,
+      }),
+      "utf8",
+    );
+  }
   writeFileSync(
-    path.join(OUT, `adr-${stem}.html`),
+    path.join(OUT, "adr.html"),
     page({
-      title: stem,
-      body: renderMarkdown(readFileSync(path.join(adrDir, name), "utf8")),
+      title: "ADR",
+      body: `<h1>架构决策记录（ADR）</h1>\n<p>只增不改；被推翻就写新 ADR 标注取代。共 ${adrFiles.length} 篇（**仅本地**，不随仓库公开）。</p>\n<ul>${adrItems}</ul>`,
       nav: ZH_NAV,
       lang: "zh",
-      file: `ADR/${name}`,
+      file: "docs/ADR/（未入库）",
     }),
     "utf8",
   );
 }
-writeFileSync(
-  path.join(OUT, "adr.html"),
-  page({
-    title: "ADR",
-    body: `<h1>架构决策记录（ADR）</h1>\n<p>只增不改；被推翻就写新 ADR 标注取代。共 ${adrFiles.length} 篇。</p>\n<ul>${adrItems}</ul>`,
-    nav: ZH_NAV,
-    lang: "zh",
-    file: "ADR/",
-  }),
-  "utf8",
-);
 
-console.log(`✓ docs-site-dist/：${built + adrFiles.length + 1} 个页面（含 ${adrFiles.length} 篇 ADR）`);
+console.log(
+  `✓ docs-site-dist/：${built + (adrFiles.length ? adrFiles.length + 1 : 0)} 个页面` +
+    (adrFiles.length ? `（含 ${adrFiles.length} 篇本地 ADR）` : "（ADR 未包含；要本地翻加 --with-adr）"),
+);
 console.log("  本地预览：python -m http.server -d docs-site-dist 8080");
