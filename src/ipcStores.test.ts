@@ -410,7 +410,21 @@ describe("结构守卫：JSON 落盘不许再有第二份手写", () => {
    * 才被明牌列进来的。现在落盘走 `createJsonStore`、读-改-写**串行化**（一条队列），
    * 那条理由不成立了 —— 例外名单该越用越短，不是越用越长。
    */
-  const ALLOWED = new Set(["snapshotStore.ts"]);
+  const ALLOWED = new Set([
+    "snapshotStore.ts",
+    /*
+     * `workflowStore.ts`（V6-2l）：保存的是**用户定义文件**，文件名由用户给
+     * （任意 `workflows/<名字>.json`），而且**必须与 CLI 共享**（CLI 直接读裸定义）。
+     * 套 `jsonStore` 的信封会让 CLI 读不到；它写的是整文件覆盖（定义小、可从界面重建）。
+     */
+    "workflowStore.ts",
+    /*
+     * `computer.ts`（V6-2n）：`computer-use.json` 是**一个布尔开关**（atomic tmp+rename），
+     * `computer-use.jsonl` 是 append-only 审计日志 —— 两者都不是"文档库"，
+     * 不适用信封与迁移链。
+     */
+    "computer.ts",
+  ]);
 
   /** 从 `(` 取到配平的那个 `)`（跳过字符串/模板串里的括号）。取不到返回 null。 */
   function balancedArgs(src: string, open: number): string | null {
