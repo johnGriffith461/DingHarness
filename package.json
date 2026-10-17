@@ -14,7 +14,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite",
     "start": "node scripts/check-build-freshness.mjs && electron .",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && node scripts/check-build-freshness.mjs && node scripts/verify-cli-npm.mjs && node scripts/accept/accept-smoke.mjs",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && node scripts/build-docs-site.mjs && node scripts/check-build-freshness.mjs && node scripts/verify-cli-npm.mjs && node scripts/accept/accept-smoke.mjs",
     "check:freshness": "node scripts/check-build-freshness.mjs",
     "ding": "tsx hosts/cli/ding.ts",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",

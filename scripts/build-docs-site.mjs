@@ -143,6 +143,9 @@ function renderMarkdown(markdown) {
 
 const ZH_NAV = [
   ["index.html", "首页 / README"],
+  ["tutorial.html", "教程：跑通第一件事"],
+  ["examples.html", "示例任务库"],
+  ["video-script.html", "5 分钟演示脚本"],
   ["getting-started.html", "十分钟跑通"],
   ["knowledge.html", "本地知识库"],
   ["acp.html", "ACP（两个方向）"],
@@ -189,6 +192,7 @@ const PAGE_MAP = {
 };
 const EN_NAV = [
   ["en/index.html", "Home"],
+  ["en/tutorial.html", "Tutorial"],
   ["en/architecture.html", "Architecture"],
 ];
 
@@ -292,6 +296,9 @@ mkdirSync(path.join(OUT, "en"), { recursive: true });
 const pages = [
   /* [输出文件, 标题, 源文件, 语言] */
   ["index.html", "Ding Harness", "README.md", "zh"],
+  ["tutorial.html", "教程：跑通第一件事", "docs-site/zh/tutorial.md", "zh"],
+  ["examples.html", "示例任务库", "docs-site/zh/examples.md", "zh"],
+  ["video-script.html", "5 分钟演示脚本", "docs-site/zh/video-script.md", "zh"],
   ["getting-started.html", "十分钟跑通", "docs-site/zh/getting-started.md", "zh"],
   ["knowledge.html", "本地知识库", "docs-site/zh/knowledge.md", "zh"],
   ["acp.html", "ACP（两个方向）", "docs-site/zh/acp.md", "zh"],
@@ -311,6 +318,7 @@ const pages = [
   ["support.html", "支持渠道", "SUPPORT.md", "zh"],
   ["contributing.html", "贡献指南", "CONTRIBUTING.md", "zh"],
   ["en/index.html", "Ding Harness", "docs-site/en/index.md", "en"],
+  ["en/tutorial.html", "Tutorial", "docs-site/en/tutorial.md", "en"],
   ["en/architecture.html", "Architecture", "docs-site/en/architecture.md", "en"],
 ];
 
@@ -368,6 +376,45 @@ if (adrFiles.length) {
     }),
     "utf8",
   );
+}
+
+/*
+ * **站内链接校验**（L10）：文档站最容易坏的地方不是排版，是死链 ——
+ * 改个文件名，旁边三篇的链接就 404，而"页面能打开"完全看不出来。
+ *
+ * 判据：生成出来的每个 HTML 里，所有**相对** href 都必须指向 `docs-site-dist/`
+ * 里真实存在的文件（`#锚点` / `http(s)` / `mailto` 跳过）。有死链就非零退出。
+ */
+const allHtml = [];
+const walkHtml = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkHtml(full);
+    else if (entry.name.endsWith(".html")) allHtml.push(full);
+  }
+};
+walkHtml(OUT);
+
+const deadLinks = [];
+for (const file of allHtml) {
+  const html = readFileSync(file, "utf8");
+  for (const m of html.matchAll(/href="([^"]+)"/g)) {
+    const href = m[1];
+    if (/^(https?:|#|mailto:)/.test(href)) continue;
+    const [target] = href.split("#");
+    if (!target) continue;
+    const resolved = path.resolve(path.dirname(file), target);
+    if (!existsSync(resolved)) {
+      deadLinks.push(`${path.relative(OUT, file)} → ${href}`);
+    }
+  }
+}
+if (deadLinks.length) {
+  console.error(`✗ 文档站里有 ${deadLinks.length} 条死链：`);
+  for (const one of deadLinks.slice(0, 20)) console.error("  · " + one);
+  process.exitCode = 1;
+} else {
+  console.log(`✓ 站内链接全部可达（扫描 ${allHtml.length} 个页面）`);
 }
 
 console.log(

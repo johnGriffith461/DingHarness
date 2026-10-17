@@ -17,7 +17,7 @@ Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无
 
 ## 功能
 
-- **Agent 工具面**：13 个内置工具——记忆（`memory_save` / `memory_list`）、定时任务（`schedule_create` / `schedule_list`）、画布（`canvas_add_node`），以及文件类 `list_files` / `read_file` / `write_file` / `list_dir` / `search_files` / `edit_file`、`run_command`，加一层子智能体 `spawn_agent`。
+- **Agent 工具面**：文件与命令（`list_files` / `read_file` / `write_file` / `list_dir` / `search_files` / `edit_file` / `run_command`）、记忆（`memory_save` / `memory_list`）、定时任务（`schedule_create` / `schedule_list`）、画布（`canvas_add_node`）、本地知识库（`knowledge_search`）、浏览器与电脑操作，以及子智能体（`spawn_agent` / 小队）。**权威清单以 `shared/agentTools.ts` 的注册表为准**（这里不写死数量，免得又旧了）。
 - **连接器（MCP）**：以 stdio 子进程接入 MCP server（最多 8 个），工具以 `mcp__<server>__<tool>` 暴露给模型。
 - **审批闸门**：三档模式（全部允许 / 按需确认 / 每步确认）；每个工具按读/写分级，MCP 工具默认按写对待；被拦下的调用可就地允许或拒绝，决策写入会话日志。
 - **子智能体**：独立上下文、只回要点报告、token 成本上卷父级；共用同一张闸门表，不穿透审批。
@@ -57,6 +57,15 @@ ding run "把这个目录里的文件列一遍，说清哪个最可能是配置"
 
 **桌面端**：`pnpm dev`（一条命令同时起 Vite 与 Electron），或者直接跑安装包。
 第一次打开会带你走同样的向导。
+
+## 文档
+
+- **教程（第一次跑通）**：[`docs-site/zh/tutorial.md`](docs-site/zh/tutorial.md)
+- **示例任务库**：[`docs-site/zh/examples.md`](docs-site/zh/examples.md)（每条都能在仓内验证）
+- **5 分钟演示脚本**：[`docs-site/zh/video-script.md`](docs-site/zh/video-script.md)
+- **本地文档站**：`pnpm docs:build` → `python -m http.server -d docs-site-dist 8080`
+  （生成时会校验站内链接，死链直接非零退出）
+- 英文：[`README.en.md`](README.en.md) · [`docs-site/en/tutorial.md`](docs-site/en/tutorial.md)
 
 ## 快速开始
 
