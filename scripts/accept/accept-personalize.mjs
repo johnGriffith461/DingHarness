@@ -44,20 +44,36 @@ const openGeneral = async (page) => {
 
 const settingsOnDisk = () => {
   /*
-   * 设置现在落在 KV（`stores.db` 的 `kv` 表，键名 `settings.json`）——
-   * C1 之后 JSON 落盘统一走 `jsonStore`，不再有裸的 settings.json 文件。
-   * 读法用 Node 24 自带的 `node:sqlite`（不引依赖）。
+   * 设置落在哪里取决于后端（`DSH_STORE_BACKEND`）：
+   *   · 默认 KV → `stores.db` 的 `kv` 表，键名 `settings.json`；
+   *   · 批跑固定 `file` → 数据目录里真的有一个 `settings.json`（带信封）。
+   * 两种都读 —— 只认一种的话，这条脚本在"单独跑"与"批跑里跑"会得到不同结论
+   * （第一次收进批跑就撞上了：批跑下读到 null）。
    */
   const db = path.join(DATA, "stores.db");
-  if (!fs.existsSync(db)) return null;
-  const conn = new DatabaseSync(db, { readOnly: true });
+  if (fs.existsSync(db)) {
+    try {
+      const conn = new DatabaseSync(db, { readOnly: true });
+      try {
+        const row = conn.prepare("SELECT value FROM kv WHERE key = ?").get("settings.json");
+        if (row) {
+          const raw = JSON.parse(String(row.value));
+          return raw && typeof raw === "object" && "data" in raw ? raw.data : raw;
+        }
+      } finally {
+        conn.close();
+      }
+    } catch {
+      /* 打不开/没有这张表：落到文件后端 */
+    }
+  }
+  const file = path.join(DATA, "settings.json");
+  if (!fs.existsSync(file)) return null;
   try {
-    const row = conn.prepare("SELECT value FROM kv WHERE key = ?").get("settings.json");
-    if (!row) return null;
-    const raw = JSON.parse(String(row.value));
-    return raw && typeof raw === "object" && "data" in raw ? raw.data : raw;
-  } finally {
-    conn.close();
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    return raw && typeof raw === "object" && typeof raw.__schema === "number" && "data" in raw ? raw.data : raw;
+  } catch {
+    return null;
   }
 };
 
