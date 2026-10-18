@@ -4,6 +4,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { GIT_USABLE } from "./gitProbe";
+
 import { normalizeMemory, type MemoryEntry } from "../../shared/memory";
 import { exportMemoryToGit, importMemoryFromGit, parseEntry, readMemoryLib, renderEntry, writeMemoryLib } from "./memoryGit";
 
@@ -50,7 +52,7 @@ function repo(): string {
 }
 
 describe("记忆 Git 镜像", () => {
-  it("⭐ 导出：一条一个 .md + 一次提交；没有变化不造空提交", () => {
+  it.skipIf(!GIT_USABLE)("⭐ 导出：一条一个 .md + 一次提交；没有变化不造空提交", () => {
     const dataDir = tmp("dh-memdata-");
     const r = repo();
     writeMemoryLib(dataDir, normalizeMemory({ entries: [entry("m1", "每周五发周报"), entry("m2", "用中文回答", { domain: "team" })] }));
@@ -68,7 +70,7 @@ describe("记忆 Git 镜像", () => {
     expect(git(r, ["log", "--oneline"]).trim().split("\n")).toHaveLength(1);
   });
 
-  it("改动会进提交；从 json 删掉的条目会删掉对应文件", () => {
+  it.skipIf(!GIT_USABLE)("改动会进提交；从 json 删掉的条目会删掉对应文件", () => {
     const dataDir = tmp("dh-memdata-");
     const r = repo();
     writeMemoryLib(dataDir, normalizeMemory({ entries: [entry("m1", "旧话")] }));
@@ -84,7 +86,7 @@ describe("记忆 Git 镜像", () => {
     expect(fs.existsSync(path.join(r, "entries", "m1.md"))).toBe(false);
   });
 
-  it("⭐ 导入：同 id 以 Git 侧为准、新 id 加进来（不静默丢）", () => {
+  it.skipIf(!GIT_USABLE)("⭐ 导入：同 id 以 Git 侧为准、新 id 加进来（不静默丢）", () => {
     const dataDir = tmp("dh-memdata-");
     const r = repo();
     writeMemoryLib(dataDir, normalizeMemory({ entries: [entry("m1", "本地版本")] }));
@@ -106,13 +108,13 @@ describe("记忆 Git 镜像", () => {
     expect(lib.entries.find((e) => e.id === "m3")?.domain).toBe("team");
   });
 
-  it("frontmatter 解析：坏文件给 null（不带走整批）", () => {
+  it.skipIf(!GIT_USABLE)("frontmatter 解析：坏文件给 null（不带走整批）", () => {
     expect(parseEntry("没有 frontmatter 的文本")).toBeNull();
     expect(parseEntry("---\nid: x\n---\n\n正文")?.text).toBe("正文");
     expect(parseEntry("---\nid: x\n---\n\n")?.text).toBeUndefined();
   });
 
-  it("不是仓库的目录会 init；push 没配 remote 会明确报错", () => {
+  it.skipIf(!GIT_USABLE)("不是仓库的目录会 init；push 没配 remote 会明确报错", () => {
     const dataDir = tmp("dh-memdata-");
     /* 用 repo() 是因为 git 提交需要 user.name/email；init 那一步由 export 的 ensureRepo 负责 */
     const r = repo();

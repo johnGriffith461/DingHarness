@@ -4,6 +4,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { GIT_USABLE } from "./gitProbe";
+
 import { createWorktree, listWorktrees, mergeWorktree, parseWorktreeList, removeWorktree } from "./worktree";
 
 /**
@@ -43,7 +45,7 @@ function repo(): string {
 }
 
 describe("worktree", () => {
-  it("解析 porcelain：路径/分支/detached", () => {
+  it.skipIf(!GIT_USABLE)("解析 porcelain：路径/分支/detached", () => {
     const text = [
       "worktree /repo",
       "HEAD abc123",
@@ -64,7 +66,7 @@ describe("worktree", () => {
     expect(trees[2]?.detached).toBe(true);
   });
 
-  it("⭐ 建隔离 → 改 → 合并回主树（闭环）", () => {
+  it.skipIf(!GIT_USABLE)("⭐ 建隔离 → 改 → 合并回主树（闭环）", () => {
     const root = repo();
     const created = createWorktree({ repo: root, name: "fix-a" });
     if (!created.ok) throw new Error(created.error);
@@ -81,7 +83,7 @@ describe("worktree", () => {
     expect(git(root, ["log", "-1", "--pretty=%s"]).trim()).toBe("merge 会话里的改动");
   });
 
-  it("worktree 里没改动：如实说没合并（不造一个空提交）", () => {
+  it.skipIf(!GIT_USABLE)("worktree 里没改动：如实说没合并（不造一个空提交）", () => {
     const root = repo();
     const created = createWorktree({ repo: root, name: "empty" });
     if (!created.ok) throw new Error(created.error);
@@ -91,7 +93,7 @@ describe("worktree", () => {
     expect(merged.note).toContain("没有可合并");
   });
 
-  it("⭐ 主树脏：拒绝合并（冲突不该落在用户自己的改动上）", () => {
+  it.skipIf(!GIT_USABLE)("⭐ 主树脏：拒绝合并（冲突不该落在用户自己的改动上）", () => {
     const root = repo();
     const created = createWorktree({ repo: root, name: "dirty" });
     if (!created.ok) throw new Error(created.error);
@@ -107,7 +109,7 @@ describe("worktree", () => {
     expect(fs.readFileSync(path.join(created.path, "a.txt"), "utf8")).toBe("worktree 改的\n");
   });
 
-  it("删 worktree（分支保留）", () => {
+  it.skipIf(!GIT_USABLE)("删 worktree（分支保留）", () => {
     const root = repo();
     const created = createWorktree({ repo: root, name: "gone" });
     if (!created.ok) throw new Error(created.error);
@@ -116,7 +118,7 @@ describe("worktree", () => {
     expect(listWorktrees(root).some((t) => t.branch === "ding/gone")).toBe(false);
   });
 
-  it("名字收窄：路径分隔符/点开头都不行", () => {
+  it.skipIf(!GIT_USABLE)("名字收窄：路径分隔符/点开头都不行", () => {
     const root = repo();
     expect(createWorktree({ repo: root, name: "../escape" }).ok).toBe(false);
     expect(createWorktree({ repo: root, name: ".hidden" }).ok).toBe(false);

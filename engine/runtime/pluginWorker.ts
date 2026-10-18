@@ -168,8 +168,16 @@ function startWith(
     const execArgv = tryPermission
       ? [
           "--permission",
-          `--allow-fs-read=${realDir}`,
-          ...(input.allowWrite ? [`--allow-fs-write=${realDir}`] : []),
+          /*
+           * 允许集合把**两条路都给**：调用方给的目录 + 它的 realpath（去重）。
+           *
+           * 只给 realpath 不够：插件拿到的路径仍是调用方那一条（macOS 上是 `/var/…`），
+           * 它写 `./inside.txt` 时权限模型看到的是**未解析**的子路径 —— 只认 realpath
+           * 的允许集合会把"明明在目录里"的写入拒掉（真机测试「已批准 fs:write
+           * 只能写插件目录」那条就是这么红的）。两条都给才不误伤同一种目录的两种写法。
+           */
+          ...[...new Set([input.dir, realDir])].map((dir) => `--allow-fs-read=${dir}`),
+          ...(input.allowWrite ? [...new Set([input.dir, realDir])].map((dir) => `--allow-fs-write=${dir}`) : []),
           ...(input.allowExec ? ["--allow-child-process"] : []),
         ]
       : [];
