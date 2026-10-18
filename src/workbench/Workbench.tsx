@@ -46,6 +46,7 @@ import { useMemoryStore } from "./memoryStore";
 import { useReaderStore } from "./readerStore";
 import { useDocStore } from "./docStore";
 import { startCanvasCommandHost } from "./canvasCommandHost";
+import { DiagnosticsDialog } from "./DiagnosticsDialog";
 import ThreadListPage from "./ThreadListPage";
 import FloatingAssistant from "./FloatingAssistant";
 import TitleBar from "./TitleBar";
@@ -309,6 +310,8 @@ export default function Workbench() {
       {/* 收起态由工作台持有（Esc 只在这一处判定，见上面的 Esc 处理） */}
       <SummaryPanel collapsed={summaryCollapsed} onCollapsedChange={setSummaryCollapsed} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      {/* G17：诊断包预览（「反馈」与命令面板都通过事件打开它） */}
+      <DiagnosticsDialog />
       {/* 悬浮助手窗挂应用级：云盘文件行的「问问豆包」也要能调起它 */}
       {floatOpen ? <FloatingAssistant onClose={closeFloat} seed={floatSeed} /> : null}
       {/*

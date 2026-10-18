@@ -76,6 +76,17 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         keys: "settings preferences 设置 偏好 通用",
         run: () => window.dispatchEvent(new CustomEvent("dsh-open-settings")),
       },
+      /*
+       * 诊断包（G17）：预览后导出。命令面板里也要有 —— 否则"反馈"只长在输入区
+       * 那一颗按钮上，键盘用户又回到"要记得它在哪"。
+       */
+      {
+        id: "diagnostics",
+        label: "反馈 / 导出诊断包",
+        hint: "先预览再导出（只落本机，不上报）",
+        keys: "feedback diagnostics 反馈 诊断 日志 bug",
+        run: () => window.dispatchEvent(new CustomEvent("dsh-open-diagnostics")),
+      },
     ],
     [setView, toggleCanvas, toggleNav],
   );

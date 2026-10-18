@@ -34,7 +34,8 @@ vi.mock("electron", () => ({
 }));
 
 import { appSettingsPath } from "../electron/ipc/appSettings";
-import { buildDiagnosticsBundle, diagnosticsDir, exportDiagnostics } from "../electron/ipc/diagnostics";
+import { buildDiagnosticsBundle, diagnosticsDir, exportDiagnostics, previewDiagnostics } from "../electron/ipc/diagnostics";
+import { openSqlite } from "../engine/adapters/sqliteDriver";
 
 let tmpRoot = "";
 /** 假凭据文件（不指向真实那份）+ 一把假 key（用完一定清掉）。 */
@@ -117,5 +118,52 @@ describe("诊断包导出（主进程侧）", () => {
     const model = checks.find((c) => c.name === "默认模型");
     expect(model?.detail).toContain("deepseek-chat");
     expect(json).not.toContain("SECRET-VALUE-123");
+  });
+});
+
+/**
+ * G17：**预览**与**最近事件**。
+ *
+ * 两条口径必须钉死：
+ * ① 预览与导出是**同一份文本**（不是另拼一份）；
+ * ② 最近事件只有类型/工具名，**不含对话正文**（诊断包要给第三方看）。
+ */
+describe("G17：预览 + 最近事件（不含正文）", () => {
+  it("预览 ok 时给出完整 JSON，且与导出的文件内容一致", () => {
+    const preview = previewDiagnostics(1_760_000_000_000);
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    const written = exportDiagnostics(1_760_000_000_000);
+    expect(written.ok).toBe(true);
+    if (!written.ok) return;
+    expect(readFileSync(written.path, "utf8")).toBe(preview.json);
+    expect(preview.bytes).toBeGreaterThan(100);
+    expect(preview.note).toContain("不含");
+  });
+
+  it("最近事件带类型与工具名，但不带正文", () => {
+    /* 直接建一个会话库，塞两条事件：一条正文很长的 text，一条 tool-call */
+    const dbFile = path.join(tmpRoot, "sessions.db");
+    const db = openSqlite(dbFile);
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS events (
+        session_id TEXT NOT NULL, seq INTEGER NOT NULL, at INTEGER NOT NULL,
+        type TEXT NOT NULL, payload TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (session_id, seq));`);
+      const payload = (o: unknown) => JSON.stringify(o);
+      db.prepare("INSERT INTO events (session_id, seq, at, type, payload, body) VALUES (?,?,?,?,?,?)").run(
+        "s1", 1, 1_760_000_000_000, "text", payload({ seq: 1, text: "这句是用户正文不该进包" }), "这句是用户正文不该进包",
+      );
+      db.prepare("INSERT INTO events (session_id, seq, at, type, payload, body) VALUES (?,?,?,?,?,?)").run(
+        "s1", 2, 1_760_000_001_000, "tool-call", payload({ seq: 2, toolName: "write_file" }), "",
+      );
+    } finally {
+      db.close();
+    }
+
+    const { json } = buildDiagnosticsBundle();
+    expect(json).toContain("tool-call");
+    expect(json).toContain("write_file");
+    expect(json, "对话正文进了诊断包").not.toContain("这句是用户正文不该进包");
   });
 });

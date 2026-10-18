@@ -769,14 +769,10 @@ export type ShellBridge = {
     key: (key: string) => Promise<ComputerResultView>;
     log: () => Promise<ComputerAuditView[]>;
   };
-  /**
-   * 诊断包导出（2026-10-17）。
-   *
-   * 「反馈」的本地形态：没有上报服务端，导出一个 JSON 诊断包（自检结果 + 版本/路径），
-   * 导出后主进程会在文件管理器里定位它。**不含任何密钥值**（回归里钉着这条）。
-   */
+  /** 诊断包（2026-10-17 / G17）：预览不写盘，导出写盘并在文件管理器定位；不含密钥值。 */
   diagnostics: {
     export: () => Promise<{ ok: true; path: string; bytes: number } | { ok: false; error: string }>;
+    preview: () => Promise<{ ok: true; json: string; bytes: number; note: string } | { ok: false; error: string }>;
   };
   /**
    * 插件（Phase 8.4）。

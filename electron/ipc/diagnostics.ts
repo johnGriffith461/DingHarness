@@ -3,6 +3,7 @@ import path from "node:path";
 import { app, ipcMain, shell } from "electron";
 
 import { doctorReport, runDoctor, type Check } from "../../engine/runtime/doctor";
+import { openSqlite } from "../../engine/adapters/sqliteDriver";
 import { redactSecrets } from "../../shared/redact";
 import { APP_SETTINGS_KEYS, appSettingsPath } from "./appSettings";
 
@@ -32,6 +33,8 @@ import { APP_SETTINGS_KEYS, appSettingsPath } from "./appSettings";
 /** IPC 通道名（preload 与主进程共用）。 */
 export const DIAG_CHANNEL = {
   export: "diag:export",
+  /** 预览：组装同一份包并把文本交回渲染层（**不写盘**）。 */
+  preview: "diag:preview",
 } as const;
 
 /** 诊断包落盘目录（与用户产物分开，不混进「产物」列表）。 */
@@ -44,6 +47,79 @@ const DESKTOP_SKIP = ["工作目录"] as const;
 
 /** 导出的结果：成功给路径，失败给一句人话。 */
 export type DiagnosticsExportResult = { ok: true; path: string; bytes: number } | { ok: false; error: string };
+
+/** 预览的结果：同一份文本（已脱敏）+ 一句范围说明。 */
+export type DiagnosticsPreviewResult =
+  | { ok: true; json: string; bytes: number; note: string }
+  | { ok: false; error: string };
+
+/** 最近事件里保留的字段（**不含正文**）。 */
+export type RecentEventLine = {
+  at: string;
+  session: string;
+  type: string;
+  /** 工具名（tool-call / tool-result 才有）。 */
+  tool?: string;
+  /** 这一步成功与否（tool-result 才有；`pending` 单独标）。 */
+  ok?: boolean;
+  pending?: boolean;
+  /** 运行态（run-state 才有）。 */
+  state?: string;
+};
+
+/**
+ * **最近事件摘要**（G17 的"最近事件"那一格）。
+ *
+ * ⚠️ 只取类型与元信息，**不取正文**（`events.body` 与 `payload.text` 一律不读）：
+ * 诊断包要给第三方看，"用户说了什么"不在里面。这条与文件头的红线一致。
+ *
+ * 读不动（库不存在 / 没这张表 / 老版本）时返回空数组 + 一句说明 ——
+ * 诊断包本身绝不能因为"读不到最近事件"而导出失败。
+ *
+ * @param dataDir 数据目录
+ * @param limit 最多几条
+ */
+export function recentActivity(dataDir: string, limit = 40): { events: RecentEventLine[]; note?: string } {
+  const file = path.join(dataDir, "sessions.db");
+  if (!fs.existsSync(file)) return { events: [], note: "还没有会话库（首次使用或已清理）" };
+  let db;
+  try {
+    db = openSqlite(file);
+  } catch (error) {
+    return { events: [], note: `会话库打不开：${String((error as Error)?.message ?? error).slice(0, 120)}` };
+  }
+  try {
+    const rows = db
+      .prepare("SELECT session_id, at, type, payload FROM events ORDER BY at DESC LIMIT ?")
+      .all(limit) as Array<{ session_id?: unknown; at?: unknown; type?: unknown; payload?: unknown }>;
+    const events: RecentEventLine[] = [];
+    for (const row of rows) {
+      const type = typeof row.type === "string" ? row.type : "";
+      if (!type) continue;
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = JSON.parse(String(row.payload ?? "{}")) as Record<string, unknown>;
+      } catch {
+        /* 坏行只丢它自己 */
+      }
+      const tool = typeof payload.toolName === "string" ? payload.toolName : typeof payload.name === "string" ? payload.name : undefined;
+      const line: RecentEventLine = {
+        at: new Date(Number(row.at ?? 0)).toISOString(),
+        session: String(row.session_id ?? "").slice(0, 64),
+        type,
+        ...(tool ? { tool } : {}),
+        ...(type === "tool-result" ? { ok: payload.error === undefined, ...(payload.pending === true ? { pending: true } : {}) } : {}),
+        ...(type === "run-state" && typeof payload.state === "string" ? { state: payload.state } : {}),
+      };
+      events.push(line);
+    }
+    return { events };
+  } catch (error) {
+    return { events: [], note: `最近事件读不出来：${String((error as Error)?.message ?? error).slice(0, 120)}` };
+  } finally {
+    db.close();
+  }
+}
 
 /**
  * 组装诊断包（纯组装 + 读一点的 IO；IPC 与测试都调它）。
@@ -96,6 +172,8 @@ export function buildDiagnosticsBundle(now: number = Date.now()): { bundle: Reco
       sessionsDb: path.join(dataDir, "sessions.db"),
       assets: path.join(dataDir, "assets"),
     },
+    /* G17「最近事件」：只放类型与元信息（**不含正文**）；读不动时 note 说明原因 */
+    recent: recentActivity(dataDir),
     doctor: doctorReport(checks),
   };
 
@@ -126,7 +204,28 @@ export function exportDiagnostics(now: number = Date.now()): DiagnosticsExportRe
   }
 }
 
+/**
+ * **预览诊断包**（G17："用户可预览内容"）：组装与导出**同一份**文本，但不写盘。
+ *
+ * 为什么必须复用 `buildDiagnosticsBundle`：预览要是另拼一份，用户看到的与被导出的
+ * 就不是同一份东西 —— 那比"不能预览"更坏（他会以为删掉了某段，实际导出的还有）。
+ */
+export function previewDiagnostics(now: number = Date.now()): DiagnosticsPreviewResult {
+  try {
+    const { json } = buildDiagnosticsBundle(now);
+    return {
+      ok: true,
+      json,
+      bytes: Buffer.byteLength(json, "utf8"),
+      note: "这是要导出的全部内容（已脱敏）：不含密钥值，最近事件只有类型与工具名、不含对话正文。",
+    };
+  } catch (error) {
+    return { ok: false, error: `诊断包组装失败：${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 /** 注册诊断包 IPC。 */
 export function registerDiagnosticsIpc(ipcMainInstance: Electron.IpcMain = ipcMain): void {
   ipcMainInstance.handle(DIAG_CHANNEL.export, async (): Promise<DiagnosticsExportResult> => exportDiagnostics());
+  ipcMainInstance.handle(DIAG_CHANNEL.preview, async (): Promise<DiagnosticsPreviewResult> => previewDiagnostics());
 }

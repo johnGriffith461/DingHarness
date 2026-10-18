@@ -33,12 +33,23 @@ export async function exportDiagnosticsPackage(): Promise<Outcome> {
 }
 
 /**
- * 「反馈」这条命令的**整套动作**：导出 → 用宿主给的提示条说一句。
+ * 「反馈」这条命令的**整套动作**：先预览 → 用户在预览里确认后导出。
  *
  * ⚠️ 组合放在这里而不是界面里：`Composer.tsx` 已经贴着结构守卫的 900 行上限，
  * 而"导出完必须说话"（成功带真实路径、失败带原因）是这条命令的语义，
  * 写在拥有它的模块里，界面那一行只管调它。
+ *
+ * G17：以前这里直接写盘 —— 用户对"要发给别人什么"没有任何过目机会。
+ * 现在打开预览浮层（与导出同一份组装），由用户自己按下导出。
  */
 export function runFeedbackCommand(show: (text: string) => void): void {
-  void exportDiagnosticsPackage().then((got) => show(got.message));
+  /*
+   * G17：先**预览**再导出。以前这里直接写盘 —— 用户对要发给别人什么没有任何
+   * 过目机会。现在打开预览浮层（同一份组装），由用户自己按下导出。
+   */
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    window.dispatchEvent(new CustomEvent("dsh-open-diagnostics"));
+    return;
+  }
+  show("诊断包预览需要在应用里打开");
 }

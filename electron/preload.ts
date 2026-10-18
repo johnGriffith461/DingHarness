@@ -320,10 +320,12 @@ const api = {
     revert: (sessionId: string, target: string) =>
       ipcRenderer.invoke(REVIEW_CHANNEL.revert, sessionId, target) as ReturnType<ShellBridge["review"]["revert"]>,
   },
-  /** 诊断包导出（2026-10-17）：写盘 + 在文件管理器里定位，返回真实路径。 */
+  /** 诊断包（2026-10-17；G17 加预览）：预览不写盘，导出写盘并定位。 */
   diagnostics: {
     export: (): Promise<{ ok: true; path: string; bytes: number } | { ok: false; error: string }> =>
       ipcRenderer.invoke(DIAG_CHANNEL.export),
+    preview: (): Promise<{ ok: true; json: string; bytes: number; note: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(DIAG_CHANNEL.preview),
   },
   coding: {
     loadLiked: (): Promise<string[]> => ipcRenderer.invoke(CODING_CHANNEL.read),
