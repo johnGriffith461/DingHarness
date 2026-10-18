@@ -265,7 +265,7 @@ CLI 有**两种装法**，验过的程度不一样 —— 分开说，别混成�
 | 平台 | 桌面 | CLI（npm 那条路） | CLI（单二进制） | 命令的资源上限 | 密钥加密存储 |
 |---|---|---|---|---|---|
 | **Windows x64** | ✅ 打包 + 启动验过（`pnpm package:win`） | ✅ 验过：`--help` / `sessions` / `models` / `doctor` / `eval` 63/63，且与源树逐条对照（`node scripts/verify-cli-npm.mjs`） | ✅ 编出来且**跑过**（`pnpm cli:release`：剥掉 PATH 只剩系统目录再跑，`eval` 63/63） | ✅ 作业对象（内存 / 子进程数 / 不留孤儿）；**安装包带着 `ding-sandbox.exe`**（落在 `resources/`，应用自己找得到） | ✅ 桌面走 DPAPI；CLI 无 |
-| macOS（x64 / arm64） | ⚠️ 目标配置就位，**没在真机上跑过** | ⚠️ 这条路只验过 Windows（纯 Node，理论上哪都一样，但**没在 macOS 上执行过**） | ⚠️ 编得出来，**没跑过** | ⚠️ 没打进去（只有 Windows 那份进了 `extraResources`） | ⚠️ 桌面可走 Keychain；未验证 |
+| macOS（x64 / arm64） | ⚠️ 目标配置就位，**桌面没在真机上跑过**；但**源码级门已在 macOS 26.7.1 真机跑通**（typecheck/lint/单测 3495 通过/18 跳过/0 失败、eval 63/63） | ⚠️ 这条路只验过 Windows（纯 Node，理论上哪都一样，但**没在 macOS 上执行过 npm 安装**） | ⚠️ 编得出来，**没跑过** | ⚠️ 没打进去（只有 Windows 那份进了 `extraResources`） | ⚠️ 桌面可走 Keychain；未验证 |
 | Linux x64 | ⚠️ 同上（AppImage / deb），**桌面版没在 Linux 上跑过** | ⚠️ 同上（没在 Linux 上执行过） | ✅ **跑过**：WSL Ubuntu 24.04 里 `--help` / `doctor` / `eval` 63/63（2026-10-16）—— 走的是单二进制那条路 | ⚠️ 同上（没打进去；实现只有 Windows 那份） | ⚠️ 桌面可走 libsecret；未验证 |
 
 **这张表就是"我们验过什么"的清单**：⚠️ 的那些是**能编出来但没在对应系统上执行过**，
@@ -334,7 +334,7 @@ ding connect 192.168.1.9:8787 "..." --token <口令>                    # 远端
 
 - **多平台**：见上面那张表 —— 桌面只有 Windows x64 验过；**CLI 单二进制**多了一个 Linux
   （WSL Ubuntu 24.04 上真跑过 `eval` 63/63）；**npm 那条路（`dist-cli`）只在 Windows 上执行过**；
-  macOS 仍然只有编得出来，**没在真机上跑过**。
+  macOS 桌面仍然只有编得出来（**源码级门已在真机跑通**，桌面没启动过）；Linux 桌面没在真机跑过。
 - **模型目录表**只登记了少数模型；未登记的走保守默认并在账本上标「未登记模型」。
 - 旧 JSONL 数据在启动时自动迁移，**迁移不删**旧文件；
   配置型数据从 Phase 12.1 起默认存 SQLite（`DSH_STORE_BACKEND=file` 可退回文件）。
