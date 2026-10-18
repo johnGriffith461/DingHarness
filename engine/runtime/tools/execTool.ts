@@ -267,6 +267,16 @@ function runPlan(
         shell: false,
         windowsHide: true,
         /*
+         * ⭐ **POSIX：自成进程组**（2026-10-18，Linux 实测发现的中止缺陷）。
+         *
+         * 直通路上命令常常是个壳（`sh -c 'node script.js'`），只 kill 壳的话
+         * 真正的 node 会活下来并继续占着 stdout —— 表现是"点了停止，40 秒后才回来"。
+         * `detached: true` 让子进程成为新进程组的组长，`killTree` 用 `kill(-pid)`
+         * 一次带走整组。Windows 不走这条（`taskkill /T` 已经处理了树）。
+         * 不 `unref()`：我们还要靠它的 exit 事件收尾。
+         */
+        detached: process.platform !== "win32",
+        /*
          * ⚠️ 直通路要**原样**把命令行交给 cmd：Node 的 CRT 转义会把命令里的引号弄坏，
          * 实测表现是"退出码 0、没有输出、什么都没跑"（见 `planFor` 的说明）。
          */
@@ -356,7 +366,11 @@ function runPlan(
  *
  * ⚠️ 这台机器是 Windows：`child.kill()` 只杀 `cmd.exe`，
  * 它下面的孙进程会活着继续跑（超时"杀掉了"其实没杀掉，是最难发现的那类假象）。
- * 所以 Windows 上走 `taskkill /T`；POSIX 上 kill 进程组意义不大，直接 SIGKILL。
+ * 所以 Windows 上走 `taskkill /T`。
+ *
+ * ⚠️ POSIX：**必须杀进程组**（`kill(-pid)`）。只杀直接子进程时，命令壳下面的
+ * 真命令会活下来并继续占着 stdout。实测（WSL）表现是"中止后 40 秒才返回"，
+ * 而结果还写着"已中止"。spawn 时给了 `detached: true` 才有一个可杀的组。
  */
 function killTree(child: ReturnType<typeof spawn>): void {
   const pid = child.pid;
@@ -366,9 +380,15 @@ function killTree(child: ReturnType<typeof spawn>): void {
     return;
   }
   try {
-    child.kill("SIGKILL");
+    /* 负 pid = 整个进程组（spawn 时 detached 让它自成一组的组长） */
+    process.kill(-pid, "SIGKILL");
   } catch {
-    /* 已经没了就算了 */
+    /* 组已经没了 / 没起来：退回只杀直接子进程 */
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* 已经没了就算了 */
+    }
   }
 }
 

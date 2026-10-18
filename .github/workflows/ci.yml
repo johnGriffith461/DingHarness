@@ -162,6 +162,41 @@ jobs:
   # 若它在 CI 上偶发红（起不来 / CDP 连不上），先看 `.verify/accept-smoke-data/` 与应用日志，
   # 判断是环境还是产品 —— 这台机器上"某段回环端口对 Electron 不通"的坑，
   # `harness.mjs` 的 `pickPort` / `bootApp` 已经换端口重试兜过一层，但 CI 的网络栈与这里不同。
+  # ── 跨平台（D09 构建矩阵的第一格）──
+  #
+  # 2026-10-18 在 WSL Ubuntu（Node 22）上**真跑过**同一套源码级门：
+  # typecheck / lint 绿，全量单测 309 文件 / 3497 条通过、6 条 Windows 专属跳过。
+  # 这一步把那个信号固化进 CI —— 否则"Linux 能不能跑"只能靠谁碰巧想起来验。
+  #
+  # ⚠️ macOS **没有跑过**，所以这里**不加**一格只在纸面上的 job；要加得先有真信号。
+  gates-linux:
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      # 零出网闸：任何真调远程模型的路径直接失败，而不是悄悄烧钱。
+      DSH_NO_REAL_MODEL: "1"
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+      - name: 装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: 装 pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - name: 装依赖（锁文件为准）
+        run: pnpm install --frozen-lockfile
+      - name: 类型
+        run: pnpm typecheck
+      - name: lint
+        run: pnpm lint
+      - name: 单测（Windows 专属断言在 Linux 上显式 skip）
+        env:
+          DSH_CANVAS_DATA_DIR: ${{ runner.temp }}/dsh-canvas-data
+        run: pnpm test
+
   smoke:
     needs: gates
     runs-on: windows-latest

@@ -136,14 +136,32 @@ describe("ding doctor（Phase 11.4）", () => {
      * `writeSecret` 写过，而当时那条路没人调。现在桌面「设置里填 key」真的调它，
      * 所以这一格必须能答：还没有存过 / 已加密（哪一层）/ 有文件但解不开。
      * 这里钉住"它是个现状报告而不是错误"，以及"它真的读了密钥库那两份东西"。
+     *
+     * ⚠️ 2026-10-18（Linux 实测）：这条原来**依赖开发机碰巧有** `~/.dsh/.credentials.yaml`，
+     * 在干净机器（和 WSL）上直接红 —— 不是产品坏了，是测试没造出它要的前提。
+     * 现在把 HOME/USERPROFILE 指到临时目录并在那里放一份明文凭据，跨平台可重复。
      */
-    const checks = doctorWith(freshDir());
-    const cred = checks.find((c) => c.name === "凭据保护");
-    expect(cred, "没有「凭据保护」这一格").toBeTruthy();
-    expect(cred!.ok, "这一格是现状报告，不该判成失败").toBe(true);
-    expect(cred!.detail).toContain("我们自己的加密库");
-    expect(cred!.next.trim().length).toBeGreaterThan(0);
-    expect(cred!.detail, "没提那条明文文件（它是这一格要说清的第三件事）").toContain("credentials.yaml");
+    const home = freshDir();
+    fs.mkdirSync(path.join(home, ".dsh"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".dsh", ".credentials.yaml"), "refs:\n  DEEPSEEK_API_KEY: sk-test\n", "utf8");
+    const prevHome = process.env.HOME;
+    const prevProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const checks = doctorWith(freshDir());
+      const cred = checks.find((c) => c.name === "凭据保护");
+      expect(cred, "没有「凭据保护」这一格").toBeTruthy();
+      expect(cred!.ok, "这一格是现状报告，不该判成失败").toBe(true);
+      expect(cred!.detail).toContain("我们自己的加密库");
+      expect(cred!.next.trim().length).toBeGreaterThan(0);
+      expect(cred!.detail, "没提那条明文文件（它是这一格要说清的第三件事）").toContain("credentials.yaml");
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevProfile;
+    }
   });
 
   it("⑧ `--json` 的形状：ok / failed / checks 三件都在", () => {

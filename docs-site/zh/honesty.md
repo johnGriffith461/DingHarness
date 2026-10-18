@@ -15,10 +15,14 @@
 ## 平台
 
 - 桌面只有 **Windows x64** 打包并启动验过；macOS/Linux 的桌面**没在真机上跑过**。
+- **源码级门在 Linux 上验过**（2026-10-18，WSL Ubuntu / Node 22）：`typecheck`、`lint` 绿，
+  全量单测 **309 文件 / 3497 条通过**（6 条 Windows 专属断言跳过）；CI 已加
+  `ubuntu-latest` 一格固化它。**macOS 没跑过**，所以没有 macOS 那一格。
 - CLI 的 npm 路线只在 Windows 上执行过（**2026-10-18 干净安装复验**：空缓存空前缀装
   `ding-harness@0.5.1`，版本对、`eval` 63/63）；macOS/Linux 的 npm 安装**没跑过**。
   单二进制在 WSL Ubuntu 上跑过 `eval`。
-- `run_command` 的资源上限（作业对象）**只有 Windows**；macOS/Linux 没有。
+- `run_command` 的资源上限（作业对象）**只有 Windows**；macOS/Linux 没有
+  （但中止信号在 Linux 上改成杀**进程组**，实测从"40 秒才返回"变成约 0.3 秒）。
 
 ## 安全
 

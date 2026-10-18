@@ -24,3 +24,10 @@ build output as artifacts. It does **not** publish: no npm token lives in the re
 
 ⚠️ Honest status: the workflow has not run on GitHub yet (local commits are unpushed).
 The same script has run locally once — see the Chinese page for the result table.
+
+## Cross-platform status (2026-10-18)
+
+Source-level gates have been run for real on **Linux** (WSL Ubuntu, Node 22):
+typecheck, lint, and the full unit suite (309 files / 3497 tests, 6 Windows-only skipped).
+CI now includes an `ubuntu-latest` job. macOS has **not** been run — there is no macOS job,
+because a job that only exists on paper is worse than an honest gap.
