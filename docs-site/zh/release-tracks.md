@@ -49,8 +49,10 @@ pnpm release:check -- --stable # 断言这是稳定版（不许预发布后缀�
 `.github/workflows/nightly.yml` 每天跑同一份 `nightly-gates.mjs`，把证据与构建产物
 作为 workflow artifact 上传。**它不发布**：仓库里没有 npm 令牌，发布也轮不到流水线决定。
 
-⚠️ 现状如实说：**这份 workflow 还没在 GitHub 上真跑过**（本机提交未 push）。
-本机已经用它调用的同一个脚本真实跑通过一次，结论写进了本文档的"最近一次"。
+**它已经在 GitHub 上真跑过**（2026-10-18，手动触发，run `39139112138`，3 分 20 秒全绿）。
+第一次跑是**红的**（14 秒）：action 里写了 `version: 10`，而 `package.json` 已有
+`packageManager: pnpm@10.34.1` → "Multiple versions of pnpm specified" 直接退出。
+改成与 CI 同一写法后通过 —— 这就是"写了但没跑过"的代价，记在这里。
 
 ## 最近一次本机实跑（2026-10-18）
 

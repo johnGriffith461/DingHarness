@@ -22,8 +22,10 @@ The promotion check (unit-tested in `shared/release.test.ts`) refuses when:
 `.github/workflows/nightly.yml` runs the same script daily and uploads the evidence +
 build output as artifacts. It does **not** publish: no npm token lives in the repo.
 
-⚠️ Honest status: the workflow has not run on GitHub yet (local commits are unpushed).
-The same script has run locally once — see the Chinese page for the result table.
+**It has now run on GitHub** (2026-10-18, `workflow_dispatch`, run `39139112138`, green in 3m20s).
+The first attempt failed in 14 seconds: the action pinned `version: 10` while `package.json`
+already declares `packageManager: pnpm@10.34.1` → "Multiple versions of pnpm specified".
+Fixed by matching the CI workflow.
 
 ## Cross-platform status (2026-10-18)
 

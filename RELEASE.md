@@ -85,9 +85,11 @@ CLI 补丁版可以独立于产品版本（`PRODUCT_VERSION` 仍是 0.5.0）；`
 > 写 `nightly-evidence.json`）与 `node scripts/promote-nightly.mjs --manifest <证据> [--write]`
 > （核对证据、只改版本号）。判定在 `shared/release.ts`，有单测；CI 侧
 > `.github/workflows/nightly.yml` 每天跑同一份脚本并上传证据。
-> **但这条 workflow 还没在 GitHub 上跑过**（本地提交未 push）；本机已用同一脚本
-> 真实跑通过一次（七道门全绿），`--write` 只在临时副本上演示过 ——
-> 本仓库版本号没有被自动改动。详见 `docs-site/zh/release-tracks.md`。
+> **这条 workflow 已经在 GitHub 上真跑过**（2026-10-18 手动触发，run `39139112138`，
+> 3 分 20 秒全绿；第一次是 14 秒就红 —— pnpm 版本写重了，已修）。
+> 本机也用同一脚本真跑过（七道门全绿），`--write` 只在临时副本上演示过 ——
+> 本仓库版本号没有被自动化改动，0.6.0 是人工确认后发的。
+> 详见 `docs-site/zh/release-tracks.md`。
 
 ## 七、发版 checklist（照着勾）
 
