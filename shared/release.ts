@@ -115,3 +115,64 @@ export function checkPromotion(evidence: NightlyEvidence | null | undefined, opt
   if (problems.length) return { ok: false, problems };
   return { ok: true, from: evidence.version, to: parsed.ok ? parsed.base : "" };
 }
+
+/* ─────────────────── 发版前的机械核对（E01 的准备，不发布） ─────────────────── */
+
+/** 一份版本文件（路径 + 里面写的版本）。 */
+export type VersionFile = { file: string; version: string };
+
+/** 一次版本一致性核对。 */
+export type VersionCheck = { ok: true; version: string } | { ok: false; problems: string[] };
+
+/**
+ * 核对几份版本号文件是否一致、形状是否符合这次要发的轨道。
+ *
+ * @param files 版本文件（`shared/version.json` / `package.json` / `packages/cli/package.json`）
+ * @param mode `stable` = 不许预发布后缀；`nightly` = 必须是 nightly 形状；`any` = 只要一致
+ */
+export function checkVersionSet(files: readonly VersionFile[], mode: "stable" | "nightly" | "any" = "any"): VersionCheck {
+  const problems: string[] = [];
+  if (!files.length) return { ok: false, problems: ["没有任何版本文件"] };
+
+  for (const item of files) {
+    if (!item.version || !/^\d+\.\d+\.\d+/.test(item.version.trim())) {
+      problems.push(`${item.file} 的版本不是 X.Y.Z：${JSON.stringify(item.version)}`);
+    }
+  }
+  const versions = new Set(files.map((f) => f.version.trim()));
+  if (versions.size > 1) {
+    problems.push(`版本号不一致：${files.map((f) => `${f.file}=${f.version}`).join(" / ")}`);
+  }
+  const version = files[0]!.version.trim();
+  if (mode === "stable" && version.includes("-")) {
+    problems.push(`stable 发布不能带预发布后缀（收到 ${version}）`);
+  }
+  if (mode === "nightly") {
+    const parsed = parseNightlyVersion(version);
+    if (!parsed.ok) problems.push(parsed.reason);
+  }
+  return problems.length ? { ok: false, problems } : { ok: true, version };
+}
+
+/**
+ * CHANGELOG 的发布段是否就绪。
+ *
+ * 口径（Keep a Changelog + 本仓习惯）：**最上面那个二级标题**要么是 `## 未发布`（还没发），
+ * 要么是 `## X.Y.Z`（已发）。发版时把「未发布」改成版本号 + 日期 —— 写在这里，
+ * 是因为"忘了改标题"是最常见的漏项，而它没人会红。
+ *
+ * @param changelog CHANGELOG.md 全文
+ * @param version 这次要发的版本（给了就要求标题里出现它，或仍是「未发布」）
+ */
+export function checkChangelogHeading(changelog: string, version?: string): { ok: boolean; heading: string; problem?: string } {
+  const heading = /^##\s+(.+)$/m.exec(changelog)?.[1]?.trim() ?? "";
+  if (!heading) return { ok: false, heading: "", problem: "CHANGELOG.md 里没有二级标题（找不到发布段）" };
+  if (heading.startsWith("未发布")) return { ok: true, heading };
+  if (!version) return { ok: true, heading };
+  if (heading.includes(version)) return { ok: true, heading };
+  return {
+    ok: false,
+    heading,
+    problem: `CHANGELOG 最上面的发布段是「${heading}」，既不是「未发布」也不含 ${version} —— 发版前要把标题改成版本号 + 日期`,
+  };
+}

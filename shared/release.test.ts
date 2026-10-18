@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   PROMOTION_GATES,
+  checkChangelogHeading,
   checkPromotion,
+  checkVersionSet,
   parseNightlyVersion,
   stableFromNightly,
   type NightlyEvidence,
@@ -95,5 +97,60 @@ describe("晋升检查", () => {
     for (const gate of PROMOTION_GATES) {
       expect(doc, `RELEASE.md 里没有这道门：${gate}`).toContain(gate);
     }
+  });
+});
+
+/** E01 准备：发版前的机械核对（版本一致 + 轨道形状 + CHANGELOG 标题）。 */
+describe("checkVersionSet", () => {
+  it("三份一致 → 通过", () => {
+    expect(
+      checkVersionSet([
+        { file: "shared/version.json", version: "0.6.0" },
+        { file: "package.json", version: "0.6.0" },
+        { file: "packages/cli/package.json", version: "0.6.0" },
+      ]),
+    ).toEqual({ ok: true, version: "0.6.0" });
+  });
+
+  it("不一致 → 点名（这是最容易漂的地方）", () => {
+    const got = checkVersionSet([
+      { file: "shared/version.json", version: "0.6.0" },
+      { file: "package.json", version: "0.5.1" },
+    ]);
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.problems.join("\n")).toContain("不一致");
+  });
+
+  it("stable 不许带预发布后缀；nightly 必须是 nightly 形状", () => {
+    const nightly = [{ file: "package.json", version: "0.6.0-nightly.20261018" }];
+    expect(checkVersionSet(nightly, "stable").ok).toBe(false);
+    expect(checkVersionSet(nightly, "nightly").ok).toBe(true);
+    expect(checkVersionSet([{ file: "package.json", version: "0.6.0" }], "nightly").ok).toBe(false);
+  });
+
+  it("形状不对（缺位）→ 拒绝", () => {
+    expect(checkVersionSet([{ file: "package.json", version: "1.2" }]).ok).toBe(false);
+  });
+});
+
+describe("checkChangelogHeading", () => {
+  const doc = (heading: string) => `# 变更记录\n\n${heading}\n\n- 一条改动\n`;
+
+  it("「未发布」永远算就绪（还没发）", () => {
+    expect(checkChangelogHeading(doc("## 未发布"), "0.6.0")).toEqual({ ok: true, heading: "未发布" });
+  });
+
+  it("标题含这次版本 → 就绪", () => {
+    expect(checkChangelogHeading(doc("## 0.6.0（2026-10-20）"), "0.6.0").ok).toBe(true);
+  });
+
+  it("标题还是旧版本 → 说清该怎么改", () => {
+    const got = checkChangelogHeading(doc("## 0.5.1（2026-10-18）"), "0.6.0");
+    expect(got.ok).toBe(false);
+    expect(got.problem).toContain("0.6.0");
+  });
+
+  it("没有二级标题 → 不假装就绪", () => {
+    expect(checkChangelogHeading("# 只有一级标题\n").ok).toBe(false);
   });
 });

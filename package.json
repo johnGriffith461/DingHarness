@@ -59,7 +59,8 @@
     "longtask:real": "tsx scripts/longtask-real.ts",
     "verify:clean-install": "node scripts/verify-clean-install.mjs",
     "nightly:gates": "node scripts/nightly-gates.mjs",
-    "nightly:promote": "node scripts/promote-nightly.mjs"
+    "nightly:promote": "node scripts/promote-nightly.mjs",
+    "release:check": "node scripts/release-check.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

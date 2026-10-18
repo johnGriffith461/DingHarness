@@ -13,6 +13,10 @@ node scripts/nightly-gates.mjs --base 0.6.0    # 指定基础版本
 # ② 核对证据并晋升（默认只检查）
 node scripts/promote-nightly.mjs --manifest .verify/nightly-evidence.json
 node scripts/promote-nightly.mjs --manifest .verify/nightly-evidence.json --write
+
+# ③ 发版前的机械核对（不发布）
+pnpm release:check            # 版本一致 / 轨道形状 / CHANGELOG 标题 / 三份产物在
+pnpm release:check -- --stable # 断言这是稳定版（不许预发布后缀）
 ```
 
 `--write` **只改版本号**（`shared/version.json` / `package.json` / `packages/cli/package.json`），
