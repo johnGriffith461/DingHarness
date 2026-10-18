@@ -103,7 +103,7 @@ CI 门禁（`pnpm test` 里的 `engine/eval/eval.test.ts`）：
 ⚠️ **这个数不能当"SWE-bench 成绩"引用**：10 条是有偏小样本（只挑了 5 个小仓库），
 95% 置信区间宽到 ±28 个百分点。它证明的是**链路真的通了**，不是模型的位次。
 
-### 5.2 这一轮修掉的三个测量缺陷（都会让数字变成假的）
+### 5.2 这一轮修掉的四个测量缺陷（都会让数字变成假的）
 
 1. **补丁把依赖目录收进来**：agent 在仓库里 `pip install -t .testlibs` 之后，
    `git add -A` 把整个依赖树写进 patch（实测一条 **87,278 行**），官方 harness 必然判不过。
@@ -116,6 +116,11 @@ CI 门禁（`pnpm test` 里的 `engine/eval/eval.test.ts`）：
    修法：写 `eval.sh` 时强制 LF（本机打补丁，未改上游）。
 3. **用量根本没记**：生成脚本原来 `onEvent` 是空的，跑完不知道花了多少 token ——
    现在按 `step-finish` 累加输入/输出并存出来（上面的"用量"那一行就来自它）。
+4. **测试生成的目录进了补丁**：50 条那轮 `sphinx-10435` 的补丁有 **1,276,898 行** ——
+   agent 跑了 Sphinx 自己的测试套，`tests/roots` 下每个用例目录长出一棵 `_build` HTML 树，
+   `git add -A` 全收进 patch。这一条只能按"超上限"计失败，但原因不是模型。
+   排除清单现在也盖住 `_build` / `.doctrees` / `dist` / `htmlcov` / `*.so` 这类生成物，
+   并单点化到 `engine/bench/swebench.ts`（有测试守住 `:(exclude)` 前缀）。
 
 ## 6. 爬山闭环（怎么改才算"变好"）
 

@@ -103,15 +103,23 @@ eval_file.write_bytes(_eval_lf.encode("utf-8"))
 （这是**本机对上游打的补丁**，不在本仓；重装 harness 会丢，要重打。）
 判据很简单：`file logs/.../eval.sh` 不能出现 `CRLF`。
 
-### 2. 补丁把依赖目录收进来
+### 2. 补丁把依赖目录收进来（以及测试生成的 `_build` 树）
 
 agent 为了让测试能跑，常在仓库里 `pip install -t .testlibs ...`，
 而收改动用的是 `git add -A` —— 整个依赖树进了 patch（实测一条 **87,278 行**）。
 官方 harness 应用不动，必然 unresolved，而这跟"修得对不对"无关。
 
-现在生成脚本用 pathspec 排除 `.testlibs/**`、`__pycache__`、`*.egg-info`、
-`.tox`、`node_modules`、`.venv`、`*.pyc`，并给补丁加 **3000 行上限**
-（超了不写进预测、单独计数）。判据：正常修复的补丁是**几十到几百行**。
+50 条那轮又见到更离谱的一种：`sphinx-10435` 的补丁 **1,276,898 行** —— agent 跑了
+Sphinx 自己的测试套，`tests/roots` 下每个用例目录都长出一棵 `_build` HTML 树，
+`git add -A` 全收了进去。这条只能按"超上限"计失败，但失败原因**不是模型**。
+
+现在生成脚本用 pathspec 排除依赖树、各种 `__pycache__` / `.pytest_cache` / `*.egg-info`、
+`.tox` / `.nox` / `node_modules` / `.venv`，以及**跑一次测试就长出来**的目录
+（`_build`、`.doctrees`、`dist`、`htmlcov`、`*.pyc` / `*.so` / `*.whl`），
+并给补丁加 **3000 行上限**（超了不写进预测、单独计数）。清单收在
+`engine/bench/swebench.ts` 的 `SWEBENCH_PATCH_EXCLUDES`，有测试钉住
+"每条都必须带 `:(exclude)`"——裸路径在 `git diff` 里是**包含**过滤，会把补丁收成空。
+判据：正常修复的补丁是**几十到几百行**。
 
 ### 3. Docker Desktop 管道中断
 
@@ -150,5 +158,5 @@ Docker 镜像构建 + 模型生成 + 本地全量测试三者同时跑，这台�
    负载高时跑到 6–14 秒并超时。判据是**单独跑同一条文件就绿** —— 那是环境，不是产品坏了。
 
 所以：判分与生成**串行**跑；这期间不要跑 `pnpm test`。
-判分前的镜像构建按仓库/版本合并（50 条实例实测只需要 9 个环境镜像），
+判分前的镜像构建按仓库/版本合并（50 条实例实测需要 **11 个**环境镜像），
 `--max_workers 1` 稳、`2` 会撞上面的管道错误。
