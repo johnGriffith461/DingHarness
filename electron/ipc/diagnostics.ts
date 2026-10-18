@@ -4,6 +4,7 @@ import { app, ipcMain, shell } from "electron";
 
 import { doctorReport, runDoctor, type Check } from "../../engine/runtime/doctor";
 import { openSqlite } from "../../engine/adapters/sqliteDriver";
+import { recentCrashes } from "./crashLog";
 import { redactSecrets } from "../../shared/redact";
 import { APP_SETTINGS_KEYS, appSettingsPath } from "./appSettings";
 
@@ -174,6 +175,8 @@ export function buildDiagnosticsBundle(now: number = Date.now()): { bundle: Reco
     },
     /* G17「最近事件」：只放类型与元信息（**不含正文**）；读不动时 note 说明原因 */
     recent: recentActivity(dataDir),
+    /* G17「崩溃留痕」：最近 5 条（已脱敏，只落本机、从不上传） */
+    crashes: recentCrashes(dataDir, 5),
     doctor: doctorReport(checks),
   };
 

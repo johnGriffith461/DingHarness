@@ -25,6 +25,7 @@ import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
 import { registerArtifactIpc } from "./ipc/artifactStore";
 import { registerDiagnosticsIpc } from "./ipc/diagnostics";
+import { recordCrash } from "./ipc/crashLog";
 import { registerDriveIpc } from "./ipc/driveStore";
 import { registerScheduleIpc } from "./ipc/scheduleStore";
 import { registerDocIpc } from "./ipc/docStore";
@@ -204,11 +205,30 @@ if (debugPort) {
   bootLog(`已开启调试端口 ${debugPort}`);
 }
 
+/*
+ * 崩溃：**同时**写 boot.log 与 crashes.jsonl（G17）。
+ *
+ * boot.log 是"启动过程"的流水，不进诊断包；crashes.jsonl 才是"崩溃证据"——
+ * 它会进诊断包（最近 5 条、已脱敏）。两处都写，是因为它们回答不同的问题：
+ * "它是在哪一步崩的" vs "崩在哪行代码"。
+ */
+function recordEverywhere(kind: "uncaught-exception" | "unhandled-rejection", error: unknown): void {
+  const dirs = [app.getPath("userData"), path.join(__dirname, "..", "..", "data")];
+  for (const dir of dirs) {
+    /* 写不进去时静默跳过 —— 崩溃处理器里再抛会变成递归崩溃 */
+    recordCrash(dir, kind, error, {
+      ...(app.isReady() ? { version: app.getVersion() } : {}),
+      platform: `${process.platform} ${process.arch}`,
+    });
+  }
+}
 process.on("uncaughtException", (error) => {
   bootLog(`未捕获异常：${error.stack ?? error.message}`);
+  recordEverywhere("uncaught-exception", error);
 });
 process.on("unhandledRejection", (reason) => {
   bootLog(`未处理的 Promise 拒绝：${reason instanceof Error ? reason.stack : String(reason)}`);
+  recordEverywhere("unhandled-rejection", reason);
 });
 
 /**
@@ -375,6 +395,22 @@ async function createWindow(): Promise<void> {
     else console.warn(`[shell] 已拦下应用内导航（非白名单）：${url}`);
   });
 
+  /*
+   * 渲染进程消失（G17）：白屏最常见的原因，而之前**只有白屏、没有任何记录**。
+   * 记下 reason/exitCode —— 它区分"用户强杀"与"真的崩了"。
+   */
+  win.webContents.on("render-process-gone", (_event, details) => {
+    const detail = `reason=${details.reason} exitCode=${details.exitCode}`;
+    bootLog(`渲染进程消失：${detail}`);
+    for (const dir of [app.getPath("userData"), path.join(__dirname, "..", "..", "data")]) {
+      recordCrash(dir, "renderer-gone", details.reason, {
+        ...(app.isReady() ? { version: app.getVersion() } : {}),
+        platform: `${process.platform} ${process.arch}`,
+        detail,
+      });
+    }
+  });
+
   if (await shouldUseDevServer()) {
     await win.loadURL(DEV_SERVER);
     win.webContents.openDevTools({ mode: "detach" });
@@ -522,6 +558,22 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+/*
+ * **子进程消失**（G17）：连接器（MCP）是子进程，它自己死掉时之前只有一句
+ * console 输出。记下来 —— "连接器突然没工具了"要能对上"它什么时候死的"。
+ */
+app.on("child-process-gone", (_event, details) => {
+  const detail = `type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`;
+  bootLog(`子进程消失：${detail}`);
+  for (const dir of [app.getPath("userData"), path.join(__dirname, "..", "..", "data")]) {
+    recordCrash(dir, "child-process-gone", details.reason, {
+      ...(app.isReady() ? { version: app.getVersion() } : {}),
+      platform: `${process.platform} ${process.arch}`,
+      detail,
+    });
+  }
 });
 
 /* 退出前把连接器的子进程收掉，别在系统里留孤儿进程 */

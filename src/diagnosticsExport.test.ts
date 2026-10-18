@@ -36,6 +36,7 @@ vi.mock("electron", () => ({
 import { appSettingsPath } from "../electron/ipc/appSettings";
 import { buildDiagnosticsBundle, diagnosticsDir, exportDiagnostics, previewDiagnostics } from "../electron/ipc/diagnostics";
 import { openSqlite } from "../engine/adapters/sqliteDriver";
+import { recordCrash } from "../electron/ipc/crashLog";
 
 let tmpRoot = "";
 /** 假凭据文件（不指向真实那份）+ 一把假 key（用完一定清掉）。 */
@@ -165,5 +166,22 @@ describe("G17：预览 + 最近事件（不含正文）", () => {
     expect(json).toContain("tool-call");
     expect(json).toContain("write_file");
     expect(json, "对话正文进了诊断包").not.toContain("这句是用户正文不该进包");
+  });
+});
+
+/** G17：崩溃记录也要进诊断包（最近 5 条、脱敏、只落本机）。 */
+describe("G17：崩溃留痕进诊断包", () => {
+  it("记过一条崩溃之后，诊断包里能看到它（且不含密钥）", () => {
+    recordCrash(tmpRoot, "uncaught-exception", new Error("启动时炸了 Authorization: Bearer sk-crash-abcdef123456"));
+    const { json, bundle } = buildDiagnosticsBundle();
+    expect(json).toContain("uncaught-exception");
+    expect(json).toContain("启动时炸了");
+    expect(json).not.toContain("sk-crash-abcdef123456");
+    expect(Array.isArray((bundle as { crashes?: unknown }).crashes)).toBe(true);
+  });
+
+  it("没崩过就是空数组（不编一条假的）", () => {
+    const { bundle } = buildDiagnosticsBundle();
+    expect((bundle as { crashes?: unknown[] }).crashes).toEqual([]);
   });
 });
