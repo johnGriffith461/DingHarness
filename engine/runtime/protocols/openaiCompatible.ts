@@ -11,11 +11,12 @@ import type { ProtocolAdapter } from "./types";
 export const openaiCompatible: ProtocolAdapter = {
   id: "openai-compatible",
   label: "OpenAI 兼容",
-  createModel: ({ baseURL, apiKey, model, headers }) =>
+  createModel: ({ baseURL, apiKey, model, headers, fetch }) =>
     createOpenAICompatible({
       name: "openai-compatible",
       baseURL,
       ...(apiKey ? { apiKey } : {}),
       ...(headers ? { headers } : {}),
+      ...(fetch ? { fetch } : {}),
     })(model),
 };

@@ -34,7 +34,6 @@ import {
 } from "./runtime/registry";
 import { envSecret, type SecretPort } from "./ports/secret";
 import { runTurn, type TurnEvent } from "./runtime/loop";
-import type { ReasoningEffort } from "./runtime/protocols/reasoning";
 
 /**
  * 内核的公开 API（Phase 1 D1 冻结）。
@@ -134,7 +133,17 @@ export type EngineRunRequest = {
   history?: { role: "system" | "user" | "assistant"; content: string }[];
   temperature?: number;
   /** 思考强度（见 ）：不给 = 不发，与以前完全一致。 */
-  reasoningEffort?: ReasoningEffort;
+  /** 思考档位（T0）：档位集合由模型能力表单声明，不再写死三档。 */
+  reasoningEffort?: string;
+  /**
+   * **模型能力表单解析出的运行时视图**（T0）。
+   *
+   * 给了就按它来（输出上限 / 参数映射 / 结构化输出 / 原生联网 / 中途 system / 模态）；
+   * 不给 = 与以前完全一致。
+   */
+  modelConfig?: import("./runtime/modelRuntime").RuntimeModelConfig;
+  /** 结构化输出要求的 JSON Schema（配合模型声明的能力）。 */
+  responseJsonSchema?: Record<string, unknown>;
   /** 闸门档位。 */
   mode: ConfirmMode;
   /** 给不给工具（起标题、翻译这类附带请求不给 —— 它们拿到工具会真的动手）。 */
@@ -454,6 +463,8 @@ export function createEngine(ports: EnginePorts): Engine {
           messages,
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
+          ...(request.modelConfig === undefined ? {} : { modelConfig: request.modelConfig }),
+          ...(request.responseJsonSchema === undefined ? {} : { responseJsonSchema: request.responseJsonSchema }),
           ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
           ...(request.onRawError ? { onRawError: request.onRawError } : {}),
           ...(request.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: request.stallTimeoutMs }),

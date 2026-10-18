@@ -98,7 +98,7 @@ describe("按窗口推导（keepForWindow）", () => {
 });
 
 describe("三档（long / balanced / economy）", () => {
-  it("默认档位是 long（ZCode parity）", () => {
+  it("默认档位是 long（按窗口推导）", () => {
     expect(DEFAULT_CONTEXT_BUDGET).toBe("long");
     expect(keepForWindow(1_000_000)).toBe(keepForWindow(1_000_000, "long"));
   });
@@ -192,5 +192,42 @@ describe("给人看的那句话（describeBudget / budgetBreakdown）", () => {
     expect(got.keep).toBe(keepTokensFor("deepseek-flash"));
     expect(got.contextWindow).toBe(1_000_000);
     expect(got.outputReserve).toBe(OUTPUT_RESERVE_MAX);
+  });
+});
+
+describe("用户声明的窗口（T0 模型能力表单）", () => {
+  it("用户声明的窗口优先于目录表", () => {
+    const found = budgetOf("deepseek-flash", Date.now(), { contextWindow: 200_000 });
+    expect(found.registered).toBe(true);
+    expect(found.contextWindow).toBe(200_000);
+    expect(found.registered && found.source).toBe("user");
+  });
+
+  it("目录表命中时 source 是 catalog（界面要分开显示「你填的」与「我们核过的」）", () => {
+    const found = budgetOf("deepseek-flash");
+    expect(found.registered && found.source).toBe("catalog");
+  });
+
+  it("用户声明的窗口让未登记模型也能按真实窗口跑（这是 T0 的目的）", () => {
+    expect(keepTokensFor("完全没登记过的模型")).toBe(KEEP_RECENT_TOKENS);
+    expect(keepTokensFor("完全没登记过的模型", Date.now(), "long", { contextWindow: 1_000_000 })).toBeGreaterThanOrEqual(
+      900_000,
+    );
+  });
+
+  it("用户声明的输出上限参与预留计算", () => {
+    const withOutput = keepTokensFor("x", Date.now(), "long", { contextWindow: 1_000_000, maxOutputTokens: 64_000 });
+    const without = keepTokensFor("x", Date.now(), "long", { contextWindow: 1_000_000 });
+    /* 两者都被 OUTPUT_RESERVE_MAX(21k) 压住，所以应当相等 —— 这条守的是"不要因为给了大会话就乱留" */
+    expect(withOutput).toBe(without);
+  });
+
+  it("说明文字标明来源是用户声明", () => {
+    expect(describeBudget("deepseek-flash", Date.now(), "long", { contextWindow: 200_000 })).toContain("用户声明");
+  });
+
+  it("0 / 负数的声明不当成有效窗口（回落到目录表或保守默认）", () => {
+    expect(budgetOf("deepseek-flash", Date.now(), { contextWindow: 0 }).contextWindow).toBe(1_000_000);
+    expect(budgetOf("没登记", Date.now(), { contextWindow: -1 }).registered).toBe(false);
   });
 });

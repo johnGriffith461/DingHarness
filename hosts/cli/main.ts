@@ -17,7 +17,9 @@ import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider, isBuiltinProviderId, setCustomProviders } from "../../engine/runtime/providers";
 import { PRODUCT_VERSION } from "../../shared/product";
-import { budgetOf, parseBudgetMode, CONTEXT_BUDGET_MODES } from "../../engine/runtime/budget";
+import { budgetOf, keepTokensFor, parseBudgetMode, CONTEXT_BUDGET_MODES } from "../../engine/runtime/budget";
+import { resolveFor } from "../../engine/runtime/modelConfigResolver";
+import { readModelConfig } from "../../engine/adapters/modelConfigStore";
 import { normalizeRules } from "../../engine/core/permissionRules";
 import { capabilityOf, describeCapability, groupCatalog, recommendReason, type ModelCapability } from "../../engine/runtime/modelCatalog";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
@@ -261,19 +263,46 @@ async function cmdRun(p: Parsed): Promise<number> {
   const { engine, close, plugins } = await buildEngine(dirs);
   for (const problem of plugins) process.stderr.write(`[plugin] ${problem}\n`);
 
+  /*
+   * ⭐ **模型能力表单**（T0）：用户声明过就按声明来。
+   *
+   * 这是"声明了却不用"最容易发生的地方 —— 表单存了窗口/输出上限，
+   * 而这一轮请求还是按默认发。所以在**建请求之前**解析一次，把它交给引擎。
+   * 没声明时 `resolveFor` 只返回内置推荐，行为与以前一致。
+   */
+  const chosenProvider = getProvider(provider);
+  const chosenModel = flag(p, "model") ?? config.model ?? chosenProvider?.models[0];
+  const modelRuntime = chosenProvider
+    ? resolveFor(
+        {
+          providerId: chosenProvider.id,
+          modelId: chosenModel ?? "",
+          baseUrl: chosenProvider.baseURL,
+          apiType: chosenProvider.protocol,
+        },
+        readModelConfig(dataDir()).file.rules,
+      )
+    : undefined;
+
   process.stdout.write(
     `\x1b[2m工作区：${dirs.join(" / ")}\nprovider：${provider}　档位：${mode}　会话：${sessionId}\x1b[0m\n`,
   );
+  if (modelRuntime?.contextWindow !== undefined) {
+    process.stdout.write(
+      `\x1b[2m模型能力：窗口 ${modelRuntime.contextWindow} / 最大输出 ${modelRuntime.maxOutputTokens ?? "未声明"} / 历史保留 ${keepTokensFor(chosenModel, Date.now(), parseBudgetMode(config.contextBudget), { contextWindow: modelRuntime.contextWindow, ...(modelRuntime.maxOutputTokens === undefined ? {} : { maxOutputTokens: modelRuntime.maxOutputTokens }) })}\x1b[0m\n`,
+    );
+  }
 
   const request: EngineRunRequest = {
     sessionId,
     provider,
-    ...((flag(p, "model") ?? config.model) ? { model: flag(p, "model") ?? config.model } : {}),
+    ...(chosenModel ? { model: chosenModel } : {}),
     system: cliSystemPrompt(dirs, mode),
     messages: [{ role: "user", content: task }],
     mode,
     useTools: true,
     maxSteps: steps.value,
+    ...(modelRuntime ? { modelConfig: modelRuntime } : {}),
     /* 插话（G06）：每一步之前看一眼队列（没有就是空数组，零开销） */
     nextSteer: () => drainSteer(dataDir(), sessionId),
     ...(typeof config.maxBudgetUsd === "number" && config.maxBudgetUsd > 0
@@ -837,7 +866,10 @@ export async function runMain(): Promise<void> {
     steer: async () => (await import("./cmdJobs")).cmdSteer(parsed, dataDir()),
     record: () => cmdRecord(parsed),
     replay: () => cmdReplay(parsed),
-    models: () => cmdModels(parsed),
+    models: async () => {
+      const handled = (await import("./cmdModels")).cmdModelsV2(parsed, dataDir());
+      return handled < 0 ? cmdModels(parsed) : handled;
+    },
     plugins: async () => (await import("./cmdPlugins")).cmdPlugins(parsed, dataDir()),
     recipe: async () => (await import("./cmdRecipe")).cmdRecipe(parsed, dataDir()),
     approvals: async () => (await import("./cmdApprovals")).cmdApprovals(parsed),

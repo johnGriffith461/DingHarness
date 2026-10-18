@@ -55,12 +55,24 @@ const BUDGETS: Record<ReasoningEffort, number> = { low: 1_024, medium: 4_096, hi
  * 把档位翻成 AI SDK 的 `providerOptions`。
  *
  * @param protocol 这家走哪种协议（`protocolOf(provider.id)`）
- * @param effort 用户选的档位；`undefined` / 认不出来 → 返回 `undefined`（**什么都不发**）
+ * @param effort 用户选的档位；`undefined` / 空串 → 返回 `undefined`（**什么都不发**）
  * @returns 直接塞给 `streamText` 的 `providerOptions`；不用发时是 `undefined`
+ *
+ * ## 2026-10-19（T0）：档位不再限于三档
+ *
+ * 档位现在由**模型能力表单**声明（`optionSpecs.reasoningLevel.values`），
+ * 可能只有 `["off","on"]`，也可能有 `["minimal","low","medium","high","xhigh"]`。
+ * 所以：
+ *
+ * - **自定义档位**只用参数映射（`optionSpecs.reasoningLevel.map`）发出去；
+ *   这里返回 `undefined` —— 因为我们**不知道**该给它多少 token 预算，
+ *   编一个数就是"看起来配了、其实按别的档位在跑"。
+ * - **三档内置值**仍按老映射走（Anthropic/Google 的 token 预算、OpenAI 兼容的
+ *   `reasoningEffort`），行为与 10-18 完全一致。
  */
 export function reasoningProviderOptions(
   protocol: Protocol,
-  effort: ReasoningEffort | undefined,
+  effort: string | undefined,
 ): Record<string, JSONObject> | undefined {
   /*
    * ⚠️ 用 `isReasoningEffort` 判而不是 `if (!effort)`：类型系统管不到运行时来的值

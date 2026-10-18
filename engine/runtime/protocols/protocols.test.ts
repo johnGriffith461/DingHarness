@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { PROTOCOLS, adapterFor } from "./index";
@@ -54,5 +56,35 @@ describe("协议注册表", () => {
     });
     // 句柄本身不暴露 headers，但**建得出来**这一点必须成立（传错类型会当场抛）
     expect(model).toBeTruthy();
+  });
+});
+
+describe("参数映射要用的自定义 fetch（T0）", () => {
+  /**
+   * 守卫：三个适配器都必须把 `fetch` 真的传给 SDK。
+   *
+   * 2026-10-19 实测漏过一次：`loop.ts` 传了 `fetch`，但适配器没往下传，
+   * 而**对象展开绕过了 TS 的多余属性检查** —— 编译绿、请求照发，
+   * 只是参数映射静默不生效。它不会以任何方式报错，只能靠这条源码守卫拦住。
+   */
+  it("三个协议适配器都把 fetch 传给了 SDK 工厂", () => {
+    const root = path.resolve(__dirname, "../../..");
+    const offenders: string[] = [];
+    for (const file of ["openaiCompatible.ts", "anthropic.ts", "google.ts"]) {
+      const src = readFileSync(path.join(root, "engine/runtime/protocols", file), "utf8");
+      if (!/\bfetch\b/.test(src)) {
+        offenders.push(`${file}：完全没有 fetch`);
+        continue;
+      }
+      if (!/\.\.\.\(fetch \? \{ fetch \} : \{\}\)/.test(src)) {
+        offenders.push(`${file}：解构了 fetch 但没传给 SDK 工厂`);
+      }
+    }
+    expect(offenders, `这些适配器没有把自定义 fetch 传下去：${offenders.join("；")}`).toEqual([]);
+  });
+
+  it("ModelHandleInput 里有 fetch（类型上有，调用方才传得进去）", () => {
+    const src = readFileSync(path.resolve(__dirname, "types.ts"), "utf8");
+    expect(src).toMatch(/fetch\?: typeof globalThis\.fetch/);
   });
 });

@@ -65,7 +65,7 @@ describe("会话样本（Phase 10.4：≥10 条，脱敏是断言）", () => {
       [/sk-[A-Za-z0-9]{8,}/, "密钥形状（sk-）"],
       [/Bearer\s+[A-Za-z0-9._-]{8,}/, "Authorization 头里的 token"],
       [/api[_-]?key"?\s*[:=]\s*"[^"]{8,}"/i, "明文 api key 字段"],
-      [/AppData|\.zcode|DingHarness\/\.\./, "用户目录痕迹"],
+      [/AppData|\.(zcode|claude|codex|cursor|config)\b|DingHarness\/\.\./, "用户目录痕迹"],
     ];
     const hits: string[] = [];
     for (const file of files) {

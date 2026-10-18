@@ -1,7 +1,10 @@
-import { stepCountIs, streamText, type ToolSet } from "ai";
+import { Output, jsonSchema, stepCountIs, streamText, type ToolSet } from "ai";
 
 import { blockedReason, realModelBlocked as gateBlocked } from "./modelGate";
-import { reasoningProviderOptions, type ReasoningEffort } from "./protocols/reasoning";
+import { createModelOptionMapFetch, optionValuesOf } from "./modelOptionMapFetch";
+import { assertModalities, type ContentPart } from "./messageTransform";
+import { nativeSearchToolFor, type RuntimeModelConfig } from "./modelRuntime";
+import { reasoningProviderOptions } from "./protocols/reasoning";
 
 import type { StepUsage } from "../../shared/cost";
 import type { HealthStore } from "../ports/health";
@@ -102,12 +105,12 @@ export type TurnEvent =
     };
 
 /** 一次调用的输入。 */
+/** 一次调用的输入。 */
 /*
- * ⚠️ 这里**没有** `maxOutputTokens`（C5 裁定）：它原来是"有管道没水源"的 ——
- * 契约里有 `maxTokens`、主进程也接了，但**渲染层从没传过**（`src/` 全仓零命中），
- * 端到端一次都没生效。按手册"要么被用要么被删"，删掉这条管道。
- * **要用的时候再加回来**，并且那时**同时**要有界面上的水源（否则又是一条空管道）。
- * （provider 自己的默认输出上限一直生效，不受这里影响。）
+ * ⚠️ `maxOutputTokens` 的来龙去脉（2026-10-19 T0 重新接回）：
+ * 它原来被删掉是因为"有管道没水源"——契约里有、主进程接了、但渲染层从没传过。
+ * 现在有水源了：模型能力表单（`ModelConfig.optionSpecs.maxOutputTokens`）。
+ * 所以这次它带着**数据来源**一起回来，而不是又一条空管道。
  */
 export type TurnRequestInput = {
   /** 属于哪段会话（只用于 OTLP span 的归属；不给也能跑）。 */
@@ -115,7 +118,13 @@ export type TurnRequestInput = {
   provider: string;
   model?: string;
   system?: string;
-  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  /**
+   * 消息。`content` 可以是纯文本，也可以是内容片段数组（T0 多模态）。
+   *
+   * 数组形态**必须**先过 `assertModalities`：模型没声明的模态在发请求前报错，
+   * 不静默降级成文本（降级会让模型照着空壳回答，用户以为它看过图了）。
+   */
+  messages: { role: "system" | "user" | "assistant"; content: string | readonly ContentPart[] }[];
   temperature?: number;
   /** 工具集；不给就是"不带工具"的一轮（起标题、翻译这类）。 */
   tools?: ToolSet;
@@ -125,9 +134,22 @@ export type TurnRequestInput = {
    * 思考强度（2026-10-16）：用户明确选的低 / 中 / 高。
    *
    * ⚠️ **不给就是不给**：这一轮不发任何思考相关参数，走各家默认（与以前完全一致）。
-   * 给的方式由  按协议翻（三家写法不一样，映射只有那一处）。
+   * 给的方式由 `reasoningProviderOptions` 按协议翻（三家写法不一样，映射只有那一处）。
+   *
+   * 2026-10-19（T0）：类型从三档联合放宽成 `string` —— 档位由模型能力表单声明
+   * （`optionSpecs.reasoningLevel.values`），不再写死 low/medium/high。
+   * 三档仍是 `REASONING_EFFORTS` 的默认值，老调用方传它们照旧工作。
    */
-  reasoningEffort?: ReasoningEffort;
+  reasoningEffort?: string;
+  /**
+   * **模型能力表单解析出的运行时视图**（T0）。
+   *
+   * 给了就按它来：输出上限、推理/输出参数映射、结构化输出、原生联网、
+   * 对话中系统消息、输入模态。不给 = 与以前完全一致（零漂移）。
+   */
+  modelConfig?: RuntimeModelConfig;
+  /** 要求结构化输出的 JSON Schema（配合 `modelConfig.supportsJsonSchemaOutput`）。 */
+  responseJsonSchema?: Record<string, unknown>;
   /**
    * 中止信号。
    *
@@ -402,10 +424,61 @@ export async function runTurn(
      * 换协议、换 SDK，**下面那一整段一个字都不用动** —— 这正是 Phase 6 的硬约束。
      */
     const adapter = adapterFor(protocolOf(provider.id));
-    const client = adapter.createModel({ baseURL: provider.baseURL, apiKey, model });
+    /*
+     * ⭐ **T0 的运行时接线**（2026-10-19）。四件事，都只在"用户声明过"时才生效：
+     *
+     * 1. 参数映射（推理档位 / 输出上限）→ 包装 `fetch`，改写**最终请求体**；
+     * 2. 原生联网搜索 → 按协议注入 provider 工具；
+     * 3. 对话中系统消息 → `allowSystemInMessages` + 不支持时的文本化；
+     * 4. 结构化输出 → `Output.object`；
+     * 5. 输入模态 → 发请求前校验（不静默降级）。
+     *
+     * ⚠️ 没给 `modelConfig` 时这里**一行都不进** —— 老调用方的行为必须零漂移。
+     */
+    const runtimeConfig = input.modelConfig;
+    const protocol = protocolOf(provider.id);
+    const optionValues = optionValuesOf({
+      ...(input.reasoningEffort ? { reasoningLevel: input.reasoningEffort } : {}),
+      ...(runtimeConfig?.maxOutputTokens ? { maxOutputTokens: runtimeConfig.maxOutputTokens } : {}),
+    });
+    const wrappedFetch =
+      runtimeConfig?.reasoningMap || runtimeConfig?.maxOutputMap
+        ? createModelOptionMapFetch({
+            fetch: globalThis.fetch,
+            specs: {
+              ...(runtimeConfig.reasoningMap ? { reasoningLevel: runtimeConfig.reasoningMap } : {}),
+              ...(runtimeConfig.maxOutputMap ? { maxOutputTokens: runtimeConfig.maxOutputMap } : {}),
+            },
+            values: optionValues,
+          })
+        : undefined;
+
+    /* 模态校验：在**发请求之前**一次性判完（第 3 条才炸等于白花钱） */
+    if (runtimeConfig) assertModalities(input.messages, runtimeConfig.inputFormat);
+
+    /* 结构化输出：能力为假时**报配置错误**，不静默降级成自由文本 */
+    if (input.responseJsonSchema && runtimeConfig && !runtimeConfig.supportsJsonSchemaOutput) {
+      const message =
+        "当前模型未声明「结构化输出」能力 —— 在「设置 → 模型 → 编辑模型」里勾上，或去掉这一轮的结构化要求。";
+      onEvent({ type: "error", message });
+      return { ok: false, error: message, aborted: false, provider: provider.id, model };
+    }
+
+    const client = adapter.createModel({
+      baseURL: provider.baseURL,
+      apiKey,
+      model,
+      ...(wrappedFetch ? { fetch: wrappedFetch } : {}),
+    });
+    const nativeSearch =
+      runtimeConfig?.supportsNativeWebSearch === true ? nativeSearchToolFor(protocol) : undefined;
+    const mergedTools =
+      input.tools || nativeSearch
+        ? { ...(input.tools ?? {}), ...(nativeSearch?.tools ?? {}) }
+        : undefined;
     const result = streamText({
       model: client,
-      messages: input.messages,
+      messages: input.messages as never,
       /*
        * **重试策略**（U10，2026-10-18）：显式写出来，不靠 SDK 默认值。
        *
@@ -417,13 +490,21 @@ export async function runTurn(
       maxRetries: 2,
       ...(input.system ? { system: input.system } : {}),
       ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+      /* T0：输出上限（原来是"有管道没水源"，现在有模型能力表单作水源） */
+      ...(runtimeConfig?.maxOutputTokens ? { maxOutputTokens: runtimeConfig.maxOutputTokens } : {}),
+      /* T0：结构化输出（AI SDK 7 的 Output.object） */
+      ...(input.responseJsonSchema && runtimeConfig?.supportsJsonSchemaOutput
+        ? { output: Output.object({ schema: jsonSchema(input.responseJsonSchema as never) }) }
+        : {}),
+      /* T0：对话中系统消息的前提；不开时那条路只能把 system 转成 user 文本 */
+      ...(runtimeConfig?.supportsMidConversationSystem ? { allowSystemInMessages: true } : {}),
       /* 思考强度：没选就是 undefined，一个字段都不多发（见 reasoning.ts 的口径） */
-      ...(reasoningProviderOptions(protocolOf(provider.id), input.reasoningEffort) === undefined
+      ...(reasoningProviderOptions(protocol, input.reasoningEffort) === undefined
         ? {}
-        : { providerOptions: reasoningProviderOptions(protocolOf(provider.id), input.reasoningEffort) }),
+        : { providerOptions: reasoningProviderOptions(protocol, input.reasoningEffort) }),
       ...(input.abortSignal || watchdog ? { abortSignal: watchdog.signal } : {}),
-      ...(input.tools
-        ? { tools: input.tools, stopWhen: stepCountIs(effectiveMaxSteps(input.maxSteps)) }
+      ...(mergedTools
+        ? { tools: mergedTools, stopWhen: stepCountIs(effectiveMaxSteps(input.maxSteps)) }
         : {}),
       /*
        * 插话（G06）：`prepareStep` 在**每一步之前**跑，正好是"不打断当前生成、

@@ -12,10 +12,11 @@ import type { ProtocolAdapter } from "./types";
 export const google: ProtocolAdapter = {
   id: "google",
   label: "Google Gemini 原生",
-  createModel: ({ baseURL, apiKey, model, headers }) =>
+  createModel: ({ baseURL, apiKey, model, headers, fetch }) =>
     createGoogleGenerativeAI({
       ...(baseURL ? { baseURL } : {}),
       ...(apiKey ? { apiKey } : {}),
       ...(headers ? { headers } : {}),
+      ...(fetch ? { fetch } : {}),
     })(model),
 };

@@ -19,10 +19,11 @@ import type { ProtocolAdapter } from "./types";
 export const anthropic: ProtocolAdapter = {
   id: "anthropic",
   label: "Anthropic 原生",
-  createModel: ({ baseURL, apiKey, model, headers }) =>
+  createModel: ({ baseURL, apiKey, model, headers, fetch }) =>
     createAnthropic({
       ...(baseURL ? { baseURL } : {}),
       ...(apiKey ? { apiKey } : {}),
       ...(headers ? { headers } : {}),
+      ...(fetch ? { fetch } : {}),
     })(model),
 };

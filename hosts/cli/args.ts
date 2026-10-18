@@ -47,6 +47,13 @@ export type Parsed = {
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "dir",
   "provider",
+  /* `ding models add`（T0 模型能力表单）：窗口 / 输出上限 / 输入模态 / 推理档位 / 参数映射 */
+  "window",
+  "max-output",
+  "input",
+  "reasoning-levels",
+  "reasoning-map",
+  "max-output-map",
   "model",
   "mode",
   "steps",
@@ -144,6 +151,11 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
  */
 export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "json",
+  /* `ding models add`：能力开关（勾上就是在保存时按协议校验） */
+  "json-output",
+  "native-web-search",
+  "mid-system",
+  "no-tools",
   "yes",
   /* `ding run --background`（G06）：交给后台任务，父进程立刻返回 */
   "background",

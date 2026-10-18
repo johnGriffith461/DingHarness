@@ -42,6 +42,15 @@ export type ModelHandleInput = {
    * 而各家 SDK 都支持 `headers` —— 与其为每个中转站写一个协议，不如把它当配置。
    */
   headers?: Record<string, string>;
+  /**
+   * **自定义 fetch**（T0）：参数映射靠它改写最终请求体。
+   *
+   * ⚠️ 这个字段是**必须真的用上**的：漏传时不会有任何报错 ——
+   * 请求照发、界面上一切正常，只是映射**静默不生效**。
+   * 2026-10-19 实测就是这样漏了一次（对象展开绕过了 TS 的多余属性检查）。
+   * `protocols.test.ts` 里有一条守卫逐条扫三个适配器，确认它被真的传下去。
+   */
+  fetch?: typeof globalThis.fetch;
 };
 
 /** 一个协议适配器。 */

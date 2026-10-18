@@ -16,7 +16,7 @@ import { UNKNOWN_MODEL_BUDGET, describeModel, findModel, isStale } from "./model
  * 2. **往下也不安全**：50% 不留输出额度，窗口 32k 的模型按 50% 留 16k，
  *    再加上输出就可能顶爆。
  *
- * 现在按成熟 harness 的口径（ZCode parity，默认 `long`）：
+ * 现在按成熟 harness 的口径（按窗口推导，默认 `long`）：
  *
  * ```
  * reserve  = min(outputLimit ?? 32_000, 21_000)      // 给输出留的位置
@@ -67,7 +67,7 @@ export const CONTEXT_BUFFER = 13_000;
 export const CONTEXT_BUDGET_MODES = ["long", "balanced", "economy"] as const;
 export type ContextBudgetMode = (typeof CONTEXT_BUDGET_MODES)[number];
 
-/** 默认档位（ZCode parity：按窗口推导）。 */
+/** 默认档位（按窗口推导）。 */
 export const DEFAULT_CONTEXT_BUDGET: ContextBudgetMode = "long";
 
 /**
@@ -91,24 +91,65 @@ export const BUDGET_MODE_LABEL: Record<ContextBudgetMode, string> = {
  *
  * ⚠️ `registered: false` 是**一等结果**（不是"没找到就 undefined"）：
  * 调用方必须显式处理"这个模型我们不知道"这件事 —— 要么走保守默认，要么标注出来。
+ *
+ * `source` 说明窗口是从哪来的（T0 加）：`user` = 用户自己声明的，
+ * `catalog` = 仓库登记过的表。界面上这两种要分开显示 ——
+ * "你填的" 与 "我们核过的" 可信度不同。
  */
 export type BudgetLookup =
-  | { registered: true; contextWindow: number; stale: boolean; outputLimit?: number }
+  | {
+      registered: true;
+      contextWindow: number;
+      stale: boolean;
+      outputLimit?: number;
+      source?: "user" | "catalog";
+    }
   | { registered: false; contextWindow: number; stale: false };
+
+/**
+ * 用户声明的覆盖（T0 模型能力表单）。
+ *
+ * 存在的理由：`MODEL_CATALOG` 是**我们**核过的表，接一个新中转站的模型时
+ * 它里面没有 —— 以前只能走 20k 保守默认，而模型明明是 1M 的。
+ * 现在用户可以在「设置 → 模型」里自己声明，声明的东西从这里进预算。
+ */
+export type BudgetOverride = {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+};
 
 /**
  * 按模型 id 查预算。
  *
  * @param modelId 模型 id
  * @param now 现在（测试里给固定值）
+ * @param override 用户声明的窗口/输出（**优先于目录表**）
  */
-export function budgetOf(modelId: string | undefined, now: number = Date.now()): BudgetLookup {
+export function budgetOf(
+  modelId: string | undefined,
+  now: number = Date.now(),
+  override?: BudgetOverride,
+): BudgetLookup {
+  /*
+   * ⚠️ 顺序是契约：**用户声明 > 目录表 > 保守默认**。
+   * 反过来会让「我明明填了 1M 还是按 20k 跑」，而用户没有任何办法查明原因。
+   */
+  if (override?.contextWindow !== undefined && override.contextWindow > 0) {
+    return {
+      registered: true,
+      contextWindow: override.contextWindow,
+      stale: false,
+      source: "user",
+      ...(override.maxOutputTokens === undefined ? {} : { outputLimit: override.maxOutputTokens }),
+    };
+  }
   const spec = findModel(modelId);
   if (!spec) return { registered: false, contextWindow: UNKNOWN_MODEL_BUDGET.contextWindow, stale: false };
   return {
     registered: true,
     contextWindow: spec.contextWindow,
     stale: isStale(spec, now),
+    source: "catalog",
     ...(spec.outputLimit === undefined ? {} : { outputLimit: spec.outputLimit }),
   };
 }
@@ -170,8 +211,9 @@ export function keepTokensFor(
   modelId: string | undefined,
   now: number = Date.now(),
   mode: ContextBudgetMode = DEFAULT_CONTEXT_BUDGET,
+  override?: BudgetOverride,
 ): number {
-  const found = budgetOf(modelId, now);
+  const found = budgetOf(modelId, now, override);
   if (!found.registered) return KEEP_RECENT_TOKENS;
   return keepForWindow(found.contextWindow, mode, found.outputLimit);
 }
@@ -182,19 +224,22 @@ export function keepTokensFor(
  * @param modelId 模型 id
  * @param now 现在（测试用）
  * @param mode 档位
+ * @param override 用户声明的窗口/输出
  */
 export function describeBudget(
   modelId: string | undefined,
   now: number = Date.now(),
   mode: ContextBudgetMode = DEFAULT_CONTEXT_BUDGET,
+  override?: BudgetOverride,
 ): string {
-  const found = budgetOf(modelId, now);
+  const found = budgetOf(modelId, now, override);
   if (!found.registered) {
     return `${describeModel(modelId)}；历史按保守默认 ${KEEP_RECENT_TOKENS} token 保留（未登记，不按估计窗口发请求）`;
   }
-  const keep = keepTokensFor(modelId, now, mode);
+  const keep = keepTokensFor(modelId, now, mode, override);
   const reserve = outputReserveFor(found.contextWindow, found.outputLimit);
-  return `${describeModel(modelId)}；窗口 ${found.contextWindow} / 输出预留 ${reserve} / 历史 ${keep}（档位 ${mode}：${BUDGET_MODE_LABEL[mode]}）`;
+  const source = found.source === "user" ? "（用户声明）" : "";
+  return `${describeModel(modelId)}${source}；窗口 ${found.contextWindow} / 输出预留 ${reserve} / 历史 ${keep}（档位 ${mode}：${BUDGET_MODE_LABEL[mode]}）`;
 }
 
 /** 一条预算记录的完整说明（`ding models --json` / 设置页用）。 */
@@ -202,13 +247,22 @@ export function budgetBreakdown(
   modelId: string | undefined,
   now: number = Date.now(),
   mode: ContextBudgetMode = DEFAULT_CONTEXT_BUDGET,
-): { mode: ContextBudgetMode; registered: boolean; contextWindow: number; outputReserve: number; keep: number } {
-  const found = budgetOf(modelId, now);
+  override?: BudgetOverride,
+): {
+  mode: ContextBudgetMode;
+  registered: boolean;
+  contextWindow: number;
+  outputReserve: number;
+  keep: number;
+  source?: "user" | "catalog";
+} {
+  const found = budgetOf(modelId, now, override);
   return {
     mode,
     registered: found.registered,
     contextWindow: found.contextWindow,
     outputReserve: found.registered ? outputReserveFor(found.contextWindow, found.outputLimit) : 0,
-    keep: keepTokensFor(modelId, now, mode),
+    keep: keepTokensFor(modelId, now, mode, override),
+    ...(found.registered && found.source ? { source: found.source } : {}),
   };
 }
