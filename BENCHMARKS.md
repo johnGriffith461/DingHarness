@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | **过程回归**（`ding eval`） | 63 条离线用例，脚本化 provider | 事件序列 / 回显文案 / 闸门 / 产物 / 账本 | 不花 | **63/63 通过**（基线锁定，见 §3） |
 | **任务基准**（`ding bench`，harness 套） | 7 条任务，真引擎 + 真工具 + 判产物 | 文件内容 + 判分命令退出码 | 不花 | **7/7 通过**（见 §2） |
-| **SWE-bench Verified**（`swebench` 套） | 官方集，真模型 | 官方 harness | 花 | **尚未跑**（适配层已就绪，见 §5） |
+| **SWE-bench Verified**（`swebench` 套） | 官方集，真模型 | 官方 harness | 花 | **抽样 10 条：7 解 / 2 未解 / 1 环境错误**（见 §5；这是抽样，**不是官方面**） |
 
 ⚠️ **这两层不能混成一句话。** `harness` 套的模型回复是脚本化的：它证明
 "Ding 的编排、工具、闸门、恢复能走通"，**不证明模型能修真实仓库的 bug**。
@@ -80,13 +80,40 @@ CI 门禁（`pnpm test` 里的 `engine/eval/eval.test.ts`）：
 装置不可达（本机回环连不上自己的假 provider）**不计入**失败分类，单独计
 `environment`；门禁要求它必须是 0。
 
-## 5. SWE-bench（未跑）
+## 5. SWE-bench Verified（抽样 10 条，非官方面）
 
 - 适配层：`engine/bench/swebench.ts`（读官方 JSONL）+ `scripts/bench-swebench.ts`（生成官方预测）。
-- **判分交给官方 harness**，本仓不伪造判分。
+- **判分交给官方 harness**（`swebench==3.0.5` + Docker），本仓不伪造判分。
 - 数据集不进仓（会更新）；下载与运行方式见 [`bench/swebench/README.md`](bench/swebench/README.md)。
-- **当前没有可发布的成绩。** 下一版完成官方判分后会在此处补上：
-  版本号、模型、`run_id`、`report.json` 摘要、失败分布。
+
+### 5.1 这一轮的真实数字（2026-10-18）
+
+| 项 | 值 |
+|---|---|
+| 数据集 | `princeton-nlp/SWE-bench_Verified`（500 条），**抽 10 条**：flask 1 / requests 3 / seaborn 2 / pylint 3 / pytest 1 |
+| 模型 | `deepseek-v4.1-flash-1017`（通道 `tokenrhythm`） |
+| 判分 | 官方 harness `swebench 3.0.5`，Docker 29.8.2，每实例独立镜像 |
+| `run_id` | `ding-pilot10-lf` |
+| 结果 | **resolved 7 / 10**；未解决 2（`flask-5014`、`pylint-4604`）；环境错误 1（`pytest-10051`，镜像里 `git clone` 断流） |
+| 用量 | 10 条共 **8.29M 输入 / 0.16M 输出** token（每条平均 828k 输入 / 16k 输出，≈33 步） |
+| 命令 | `pnpm tsx scripts/bench-swebench.ts --instances sample.jsonl --out pred.jsonl --provider tokenrhythm --model deepseek-v4.1-flash-1017 --yes-spend` → `python -m swebench.harness.run_evaluation --dataset_name sample-dataset.json --predictions_path pred.jsonl --run_id …` |
+
+⚠️ **这个数不能当"SWE-bench 成绩"引用**：10 条是有偏小样本（只挑了 5 个小仓库），
+95% 置信区间宽到 ±28 个百分点。它证明的是**链路真的通了**，不是模型的位次。
+
+### 5.2 这一轮修掉的三个测量缺陷（都会让数字变成假的）
+
+1. **补丁把依赖目录收进来**：agent 在仓库里 `pip install -t .testlibs` 之后，
+   `git add -A` 把整个依赖树写进 patch（实测一条 **87,278 行**），官方 harness 必然判不过。
+   现在收改动时排除 `.testlibs` / `__pycache__` / `*.egg-info` / `.tox` / `node_modules` / `.venv`，
+   并给补丁加 3000 行上限（超了不写进预测、单独计数）。
+2. **评估脚本被写成了 CRLF**：官方 harness 在 Windows 上用文本模式写 `eval.sh`，
+   容器里的 bash 把每行末尾的 `\r` 当成参数的一部分 ——
+   于是 `git checkout <sha> test_requests.py\r` 失败、`pytest\r` 找不到命令，
+   **每一版补丁都判不过**（第一次跑出来是 0/10，那是这个 bug，不是模型）。
+   修法：写 `eval.sh` 时强制 LF（本机打补丁，未改上游）。
+3. **用量根本没记**：生成脚本原来 `onEvent` 是空的，跑完不知道花了多少 token ——
+   现在按 `step-finish` 累加输入/输出并存出来（上面的"用量"那一行就来自它）。
 
 ## 6. 爬山闭环（怎么改才算"变好"）
 
