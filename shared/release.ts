@@ -176,3 +176,70 @@ export function checkChangelogHeading(changelog: string, version?: string): { ok
     problem: `CHANGELOG 最上面的发布段是「${heading}」，既不是「未发布」也不含 ${version} —— 发版前要把标题改成版本号 + 日期`,
   };
 }
+
+/* ─────────────────── CHANGELOG 草稿（D09：从提交生成，人工定稿） ─────────────────── */
+
+/** 一条提交（只要生成草稿需要的两个字段）。 */
+export type CommitLine = { sha: string; subject: string };
+
+/** 一组提交（按任务号）。 */
+export type CommitGroup = { task: string; commits: CommitLine[] };
+
+/**
+ * 从提交标题里认出**任务号**（本仓习惯：`G12 IM 审批卡…`、`L06 个性化…`、`U03 …`、`E02 …`）。
+ *
+ * 认不出就归到「其他」—— **不猜**（猜错的分类比不分更难查）。
+ * 支持带连字符的（`V6-2n`）与 `Phase 0` 这种写法。
+ *
+ * @param subject 提交标题
+ * @returns 任务号；认不出返回空串
+ */
+export function taskOfCommit(subject: string): string {
+  const text = String(subject ?? "").trim();
+  const m = /^(?:([A-Z]\d{1,2}(?:-\d+[a-z]?)?)\b|(Phase\s+\d+)\b)/.exec(text);
+  return (m?.[1] ?? m?.[2] ?? "").trim();
+}
+
+/**
+ * 把提交按任务号分组（组顺序 = 第一次出现的顺序；组内保持原顺序）。
+ *
+ * @param commits 提交（新在前或旧在前都行 —— 这里不改顺序）
+ */
+export function groupCommits(commits: readonly CommitLine[]): CommitGroup[] {
+  const groups: CommitGroup[] = [];
+  const index = new Map<string, CommitGroup>();
+  for (const commit of commits) {
+    const task = taskOfCommit(commit.subject) || "其他";
+    let group = index.get(task);
+    if (!group) {
+      group = { task, commits: [] };
+      index.set(task, group);
+      groups.push(group);
+    }
+    group.commits.push(commit);
+  }
+  return groups;
+}
+
+/**
+ * 生成 CHANGELOG 草稿（Markdown）。
+ *
+ * ⚠️ **它是草稿，不是发布记录**：条目是提交标题原文，没有经过"用户可见差异"的改写。
+ * 发版时仍要按 `RELEASE.md` 第四条人工过一遍（Keep a Changelog 口径）。
+ *
+ * @param groups 分组结果
+ * @param opts.version 版本号（写进标题；没给就用「未发布」）
+ * @param opts.date 日期（`YYYY-MM-DD`）
+ */
+export function changelogDraft(groups: readonly CommitGroup[], opts: { version?: string; date?: string } = {}): string {
+  const heading = opts.version ? `## ${opts.version}${opts.date ? `（${opts.date}）` : ""}` : "## 未发布";
+  const lines: string[] = [heading, "", "> 草稿：条目来自提交标题，发版前要按「用户可见差异」改写。", ""];
+  for (const group of groups) {
+    lines.push(`### ${group.task}`, "");
+    for (const commit of group.commits) {
+      lines.push(`- ${commit.subject}（${commit.sha.slice(0, 7)}）`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd() + "\n";
+}

@@ -60,7 +60,8 @@
     "verify:clean-install": "node scripts/verify-clean-install.mjs",
     "nightly:gates": "node scripts/nightly-gates.mjs",
     "nightly:promote": "node scripts/promote-nightly.mjs",
-    "release:check": "node scripts/release-check.mjs"
+    "release:check": "node scripts/release-check.mjs",
+    "changelog:draft": "node scripts/changelog-draft.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

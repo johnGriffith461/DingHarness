@@ -94,6 +94,8 @@ CLI 补丁版可以独立于产品版本（`PRODUCT_VERSION` 仍是 0.5.0）；`
 - [ ] 机械项先跑一遍：`pnpm release:check`（版本一致 / 轨道形状 / CHANGELOG 标题 / 三份产物在）
 - [ ] 版本号：根 `package.json` 与 `packages/cli/package.json` 一致；stable 无预发布后缀
 - [ ] `CHANGELOG.md`：把 `未发布` 改成版本号 + 日期，条目说用户可见差异
+      （草稿用 `pnpm changelog:draft --since <上个 tag>` 生成 —— 它按任务号分组提交标题，
+      **只是草稿**，仍要人工改写成用户可见差异；脚本不写文件、不动 CHANGELOG）
 - [ ] 六道门全绿（上面那串命令）
 - [ ] `BENCHMARKS.md`：本次跑过的数字更新；没跑的不写
 - [ ] 桌面产物：`pnpm build`（Windows 签名仍然**未做** —— 发布说明里必须勾选"未签名"）

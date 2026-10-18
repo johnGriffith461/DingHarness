@@ -7,6 +7,9 @@ import {
   checkChangelogHeading,
   checkPromotion,
   checkVersionSet,
+  changelogDraft,
+  groupCommits,
+  taskOfCommit,
   parseNightlyVersion,
   stableFromNightly,
   type NightlyEvidence,
@@ -152,5 +155,49 @@ describe("checkChangelogHeading", () => {
 
   it("没有二级标题 → 不假装就绪", () => {
     expect(checkChangelogHeading("# 只有一级标题\n").ok).toBe(false);
+  });
+});
+
+/** D09：CHANGELOG 草稿（按任务号分组；认不出归「其他」，不猜）。 */
+describe("groupCommits / changelogDraft", () => {
+  it("认得出 G12 / L06 / U03 / E02 / V6-2n / Phase 0", () => {
+    expect(taskOfCommit("G12 IM 审批卡接线：手机上 yes 能批")).toBe("G12");
+    expect(taskOfCommit("L06 个性化：主题/快捷键/人格")).toBe("L06");
+    expect(taskOfCommit("U03 权限规则 v1")).toBe("U03");
+    expect(taskOfCommit("E02 nightly→stable")).toBe("E02");
+    expect(taskOfCommit("V6-2n Computer Use")).toBe("V6-2n");
+    expect(taskOfCommit("Phase 0 交付门")).toBe("Phase 0");
+  });
+
+  it("认不出的归「其他」（不硬塞一个像的任务号）", () => {
+    expect(taskOfCommit("跨平台：Linux 全量测试跑通")).toBe("");
+    const groups = groupCommits([
+      { sha: "a".repeat(40), subject: "跨平台：Linux 全量测试跑通" },
+      { sha: "b".repeat(40), subject: "G12 IM 审批卡" },
+    ]);
+    expect(groups.map((g) => g.task)).toEqual(["其他", "G12"]);
+  });
+
+  it("组内保持原顺序、组按首次出现排序", () => {
+    const groups = groupCommits([
+      { sha: "1".repeat(40), subject: "G12 第一条" },
+      { sha: "2".repeat(40), subject: "L06 第一条" },
+      { sha: "3".repeat(40), subject: "G12 第二条" },
+    ]);
+    expect(groups.map((g) => g.task)).toEqual(["G12", "L06"]);
+    expect(groups[0]!.commits.map((c) => c.subject)).toEqual(["G12 第一条", "G12 第二条"]);
+  });
+
+  it("草稿带标题、说明与短 sha；没给版本写「未发布」", () => {
+    const draft = changelogDraft(groupCommits([{ sha: "abcdef1234567890", subject: "G12 接线" }]), { date: "2026-10-18" });
+    expect(draft).toContain("## 未发布");
+    expect(draft).toContain("### G12");
+    expect(draft).toContain("G12 接线（abcdef1）");
+    expect(draft).toContain("发版前要按「用户可见差异」改写");
+  });
+
+  it("给了版本与日期 → 标题是版本号 + 日期", () => {
+    const draft = changelogDraft([], { version: "0.6.0", date: "2026-10-20" });
+    expect(draft).toContain("## 0.6.0（2026-10-20）");
   });
 });
