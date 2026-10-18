@@ -104,6 +104,8 @@ async function main(): Promise<void> {
 
   /** 整轮用量（跑完打一行总账；**不折算价格** —— 这个中转站的单价我们没有可信来源）。 */
   const totals = { inputTokens: 0, outputTokens: 0, steps: 0 };
+  /** 超大补丁（把依赖/产物收进来的那种）不写入预测，单独计数。 */
+  let oversize = 0;
 
   for (let i = 0; i < chosen.length; i += 1) {
     const instance = chosen[i]!;
@@ -165,13 +167,53 @@ async function main(): Promise<void> {
       /*
        * 收改动：`git add -A` 把新文件也纳入，`--cached` 出统一 diff。
        * 收完立刻 `reset`：下一条要从干净 base 开始。
+       *
+       * ⚠️ **必须排除 agent 跑命令留下的杂物**（2026-10-18 实测抓到的真缺陷）。
+       *
+       * 第一条实测里 flask 那条的补丁有 **87,278 行**：agent 为了能跑测试，
+       * 在仓库里 `pip install -t .testlibs …`，而 `git add -A` 把整个依赖目录
+       * 一起收进了 patch —— 官方 harness 当然判不过（而且这根本不是它的修复）。
+       * 这类目录还有 `__pycache__` / `.pytest_cache` / `.mypy_cache` / `*.egg-info` /
+       * `.tox` / `node_modules` / `.venv`。它们**不是补丁的一部分**，必须在 diff 里排除。
+       *
+       * 排除用 pathspec（`:(exclude)`），而不是先 `git clean` —— clean 会把 agent
+       * 真写下的新源文件也删掉（那是修复的一部分）。
        */
+      const JUNK_GLOBS = [
+        ":(exclude).testlibs/**",
+        ":(exclude)**/__pycache__/**",
+        ":(exclude).pytest_cache/**",
+        ":(exclude)**/.pytest_cache/**",
+        ":(exclude).mypy_cache/**",
+        ":(exclude).ruff_cache/**",
+        ":(exclude)**/*.egg-info/**",
+        ":(exclude).tox/**",
+        ":(exclude)**/.tox/**",
+        ":(exclude)node_modules/**",
+        ":(exclude).venv/**",
+        ":(exclude)venv/**",
+        ":(exclude)**/*.pyc",
+      ];
       sh("git", ["add", "-A"], repoDir);
-      const patch = sh("git", ["diff", "--cached", "--binary"], repoDir);
+      const patch = sh("git", ["diff", "--cached", "--binary", "--", ".", ...JUNK_GLOBS], repoDir);
       sh("git", ["reset", "--quiet"], repoDir);
-      const line: SweBenchPrediction = { instance_id: instance.instance_id, model_name_or_path: modelName, model_patch: patch };
-      out.write(JSON.stringify(line) + "\n");
-      process.stdout.write(patch.trim() ? `完成（补丁 ${patch.split("\n").length} 行）\n` : "完成（无改动）\n");
+
+      /*
+       * 补丁体积守卫：**超大的补丁不写进预测**（写了也是必然判不过，还污染成绩口径）。
+       * 3000 行是"正常修复 + 几个测试"的天花板；超过它多半是把依赖/产物收进来了。
+       */
+      const MAX_PATCH_LINES = 3000;
+      const patchLines = patch ? patch.split("\n").length : 0;
+      if (patchLines > MAX_PATCH_LINES) {
+        process.stdout.write(
+          `⚠️ 补丁 ${patchLines} 行，超过 ${MAX_PATCH_LINES} 行上限 —— 视为"把非源码改动收进来了"，**不写入预测**（这一条按失败计）\n`,
+        );
+        oversize += 1;
+      } else {
+        const line: SweBenchPrediction = { instance_id: instance.instance_id, model_name_or_path: modelName, model_patch: patch };
+        out.write(JSON.stringify(line) + "\n");
+        process.stdout.write(patch.trim() ? `完成（补丁 ${patchLines} 行）\n` : "完成（无改动）\n");
+      }
     } catch (error) {
       process.stdout.write(`失败：${String((error as Error)?.message ?? error).split("\n")[0]}\n`);
     } finally {
@@ -185,6 +227,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     `\n用量：${per} 条 / ${totals.steps} 步 / 输入 ${totals.inputTokens} tok / 输出 ${totals.outputTokens} tok` +
       `（每条平均 输入 ${per ? Math.round(totals.inputTokens / per) : 0} tok / 输出 ${per ? Math.round(totals.outputTokens / per) : 0} tok）\n` +
+      (oversize ? `⚠️ ${oversize} 条因补丁超大（疑似把依赖/产物收进来）未写入预测 —— 它们按失败计，别混进通过率。\n` : "") +
       `⚠️ **不折算成金额**：这个通道的单价没有可信来源，token 数是真的、钱要你自己按账单核。\n` +
       `预测已写入 ${path.resolve(outFile)}\n` +
       `判分请用官方 harness（见 bench/swebench/README.md）。**本脚本不产生成绩数字。**\n`,
