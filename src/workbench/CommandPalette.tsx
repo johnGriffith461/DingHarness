@@ -65,6 +65,17 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { id: "phone", label: "手机遥控电脑", hint: "本地配对", keys: "phone remote 手机 遥控", run: () => setView("phone") },
       { id: "canvas", label: "打开 / 关闭画布", hint: "产物面板", keys: "canvas 画布 白板", run: () => toggleCanvas() },
       { id: "nav", label: "收起 / 展开左栏", hint: "导航", keys: "sidebar nav 左栏 收起", run: () => toggleNav() },
+      /*
+       * 设置（G16）：键盘用户不该为了打开设置去 Tab 遍左栏。
+       * 走的是左栏已经在听的那个事件（`dsh-open-settings`）——不新开一条"打开设置"的路。
+       */
+      {
+        id: "settings",
+        label: "设置",
+        hint: "模型 / 权限 / 知识库 / 个性化",
+        keys: "settings preferences 设置 偏好 通用",
+        run: () => window.dispatchEvent(new CustomEvent("dsh-open-settings")),
+      },
     ],
     [setView, toggleCanvas, toggleNav],
   );

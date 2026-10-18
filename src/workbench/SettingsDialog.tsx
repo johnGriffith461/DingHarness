@@ -5,11 +5,12 @@
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, X, Library } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
+import { trapTabKey } from "./focusTrap";
 import { useAppSettings } from "./appSettings";
 import { listProviders } from "@/ai/aiClient";
 import { useMemoryStore } from "./memoryStore";
@@ -95,6 +96,35 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  /*
+   * **键盘可达**（G16）：打开时把焦点移进来、Tab 在浮层内循环、关闭时还回去。
+   *
+   * 之前这里只有 Esc：`aria-modal="true"` 写着了，但焦点仍留在背后的按钮上，
+   * Tab 会跑进被盖住的内容 —— 视觉上看不出来，键盘/读屏用户直接迷路。
+   * 判定在 `focusTrap.ts`（纯函数有单测），这里只接 DOM。
+   */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    /* 焦点落在容器本身（不抢到某个按钮上：用户可能想先读标题） */
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      trapTabKey(e, panelRef.current);
+    };
+    /* 捕获阶段：浮层内部组件自己也处理 Tab（下拉框等）时先让它走完，只有出了边界才循环 */
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      /*
+       * 还回打开它的那个元素。**它可能已经不在了**（从命令面板打开时，面板一执行就卸载），
+       * 也可能本来就没焦点（`document.activeElement` 是 body）—— 那就落到左栏第一项：
+       * 总之不许把焦点丢在 body 上（读屏用户会从整页开头重读）。
+       */
+      if (previous && previous !== document.body && document.contains(previous)) previous.focus();
+      else document.querySelector<HTMLElement>('[data-testid="wb-nav-home"]')?.focus();
+    };
+  }, []);
 
   /*
    * 首屏卡片上那一格「主题」。
@@ -189,6 +219,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     <div
       className="wb-setfull"
       data-testid="wb-settings"
+      ref={panelRef}
+      /* 容器本身可聚焦（-1 = 只在脚本里聚焦，不进 Tab 序列） */
+      tabIndex={-1}
       /*
        * ⚠️ 无障碍语义（2026-10-16 审计 P108）：它原来只有一个 div ——
        * 读屏软件不知道"这里进了一层"，也不知道"底下那些还能不能用"。
