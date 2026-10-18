@@ -151,6 +151,15 @@ export type EngineRunRequest = {
   /** 步数上限（父 4 / 子 6 是各自的经验值，作为参数传进来）。 */
   maxSteps?: number;
   /**
+   * **卡住看门狗的时限**（毫秒，可选；不给 = 内核默认 2 分钟）。
+   *
+   * 存在的理由：长上下文 + 推理模型的首 token 延迟可能远超 2 分钟
+   * （实测 50 万 token 输入、并发 4 时出现过连续两次 120 秒没有任何输出），
+   * 而那不是"连接断了"，只是还没开始吐字。评测这类**要跑满上下文**的装置
+   * 需要一个更宽的窗口；普通聊天仍用默认值，不为它放宽。
+   */
+  stallTimeoutMs?: number;
+  /**
    * **谁发起的这一轮**（C5，2026-10-17）。
    *
    * 缺省 = `LOCAL_USER`（本机单用户）。它是 `request` 记录的 actor；
@@ -447,6 +456,7 @@ export function createEngine(ports: EnginePorts): Engine {
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
           ...(request.onRawError ? { onRawError: request.onRawError } : {}),
+          ...(request.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: request.stallTimeoutMs }),
           ...(request.nextSteer ? { nextSteer: request.nextSteer } : {}),
           ...(request.useTools
             ? {

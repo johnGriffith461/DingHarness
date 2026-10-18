@@ -208,6 +208,12 @@ async function main(): Promise<void> {
           mode: "全部允许",
           useTools: true,
           maxSteps: task.maxSteps ?? 40,
+          /*
+           * 看门狗放宽到 5 分钟：SWE-bench 的上下文会长到 50 万 token 以上，
+           * 并发跑时 provider 的首 token 延迟常态超过 2 分钟 —— 那不是断线，
+           * 用默认 120 秒会把"还在思考"误判成失败（实测连续两条中招）。
+           */
+          stallTimeoutMs: 5 * 60 * 1000,
           onEvent: (event) => {
             if (event.type !== "step-finish" && event.type !== "done") return;
             const u = (event as { usage?: { inputTokens?: number; outputTokens?: number } }).usage;
