@@ -11,18 +11,16 @@
  *
  * ## 权限分两类（这一条是这份代码最要紧的诚实之处）
  *
- * | 类别 | 例子 | v1 是否**真的**拦得住 |
+ * | 类别 | 例子 | 现在**真的**拦得住吗（G18 之后） |
  * |---|---|---|
  * | **能力注入类** | `tools:register` / `hooks:register` | ✅ 拦得住：不给那个权限，那条线就不接 |
- * | **资源访问类** | `fs:read` / `fs:write` / `net` / `exec` | ❌ **拦不住**（v1 插件与宿主同进程、同权限） |
+ * | `fs:read` / `fs:write` / `exec` | 读文件 / 写文件 / 起子进程 | ✅ **隔离进程里按批准项强制**（Node 权限模型）；宿主不支持时降级并如实标注 |
+ * | `net` | 联网 | ⚠️ **拦不住**：Node 权限模型没有网络那一格 —— 声明而已 |
  *
- * ⚠️ 第二类**必须**在安装界面与文档里说清"这是声明、不是沙箱"。
- * 一个看着像权限、实际不生效的东西，比没有权限声明更坏 ——
- * 用户会据此做出错误的信任判断。方案里也写了这一条：
- * **v1 进程内执行 + 权限声明 + 安装确认；Worker / 容器隔离列 v2**。
- *
- * 那第二类为什么还要声明？因为它仍是**有用的**：安装时用户看到
- * "这个插件要读文件、要联网"，就能决定装不装 —— 那是**知情**，不是**限制**。
+ * ⚠️ 插件现在跑在**独立 Worker**（`runtime/pluginWorker.ts`）：读插件目录之外的文件、
+ * 写文件、起子进程默认都被拒（除了插件目录内、且批准了 `fs:write`）。
+ * 但 `net` 仍然只是知情 —— 安装界面与文档必须继续说清这一格。
+ * 早于 G18 的说明（"v1 同进程、资源类全拦不住"）已作废，别再照抄。
  */
 
 import { parseDependencies } from "./pluginDeps";
@@ -50,6 +48,17 @@ export const PLUGIN_PERMISSIONS: readonly PluginPermission[] = [
 
 /** v1 **真的**拦得住的那两种（见文件头那张表）。 */
 export const ENFORCED_PERMISSIONS: readonly PluginPermission[] = ["tools:register", "hooks:register"];
+
+/**
+ * 隔离进程里由 **Node 权限模型强制**的资源权限（G18）。
+ *
+ * ⚠️ 宿主 Node 不支持权限模型时会降级成只隔离崩溃 —— 那时这三项也回到"声明"。
+ * 界面据 `LoadedPlugin.isolation` 决定怎么说，别把降级说成已强制。
+ */
+export const SANDBOXED_PERMISSIONS: readonly PluginPermission[] = ["fs:read", "fs:write", "exec"];
+
+/** 仍**只是声明**的权限：`net`。Node 权限模型没有网络那一格。 */
+export const DECLARATION_ONLY_PERMISSIONS: readonly PluginPermission[] = ["net"];
 
 /** 生命周期点（Phase 8.3）。 */
 export type HookName = "session:start" | "tool:before" | "tool:after" | "turn:end";

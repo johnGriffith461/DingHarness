@@ -16,6 +16,7 @@ import { PRODUCT_VERSION } from "../../shared/product";
 import { engineIncompatibility } from "./pluginIndex";
 import { checkManifest } from "./plugins";
 import { dependencyProblems } from "./pluginDeps";
+import { startIsolatedPlugin, type IsolatedPlugin } from "./pluginWorker";
 import type { HooksPort } from "../ports/hooks";
 
 /**
@@ -37,11 +38,11 @@ import type { HooksPort } from "../ports/hooks";
  * };
  * ```
  *
- * ## 三条边界（v1 如实说清）
+ * ## 三条边界（G18 之后）
  *
- * 1. **进程内执行**：插件与宿主**同进程、同权限**。所以 `fs:read` / `net` / `exec`
- *    这类权限在 v1 **拦不住**（见 `plugins.ts` 文件头那张表）—— 它们的作用是
- *    "让用户知情"，不是"限制"。真正的隔离（Worker / 容器）列 v2。
+ * 1. **独立进程执行**：插件代码跑在 Worker 里（`pluginWorker.ts`），不在主进程 ——
+ *    死循环/崩溃只毁它自己；文件与子进程按批准项由 Node 权限模型强制。
+ *    **例外如实记**：`net` 仍拦不住（Node 没有网络权限那一格）。
  * 2. **钩子是"只看不改"**：钩子的返回值**一律忽略**。钩子能改行为的话，
  *    一个坏插件就能悄悄改掉工具参数或拦下工具调用 —— 而那种改动
  *    在留痕里看不出来（"模型说它调了 A，结果执行的是 B"）。
@@ -51,49 +52,12 @@ import type { HooksPort } from "../ports/hooks";
  * ## 权限在这里**真的**生效
  *
  * `tools:register` / `hooks:register` 没被批准 → 那条线**不接**：
- * 工具不进注册表、钩子不会被调用。这是 v1 里两类权限中能真拦的那一类。
+ * 工具不进注册表、钩子不会被调用。`fs:read` / `fs:write` / `exec` 由 worker
+ * 的启动参数决定（`isolation` 字段如实标 `worker-permission` 还是 `worker`）。
  */
-
-/**
- * 藏在编译背后的动态 `import`（`new Function` 让它不被 TS 改写成 `require`）。
- */
-const compiledImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<PluginModule>;
-
-/**
- * **加载一个插件模块**（两种宿主都要能跑，所以两条路都留着）。
- *
- * | 宿主 | 直接写 `import()` 会怎样 | 用 `compiledImport` 会怎样 |
- * |---|---|---|
- * | 桌面主进程（**CJS**） | TS 把它编译成 `require()` → **加载不了 ESM** | ✅ 真正的动态 import |
- * | vitest（ESM） | ✅ | ❌ 报 "A dynamic import callback was not specified"（不在模块图里） |
- *
- * 所以：先走 `compiledImport`（桌面那条路必需），**只在它报"环境不支持"时**回落到普通
- * `import()`（vitest 那条路必需）。删掉任何一条，都会有半边宿主炸 ——
- * 而这半边炸的时候，错误信息离原因很远（`Cannot find module 'file:///…'`
- * 那个格式其实是 **require** 的，不是 ESM 的）。
- *
- * @param url 模块 URL
- * @returns 模块
- */
-async function loadModule(url: string): Promise<PluginModule> {
-  try {
-    return await compiledImport(url);
-  } catch (error) {
-    const message = String(error instanceof Error ? error.message : error);
-    // 只在这类"这个环境里没有动态 import 回调"的错误上回落，别把插件自己的报错吞了
-    if (!/dynamic import callback|import\(\) is not a function|Cannot use import statement/i.test(message)) throw error;
-    return (await import(url)) as PluginModule;
-  }
-}
 
 /** 插件工具的运行体。 */
 export type PluginToolRun = (input: unknown, ctx: { sessionId?: string }) => Promise<unknown> | unknown;
-
-/** 一个插件导出的东西（作者写的形状）。 */
-export type PluginModule = {
-  tools?: Record<string, { description?: string; inputSchema?: unknown; run?: PluginToolRun }>;
-  hooks?: Partial<Record<HookName, (payload: unknown) => unknown>>;
-};
 
 /** 装载结果。 */
 export type LoadedPlugin = {
@@ -108,6 +72,12 @@ export type LoadedPlugin = {
   withheld: PluginPermission[];
   /** 装载过程中发现的问题（**报出来而不是吞掉**：插件少了一个工具，用户该知道）。 */
   problems: string[];
+  /**
+   * 隔离档位（G18）：`worker-permission` = 独立进程 + Node 权限模型（文件/子进程受控）；
+   * `worker` = 独立进程（崩溃/卡死隔离，但文件与命令边界**没有强制**）。
+   * 缺省 = 早期台账/未装载。
+   */
+  isolation?: "worker-permission" | "worker";
 };
 
 /**
@@ -125,6 +95,13 @@ function normalizeSchema(raw: unknown): Record<string, unknown> {
 
 /** 已装载的工具运行体（键是带前缀的完整名字）。 */
 const runners = new Map<string, PluginToolRun>();
+/**
+ * 已起的隔离进程（G18）：插件名 → worker 句柄。
+ *
+ * 与 `runners` 分开：`runners` 是"怎么调"（工具名 → 调用），这里是"进程在哪"
+ * （重装载/退出时要 terminate）。
+ */
+const workers = new Map<string, IsolatedPlugin>();
 
 /** 当前装载的插件（宿主从这里取条目与钩子）。 */
 let loaded: LoadedPlugin[] = [];
@@ -147,11 +124,12 @@ export function withheldCapabilities(): { plugin: string; permissions: PluginPer
 /**
  * 插件工具的资源上限（G18，2026-10-18）。
  *
- * ⚠️ 这是**进程内**的上限，不是隔离：插件代码仍与应用同进程、同权限。
- * 它能挡的是"卡住整轮"与"吐出一个吃爆上下文的巨大结果"，
- * 挡不住"读任意文件"（要挡那个得把插件搬进独立进程 —— 那是 v2，见文件头）。
+ * ⚠️ 插件现在跑在**独立 Worker**（G18，见 `pluginWorker.ts`）：超时会 terminate 那个进程；
+ * 结果上限仍在这里（挡"吐出一个吃爆上下文的巨大结果"）。
  */
 export const PLUGIN_TOOL_TIMEOUT_MS = 30_000;
+/** 钩子上限：钩子是"只看不改"的旁路，超过 5 秒就当它卡住了。 */
+export const PLUGIN_HOOK_TIMEOUT_MS = 5_000;
 export const PLUGIN_TOOL_MAX_CHARS = 64 * 1024;
 
 /**
@@ -247,24 +225,25 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
   const entryFile = path.join(plugin.dir, approved.main ?? "index.mjs");
   if (!existsSync(entryFile)) return { ...empty, withheld: caps.withheld, problems: [`入口文件 ${approved.main ?? "index.mjs"} 不在了`] };
 
-  let mod: PluginModule;
-  try {
-    /*
-     * 动态 import：插件是**用户装的代码**，加载它等于执行它 —— 这正是 v1 的边界
-     * （进程内、同权限）。`?v=<installedAt>` 是刻意的：改过插件之后重新装载
-     * 不会被 Node 的模块缓存挡住（否则"改了没生效"会成为一个假 bug）。
-     *
-     * ⚠️⚠️ 必须用 `dynamicImport`（不是直接写 `import()`）：
-     * TypeScript 在 **CommonJS 目标**下会把 `import(x)` **编译成 `require(x)`**，
-     * 而 `require` 加载不了 ESM 插件 —— 桌面主进程正是 CJS（`tsconfig.electron.json`），
-     * 于是同一段代码在 CLI（tsx/ESM）里好好的、在桌面里报
-     * `Cannot find module 'file:///.../index.mjs'`（这个错误格式本身就是 require 的）。
-     * 用 `new Function` 把 `import` 藏过编译，两种宿主都拿到**真正的**动态 import。
-     */
-    mod = await loadModule(`${pathToFileURL(entryFile).href}?v=${plugin.installedAt}`);
-  } catch (error) {
-    return { ...empty, withheld: caps.withheld, problems: [`装载失败：${error instanceof Error ? error.message : String(error)}`] };
+  /*
+   * ⭐ **隔离装载（G18）**：插件代码在独立 Worker 里跑，不在主进程。
+   *
+   * 之前这里是 `loadModule()` 直接 import —— 插件与应用同进程、同权限：
+   * 一个死循环能卡死界面，一个未捕获异常能带崩应用，`fs`/`child_process` 随便用。
+   * 现在：加载、跑工具、跑钩子全在 worker 里；超时直接 terminate。
+   * 文件/子进程边界由 Node 权限模型尽力强制（见 `pluginWorker.ts` 的如实说明）。
+   */
+  const started = await startIsolatedPlugin({
+    dir: plugin.dir,
+    entryUrl: pathToFileURL(entryFile).href,
+    allowWrite: plugin.granted.includes("fs:write"),
+    allowExec: plugin.granted.includes("exec"),
+  });
+  if (!started.ok) {
+    return { ...empty, withheld: caps.withheld, problems: [`隔离进程没能起来：${started.error}`] };
   }
+  const isolated = started.plugin;
+  workers.set(plugin.name, isolated);
 
   const problems: string[] = [];
   const entries: ToolEntry[] = [];
@@ -278,24 +257,21 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
    * · 导出了 + 没声明 → **不接**（未声明的能力不予注入），并报出来。
    */
   const declaredTools = new Set(approved.tools ?? []);
-  const exportedTools = Object.keys(mod.tools ?? {});
+  const exportedTools = Object.keys(isolated.tools);
   if (caps.tools) {
     for (const tool of declaredTools) {
-      const def = mod.tools?.[tool];
+      const def = isolated.tools[tool];
       if (!def) {
         problems.push(`清单声明了工具 ${tool}，但代码里没有导出它`);
         continue;
       }
-      if (typeof def.run !== "function") {
-        problems.push(`工具 ${tool} 没有 run 函数`);
-        continue;
-      }
       const full = pluginToolName(plugin.name, tool);
-      runners.set(full, def.run as PluginToolRun);
+      /* 调用一律过隔离进程（外层的超时是第二道保险） */
+      runners.set(full, (input) => isolated.run(tool, input, PLUGIN_TOOL_TIMEOUT_MS));
       entries.push({
         name: full,
         source: "plugin",
-        description: typeof def.description === "string" && def.description ? def.description : `${plugin.name} 提供的 ${tool}`,
+        description: def.description ? def.description : `${plugin.name} 提供的 ${tool}`,
         /*
          * 插件给的是**纯 JSON Schema**（它不该依赖我们的 zod 版本）—— 与 MCP 那条同一个口径。
          *
@@ -320,23 +296,31 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
   const hooks: Partial<Record<HookName, (payload: unknown) => unknown>> = {};
   if (caps.hooks) {
     for (const hook of declaredHooks) {
-      const fn = mod.hooks?.[hook];
-      if (typeof fn !== "function") {
+      if (!isolated.hooks.includes(hook)) {
         problems.push(`清单声明了钩子 ${hook}，但代码里没有导出它`);
         continue;
       }
-      hooks[hook] = fn;
+      hooks[hook] = (payload) => isolated.hook(hook, payload, PLUGIN_HOOK_TIMEOUT_MS);
     }
-    for (const exported of Object.keys(mod.hooks ?? {})) {
+    for (const exported of isolated.hooks) {
       if (!declaredHooks.has(exported as HookName)) {
         problems.push(`代码导出了钩子 ${exported}，但清单里没声明它 —— 不会被调用`);
       }
     }
-  } else if (Object.keys(mod.hooks ?? {}).length) {
+  } else if (isolated.hooks.length) {
     problems.push("导出了钩子，但没有 `hooks:register` 权限 —— 一个都不会被调用");
   }
 
-  return { name: plugin.name, version: plugin.version, dir: plugin.dir, entries, hooks, withheld: caps.withheld, problems };
+  return {
+    name: plugin.name,
+    version: plugin.version,
+    dir: plugin.dir,
+    entries,
+    hooks,
+    withheld: caps.withheld,
+    problems,
+    isolation: isolated.isolation,
+  };
 }
 
 /**
@@ -347,6 +331,9 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
  */
 export async function loadEnabledPlugins(installed: readonly InstalledPlugin[]): Promise<LoadedPlugin[]> {
   runners.clear();
+  /* 重装载前先关掉上一批隔离进程（不然每切一次开关就多几个 worker 挂着） */
+  for (const w of workers.values()) w.close();
+  workers.clear();
   const out: LoadedPlugin[] = [];
   /*
    * 依赖门（L04）：依赖没装/关着/版本不符 → **不装载**，但把原因放进
@@ -377,6 +364,8 @@ export async function loadEnabledPlugins(installed: readonly InstalledPlugin[]):
 /** 清空装载状态（测试与"关掉全部插件"用）。 */
 export function resetPlugins(): void {
   runners.clear();
+  for (const w of workers.values()) w.close();
+  workers.clear();
   loaded = [];
 }
 

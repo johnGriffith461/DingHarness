@@ -46,15 +46,16 @@ function makePlugin(opts: {
     description: "一个用于测试的插件",
     tools: ["hello"],
     hooks: ["turn:end"],
-    permissions: ["tools:register", "hooks:register"],
+    permissions: ["tools:register", "hooks:register", "fs:write"],
     engines: { ding: ">=0.2.0" },
   };
   writeFileSync(path.join(dir, "ding-plugin.json"), JSON.stringify(manifest, null, 2), "utf8");
   writeFileSync(
     path.join(dir, "index.mjs"),
     opts.tools ??
-      `export const tools = { hello: { description: "打个招呼", inputSchema: { type: "object" }, run: async () => ({ ok: true, text: "你好" }) } };
-export const hooks = { "turn:end": async () => { globalThis.__pluginHookCalls = (globalThis.__pluginHookCalls ?? 0) + 1; } };`,
+      `import { appendFileSync } from "node:fs";
+export const tools = { hello: { description: "打个招呼", inputSchema: { type: "object" }, run: async () => ({ ok: true, text: "你好" }) } };
+export const hooks = { "turn:end": async () => { appendFileSync(new URL("./hook.log", import.meta.url), "hook\\n"); } };`,
     "utf8",
   );
   return dir;
@@ -207,13 +208,14 @@ describe("整条链路：装 → 装载 → 调工具", () => {
     expect(out).toEqual({ ok: true, text: "你好" });
 
     await runHooks("turn:end", {});
-    expect((globalThis as { __pluginHookCalls?: number }).__pluginHookCalls).toBe(1);
+    /* 隔离之后 globalThis 不共享了：钩子的证据是它在插件目录里写的那个文件 */
+    expect(readFileSyncCompat(path.join(loaded[0]!.dir, "hook.log"))).toBe("hook\n");
   });
 
   it("⭐ 用户没批 `tools:register` → 工具**不进注册表**（不是「注入了但拦着」）", async () => {
     const dir = makePlugin();
     const paths = pluginPaths(dataDir);
-    installFromDir({ paths, from: dir, granted: ["hooks:register"] });
+    installFromDir({ paths, from: dir, granted: ["hooks:register", "fs:write"] });
 
     const loaded = await loadEnabledPlugins(readLedger(paths).ledger.installed);
     expect(pluginToolEntries()).toEqual([]);
@@ -222,7 +224,7 @@ describe("整条链路：装 → 装载 → 调工具", () => {
     expect(withheldCapabilities()).toEqual([{ plugin: "hello-plugin", permissions: ["tools:register"] }]);
     // 钩子那条线还是接着的
     await runHooks("turn:end", {});
-    expect((globalThis as { __pluginHookCalls?: number }).__pluginHookCalls).toBe(1);
+    expect(readFileSyncCompat(path.join(loaded[0]!.dir, "hook.log"))).toBe("hook\n");
   });
 
   it("⭐ 声明了却没导出 → **报出来**（不静默少一个工具）", async () => {

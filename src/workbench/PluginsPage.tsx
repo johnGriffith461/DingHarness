@@ -111,11 +111,11 @@ export function PluginsPage() {
    *
    * 与上面的「已安装清单」**不是同一类东西**（与连接器同一条区分）：
    * 那些是应用内置目录里的条目（本应用自己长出来的能力），
-   * 这些是**用户装的第三方代码**（装在 `userData/plugins/`，与宿主同进程跑）。
+   * 这些是**用户装的第三方代码**（装在 `userData/plugins/`，跑在独立 Worker 里；G18）。
    *
    * 所以这一段的界面重点不是"好不好看"，而是**把两件事如实说清**：
    *   ① 它申请了什么权限、你批了哪几项（申请了没批的**真的不生效**）；
-   *   ② 哪些权限 v1 根本拦不住（资源类）—— 那是"知情"不是"限制"。
+   *   ② 哪些权限仍拦不住（现在只剩 `net`）—— 那是"知情"不是"限制"。
    * 一个看着像权限、实际不生效的界面，比没有权限界面更坏。
    */
   const [plugins, setPlugins] = useState<
@@ -127,7 +127,9 @@ export function PluginsPage() {
         granted: readonly string[];
         requested: readonly string[];
         withheld: readonly string[];
+        sandboxed: readonly string[];
         declaredOnly: readonly string[];
+        isolation?: "worker-permission" | "worker";
         problems: string[];
         toolCount: number;
       }[]
@@ -492,9 +494,19 @@ export function PluginsPage() {
                             申请了但没批（**真的不生效**）：{p.withheld.join(" / ")}
                           </span>
                         ) : null}
+                        {p.sandboxed.length ? (
+                          <span className="wb-sched-meta" data-testid={`wb-plugin-sandboxed-${p.name}`}>
+                            隔离进程强制（只能碰插件目录；写/起子进程要单独批准）：{p.sandboxed.join(" / ")}
+                          </span>
+                        ) : null}
                         {p.declaredOnly.length ? (
                           <span className="wb-sched-meta" data-testid={`wb-plugin-declared-${p.name}`}>
-                            v1 拦不住（只是声明）：{p.declaredOnly.join(" / ")}
+                            仍拦不住（Node 没有网络权限那一格）：{p.declaredOnly.join(" / ")}
+                          </span>
+                        ) : null}
+                        {p.isolation === "worker" ? (
+                          <span className="wb-sched-meta" data-testid={`wb-plugin-isolation-${p.name}`}>
+                            隔离：独立进程（只隔离崩溃；文件/命令边界未强制）
                           </span>
                         ) : null}
                         {p.problems.map((problem) => (

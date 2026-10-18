@@ -307,9 +307,10 @@ pnpm e2ee:demo                                                   # 现场演示�
 
 - **`run_command` 不是安全边界**：Windows 上它有内存与子进程数上限（作业对象），
   但命令仍以**你的身份**运行，能读能写能联网。唯一拦着 `rm -rf` 的是**闸门**（你点的那一下）。
-- **插件 v1 的权限只是声明**：`fs:read` / `fs:write` / `net` / `exec` **拦不住**
-  （插件与宿主同进程）。`tools:register` / `hooks:register` 是真的（不批就不接那根线）。
-  隔离版（wasmtime + 签名）**未做**。
+- **插件跑在独立 Worker**（G18）：死循环/崩溃只毁它自己；读插件目录外、写文件、起子进程
+  默认拒绝（批准 `fs:write` 只能写插件目录、批准 `exec` 才能起子进程）；
+  **`net` 仍拦不住**（Node 权限模型没有网络那一格）。宿主不支持权限模型时降级为
+  "只隔离崩溃"并在界面与 `ding plugins list` 标注 `worker`。
 - **密钥**：桌面端「设置 → 密钥」里填的 key 走 `safeStorage`（DPAPI / Keychain / libsecret），
   拿不到系统加密能力时**拒绝写**并说清原因（不退化成明文）；
   **CLI 向导（`ding init`）写的是明文** —— 原因是 CLI 没有系统钥匙串入口

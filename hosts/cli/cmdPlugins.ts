@@ -35,7 +35,14 @@ import {
 } from "../../engine/runtime/pluginIndex";
 import { checkIndexTrust, indexPinsFileOf, readIndexPins, writeIndexPins } from "../../engine/runtime/pluginIndexTrust";
 import { loadEnabledPlugins, loadedPlugins, withheldCapabilities } from "../../engine/runtime/pluginHost";
-import { ENFORCED_PERMISSIONS, PLUGIN_PERMISSIONS, checkManifest, type PluginPermission } from "../../engine/runtime/plugins";
+import {
+  DECLARATION_ONLY_PERMISSIONS,
+  ENFORCED_PERMISSIONS,
+  PLUGIN_PERMISSIONS,
+  SANDBOXED_PERMISSIONS,
+  checkManifest,
+  type PluginPermission,
+} from "../../engine/runtime/plugins";
 import { flag, type Parsed } from "./args";
 
 /**
@@ -144,6 +151,16 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
           ? "未签名"
           : `已签名（${item.signature.publisher.id}，${item.signature.trust === "trusted" ? "同一把钥匙" : "首次见到"}）`;
       console.log(`    签名：${sig}`);
+      /*
+       * 隔离档位（G18）：插件跑在独立进程里。宿主 Node 不支持权限模型时会降级成
+       * 只隔离崩溃 —— 这一行必须如实说，别让用户以为文件边界也生效了。
+       */
+      const iso = loadedPlugins().find((p) => p.name === item.name)?.isolation;
+      if (iso) {
+        console.log(
+          `    隔离：${iso === "worker-permission" ? "独立进程（文件/命令按批准项受控）" : "独立进程（只隔离崩溃；文件/命令边界未强制）"}`,
+        );
+      }
       const deps = item.manifest.dependencies ?? {};
       const depText = Object.entries(deps)
         .map(([dep, range]) => `${dep} ${range}`)
@@ -275,10 +292,17 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     console.log(`  ${m.description}`);
     console.log(`  它申请的权限：${m.permissions.length ? m.permissions.join(" / ") : "（无）"}`);
     const enforced = m.permissions.filter((x) => ENFORCED_PERMISSIONS.includes(x));
-    const declaredOnly = m.permissions.filter((x) => !ENFORCED_PERMISSIONS.includes(x));
+    const sandboxed = m.permissions.filter((x) => SANDBOXED_PERMISSIONS.includes(x));
+    const declaredOnly = m.permissions.filter((x) => DECLARATION_ONLY_PERMISSIONS.includes(x));
     if (enforced.length) console.log(`  · 这几项**会真的生效**（不批就不接那根线）：${enforced.join(" / ")}`);
+    if (sandboxed.length) {
+      console.log(
+        `  · 这几项在**隔离进程**里强制（只能碰插件目录；写/起子进程要单独批准）：${sandboxed.join(" / ")}` +
+          "（宿主 Node 不支持权限模型时降级为只隔离崩溃）",
+      );
+    }
     if (declaredOnly.length) {
-      console.log(`  · 这几项 v1 **拦不住**（插件与宿主同进程同权限）—— 是"知情"不是"限制"：${declaredOnly.join(" / ")}`);
+      console.log(`  · 这几项**拦不住**（Node 没有网络权限那一格）—— 是"知情"不是"限制"：${declaredOnly.join(" / ")}`);
     }
     const deps = m.dependencies ?? {};
     if (Object.keys(deps).length) {

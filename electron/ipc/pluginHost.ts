@@ -16,7 +16,14 @@ import {
   type InstalledPlugin,
 } from "../../engine/adapters/pluginStore";
 import { loadEnabledPlugins, loadedPlugins, withheldCapabilities } from "../../engine/runtime/pluginHost";
-import { checkManifest, ENFORCED_PERMISSIONS, type PluginManifest, type PluginPermission } from "../../engine/runtime/plugins";
+import {
+  checkManifest,
+  DECLARATION_ONLY_PERMISSIONS,
+  ENFORCED_PERMISSIONS,
+  SANDBOXED_PERMISSIONS,
+  type PluginManifest,
+  type PluginPermission,
+} from "../../engine/runtime/plugins";
 
 /**
  * 桌面的插件 IPC（Phase 8.4）。
@@ -100,7 +107,11 @@ export function pluginViews(): PluginView[] {
       granted: item.granted,
       requested: item.permissions,
       withheld,
-      declaredOnly: item.permissions.filter((p) => !ENFORCED_PERMISSIONS.includes(p)),
+      /* 隔离进程强制的资源项（宿主支持权限模型时；降级时 isolation 会说是 worker） */
+      sandboxed: item.permissions.filter((p) => SANDBOXED_PERMISSIONS.includes(p)),
+      /* 仍然拦不住的：只剩 net（Node 没有网络权限那一格） */
+      declaredOnly: item.permissions.filter((p) => DECLARATION_ONLY_PERMISSIONS.includes(p)),
+      ...(loaded?.isolation ? { isolation: loaded.isolation } : {}),
       problems: loaded?.problems ?? (item.enabled ? [] : []),
       toolCount: loaded?.entries.length ?? 0,
     };
@@ -156,17 +167,21 @@ export async function loadPluginsAtStartup(): Promise<void> {
 async function confirmInstall(win: BrowserWindow | null, manifest: PluginManifest): Promise<boolean> {
   if (!win) return false;
   const enforced = manifest.permissions.filter((p) => ENFORCED_PERMISSIONS.includes(p));
-  const declaredOnly = manifest.permissions.filter((p) => !ENFORCED_PERMISSIONS.includes(p));
+  const sandboxed = manifest.permissions.filter((p) => SANDBOXED_PERMISSIONS.includes(p));
+  const declaredOnly = manifest.permissions.filter((p) => DECLARATION_ONLY_PERMISSIONS.includes(p));
   const detail = [
     manifest.description,
     "",
     `它申请的权限：${manifest.permissions.length ? manifest.permissions.join(" / ") : "（无）"}`,
     enforced.length ? `· 这几项**会真的生效**（不批它就不接那根线）：${enforced.join(" / ")}` : "",
+    sandboxed.length
+      ? `· 这几项在**隔离进程**里强制（只能碰插件目录；写/起子进程要单独批准）：${sandboxed.join(" / ")}`
+      : "",
     declaredOnly.length
-      ? `· 这几项 v1 **拦不住**（插件与宿主同进程同权限）—— 是"知情"，不是"限制"：${declaredOnly.join(" / ")}`
+      ? `· 这几项**拦不住**（Node 没有网络权限那一格）—— 是"知情"，不是"限制"：${declaredOnly.join(" / ")}`
       : "",
     "",
-    "插件代码会在主进程里执行。只装你信得过的。",
+    "插件代码会在独立进程里执行（不是主进程）。只装你信得过的。",
   ]
     .filter(Boolean)
     .join("\n");

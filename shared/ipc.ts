@@ -28,7 +28,7 @@ import type { PersonaPref } from "./persona";
 /* 键位与人格（L06）用真形状，不手抄 —— 收窄与判定都在各自模块里。 */
 export type KeymapWire = Keymap;
 export type PersonaWire = PersonaPref;
-/** 应用设置落盘形状（`appSettings:read/write` 共用，避免两处手抄）。 */
+/** 应用设置落盘形状（read/write 共用，避免手抄）。 */
 export type AppSettingsWire = {
   pinnedModel: string;
   navCollapsed?: boolean;
@@ -350,8 +350,8 @@ export type ComputerResultView =
 import type { PermissionRuleWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type { PermissionRuleWire, ReviewChangeWire, ReviewListResult, ReviewRevertResult } from "./review";
 export type ShellBridge = {
-  skills: import("./skillsWire").SkillsBridge; /* G08：形状在 skillsWire.ts */
-  /* 审阅（U08）：本体在 engine。 */
+  skills: import("./skillsWire").SkillsBridge;
+  knowledge: import("./knowledgeWire").KnowledgeBridge;
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;
     revert: (sessionId: string, path: string) => Promise<ReviewRevertResult>;
@@ -507,11 +507,7 @@ export type ShellBridge = {
     /** 列出产物目录里的所有文件（重启后恢复列表用）。 */
     listArtifacts: () => Promise<Array<{ filePath: string; name: string; bytes: number }>>;
   };
-  /**
-   * 本机版应用设置（§183）—— 主进程原子写（不走 localStorage，§156 的教训）。
-   * 字段见 `AppSettingsWire`：默认通道 / 左栏收起态 / 权限规则 / 键位 / 人格。
-   * 可选字段缺了就是默认值 —— 让旧 `settings.json` 读出来报缺字段是本末倒置。
-   */
+  /** 本机版应用设置（§183）：字段见 `AppSettingsWire`；主进程原子写，缺字段取默认。 */
   appSettings: {
     read: () => Promise<AppSettingsWire>;
     write: (next: AppSettingsWire) => Promise<AppSettingsWire>;
@@ -799,7 +795,12 @@ export type ShellBridge = {
         granted: readonly string[];
         requested: readonly string[];
         withheld: readonly string[];
+        /** 隔离进程里由权限模型强制的资源权限（fs/exec）。 */
+        sandboxed: readonly string[];
+        /** 仍拦不住的（现在只剩 net）。 */
         declaredOnly: readonly string[];
+        /** 隔离档位：worker-permission = 文件/命令受控；worker = 只隔离崩溃。 */
+        isolation?: "worker-permission" | "worker";
         problems: string[];
         toolCount: number;
       }[]
@@ -820,7 +821,6 @@ export type ShellBridge = {
   };
   /**
    * **团队空间**（V5-3 的产品面，V5 收尾加）：名册 / 配对码 / 共享与接管 / 账本。
-   *
    * ⚠️ 操作的是**本机数据目录里的 `space.json`** —— 与 `ding space`（CLI）和
    * `ding serve`（服务端）是**同一个账本**，规矩来自同一份纯函数。
    * 所以这三条路上"一码一人 / 不能动主人 / 移除连口令一起作废"一字不差。
