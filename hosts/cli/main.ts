@@ -83,8 +83,12 @@ import { AGENT_SPECS } from "../../engine/runtime/agents";
  * ⚠️ 另一半（备份/恢复时**显式说出**根在哪、以及桌面的那份在不在里面）要改
  * `hosts/cli/cmdBackup.ts` —— 那不在本工单的文件范围里。
  */
+/** `--data-dir` 的全局覆盖（`runMain` 里从解析结果设一次；只活得比这一条命令久一点）。 */
+let dataDirOverride = "";
+
 function dataDir(): string {
   return (
+    dataDirOverride ||
     process.env.DH_DATA_DIR?.trim() ||
     process.env.DSH_CANVAS_DATA_DIR?.trim() ||
     path.join(os.homedir(), ".ding")
@@ -715,6 +719,15 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
  */
 export async function runMain(): Promise<void> {
   const parsed = parseArgv(process.argv.slice(2));
+
+  /*
+   * `--data-dir` 是**全局**的，不只是备份那两个命令用。
+   *
+   * 之前它只在 `resolveBackupDataDir` 里被读，别的命令一律落到 `~/.ding` ——
+   * 于是 `ding plugins install … --data-dir /tmp/x` 会**静默装到真实数据目录**，
+   * 而用户以为自己隔离了一份。参数被接受了就必须生效（审计 P220 同一条口径）。
+   */
+  dataDirOverride = parsed.flags.get("data-dir")?.[0]?.trim() ?? "";
 
   /*
    * ⭐ **参数层面的错在这里拦，不在命令里各自静默**（审计 P50 / P219 / P220）：
