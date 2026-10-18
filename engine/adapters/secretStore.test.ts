@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -202,17 +202,73 @@ describe("凭据保护那一格（审计 P119：三种状态都要答得出，�
   });
 
   it("指名的主位置那份必须说清是 `ding init` 写的（不能把用户自己的文件说成别人的）", () => {
-    const dir = freshDir();
-    const primary = primaryCredentialsPath();
-    writeFileSync(primary, "refs:\n  A_KEY: sk-plain\n", "utf8");
+    /*
+     * ⚠️ **这条测试曾经删过真实用户文件**（2026-10-19，写完就跑）。
+     *
+     * 第一版直接写 `primaryCredentialsPath()` 再 `rmSync` —— 那是**用户真正的
+     * `~/.ding/.credentials.yaml`**，于是跑一次测试就把真实凭据删了。
+     * 教训：凡是"按真实路径算出来的位置"，测试都不许直接碰；要用临时家目录把
+     * `os.homedir()` 换掉，让被测路径落在沙箱里。
+     *
+     * 这里用 HOME/USERPROFILE 指向临时目录，主位置就变成 `<tmp>/.ding/.credentials.yaml`。
+     */
+    const home = freshDir();
+    const savedHome = process.env.HOME;
+    const savedProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
     try {
-      const got = credentialProtection(dir, { legacyPaths: [primary] });
+      const primary = primaryCredentialsPath();
+      // 断言它确实落在沙箱里（万一路径算错，宁可红也不要碰真文件）
+      expect(primary.startsWith(home), `主路径没落在临时家目录里：${primary}`).toBe(true);
+      mkdirSync(path.dirname(primary), { recursive: true });
+      writeFileSync(primary, "refs:\n  A_KEY: sk-plain\n", "utf8");
+      const got = credentialProtection(freshDir(), { legacyPaths: [primary] });
       expect(got.detail, "主位置那份没说是 ding init 写的").toContain("ding init");
       expect(got.detail, "主位置那份被说成了别人的").not.toContain("只读兜底");
     } finally {
-      rmSync(primary, { force: true });
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = savedProfile;
     }
-  });});
+  });
+
+  it("⭐ 守卫：任何测试都不许按真实主路径写/删（这条是真出过事故的）", () => {
+    /*
+     * 2026-10-19 实况：上面那条测试第一版直接 `writeFileSync(primaryCredentialsPath())`
+     * 再 `rmSync` —— 那是**用户真正的** `~/.ding/.credentials.yaml`，跑一次就删了。
+     *
+     * 结构上挡不住"有人又这么写"，所以这里加一条源码守卫：凡是引用
+     * `primaryCredentialsPath()` / `legacyCredentialsPath()` 的测试文件，
+     * 都必须同时出现把家目录指向沙箱的动作（`USERPROFILE` 或 `HOME`）。
+     */
+    const offenders: string[] = [];
+    const walk = (dir: string): string[] => {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+          out.push(...walk(full));
+        } else if (entry.name.endsWith(".test.ts")) {
+          out.push(full);
+        }
+      }
+      return out;
+    };
+    for (const file of [...walk(path.join(ROOT, "engine")), ...walk(path.join(ROOT, "hosts")), ...walk(path.join(ROOT, "src"))]) {
+      const src = readFileSync(file, "utf8");
+      if (!/primaryCredentialsPath|legacyCredentialsPath/.test(src)) continue;
+      if (/USERPROFILE|process\.env\.HOME/.test(src)) continue;
+      offenders.push(path.relative(ROOT, file));
+    }
+    expect(
+      offenders,
+      `这些测试引用了真实凭据路径却没有把家目录指到沙箱 —— 会碰到用户的真实 key：${offenders.join("、")}`,
+    ).toEqual([]);
+  });
+});
 
 describe("真话守卫（审计 P114 / P120 / D3 复核）：自述必须与实现一致", () => {
   it("⭐ 桌面那条写 key 的路真的调 `writeSecret`（它不再是零调用死代码）", () => {
