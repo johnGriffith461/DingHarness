@@ -27,7 +27,6 @@ const root = mkdtempSync(path.join(os.tmpdir(), "dh-clean-install-"));
 const prefix = path.join(root, "prefix");
 const cache = path.join(root, "cache");
 const problems = [];
-let child;
 
 const run = (cmd, args, opts = {}) => {
   /*

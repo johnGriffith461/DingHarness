@@ -237,6 +237,44 @@ export function memoryVisibleTo(entry: MemoryEntry, viewerId: string): boolean {
 }
 
 /**
+ * **按当前问题给记忆排序**（G09）。
+ *
+ * 之前注入永远是"新的在前"：记忆多了以后，跟这次问题**最相关**的那条可能因为
+ * 字数上限被挤掉。这里做一个便宜的排序（不引模型、不建索引）：
+ *
+ * - 英文/数字按词命中；中文按**两字片段**命中（没有分词器，两字窗是最稳的近似）；
+ * - 命中的不同词/片段越多，分越高；同分保持原顺序（新在前）；
+ * - 查询为空 → 原样返回（不改变"没问具体问题时看最近的"这条口径）。
+ *
+ * @param entries 可见记忆（新在前）
+ * @param query 本次用户消息
+ * @returns 排好序的新数组（不改原数组）
+ */
+export function rankMemoryEntries(entries: readonly MemoryEntry[], query: string): MemoryEntry[] {
+  const q = String(query ?? "").trim().toLowerCase();
+  if (!q) return [...entries];
+  const words = [...new Set((q.match(/[a-z0-9_]+/g) ?? []).filter((w) => w.length >= 2))];
+  const bigrams = [...new Set((q.match(/[\u4e00-\u9fff]{2,}/g) ?? []).flatMap((run) => {
+    const out: string[] = [];
+    for (let i = 0; i + 1 < run.length; i += 1) out.push(run.slice(i, i + 2));
+    return out;
+  }))];
+  if (!words.length && !bigrams.length) return [...entries];
+  const scoreOf = (entry: MemoryEntry): number => {
+    const text = entry.text.toLowerCase();
+    let score = 0;
+    for (const w of words) if (text.includes(w)) score += 2;
+    for (const b of bigrams) if (text.includes(b)) score += 1;
+    return score;
+  };
+  return entries
+    .map((entry, index) => ({ entry, index, score: scoreOf(entry) }))
+    /* 相关度优先；同分按原顺序（新在前） */
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((x) => x.entry);
+}
+
+/**
  * 记忆注入系统提示词的那一段。
  *
  * 与 `enabledPromptBlock` 同一个位置 —— 都是"这次对话开始前要先告诉模型的事"。
@@ -248,12 +286,15 @@ export function memoryVisibleTo(entry: MemoryEntry, viewerId: string): boolean {
  *
  * @param lib 记忆库
  * @param limitChars 注入的字数上限
+ * @param viewerId 现在是谁在看（可见性过滤）
+ * @param query 本次用户消息（给了就按相关度排，G09；空 = 保持"新在前"）
  * @returns 可直接拼接的文本（可能为空串）
  */
 export function memoryPromptBlock(
   lib: MemoryLib,
   limitChars = MEMORY_BLOCK_CHARS,
   viewerId: string = LOCAL_MEMORY_OWNER,
+  query = "",
 ): string {
   /*
    * ⚠️ 关掉了就不注入（§182）。
@@ -269,7 +310,10 @@ export function memoryPromptBlock(
    * 本机单用户下 viewer 就是 `local`，与从前逐字相同 —— 这一层是给别人进来时准备的墙，
    * 而不是"已经有人在越界"（那种说法会是假的）。
    */
-  const visible = lib.entries.filter((e) => memoryVisibleTo(e, viewerId));
+  const visible = rankMemoryEntries(
+    lib.entries.filter((e) => memoryVisibleTo(e, viewerId)),
+    query,
+  );
   if (visible.length === 0) return "";
   const head = "【长期记忆】以下是用户希望你长期记住的事：";
   const lines: string[] = [];
