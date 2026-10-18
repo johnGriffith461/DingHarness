@@ -6,6 +6,7 @@ import { CODING_CHANNEL } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
 import { REVIEW_CHANNEL } from "./ipc/review";
 import { SKILLS_CHANNEL } from "./ipc/skills";
+import { KNOWLEDGE_CHANNEL } from "./ipc/knowledge";
 import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { STATS_CHANNEL } from "./ipc/stats";
@@ -300,6 +301,16 @@ const api = {
   skills: {
     list: () => ipcRenderer.invoke(SKILLS_CHANNEL.list) as ReturnType<ShellBridge["skills"]["list"]>,
     block: (text: string) => ipcRenderer.invoke(SKILLS_CHANNEL.block, text) as Promise<string>,
+  },
+  /** 本地知识库（G15）：桌面面板与 knowledge_search 工具共用一份库文件 */
+  knowledge: {
+    list: () => ipcRenderer.invoke(KNOWLEDGE_CHANNEL.list) as ReturnType<ShellBridge["knowledge"]["list"]>,
+    addText: (input) => ipcRenderer.invoke(KNOWLEDGE_CHANNEL.addText, input) as ReturnType<ShellBridge["knowledge"]["addText"]>,
+    addFile: () => ipcRenderer.invoke(KNOWLEDGE_CHANNEL.addFile) as ReturnType<ShellBridge["knowledge"]["addFile"]>,
+    search: (query: string) =>
+      ipcRenderer.invoke(KNOWLEDGE_CHANNEL.search, query) as ReturnType<ShellBridge["knowledge"]["search"]>,
+    remove: (idOrPath: string) =>
+      ipcRenderer.invoke(KNOWLEDGE_CHANNEL.remove, idOrPath) as ReturnType<ShellBridge["knowledge"]["remove"]>,
   },
   /** 逐文件改动审阅（U08）：读改动清单 / 回滚某个文件 */
   review: {

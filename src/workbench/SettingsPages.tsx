@@ -3,6 +3,7 @@ import { SETTINGS_LABELS, aboutTitle, memoryStateLabel, settingsSections } from 
 import { ModelSettingsPage } from "./ModelSettingsPage";
 import { TeamPage } from "./TeamPage";
 import { PluginsPage } from "./PluginsPage";
+import { KnowledgePage } from "./KnowledgePage";
 import { PersonalizePanel } from "./PersonalizePanel";
 import { useMemoryStore } from "./memoryStore";
 import { useAppSettings } from "./appSettings";
@@ -19,7 +20,7 @@ import { spacing } from "../utils/spacing";
  * 而不是画一个点了没反应的按钮。
  */
 
-export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team";
+export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team" | "knowledge";
 
 export type SettingsPagesProps = {
   /** 显示哪一页。 */
@@ -42,6 +43,7 @@ const META: Record<SettingsSubPage, { title: string; note: string }> = {
     note: "名册 / 配对码 / 共享与接管 / 按成员的成本账本 —— 账本与 `ding space`、`ding serve` 是同一个文件。",
   },
   models: { title: "模型", note: "配哪些 provider、拉它们的模型清单、选默认模型" },
+  knowledge: { title: "知识库", note: "导入资料 → 自己检索 → 回答带引用。与 ding knowledge 是同一个库文件。" },
   profile: {
     title: "个人资料",
     note: "本机版没有账号服务端：昵称与头像是本地显示用的，不会同步到任何服务器。",
@@ -98,6 +100,18 @@ export default function SettingsPages({
           <b>团队空间</b>
         </header>
         <TeamPage />
+      </div>
+    );
+  }
+
+  if (page === "knowledge") {
+    return (
+      <div className="wb-setpage" data-testid="wb-setpage-knowledge">
+        <header className="wb-setpage-head">
+          <button className="wb-icon" data-testid="wb-setpage-back" onClick={onBack} aria-label="返回">‹</button>
+          <b>知识库</b>
+        </header>
+        <KnowledgePage />
       </div>
     );
   }

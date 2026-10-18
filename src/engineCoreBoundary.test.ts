@@ -87,8 +87,11 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * ⚠️ 2026-10-18（L06）60 → 62：`shared/keymap.ts`（键位判定/校验）与
  * `shared/persona.ts`（人格偏好收窄与提示词片段）。两者都是**零 IO 的纯函数**，
  * 被 `shared/ipc.ts` 的契约类型带进来（主进程落盘与渲染层判定必须同一份）。
+ *
+ * ⚠️ 2026-10-18（G15）62 → 63：`shared/knowledgeWire.ts`（知识库的 IPC 形状）。
+ * 纯类型 + 常量（允许的扩展名/大小上限），被 preload 与契约带进来。
  */
-const CLOSURE_BUDGET = 62;
+const CLOSURE_BUDGET = 63;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

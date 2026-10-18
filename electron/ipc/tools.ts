@@ -65,6 +65,7 @@ import type { ComputerKey } from "../../shared/computer";
 import { app } from "electron";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
 import { currentPermissionRules } from "./appSettings";
+import { KNOWLEDGE_SEARCH_TOOL } from "../../shared/knowledgeTools";
 
 /**
  * 工具结果落盘目录（U02）：`<userData>/tool-results`。
@@ -519,6 +520,29 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
           }
         : { error: result.error }),
     };
+  },
+
+  /**
+   * 本地知识库检索（G15）。
+   *
+   * 这个工具声明早就在 `AGENT_TOOLS` 里（`shared/knowledgeTools.ts`），但桌面执行体
+   * **没有对应分支** —— 模型调到它只会拿到"没有这个工具"。CLI 那条早就接上了
+   * （`ding knowledge`），桌面的知识库面板与这里用同一个库文件。
+   */
+  [KNOWLEDGE_SEARCH_TOOL]: async (input) => {
+    const { query, limit } = input as { query: string; limit?: number };
+    const { openKnowledgeStore } = await import("../../engine/rag/store");
+    const { describeHits } = await import("../../shared/knowledgeTools");
+    const store = openKnowledgeStore(app.getPath("userData"));
+    try {
+      const hits = store.search(query, { limit: limit ?? 6 }).map((h) => ({
+        citation: h.citation ?? h.path ?? h.docId ?? "",
+        text: h.text,
+      }));
+      return { ...describeHits(hits), count: hits.length };
+    } finally {
+      store.close();
+    }
   },
 
   /**

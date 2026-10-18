@@ -17,6 +17,7 @@ import { registerStatsIpc } from "./ipc/stats";
 import { registerWorkflowIpc } from "./ipc/workflowStore";
 import { registerReviewIpc } from "./ipc/review";
 import { registerSkillsIpc } from "./ipc/skills";
+import { registerKnowledgeIpc } from "./ipc/knowledge";
 import { registerPreviewIpc } from "./ipc/preview";
 import { registerComputerIpc } from "./ipc/computer";
 import { registerCanvasIpc } from "./ipc/canvas";
@@ -427,6 +428,8 @@ safeRegister("workflow", () => registerWorkflowIpc(), logRegisterFailure);
 safeRegister("review", () => registerReviewIpc(ipcMain), logRegisterFailure);
 /* 技能（G08）：主进程读 <userData>/skills，渲染层只要拼好的那段提示 */
 safeRegister("skills", () => registerSkillsIpc(ipcMain), logRegisterFailure);
+/* 本地知识库（G15）：桌面面板 + knowledge_search 工具 */
+safeRegister("knowledge", () => registerKnowledgeIpc(ipcMain, () => win), logRegisterFailure);
 /* 内置浏览器预览（V6-2m）：只允许本机地址、独立持久分区 */
 safeRegister("preview", () => registerPreviewIpc(), logRegisterFailure);
 /* Computer Use（V6-2n）：默认关；每个动作原生确认 + 留痕（不记输入内容） */

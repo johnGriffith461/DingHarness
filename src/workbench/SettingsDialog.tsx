@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, X } from "lucide-react";
+import { Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, X, Library } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { useAppSettings } from "./appSettings";
@@ -182,6 +182,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     */
     { group: 1, icon: <Users size={13} />, label: "团队空间", value: "成员 / 配对码 / 共享 / 账本" },
     { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
+    /* 知识库（G15）：导入 / 检索 / 引用，与 ding knowledge 同一个库 */
+    { group: 1, icon: <Library size={13} />, label: "知识库", value: "导入 / 检索" },
   ];
   return createPortal(
     <div
@@ -257,6 +259,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                         /* 团队空间（V5-3 的产品面）：名册 / 配对码 / 共享接管 / 账本 */
                         if (r.label === "团队空间") {
                           setSubPage("team");
+                          return;
+                        }
+                        if (r.label === "知识库") {
+                          setSubPage("knowledge");
                           return;
                         }
                         if (r.label === "记忆") {
