@@ -14,7 +14,12 @@
 
 ## 平台
 
-- 桌面只有 **Windows x64** 打包并启动验过；macOS/Linux 的桌面**没在真机上跑过**。
+- 桌面只有 **Windows x64** 打包并启动验过；**macOS / Linux 的桌面仍然没在真机上跑过**（macOS 只验了源码级门，见下）。
+- **源码级门在 macOS 真机上验过**（2026-10-18，MacPortable / macOS 26.7.1 / Node 22.14 / x64）：
+  `typecheck`、`lint` 绿，全量单测 **3495 通过 / 18 跳过 / 0 失败**（跳过的是 11 条依赖 git 的用例 ——
+  那台 VM 没装 Xcode 命令行工具，`/usr/bin/git` 是桩；另有 macOS 的 Node 不带 FTS5 而跳过的老库迁移用例），
+  `eval` **63/63**。这条真机跑通顺手改了三个真问题（插件隔离的符号链接路径、
+  两处把平台差异写死的测试）。
 - **源码级门在 Linux 上验过**（2026-10-18，WSL Ubuntu / Node 22）：`typecheck`、`lint` 绿，
   全量单测 **309 文件 / 3497 条通过**（6 条 Windows 专属断言跳过），
   `eval` **63/63**、`bench` **7/7**；CI 已加 `ubuntu-latest` 一格固化它。**macOS 没跑过**，所以没有 macOS 那一格。

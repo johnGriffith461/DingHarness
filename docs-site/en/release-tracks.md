@@ -30,5 +30,11 @@ The same script has run locally once — see the Chinese page for the result tab
 Source-level gates have been run for real on **Linux** (WSL Ubuntu, Node 22):
 typecheck, lint, the full unit suite (309 files / 3497 tests, 6 Windows-only skipped),
 `pnpm eval` (63/63) and `pnpm bench` (7/7).
-CI now includes an `ubuntu-latest` job. macOS has **not** been run — there is no macOS job,
-because a job that only exists on paper is worse than an honest gap.
+CI now includes an `ubuntu-latest` job.
+
+**macOS has also been run on a real machine** (2026-10-18, MacPortable VM / macOS 26.7.1 /
+Node 22.14 / x64): typecheck and lint green, full unit suite **3495 passed / 18 skipped /
+0 failed** (the skips are 11 git-dependent cases — that VM has no Xcode command line tools
+so `/usr/bin/git` is a stub — plus the legacy-DB migration case, since Node on macOS ships
+without FTS5), `eval` **63/63**. No macOS desktop build has been launched, and there is no
+macOS CI job yet because the runner image would need a real macOS runner.
