@@ -58,9 +58,31 @@ const withGate = async <T>(value: string | undefined, fn: () => T | Promise<T>):
   }
 };
 
+/**
+ * 把**两个**变量都清空跑一段，跑完原样恢复。
+ *
+ * 为什么需要它（2026-10-19 CI 逮到）：Linux 门禁是带着 `DSH_NO_REAL_MODEL=1` 跑的
+ * （安全闸，防真花钱）。任何"假设闸没开"的断言在那种环境里都会假红 ——
+ * 而假红会让人去改测试，最后把真闸的覆盖也一起改掉。
+ */
+const withGateCleared = async <T>(fn: () => T | Promise<T>): Promise<T> => {
+  const prevDing = process.env.DING_NO_REAL_MODEL;
+  const prevDsh = process.env.DSH_NO_REAL_MODEL;
+  delete process.env.DING_NO_REAL_MODEL;
+  delete process.env.DSH_NO_REAL_MODEL;
+  try {
+    return await fn();
+  } finally {
+    if (prevDing === undefined) delete process.env.DING_NO_REAL_MODEL;
+    else process.env.DING_NO_REAL_MODEL = prevDing;
+    if (prevDsh === undefined) delete process.env.DSH_NO_REAL_MODEL;
+    else process.env.DSH_NO_REAL_MODEL = prevDsh;
+  }
+};
+
 describe("modelGate（闸本体）", () => {
   it("闸没开：远程地址也放行（正常跑）", async () => {
-    await withGate(undefined, () => {
+    await withGateCleared(() => {
       expect(realModelBlocked("https://api.example.com/v1")).toBe(false);
     });
   });
@@ -92,25 +114,35 @@ describe("modelGate（闸本体）", () => {
     });
   });
 
-  it("闸用新名字（DING_NO_REAL_MODEL）打开时，报错说的是新名字", () => {
-    const prev = process.env.DING_NO_REAL_MODEL;
-    process.env.DING_NO_REAL_MODEL = "1";
-    try {
+  it("闸用新名字（DING_NO_REAL_MODEL）打开时，报错说的是新名字", async () => {
+    /*
+     * ⚠️ **不能假设环境是干净的**（2026-10-19 CI 逮到）：Linux 门禁本身带着
+     * `DSH_NO_REAL_MODEL=1` 跑（那是"别烧钱"的安全闸），于是"新名字优先"这条
+     * 会被旧名字干扰。所有涉及闸的用例都必须先**显式清空两个变量**再摆姿势。
+     */
+    await withGateCleared(() => {
+      process.env.DING_NO_REAL_MODEL = "1";
       expect(activeGateVar()).toBe("DING_NO_REAL_MODEL");
       expect(blockedReason("生成图片", "https://api.example.com/v1")).toContain("DING_NO_REAL_MODEL");
       expect(realModelBlocked("https://api.example.com/v1")).toBe(true);
       expect(realModelBlocked(origin)).toBe(false);
-    } finally {
-      if (prev === undefined) delete process.env.DING_NO_REAL_MODEL;
-      else process.env.DING_NO_REAL_MODEL = prev;
-    }
+    });
   });
 
   it("旧名仍在生效：只设 DSH_NO_REAL_MODEL 也能拦住远程（改名不能把闸拆了）", async () => {
-    expect(activeGateVar()).toBeNull();
-    await withGate("1", () => {
+    await withGateCleared(() => {
+      expect(activeGateVar()).toBeNull();
+      process.env.DSH_NO_REAL_MODEL = "1";
       expect(activeGateVar()).toBe("DSH_NO_REAL_MODEL");
       expect(realModelBlocked("https://api.example.com/v1")).toBe(true);
+    });
+  });
+
+  it("两个都设时以新名为准（报错文案才不会指错变量）", async () => {
+    await withGateCleared(() => {
+      process.env.DSH_NO_REAL_MODEL = "1";
+      process.env.DING_NO_REAL_MODEL = "1";
+      expect(activeGateVar()).toBe("DING_NO_REAL_MODEL");
     });
   });
 
