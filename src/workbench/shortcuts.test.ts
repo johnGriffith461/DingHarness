@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { NAV_SHORTCUTS, matchShortcut, shortcutFor, type ShortcutEvent } from "./shortcuts";
 
+/**
+ * 当前环境的显示口径。
+ *
+ * ⚠️ 2026-10-18（macOS 真机抓到）：下面几条断言原来写死 `Ctrl N`。
+ * `shortcutFor` 显示的是**平台主修饰键**（macOS 上是 `Cmd`），于是同一份代码
+ * 在 macOS 上跑测试会红 —— 红的是期望，不是产品。判据必须与产品同源。
+ */
+const IS_MAC = /mac/i.test(typeof navigator === "undefined" ? "" : (navigator.platform ?? ""));
+const CTRL = IS_MAC ? "Cmd" : "Ctrl";
+
 /** 造一个按键事件。 */
 const ev = (key: string, mods: Partial<ShortcutEvent> = {}): ShortcutEvent => ({
   key,
@@ -68,8 +78,8 @@ describe("matchShortcut", () => {
 
 describe("键位表与提示文本", () => {
   it("每一个视图都能查到自己的提示文本（搬走/拆掉的入口没有键位）", () => {
-    expect(shortcutFor("home")).toBe("Ctrl N");
-    expect(shortcutFor("scheduled")).toBe("Ctrl Shift T");
+    expect(shortcutFor("home")).toBe(`${CTRL} N`);
+    expect(shortcutFor("scheduled")).toBe(`${CTRL} Shift T`);
     /* 插件搬进设置（d38fe75）之后左栏不再有它 → 提示文本为空（不渲染角标） */
     expect(shortcutFor("plugins")).toBe("");
   });
@@ -110,7 +120,7 @@ describe("L06：自定义键位", () => {
   const custom = { palette: "Mod+J", newChat: "Mod+Shift+H", scheduled: "" };
 
   it("提示文本跟着键位表变（不是永远读常量）", () => {
-    expect(shortcutFor("home", custom)).toBe("Ctrl Shift H");
+    expect(shortcutFor("home", custom)).toBe(`${CTRL} Shift H`);
     expect(shortcutFor("scheduled", custom), "解绑了就不显示角标").toBe("");
   });
 

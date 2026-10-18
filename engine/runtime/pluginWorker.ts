@@ -29,6 +29,7 @@
  * 传进去，两条路都不依赖文件位置 —— 而这段代码本来就只有几十行。
  */
 
+import { realpathSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 
 
@@ -132,11 +133,28 @@ function startWith(
   tryPermission: boolean,
 ): Promise<IsolatedStart> {
   return new Promise((resolve) => {
+    /*
+     * ⚠️ **权限模型的允许路径必须用 realpath**（2026-10-18，macOS 真机抓到）。
+     *
+     * 权限模型是按**解析后的真实路径**比对的。macOS 的临时目录 `/var/folders/…`
+     * 实际指向 `/private/var/folders/…`（`/var` 是符号链接），于是
+     * `--allow-fs-read=/var/…` 写的是一条"看起来对、比对时对不上"的路 ——
+     * 插件一加载就报 `Access to this API has been restricted`，
+     * 而 Windows 上因为路径本来就没有符号链接，同样的代码一直是好的。
+     * 允许集合按 realpath 写，两个平台才一致。
+     */
+    const realDir = (() => {
+      try {
+        return realpathSync(input.dir);
+      } catch {
+        return input.dir;
+      }
+    })();
     const execArgv = tryPermission
       ? [
           "--permission",
-          `--allow-fs-read=${input.dir}`,
-          ...(input.allowWrite ? [`--allow-fs-write=${input.dir}`] : []),
+          `--allow-fs-read=${realDir}`,
+          ...(input.allowWrite ? [`--allow-fs-write=${realDir}`] : []),
           ...(input.allowExec ? ["--allow-child-process"] : []),
         ]
       : [];

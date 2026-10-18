@@ -111,7 +111,20 @@ describe("录制与收窄", () => {
   });
 
   it("录制产出规范化字符串", () => {
-    expect(chordFromEvent({ key: "j", ctrlKey: true, metaKey: false, altKey: false, shiftKey: true })).toBe("Mod+Shift+J");
+    /*
+     * ⚠️ 2026-10-18（macOS 真机抓到）：这条原来写死期望 `Mod+Shift+J`。
+     * 而 `chordFromEvent` 的语义是"**平台主修饰键**才算 Mod"——
+     * 在 macOS 上按 Ctrl（不是 Cmd）应当录成 `Ctrl+Shift+J`，那是对的。
+     * 于是这条断言本身要按平台写，否则 macOS 上红的是测试、不是产品。
+     */
+    const isMac = /mac/i.test(typeof navigator === "undefined" ? "" : (navigator.platform ?? ""));
+    const primary = isMac ? { metaKey: true, ctrlKey: false } : { ctrlKey: true, metaKey: false };
+    expect(chordFromEvent({ key: "j", altKey: false, shiftKey: true, ...primary })).toBe("Mod+Shift+J");
+    /* 非主修饰键保留原样（mac 上的 Ctrl 不能被悄悄当成 Cmd） */
+    const secondary = isMac ? { ctrlKey: true, metaKey: false } : { metaKey: true, ctrlKey: false };
+    expect(chordFromEvent({ key: "j", altKey: false, shiftKey: true, ...secondary })).toBe(
+      isMac ? "Ctrl+Shift+J" : "Meta+Shift+J",
+    );
   });
 
   it("旧设置没有 keymap → 全部回默认（升级不丢键位）", () => {

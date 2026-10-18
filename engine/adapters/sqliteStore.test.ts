@@ -10,6 +10,29 @@ import { ledgerOf, localDay, rollup } from "../core/ledger";
 import type { LogInputAt } from "../ports/store";
 
 /**
+ * 这个 runtime 的 SQLite 有没有 FTS5。
+ *
+ * ⚠️ 2026-10-18（macOS 真机抓到）：Node 22.14 的 **macOS 构建不带 FTS5**
+ * （`no such module: fts5`），Windows 与 Linux 的构建带。产品侧对此已有降级
+ * （检索退到 LIKE，且有一条单独的用例覆盖"没有 FTS 时照样能用"）；
+ * 但**造一份 12.4 老库**这个用例本身要求 FTS5 —— 那是数据形状的前提，不是产品缺陷。
+ * 所以先探测，缺了就跳过并写明原因（跳过不是"通过"）。
+ */
+const HAS_FTS5 = (() => {
+  try {
+    const probe = openSqlite(":memory:");
+    try {
+      probe.exec("CREATE VIRTUAL TABLE __fts_probe USING fts5(x)");
+      return true;
+    } finally {
+      probe.close();
+    }
+  } catch {
+    return false;
+  }
+})();
+
+/**
  * SQLite 会话库（Phase 1 D1 的 PoC）。
  *
  * ## 这些断言要挡住的是什么
@@ -433,7 +456,11 @@ describe('FTS5 缺席时降级，而不是整个会话库打不开（审计 P140
 });
 
 describe('老库迁移：正文列与索引都要**搬**过来（审计 P101）', () => {
-  it('⭐ 12.4 时代写下的行（没有 body 列、FTS 建在整行 JSON 上）升级后照样搜得到，索引也搬到正文列上', async () => {
+  /*
+   * 没有 FTS5 的构建（macOS 的 Node 22 就是）造不出这份老库 —— 跳过并说明，
+   * 不当成通过。产品侧的降级路径由「打不开的那个库现在打得开」那条覆盖。
+   */
+  it.skipIf(!HAS_FTS5)('⭐ 12.4 时代写下的行（没有 body 列、FTS 建在整行 JSON 上）升级后照样搜得到，索引也搬到正文列上', async () => {
     /*
      * 造一份**当时那份**库：结构就是 12.4 那几个版本写出来的形状 ——
      * `events` 没有 `body`，`events_fts` 的索引列是 `payload`（整行 JSON），
