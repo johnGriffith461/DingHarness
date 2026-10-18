@@ -30,6 +30,7 @@
  */
 
 import { realpathSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 
 
@@ -134,20 +135,34 @@ function startWith(
 ): Promise<IsolatedStart> {
   return new Promise((resolve) => {
     /*
-     * ⚠️ **权限模型的允许路径必须用 realpath**（2026-10-18，macOS 真机抓到）。
+     * ⚠️ **权限模型的允许路径必须用 realpath —— 入口 URL 也一样**（2026-10-18 macOS 真机）。
      *
-     * 权限模型是按**解析后的真实路径**比对的。macOS 的临时目录 `/var/folders/…`
-     * 实际指向 `/private/var/folders/…`（`/var` 是符号链接），于是
-     * `--allow-fs-read=/var/…` 写的是一条"看起来对、比对时对不上"的路 ——
-     * 插件一加载就报 `Access to this API has been restricted`，
-     * 而 Windows 上因为路径本来就没有符号链接，同样的代码一直是好的。
-     * 允许集合按 realpath 写，两个平台才一致。
+     * 权限模型按**解析后的真实路径**比对。macOS 的临时目录 `/var/folders/…`
+     * 实际指向 `/private/var/folders/…`（`/var` 是符号链接），于是：
+     *   · `--allow-fs-read=/var/…` 是一条"看起来对、比对时对不上"的路；
+     *   · 而 `import("file:///var/…")` 里的路径也是那条符号链接路。
+     * 两边各自"看起来一致"，但在权限模型眼里一个在允许集合里、一个不在 ——
+     * 插件一加载就报 `Access to this API has been restricted`。
+     * Windows 上路径没有符号链接，所以同一份代码一直是好的。
+     *
+     * 修法：**两侧都换成 realpath**（允许集合 + 入口 URL），平台差异就消失了。
+     * （实测：只换允许集合不够；mac 上跑 `probe2` 四种组合里只有"入口也用 realpath"
+     * 那一组能过。）
      */
     const realDir = (() => {
       try {
         return realpathSync(input.dir);
       } catch {
         return input.dir;
+      }
+    })();
+    const realEntryUrl = (() => {
+      try {
+        if (!input.entryUrl.startsWith("file:")) return input.entryUrl;
+        const asPath = fileURLToPath(input.entryUrl.replace(/\?.*$/, ""));
+        return pathToFileURL(realpathSync(asPath)).href;
+      } catch {
+        return input.entryUrl;
       }
     })();
     const execArgv = tryPermission
@@ -169,7 +184,7 @@ function startWith(
     try {
       worker = new Worker(WORKER_SOURCE, {
         eval: true,
-        workerData: { entryUrl: input.entryUrl },
+        workerData: { entryUrl: realEntryUrl },
         ...(execArgv.length ? { execArgv } : {}),
         /* 资源上限：内存（128MB）与栈（4MB）—— 超了 worker 自己被干掉，主进程不陪葬 */
         resourceLimits: { maxOldGenerationSizeMb: 128, stackSizeMb: 4 },
