@@ -1,0 +1,53 @@
+# nightly 门禁：每天跑一遍七道门，留下晋升证据，不发布。
+#
+# 为什么单独一条 workflow：CI 只在 push/PR 时跑，而"nightly 这一版现在到底绿不绿"
+# 是**时间**问题不是**事件**问题。它跑的是与 `scripts/nightly-gates.mjs` 完全同一套命令
+# （脚本是唯一实现；workflow 只负责触发与上传）。
+#
+# ⚠️ 它**不发布**：仓库里没有 npm 令牌；发布要主人授权（RELEASE.md 第五条）。
+name: Nightly
+
+on:
+  schedule:
+    # 每天 18:00 UTC（北京时间次日 02:00）
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  gates:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      # 零出网闸：任何真调远程模型 / 图像通道的路径直接失败，而不是悄悄烧钱。
+      DSH_NO_REAL_MODEL: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 七道门（typecheck/lint/test/eval/bench/supply-chain/sdk）
+        run: node scripts/nightly-gates.mjs --out nightly-evidence.json
+      - name: 构建产物摘要（失败不掩盖门禁结论）
+        if: always()
+        run: pnpm cli:build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-evidence
+          path: |
+            nightly-evidence.json
+            dist-cli/**
+          retention-days: 14

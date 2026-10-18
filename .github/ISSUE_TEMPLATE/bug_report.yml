@@ -1,0 +1,67 @@
+name: Bug 报告
+description: 行为与文档/承诺不一致、崩溃、数据损坏
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢报告。这个项目有一条硬规矩：**修缺陷先复现**。
+        请尽量把"怎么重放"写清楚 —— 没有复现步骤的问题很难不被当成偶发。
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 一句话说清现象（不要只说"不工作"）
+    validations:
+      required: true
+  - type: textarea
+    id: expect
+    attributes:
+      label: 你期待什么
+      description: 最好引用文档/帮助里承诺了它的那一句
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 从干净数据目录开始；贴命令与关键输出
+      placeholder: |
+        1. ding doctor
+        2. ding run "…" --dir ./demo
+        3. 看到 …
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 在哪一层
+      options:
+        - 桌面（Electron）
+        - CLI
+        - 引擎 / SDK
+        - 文档
+        - 不确定
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: `ding --version` 或桌面「关于」页；写清是源码还是安装包
+    validations:
+      required: true
+  - type: textarea
+    id: diag
+    attributes:
+      label: 诊断包（可选）
+      description: 桌面「设置 → 关于 → 导出诊断包」；已脱敏，仍请自己看一眼
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我搜过已有 issue
+          required: true
+        - label: 这里面没有我的 API key / 真实用户数据
+          required: true

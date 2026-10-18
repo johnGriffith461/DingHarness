@@ -1,0 +1,42 @@
+name: 功能建议
+description: 想要的能力、体验改进、新平台
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你卡在哪
+      description: 先讲问题，不要只给方案 —— 方案可能不是唯一解法
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你想要的形状
+      description: 如果有，写清"用户怎么用、看到什么"
+  - type: dropdown
+    id: area
+    attributes:
+      label: 属于哪块
+      options:
+        - 工具与权限
+        - 上下文与成本
+        - 工作流 / 团队
+        - 插件与生态
+        - 界面与可访问性
+        - 发布与安装
+        - 文档
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你现在怎么绕过去的
+      description: 这能说明问题有多疼
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: 边界
+      options:
+        - label: 我知道这个项目宁可写"没做"也不写"已支持"，所以这条不要求立刻承诺
+          required: false

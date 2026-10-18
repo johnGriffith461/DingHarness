@@ -146,6 +146,8 @@ const ZH_NAV = [
   ["tutorial.html", "教程：跑通第一件事"],
   ["examples.html", "示例任务库"],
   ["video-script.html", "5 分钟演示脚本"],
+  ["release-tracks.html", "发布轨道（nightly / stable）"],
+  ["plugin-submission.html", "投稿一个插件"],
   ["getting-started.html", "十分钟跑通"],
   ["knowledge.html", "本地知识库"],
   ["acp.html", "ACP（两个方向）"],
@@ -193,6 +195,7 @@ const PAGE_MAP = {
 const EN_NAV = [
   ["en/index.html", "Home"],
   ["en/tutorial.html", "Tutorial"],
+  ["en/release-tracks.html", "Release tracks"],
   ["en/architecture.html", "Architecture"],
 ];
 
@@ -299,6 +302,8 @@ const pages = [
   ["tutorial.html", "教程：跑通第一件事", "docs-site/zh/tutorial.md", "zh"],
   ["examples.html", "示例任务库", "docs-site/zh/examples.md", "zh"],
   ["video-script.html", "5 分钟演示脚本", "docs-site/zh/video-script.md", "zh"],
+  ["release-tracks.html", "发布轨道（nightly / stable）", "docs-site/zh/release-tracks.md", "zh"],
+  ["plugin-submission.html", "投稿一个插件", "docs-site/zh/plugin-submission.md", "zh"],
   ["getting-started.html", "十分钟跑通", "docs-site/zh/getting-started.md", "zh"],
   ["knowledge.html", "本地知识库", "docs-site/zh/knowledge.md", "zh"],
   ["acp.html", "ACP（两个方向）", "docs-site/zh/acp.md", "zh"],
@@ -319,6 +324,7 @@ const pages = [
   ["contributing.html", "贡献指南", "CONTRIBUTING.md", "zh"],
   ["en/index.html", "Ding Harness", "docs-site/en/index.md", "en"],
   ["en/tutorial.html", "Tutorial", "docs-site/en/tutorial.md", "en"],
+  ["en/release-tracks.html", "Release tracks", "docs-site/en/release-tracks.md", "en"],
   ["en/architecture.html", "Architecture", "docs-site/en/architecture.md", "en"],
 ];
 

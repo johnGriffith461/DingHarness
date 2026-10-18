@@ -32,6 +32,10 @@ describe("L10：文档站页面表与源文件", () => {
       ["examples.html", "docs-site/zh/examples.md"],
       ["video-script.html", "docs-site/zh/video-script.md"],
       ["en/tutorial.html", "docs-site/en/tutorial.md"],
+      /* E02 / E04：发布轨道与插件投稿 */
+      ["release-tracks.html", "docs-site/zh/release-tracks.md"],
+      ["plugin-submission.html", "docs-site/zh/plugin-submission.md"],
+      ["en/release-tracks.html", "docs-site/en/release-tracks.md"],
     ]) {
       expect(builder, `页面表里没有 ${out}`).toContain(`"${out}"`);
       expect(builder, `页面表里没有源 ${source}`).toContain(source);
@@ -47,7 +51,13 @@ describe("L10：文档站页面表与源文件", () => {
 
 describe("L10：教程里教的命令都真的存在", () => {
   const known = knownCommands();
-  const pages = ["docs-site/zh/tutorial.md", "docs-site/zh/examples.md", "docs-site/zh/video-script.md"];
+  const pages = [
+    "docs-site/zh/tutorial.md",
+    "docs-site/zh/examples.md",
+    "docs-site/zh/video-script.md",
+    /* 投稿指南会教 `ding plugins verify`（子命令；顶层命令仍要存在） */
+    "docs-site/zh/plugin-submission.md",
+  ];
 
   it("`ding <命令>` 全部在 KNOWN_COMMANDS 里", () => {
     const unknown: string[] = [];

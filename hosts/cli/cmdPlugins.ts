@@ -380,6 +380,113 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     return 0;
   }
 
+  /*
+   * **投稿前自检**（E04）：在一个还没安装的目录上跑安装时会做的全部检查，但不真的装。
+   * 判据与安装共用同一批函数（清单/兼容/入口/签名/隔离装载），
+   * 所以不会出现"verify 说没问题、装的时候被拒"。
+   */
+  if (sub === "verify") {
+    if (!name) {
+      console.error("用法：ding plugins verify <插件目录> [--json]");
+      return 2;
+    }
+    const dir = path.resolve(name);
+    const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+    const push = (label: string, ok: boolean, detail: string): boolean => {
+      checks.push({ name: label, ok, detail });
+      return ok;
+    };
+
+    const got = readManifestFromDir(dir);
+    const checked = got.raw ? checkManifest(got.raw) : { ok: false as const, errors: [got.note ?? "读不到清单"] };
+    push(
+      "清单可读且合法",
+      checked.ok,
+      checked.ok
+        ? `工具 ${checked.manifest.tools?.length ?? 0} 个 / 钩子 ${checked.manifest.hooks?.length ?? 0} 个`
+        : checked.errors.join("；"),
+    );
+
+    const manifest = checked.ok ? checked.manifest : null;
+    if (manifest) {
+      const incompatible = engineIncompatibility(manifest.engines.ding, PRODUCT_VERSION);
+      push("宿主版本兼容", !incompatible, incompatible ?? `engines.ding ${manifest.engines.ding} 覆盖 ${PRODUCT_VERSION}`);
+
+      const entry = path.join(dir, manifest.main ?? "index.mjs");
+      push("入口文件存在", existsSync(entry), path.basename(entry));
+
+      if (manifest.publisher && manifest.signature) {
+        const { verifyPluginSignature } = await import("../../engine/runtime/pluginSignature");
+        const verdict = verifyPluginSignature({
+          dir,
+          rawManifest: got.raw,
+          publisher: manifest.publisher,
+          signature: manifest.signature,
+        });
+        push(
+          "签名有效",
+          verdict.ok,
+          verdict.ok ? `发布者 ${manifest.publisher.id}，摘要 ${verdict.digest.slice(0, 12)}…` : verdict.message,
+        );
+      } else {
+        push("签名", true, "未签名（可以装；用户会看到「没人担保」）");
+      }
+
+      /* 真起一次隔离进程：声明与导出对不上的问题，只有装载时才知道 */
+      const { startIsolatedPlugin } = await import("../../engine/runtime/pluginWorker");
+      const { pathToFileURL } = await import("node:url");
+      const started = await startIsolatedPlugin({
+        dir,
+        entryUrl: pathToFileURL(entry).href,
+        allowWrite: false,
+        allowExec: false,
+      });
+      if (!started.ok) {
+        push("隔离装载", false, started.error);
+      } else {
+        const declared = new Set(manifest.tools ?? []);
+        const exported = Object.keys(started.plugin.tools);
+        const missing = [...declared].filter((t) => !exported.includes(t));
+        const undeclared = exported.filter((t) => !declared.has(t));
+        push(
+          "工具声明与实现一致",
+          missing.length === 0 && undeclared.length === 0,
+          missing.length || undeclared.length
+            ? `声明了没导出：${missing.join("/") || "无"}；导出了没声明：${undeclared.join("/") || "无"}`
+            : `${exported.length} 个工具都在声明里`,
+        );
+        const declaredHooks = new Set<string>(manifest.hooks ?? []);
+        const extraHooks = started.plugin.hooks.filter((h) => !declaredHooks.has(h));
+        const missingHooks = [...declaredHooks].filter((h) => !started.plugin.hooks.includes(h));
+        push(
+          "钩子声明与实现一致",
+          extraHooks.length === 0 && missingHooks.length === 0,
+          extraHooks.length || missingHooks.length
+            ? `声明了没导出：${missingHooks.join("/") || "无"}；导出了没声明：${extraHooks.join("/") || "无"}`
+            : "一致",
+        );
+        push(
+          "隔离档位",
+          true,
+          started.plugin.isolation === "worker-permission" ? "独立进程（文件/命令受控）" : "独立进程（仅隔离崩溃）",
+        );
+        started.plugin.close();
+      }
+    }
+
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify({ dir, checks, ok: checks.every((c) => c.ok) }, null, 2));
+    } else {
+      console.log(`插件目录：${dir}`);
+      for (const check of checks) console.log(`  ${check.ok ? "✓" : "✗"} ${check.name}：${check.detail}`);
+    }
+    const ok = checks.length > 0 && checks.every((c) => c.ok);
+    if (!ok && !p.flags.has("json")) {
+      console.error("\n有检查没过 —— 修完再投稿（安装时会被同一批判据拒掉）。");
+    }
+    return ok ? 0 : 1;
+  }
+
   if (sub === "doctor") {
     const { missing } = auditLedger(paths);
     const withheld = withheldCapabilities();
@@ -393,6 +500,6 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     return 0;
   }
 
-  console.error(`不认识的子命令：${sub}（可用：list / install / enable / disable / remove / doctor）`);
+  console.error(`不认识的子命令：${sub}（可用：list / search / install / enable / disable / remove / verify / doctor）`);
   return 2;
 }

@@ -81,8 +81,13 @@ CLI 补丁版可以独立于产品版本（`PRODUCT_VERSION` 仍是 0.5.0）；`
   `pnpm bench` / `pnpm verify:supply-chain` / `pnpm verify:sdk`；
 - 公开成绩随 stable 一起发（`BENCHMARKS.md` 更新 + 评测不回退）。
 
-> ⚠️ 现状如实说：**nightly→stable 的自动化尚未跑过一次**（没有 nightly 发布通道）。
-> 上面是纪律与检查表，不是"已经有的流水线"。
+> ⚠️ 2026-10-18 更新：跑法已有两条命令 —— `node scripts/nightly-gates.mjs`（跑七道门、
+> 写 `nightly-evidence.json`）与 `node scripts/promote-nightly.mjs --manifest <证据> [--write]`
+> （核对证据、只改版本号）。判定在 `shared/release.ts`，有单测；CI 侧
+> `.github/workflows/nightly.yml` 每天跑同一份脚本并上传证据。
+> **但这条 workflow 还没在 GitHub 上跑过**（本地提交未 push）；本机已用同一脚本
+> 真实跑通过一次（七道门全绿），`--write` 只在临时副本上演示过 ——
+> 本仓库版本号没有被自动改动。详见 `docs-site/zh/release-tracks.md`。
 
 ## 七、发版 checklist（照着勾）
 

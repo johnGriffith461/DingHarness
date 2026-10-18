@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞（不要开公开 issue）
+    url: https://github.com/johnGriffith461/DingHarness/blob/master/SECURITY.md
+    about: 按 SECURITY.md 的渠道私报，别把可利用细节贴在 issue 里
+  - name: 文档与已知边界
+    url: https://github.com/johnGriffith461/DingHarness/blob/master/SAFETY.md
+    about: 先看 SAFETY.md / BENCHMARKS.md —— 很多"以为坏了"是写明的边界
