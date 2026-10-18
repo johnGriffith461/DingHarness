@@ -3,7 +3,7 @@ import { Copy, RefreshCw } from "lucide-react";
 
 import type { ShellBridge, WorkflowRunView, WorkflowSpecView } from "@shared/ipc";
 import { NavCollapseButton } from "./NavCollapseButton";
-import { layersOf, progressOf, resumeCommand } from "./workflowView";
+import { layersOf, progressOf, resumeCommand, timelineOf, formatDuration } from "./workflowView";
 
 /**
  * 工作流与 Agent Teams 可视化（V6-2l）。
@@ -84,6 +84,19 @@ export function WorkflowPage() {
   const run = useMemo(() => runs.find((r) => r.id === selected) ?? runs[0] ?? null, [runs, selected]);
   const layers = useMemo(() => (run ? layersOf(run.steps) : []), [run]);
   const progress = useMemo(() => (run ? progressOf(run.steps) : { done: 0, total: 0 }), [run]);
+
+  /*
+   * 时间线（G10）：正在跑的步骤右端是"现在"，所以要有个每秒走一次的钟。
+   * 只在**有运行中的步骤**时才起定时器（静止的页不该每秒重渲染）。
+   */
+  const [now, setNow] = useState(() => Date.now());
+  const hasRunning = run?.steps.some((s) => s.status === "running") ?? false;
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [hasRunning]);
+  const timeline = useMemo(() => (run ? timelineOf(run, now) : null), [run, now]);
 
   const copy = (text: string) => {
     void navigator.clipboard?.writeText(text).then(
@@ -182,6 +195,50 @@ export function WorkflowPage() {
                       </div>
                     ) : null}
                   </div>
+
+                  {/* G10 时间线：泳道回答"谁依赖谁"，这一条回答"时间花在哪、有没有真并行" */}
+                  {timeline ? (
+                    <div data-testid="wb-workflow-timeline" style={{ marginBottom: 10 }}>
+                      <div className="wb-card-desc" style={{ marginBottom: 4 }}>
+                        时间线（总 {formatDuration(timeline.spanMs)}）
+                      </div>
+                      <div
+                        style={{
+                          position: "relative",
+                          height: 34,
+                          background: "var(--bg-2)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 6,
+                        }}
+                      >
+                        {timeline.segments.map((seg) => (
+                          <div
+                            key={seg.id}
+                            data-testid={`wb-workflow-timeline-${seg.id}`}
+                            title={`${seg.id} · ${seg.agent} · ${formatDuration(seg.durationMs)}`}
+                            style={{
+                              position: "absolute",
+                              left: `${seg.leftPct}%`,
+                              width: `${seg.widthPct}%`,
+                              top: 4,
+                              height: 24,
+                              background: STATUS_COLOR[seg.status],
+                              opacity: seg.live ? 0.7 : 0.92,
+                              borderRadius: 4,
+                              color: "#fff",
+                              fontSize: 11,
+                              lineHeight: "24px",
+                              padding: "0 5px",
+                              overflow: "hidden",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {seg.id}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 6 }}>
                     {layers.map((layer) => (

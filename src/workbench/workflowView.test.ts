@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { layersOf, progressOf, resumeCommand } from "./workflowView";
+import { formatDuration, layersOf, progressOf, resumeCommand, timelineOf } from "./workflowView";
 import type { WorkflowStepView } from "@shared/ipc";
 
 /**
@@ -39,5 +39,68 @@ describe("分层", () => {
 
   it("续跑命令指向 runs/<id>.json", () => {
     expect(resumeCommand("wf-1", "C:/data/workflows")).toContain("runs/wf-1.json");
+  });
+});
+
+/** G10：时间线（泳道回答依赖，时间线回答"时间花在哪"）。 */
+describe("时间线", () => {
+  const step = (over: Record<string, unknown>) => ({
+    id: "s1",
+    agent: "a",
+    task: "t",
+    dependsOn: [],
+    status: "done" as const,
+    ...over,
+  });
+
+  it("没有开始时间 → 不画（不是画成 0 宽）", () => {
+    expect(timelineOf({ steps: [step({})] })).toBeNull();
+    expect(timelineOf({ steps: [] })).toBeNull();
+  });
+
+  it("按真实起止算左右位置，正在跑的那一步右端用 now", () => {
+    const t = timelineOf(
+      {
+        createdAt: 1000,
+        steps: [
+          step({ id: "a", startedAt: 1000, finishedAt: 2000 }),
+          step({ id: "b", startedAt: 2000, status: "running" }),
+        ],
+      },
+      3000,
+    )!;
+    expect(t.start).toBe(1000);
+    expect(t.end).toBe(3000);
+    expect(t.segments.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(t.segments[0]!.leftPct).toBe(0);
+    expect(t.segments[0]!.widthPct).toBeCloseTo(50, 5);
+    expect(t.segments[1]!.leftPct).toBeCloseTo(50, 5);
+    expect(t.segments[1]!.live).toBe(true);
+    expect(t.segments[1]!.durationMs).toBe(1000);
+  });
+
+  it("没跑过的步骤不进时间线（pending 不占时间）", () => {
+    const t = timelineOf({ steps: [step({ id: "a", startedAt: 1, finishedAt: 2 }), step({ id: "b", status: "pending" })] })!;
+    expect(t.segments.map((s) => s.id)).toEqual(["a"]);
+  });
+
+  it("极短的一步有最小可见宽度，且不越过 100%", () => {
+    const t = timelineOf(
+      { steps: [step({ id: "a", startedAt: 1, finishedAt: 1 }), step({ id: "b", startedAt: 1, finishedAt: 10_000 })] },
+      10_000,
+    )!;
+    const a = t.segments[0]!;
+    expect(a.widthPct).toBeGreaterThanOrEqual(0.6);
+    for (const s of t.segments) {
+      expect(s.leftPct).toBeGreaterThanOrEqual(0);
+      expect(s.leftPct + s.widthPct).toBeLessThanOrEqual(100.0001);
+    }
+  });
+
+  it("时长文案三档：ms / 秒 / 分", () => {
+    expect(formatDuration(0)).toBe("0ms");
+    expect(formatDuration(450)).toBe("450ms");
+    expect(formatDuration(1500)).toBe("1.5s");
+    expect(formatDuration(65_000)).toBe("1m5s");
   });
 });
