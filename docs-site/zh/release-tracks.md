@@ -56,11 +56,16 @@ node scripts/promote-nightly.mjs --manifest .verify/nightly-evidence.json --writ
 |---|---|
 | `pnpm typecheck` | 绿 |
 | `pnpm lint` | 绿 |
-| `pnpm test` | 绿（3452 条） |
+| `pnpm test` | 绿（3467 条） |
 | `pnpm eval` | 绿（63/63） |
 | `pnpm bench` | 绿（7/7） |
 | `pnpm verify:supply-chain` | 绿 |
 | `pnpm verify:sdk` | 绿 |
 
-随后 `promote-nightly.mjs` 在**临时副本**上演示了 `--write`（没有改本仓库版本号）——
+在同一提交（`88efe31`）上跑 `promote-nightly.mjs`（检查模式）：通过，
+`0.5.2-nightly.20261018 → 0.5.2`。`--write` 只在**临时副本**上演示过（没有改本仓库版本号）——
 这证明链路本身能用；要不要真的晋升下一个版本，是主人的决定。
+
+顺带验到了一条真守卫：中途改过代码之后，拿**上一个提交**的证据去晋升会被拒
+（"证据来自另一个提交（722cf03），当前 HEAD 是 …"）—— 这正是它该做的，
+而不是"上次全绿了这次也算"。
