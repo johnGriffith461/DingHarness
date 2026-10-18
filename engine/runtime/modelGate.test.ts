@@ -4,7 +4,14 @@ import { SELF_CHECK_PATH, listenReachable } from "../testing/localServer";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { assertRealModelAllowed, blockedReason, fetchRemote, isLoopbackUrl, realModelBlocked } from "./modelGate";
+import {
+  activeGateVar,
+  assertRealModelAllowed,
+  blockedReason,
+  fetchRemote,
+  isLoopbackUrl,
+  realModelBlocked,
+} from "./modelGate";
 
 /**
  * 「禁止真实模型」这道闸（2026-10-16，审计 P53）。
@@ -74,11 +81,37 @@ describe("modelGate（闸本体）", () => {
     });
   });
 
-  it("拒绝的话是把真因说清的人话（含开关名与目标地址）", () => {
-    const text = blockedReason("生成图片", "https://api.example.com/v1");
-    expect(text).toContain("DSH_NO_REAL_MODEL");
-    expect(text).toContain("生成图片");
-    expect(text).toContain("api.example.com");
+  it("拒绝的话是把真因说清的人话（含开关名与目标地址）", async () => {
+    // 这句话只在闸开着时才会出现，所以要在闸开的状态下断言（否则测的是"没开时说什么"，没有意义）
+    await withGate("1", () => {
+      const text = blockedReason("生成图片", "https://api.example.com/v1");
+      // 报的是**用户真设的那个变量名**：他设旧名就报旧名，否则会去 env 里找一个不存在的名字
+      expect(text).toContain("DSH_NO_REAL_MODEL");
+      expect(text).toContain("生成图片");
+      expect(text).toContain("api.example.com");
+    });
+  });
+
+  it("闸用新名字（DING_NO_REAL_MODEL）打开时，报错说的是新名字", () => {
+    const prev = process.env.DING_NO_REAL_MODEL;
+    process.env.DING_NO_REAL_MODEL = "1";
+    try {
+      expect(activeGateVar()).toBe("DING_NO_REAL_MODEL");
+      expect(blockedReason("生成图片", "https://api.example.com/v1")).toContain("DING_NO_REAL_MODEL");
+      expect(realModelBlocked("https://api.example.com/v1")).toBe(true);
+      expect(realModelBlocked(origin)).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.DING_NO_REAL_MODEL;
+      else process.env.DING_NO_REAL_MODEL = prev;
+    }
+  });
+
+  it("旧名仍在生效：只设 DSH_NO_REAL_MODEL 也能拦住远程（改名不能把闸拆了）", async () => {
+    expect(activeGateVar()).toBeNull();
+    await withGate("1", () => {
+      expect(activeGateVar()).toBe("DSH_NO_REAL_MODEL");
+      expect(realModelBlocked("https://api.example.com/v1")).toBe(true);
+    });
   });
 
   it("assertRealModelAllowed：拦下时抛，放行时不抛", async () => {

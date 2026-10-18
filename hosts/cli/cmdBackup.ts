@@ -33,8 +33,9 @@ import { configPaths, normalizeConfig, readConfig, writeConfig } from "./config"
  * | 配置型 store（任务 / 记忆 / 定时 / 工作区…） | `stores.db` 的 kv 表 |
  * | CLI 配置（provider / model / 档位 / 目录） | `config.json` |
  *
- * ⚠️ **不含密钥**：凭据在 `~/.dsh/.credentials.yaml`，那是另一个程序的资产，
- * 也**不该**被一个随手分享的备份文件带走。这一条写在这里，免得有人"顺手加上"。
+ * ⚠️ **不含密钥**：凭据在 `~/.ding/.credentials.yaml`（旧位置 `~/.dsh/` 仍读），
+ * 那是**明文**、也**不该**被一个随手分享的备份文件带走。
+ * 这一条写在这里，免得有人"顺手加上"。
  *
  * ## 两个数据根与 `--data-dir`（审计 P129 / NEW-N2-7）
  *
@@ -359,7 +360,7 @@ export async function cmdBackup(p: Parsed, dataDir: string): Promise<number> {
       `  内容：会话 ${payload.summary.sessions} 段 / 记录 ${payload.summary.records} 条 / 配置型 store ${payload.summary.stores} 项`,
       "",
       "  它是一个**能打开的 JSON 文件** —— 你可以自己看里面有什么，也可以拷到别的机器上恢复。",
-      "  不含密钥（凭据在 ~/.dsh/.credentials.yaml，不跟着备份走）。",
+      "  不含密钥（凭据在 ~/.ding/.credentials.yaml，不跟着备份走）。",
       "",
     ].join("\n"),
   );

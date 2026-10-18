@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
+
+import { legacyCredentialsPath, primaryCredentialsPath } from "../runtime/credentials";
 
 /**
  * 密钥的**加密存储**（Phase 14.2）。
@@ -15,7 +16,7 @@ import path from "node:path";
  * | 谁的密钥 | 现状 | 为什么 |
  * |---|---|---|
  * | **我们写的**（`ding init` 向导、桌面里填的 provider key） | 进 `secrets.dat`，**加密**（见下） | 这是我们自己的数据，没有理由明文 |
- * | **别人写的**（`~/.dsh/.credentials.yaml`） | 只读，**不动它** | 那个文件是另一个程序（用户的启动器）的资产，加密它等于把人家的文件改坏 |
+ * | **旧位置**（`~/.dsh/.credentials.yaml`） | 只读，**不动它** | 那个目录别的程序也在用，加密/搬走它的文件等于把人家文件改坏 |
  *
  * ## 加密用什么
  *
@@ -31,7 +32,7 @@ import path from "node:path";
  * 方案原文还有一句「**旧明文配置一次性迁移并提示**」—— **这里没有实现**：
  * CLI 没有钥匙串集成（见 `SAFETY.md` 第五节），迁移要么得先把明文读出来再明文写回去
  * （等于没迁），要么得有加密能力（桌面才有）。现状是：
- *   · `writeSecret` 只写自己的 `secrets.dat`，**不碰** `~/.dsh/.credentials.yaml`；
+ *   · `writeSecret` 只写自己的 `secrets.dat`，**不碰** `~/.dsh/.credentials.yaml`（旧位置只读）；
  *   · 那条旧明文文件的迁移**没人做**，只在 `ding doctor` 的「凭据保护」里被**报出来**；
  *   · `hosts/cli/wizard.ts` 在 CLI 下仍然把 key **明文**写进那条旧文件的 `refs:` 段
  *     （那是 CLI 唯一能用的落点），并在用户面前如实说清"明文"。
@@ -189,17 +190,24 @@ export function writeSecret(
  * 我们不加密它（那会把别人的文件改坏），但也不假装它不存在。
  *
  * @param dir 我们的数据目录（`secrets.dat` 在这里）
- * @param opts `legacyPath` = 那条明文文件的位置（默认 `~/.dsh/.credentials.yaml`；
+ * @param opts `legacyPaths` = 明文凭据文件的位置（默认**两个**：
+ *   `~/.ding/.credentials.yaml`（现在的）与 `~/.dsh/.credentials.yaml`（旧的，只读兜底）；
  *   测试与宿主可以指到别处，免得去碰真实的用户文件）
  */
 export function credentialProtection(
   dir: string,
-  opts?: { legacyPath?: string },
+  opts?: { legacyPath?: string; legacyPaths?: string[] },
 ): { detail: string; next: string } {
   const ours = existsSync(secretsPath(dir));
   const protectedNow = secretsEncrypted();
-  const legacy = opts?.legacyPath ?? path.join(os.homedir(), ".dsh", ".credentials.yaml");
-  const legacyExists = existsSync(legacy);
+  /*
+   * 2026-10-19：凭据从 `~/.dsh` 搬到 `~/.ding`，但旧文件仍然读得到。
+   * 这里要把**两份**都说出来 —— 只报一份会让用户以为另一半 key 不存在。
+   */
+  const legacyFiles =
+    opts?.legacyPaths ??
+    (opts?.legacyPath ? [opts.legacyPath] : [primaryCredentialsPath(), legacyCredentialsPath()]);
+  const existing = legacyFiles.filter((file) => existsSync(file));
 
   const parts: string[] = [];
   parts.push(
@@ -209,15 +217,23 @@ export function credentialProtection(
         ? `我们自己的加密库（secrets.dat）：已加密（${cipherName()}）`
         : `我们自己的加密库（secrets.dat）：有文件但**这台机器上解不开**（${cipherName()}）`,
   );
-  if (legacyExists) {
+  for (const file of existing) {
+    /*
+     * 两份要说成两件事：新的那份是**我们自己的**（`ding init` 写的）；
+     * 旧的那份是**只读兜底**（可能是旧版本或别的程序写的）。
+     * 说成一样会让用户以为新文件"也只是别人的"，从而不敢删旧的那份。
+     */
+    const isPrimary = file === primaryCredentialsPath();
     parts.push(
-      `${legacy}：**明文**（可能是另一个程序写的，也可能是 \`ding init\` 向导写的 —— 我们只碰 \`refs:\` 段里那个键，不加密它：加密别人的文件等于把人家文件改坏）`,
+      isPrimary
+        ? `${file}：**明文**（我们自己的，\`ding init\` 向导写的 —— 我们只碰 \`refs:\` 段里那个键，不加密它）`
+        : `${file}：**明文**（旧位置，只读兜底 —— 可能由旧版本或别的程序写的；我们不再往里写，也不删它）`,
     );
   }
 
   const next = !protectedNow
     ? "想让我们的密钥走系统保护：在桌面端填一次 provider key（它用系统密钥串加密）；CLI 没有钥匙串集成，所以 CLI 存的 key 是明文"
-    : legacyExists
+    : existing.length
       ? "那条明文文件是明文：要减少明文面，可以改用环境变量，或让写它的程序也加密"
       : "无需处理";
 

@@ -106,7 +106,9 @@ pnpm verify
 密钥按以下优先级读取：
 
 1. 环境变量
-2. `~/.dsh/.credentials.yaml`
+2. `~/.ding/.credentials.yaml`（Ding 自己的；`ding init` 向导写这里）
+3. `~/.dsh/.credentials.yaml`（**旧位置，只读兜底** —— 那个目录别的程序也在用，
+   Ding 只把自己那份搬走，老文件里的 key 照旧读得到）
 
 设置页有连通性探测，用来区分「配了密钥」和「密钥真的可用」。
 
@@ -315,9 +317,10 @@ pnpm e2ee:demo                                                   # 现场演示�
   拿不到系统加密能力时**拒绝写**并说清原因（不退化成明文）；
   **CLI 向导（`ding init`）写的是明文** —— 原因是 CLI 没有系统钥匙串入口
   （`secretsEncrypted()` 恒为 false），不是因为"CLI 不落盘"；它写的是
-  `~/.dsh/.credentials.yaml` 里 `refs:` 段自己那一个键（那个文件**桌面与 CLI 共用**，
-  别人的键与注释原样保留）；`mode: 0o600` 只在 POSIX 成立，Windows 上没有这层保护。
-  「旧明文配置一次性迁移并提示」**没做**（列在 `SAFETY.md` 第五节）。
+  `~/.ding/.credentials.yaml` 里 `refs:` 段自己那一个键（段外别人的键与注释原样保留）；
+  `mode: 0o600` 只在 POSIX 成立，Windows 上没有这层保护。
+  旧位置 `~/.dsh/.credentials.yaml` **仍然读**（那个目录别的程序也在用，我们只搬走自己那份），
+  但**不再往里写**。`「旧明文配置一次性迁移并提示」没做**（列在 `SAFETY.md` 第五节）。
   备份里**不含密钥**，而且加密是**本机绑定**的（换机器解不开，要重填一次）。
 ## 连到远端的 agent（Phase 17 的另一半）
 

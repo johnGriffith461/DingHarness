@@ -1,5 +1,9 @@
 /**
- * 「禁止真实模型」这道闸（`DSH_NO_REAL_MODEL`）——**唯一一份判定**。
+ * 「禁止真实模型」这道闸（`DING_NO_REAL_MODEL`）——**唯一一份判定**。
+ *
+ * 旧名 `DSH_NO_REAL_MODEL` **继续认**（2026-10-19 改名）：这道闸是**花钱与安全**的闸，
+ * 有人把它写进了 shell profile / CI 变量，改名后不认旧名就等于**悄悄把闸拆了** ——
+ * 那是比"名字不好看"严重得多的事故。两个都读，任一个开着就算开。
  *
  * ## 为什么抽出来（2026-10-16，审计 P53）
  *
@@ -19,9 +23,22 @@
  * 宁可拦错一次，不要放过一次真花钱的调用。
  */
 
+/**
+ * 闸是否开着（新旧两个变量名，任一非空即为开）。
+ *
+ * 返回**实际生效的那个名字**，`null` 表示闸没开。
+ * 报错文案要说用户真设的那一个 —— 他设的是旧名，却被告知新名，
+ * 会去 `env` 里找 `DING_...` 而找不到。
+ */
+export function activeGateVar(): string | null {
+  if (process.env.DING_NO_REAL_MODEL?.trim()) return "DING_NO_REAL_MODEL";
+  if (process.env.DSH_NO_REAL_MODEL?.trim()) return "DSH_NO_REAL_MODEL";
+  return null;
+}
+
 /** 闸开着时，这个地址算不算"远程"。 */
 export function realModelBlocked(url: string): boolean {
-  if (!process.env.DSH_NO_REAL_MODEL?.trim()) return false;
+  if (!activeGateVar()) return false;
   return !isLoopbackUrl(url);
 }
 
@@ -37,7 +54,8 @@ export function isLoopbackUrl(url: string): boolean {
 
 /** 拒掉时那句给人看的话（文本轮与图像/视频/探测说同一句，用户不用学两遍）。 */
 export function blockedReason(what: string, url: string): string {
-  return `DSH_NO_REAL_MODEL 已设置：拒绝调用远程地址（${what} → ${url}）。只有指向本机的任务才允许跑。`;
+  const name = activeGateVar() ?? "DING_NO_REAL_MODEL";
+  return `${name} 已设置：拒绝调用远程地址（${what} → ${url}）。只有指向本机的任务才允许跑。`;
 }
 
 /**

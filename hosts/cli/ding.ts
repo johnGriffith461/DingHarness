@@ -27,6 +27,7 @@ import { cmdCommandHelp, cmdHelp } from "./help";
 /** 数据目录（与 `main.ts` 的 `dataDir()` 逐字一致）。 */
 function dataDir(): string {
   return (
+    process.env.DING_DATA_DIR?.trim() ||
     process.env.DH_DATA_DIR?.trim() ||
     process.env.DSH_CANVAS_DATA_DIR?.trim() ||
     path.join(os.homedir(), ".ding")

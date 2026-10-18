@@ -237,10 +237,14 @@ process.on("unhandledRejection", (reason) => {
  * 分两种情况，因为**打包后 `__dirname` 在 asar 里，是只读的**：
  *   · 打包后：用系统 userData（`%APPDATA%\Ding Harness`）—— 安装目录不可写，写那里会直接失败
  *   · 开发期：用工程根的 `data/`（`.gitignore` 已排除）—— 能直接翻快照文件排查问题
- * 两种情况都可以用 `DSH_CANVAS_DATA_DIR` 覆盖（多份数据并行测试时用）。
+ * 两种情况都可以用 `DING_DATA_DIR` 覆盖（多份数据并行测试时用）；
+ * 旧名 `DH_DATA_DIR` / `DSH_CANVAS_DATA_DIR` 继续认（2026-10-19 改名，验收脚本大量在用）。
  */
 function configureDataDir(): void {
-  const override = process.env.DSH_CANVAS_DATA_DIR;
+  const override =
+    process.env.DING_DATA_DIR?.trim() ||
+    process.env.DH_DATA_DIR?.trim() ||
+    process.env.DSH_CANVAS_DATA_DIR?.trim();
   if (!override && app.isPackaged) return; // 直接用系统默认 userData
   const dir = override ? path.resolve(override) : path.join(__dirname, "..", "..", "data");
   try {

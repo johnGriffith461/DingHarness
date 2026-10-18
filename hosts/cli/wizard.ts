@@ -26,7 +26,7 @@ import { readConfig, writeConfig, type CliConfig } from "./config";
  *
  * ## 它**不改用户的机器**，只做两件事
  *
- * 1. 把 key 写进 `~/.dsh/.credentials.yaml`（**只写它自己那一行**，不碰别的键）；
+ * 1. 把 key 写进 `~/.ding/.credentials.yaml`（**只写它自己那一行**，不碰别的键）；
  * 2. 把 provider / model / dirs / mode 写进 `~/.ding/config.json`。
  *
  * 其余什么都不动（不装东西、不改 PATH、不写注册表）。

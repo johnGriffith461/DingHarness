@@ -89,6 +89,7 @@ let dataDirOverride = "";
 function dataDir(): string {
   return (
     dataDirOverride ||
+    process.env.DING_DATA_DIR?.trim() ||
     process.env.DH_DATA_DIR?.trim() ||
     process.env.DSH_CANVAS_DATA_DIR?.trim() ||
     path.join(os.homedir(), ".ding")

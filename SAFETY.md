@@ -45,8 +45,9 @@ Phase 14.5（opt-in 高档位）—— **现在没做，这里就写"没做"**�
 | 项 | 现状 | 依据 |
 |---|---|---|
 | **桌面里填的 key**（设置 → 密钥） | ✅ 进 `safeStorage`（Windows DPAPI / macOS Keychain / Linux secret-service）加密后落 `secrets.dat`；拿不到系统加密能力时**拒绝写**并说清原因（不退化成明文） | `engine/adapters/secretStore.ts` + `electron/ipc/secretStore.ts` |
-| **`ding init` 向导写的 key** | ⚠️ **明文**：CLI 这台机器上没有系统钥匙串集成（`secretsEncrypted()` 恒 false），所以向导只能写明文 —— 它写进 `~/.dsh/.credentials.yaml` 的 `refs:` 段，**并在用户面前如实说明文**。想不落盘就用环境变量 | `hosts/cli/wizard.ts` |
-| **`~/.dsh/.credentials.yaml` 这个文件** | **明文**。它是**共用的**：可能由别的程序（用户的启动器）写，也由我们的 `ding init` 向导写。我们**只碰 `refs:` 段里自己那一个键**（注释、别人的键、别的段原样保留），**不加密它** —— 加密别人的文件等于把人家的文件改坏 | `hosts/cli/wizard.ts`、`engine/runtime/credentials.ts` |
+| **`ding init` 向导写的 key** | ⚠️ **明文**：CLI 这台机器上没有系统钥匙串集成（`secretsEncrypted()` 恒 false），所以向导只能写明文 —— 它写进 `~/.ding/.credentials.yaml` 的 `refs:` 段，**并在用户面前如实说明文**。想不落盘就用环境变量 | `hosts/cli/wizard.ts` |
+| **`~/.ding/.credentials.yaml` 这个文件** | **明文**。我们**只碰 `refs:` 段里自己那一个键**（注释、别人的键、别的段原样保留），**不加密它** —— 加密别人的文件等于把人家的文件改坏 | `hosts/cli/wizard.ts`、`engine/runtime/credentials.ts` |
+| **旧位置 `~/.dsh/.credentials.yaml`** | **仍然读、不再写**（2026-10-19 搬家）。那个目录是**别的程序也在用**的（同层还有它们的配置文件），所以不能整个改名或删除；Ding 只是把自己那份搬去 `~/.ding`，并在读的时候把旧文件当兜底 —— 老用户的 key 不会失效 | `engine/runtime/credentials.ts` |
 | **环境变量里的 key** | 原样读（那是你自己设的，我们不改环境） | `engine/runtime/credentials.ts` |
 | **加密的范围** | ⚠️ **本机绑定**：换机器/换用户解不开。所以**备份里不含密钥**，换机器要重新填一次 | `engine/core/backup.ts` |
 | **key 会不会进日志** | ❌ 不会。会话日志记的是"用了哪家/哪个模型"，不含密钥 | `engine/index.ts` 的 `request` 记录 |

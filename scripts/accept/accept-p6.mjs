@@ -82,7 +82,7 @@ report.chatSidebar = await page.locator(".chat-provider").count();
 report.prodStoreAbsent = await page.evaluate(() => typeof window.__canvasStore === "undefined");
 report.devPromptProbeAbsent = await page.evaluate(() => typeof window.__lastAiPrompt === "undefined");
 
-// AI 通道：打包后密钥仍从 ~/.dsh 读，provider 列表应能返回
+// AI 通道：打包后密钥从 ~/.ding 读（旧 ~/.dsh 兜底），provider 列表应能返回
 report.providers = await page.evaluate(async () => {
   try {
     const list = await window.shell.ai.listProviders();

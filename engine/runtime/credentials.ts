@@ -5,16 +5,61 @@ import path from "node:path";
 /**
  * 凭据读取（只读，绝不回传明文给渲染进程）。
  *
- * 优先级：环境变量 → `~/.dsh/.credentials.yaml`（DSH 的凭据库）。
+ * 优先级：环境变量 → `~/.ding/.credentials.yaml`（Ding 自己的）→
+ * `~/.dsh/.credentials.yaml`（**旧位置，只读兜底**）。
  * 渲染进程只能拿到"某个 provider 有没有可用 key"这种布尔信息与一份脱敏的模型清单，
  * key 本体只在主进程里用来发请求。
+ *
+ * ## 为什么从 `~/.dsh` 搬到 `~/.ding`（2026-10-19）
+ *
+ * `~/.dsh` 这个名字会被误读成 "DeepSeek Harness"，而它**不是我们的目录** ——
+ * 同一层里还有别的程序写的东西（`~/.dsh/.workbuddy-*.json`、`.agent-presets/`），
+ * 所以「把目录改名」不是我们有权做的事。能做的是**把 Ding 自己的文件搬走**：
+ * Ding 只往 `~/.ding/.credentials.yaml` 写，旧文件仍然读得到（老用户的 key 不会失效）。
  */
 
-/** 凭据文件位置（可用 DSH_CREDENTIALS_FILE 覆盖，便于换机器）。 */
+/** 新位置：Ding 自己的数据目录（CLI 的 `--data-dir` 默认也是它）。 */
+const PRIMARY_DIRNAME = ".ding";
+/**
+ * 旧位置：与别的程序共用的目录。
+ * ⚠️ 只读、不写、不删 —— 那个文件可能是另一个程序（用户的启动器）的资产。
+ */
+const LEGACY_DIRNAME = ".dsh";
+const CREDENTIALS_FILENAME = ".credentials.yaml";
+
+/** Ding 自己的凭据文件（写入口）。 */
+export function primaryCredentialsPath(): string {
+  return path.join(os.homedir(), PRIMARY_DIRNAME, CREDENTIALS_FILENAME);
+}
+
+/** 旧位置（只读兜底）。 */
+export function legacyCredentialsPath(): string {
+  return path.join(os.homedir(), LEGACY_DIRNAME, CREDENTIALS_FILENAME);
+}
+
+/**
+ * 按优先级列出要读的凭据文件（高优先级在前）。
+ *
+ * 覆盖变量：`DING_CREDENTIALS_FILE` > `DSH_CREDENTIALS_FILE`（旧名，继续认）。
+ * 给了覆盖就只读那一个文件 —— 换机器/测试都要能完全脱离用户目录。
+ */
+export function credentialsPaths(): string[] {
+  const override =
+    process.env.DING_CREDENTIALS_FILE?.trim() || process.env.DSH_CREDENTIALS_FILE?.trim();
+  if (override) return [override];
+  const primary = primaryCredentialsPath();
+  const legacy = legacyCredentialsPath();
+  return primary === legacy ? [primary] : [primary, legacy];
+}
+
+/**
+ * **写**入口：永远是新的那个位置。
+ *
+ * 写入不再落到旧文件上：那份文件可能被别的程序共用，我们只该管自己那一份。
+ * 读的时候会把两边合起来（见 `readCredentialRefs`），所以老用户的 key 照旧能用。
+ */
 export function credentialsPath(): string {
-  const override = process.env.DSH_CREDENTIALS_FILE;
-  if (override) return override;
-  return path.join(os.homedir(), ".dsh", ".credentials.yaml");
+  return credentialsPaths()[0]!;
 }
 
 /**
@@ -59,11 +104,11 @@ function parseRefs(text: string): Record<string, string> {
  * 缓存。
  *
  * ⚠️ **必须按文件路径分开**（2026-10-15 修）：原来只记时间戳，于是换了凭据文件
- * （`DSH_CREDENTIALS_FILE` 变过、或者用户在向导里刚写完一份新的）之后，
+ * （覆盖变量变过、或者用户在向导里刚写完一份新的）之后，
  * 30 秒内读到的还是**上一个文件**的内容 —— 表现是"刚配好，doctor 却说没配"。
  * 这条是 `hosts/cli/wizard.test.ts` 逮到的：它每个用例换一个凭据文件。
  */
-let cache: { at: number; file: string; refs: Record<string, string> } | null = null;
+let cache: { at: number; files: string; refs: Record<string, string> } | null = null;
 
 /**
  * 让凭据缓存失效。
@@ -79,25 +124,35 @@ export function invalidateCredentialCache(): void {
 /**
  * 读 refs 段（带 30s 缓存，避免每次发请求都读盘）。
  *
- * 缓存键是**文件路径 + 时间**：换了文件立刻失效（不清缓存就读到别人的 key 才是更坏的）。
+ * **两个文件会合并**（2026-10-19）：`~/.ding/` 里的优先，`~/.dsh/` 里的兜底。
+ * 合并是逐键的 —— 所以「新位置只写了一部分、老的还有别的键」也不会互相打架；
+ * 同一个键出现两次时，新的那份赢（用户自己的意愿优先于历史/别人的文件）。
+ *
+ * 缓存键是**整组路径 + 时间**：换了文件立刻失效（不清缓存就读到别人的 key 才是更坏的）。
  */
 export function readCredentialRefs(): Record<string, string> {
   const now = Date.now();
-  const file = credentialsPath();
-  if (cache && cache.file === file && now - cache.at < 30_000) return cache.refs;
+  const files = credentialsPaths();
+  const cacheKey = files.join("|");
+  if (cache && cache.files === cacheKey && now - cache.at < 30_000) return cache.refs;
 
-  let refs: Record<string, string> = {};
-  try {
-    if (fs.existsSync(file)) {
+  const refs: Record<string, string> = {};
+  /*
+   * 反向遍历：先读低优先级的（旧文件），再用高优先级的覆盖。
+   * 顺序写反会让"新文件里的 key 被旧文件盖掉" —— 那正是这次搬家要避免的事。
+   */
+  for (const file of [...files].reverse()) {
+    try {
+      if (!fs.existsSync(file)) continue;
       // 先按 UTF-8 解，失败再退到 latin1（BOM/编码异常时至少不崩）
       const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
-      refs = parseRefs(text);
+      Object.assign(refs, parseRefs(text));
+    } catch {
+      /* 单个文件读不了就跳过：另一个文件里可能还有能用的 key */
     }
-  } catch {
-    refs = {};
   }
 
-  cache = { at: now, file, refs };
+  cache = { at: now, files: cacheKey, refs };
   return refs;
 }
 

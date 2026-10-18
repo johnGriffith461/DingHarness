@@ -85,8 +85,8 @@ describe("ding doctor（Phase 11.4）", () => {
     const cred = checks.find((c) => c.name === "模型凭据");
     expect(cred, "没有「模型凭据」这一格").toBeTruthy();
     expect(cred!.ok, "干净环境下凭据竟然判成可用").toBe(false);
-    // 指引要**可执行**：提到具体命令或具体文件
-    expect(/ding init|credentials|环境变量|\.dsh/.test(cred!.next), `指引太空：${cred!.next}`).toBe(true);
+    // 指引要**可执行**：提到具体命令或具体文件（新旧两个凭据路径都算）
+    expect(/ding init|credentials|环境变量|\.ding|\.dsh/.test(cred!.next), `指引太空：${cred!.next}`).toBe(true);
   });
 
   it("③ 配置里写了不认识的档位：这一格红，且说清可选值", () => {
@@ -140,10 +140,13 @@ describe("ding doctor（Phase 11.4）", () => {
      * ⚠️ 2026-10-18（Linux 实测）：这条原来**依赖开发机碰巧有** `~/.dsh/.credentials.yaml`，
      * 在干净机器（和 WSL）上直接红 —— 不是产品坏了，是测试没造出它要的前提。
      * 现在把 HOME/USERPROFILE 指到临时目录并在那里放一份明文凭据，跨平台可重复。
+     *
+     * 2026-10-19 起凭据搬到 `~/.ding`：这里放的是**新位置**那份（用户现在的常态），
+     * 旧位置 `~/.dsh` 的兜底由 `engine/runtime/credentials.test.ts` 单独钉。
      */
     const home = freshDir();
-    fs.mkdirSync(path.join(home, ".dsh"), { recursive: true });
-    fs.writeFileSync(path.join(home, ".dsh", ".credentials.yaml"), "refs:\n  DEEPSEEK_API_KEY: sk-test\n", "utf8");
+    fs.mkdirSync(path.join(home, ".ding"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".ding", ".credentials.yaml"), "refs:\n  DEEPSEEK_API_KEY: sk-test\n", "utf8");
     const prevHome = process.env.HOME;
     const prevProfile = process.env.USERPROFILE;
     process.env.HOME = home;

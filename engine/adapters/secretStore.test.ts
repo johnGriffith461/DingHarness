@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { primaryCredentialsPath } from "../runtime/credentials";
 import {
   SECRETS_FILE,
   credentialProtection,
@@ -176,17 +177,42 @@ describe("凭据保护那一格（审计 P119：三种状态都要答得出，�
     expect(got.next).toMatch(/桌面端|环境变量/);
   });
 
-  it("那条旧明文文件在时：说明文、说清**我们自己的向导也写它**（不许写成「别家的、只读」）", () => {
+  it("新位置那份是「我们自己的、ding init 写的」（2026-10-19 搬家后的语义）", () => {
+    /*
+     * 这条原来守的是"不许把旧文件说成别家的、我们只读"，因为当年 `ding init` 确实写它。
+     * 2026-10-19 凭据搬到 `~/.ding/` 之后，语义分成了两半，各守一半：
+     *   · 新位置 = 我们自己的 → 必须说 `ding init` 写它；
+     *   · 旧位置 = 只读兜底 → 必须说清"我们不再往里写"。
+     * 这里用 `legacyPaths[0]` 把自己伪装成主位置来验第一种（真实主路径在用户家目录，
+     * 不该被测试碰）—— `credentialProtection` 判断"是不是主位置"按 `primaryCredentialsPath()` 比，
+     * 所以这里改为直接验两份**同时存在**时的措辞差异。
+     */
     const dir = freshDir();
-    const legacy = path.join(freshDir(), "credentials.yaml");
-    writeFileSync(legacy, "refs:\n  A_KEY: sk-plain\n", "utf8");
-    const got = credentialProtection(dir, { legacyPath: legacy });
-    expect(got.detail).toContain(legacy);
+    const primaryLike = path.join(freshDir(), "credentials.yaml");
+    const legacyLike = path.join(freshDir(), "legacy.yaml");
+    writeFileSync(primaryLike, "refs:\n  A_KEY: sk-plain\n", "utf8");
+    writeFileSync(legacyLike, "refs:\n  B_KEY: sk-plain\n", "utf8");
+    const got = credentialProtection(dir, { legacyPaths: [primaryLike, legacyLike] });
+    // 两份都要点名，且各自说清是什么
+    expect(got.detail).toContain(primaryLike);
+    expect(got.detail).toContain(legacyLike);
     expect(got.detail).toContain("明文");
-    expect(got.detail, "把那条文件说成别家的、我们只读 —— 实际 ding init 向导会写它").toContain("ding init");
+    expect(got.detail, "旧位置没写清「只读兜底」").toContain("只读兜底");
     expect(got.next).toMatch(/明文|环境变量/);
   });
-});
+
+  it("指名的主位置那份必须说清是 `ding init` 写的（不能把用户自己的文件说成别人的）", () => {
+    const dir = freshDir();
+    const primary = primaryCredentialsPath();
+    writeFileSync(primary, "refs:\n  A_KEY: sk-plain\n", "utf8");
+    try {
+      const got = credentialProtection(dir, { legacyPaths: [primary] });
+      expect(got.detail, "主位置那份没说是 ding init 写的").toContain("ding init");
+      expect(got.detail, "主位置那份被说成了别人的").not.toContain("只读兜底");
+    } finally {
+      rmSync(primary, { force: true });
+    }
+  });});
 
 describe("真话守卫（审计 P114 / P120 / D3 复核）：自述必须与实现一致", () => {
   it("⭐ 桌面那条写 key 的路真的调 `writeSecret`（它不再是零调用死代码）", () => {

@@ -31,7 +31,7 @@ ding run "…" --dir ./你的目录
 `0.6.0`、`ding eval` 是 **63/63**。要自己复验：`node scripts/verify-clean-install.mjs`
 （要联网，所以不串进 `pnpm verify`）。
 
-⚠️ **CLI 的 key 是明文**（`~/.dsh/.credentials.yaml` 的 `refs:` 段）：CLI 没有系统钥匙串
+⚠️ **CLI 的 key 是明文**（`~/.ding/.credentials.yaml` 的 `refs:` 段；旧位置 `~/.dsh/` 仍读）：CLI 没有系统钥匙串
 集成，`ding init` 会照实说。想减少明文面就用环境变量，或在桌面端填（走系统加密库）。
 
 ## 第一轮该看见什么

@@ -136,9 +136,15 @@ function handleFor(dir: string): Handle {
  * 后端选择：SQLite 还是文件。
  *
  * 判据是环境变量（`file` 走回退），默认 SQLite —— 方案的 12.1 就是"存储全面 SQLite 化"。
+ *
+ * 变量名 2026-10-19 改为 `DING_STORE_BACKEND`；旧名 `DSH_STORE_BACKEND` **继续认**
+ * （批量验收脚本与 CI 里大量在用，改名的第一原则是不让既有调用方悄悄换行为）。
  */
 export function backendKind(): "sqlite" | "file" {
-  return process.env.DSH_STORE_BACKEND?.trim().toLowerCase() === "file" ? "file" : "sqlite";
+  const raw =
+    process.env.DING_STORE_BACKEND?.trim().toLowerCase() ||
+    process.env.DSH_STORE_BACKEND?.trim().toLowerCase();
+  return raw === "file" ? "file" : "sqlite";
 }
 
 /** 库里的一行。 */

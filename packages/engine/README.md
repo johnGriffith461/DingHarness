@@ -34,7 +34,7 @@ try {
 
 ## 密钥从哪来
 
-`resolveSecret(keyRef)` 按这个优先级找：**环境变量 → `~/.dsh/.credentials.yaml` → 桌面加密库**。
+`resolveSecret(keyRef)` 按这个优先级找：**环境变量 → `~/.ding/.credentials.yaml`（旧的 `~/.dsh/` 只读兜底）→ 桌面加密库**。
 最少只要给环境变量：
 
 ```bash

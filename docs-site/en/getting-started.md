@@ -26,7 +26,7 @@ Verified on a clean machine (2026-10-18): empty npm cache and prefix, `ding-harn
 `ding --version` = `0.6.0`, `ding eval` = **63/63**. Re-run it yourself with
 `node scripts/verify-clean-install.mjs` (needs network, so it is not part of `pnpm verify`).
 
-⚠️ **CLI keys are plaintext** (`~/.dsh/.credentials.yaml`, under `refs:`). The CLI has no OS
+⚠️ **CLI keys are plaintext** (`~/.ding/.credentials.yaml`, under `refs:`; the old `~/.dsh/` path is still read as a fallback). The CLI has no OS
 keychain integration and says so. To reduce plaintext exposure, use environment variables or
 enter the key in the desktop app (it uses the OS-encrypted store).
 
