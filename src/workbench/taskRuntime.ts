@@ -50,6 +50,7 @@ import { agentPromptBlock, selectedAgentNow } from "./agentStore";
 import { personaNow } from "./appSettings";
 import { personaPromptBlock } from "@shared/persona";
 import { skillsBlockFor, stricterMode } from "./runInputs";
+import { withSubagentApprovals } from "./subagentBubbles";
 import { memoryPromptBlock } from "@shared/memory";
 import { useMemoryStore } from "./memoryStore";
 import { resolveChatRoute } from "@/ai/route";
@@ -707,15 +708,13 @@ export async function runStream(
   const errorText = failure || view.error || "";
   const text = errorText ? `（出错了）${errorText}` : view.text;
   /*
-   * ⚠️ `usage` 一起交出去（C5）：它是 provider 给的**真值**，
-   * 原来主进程发了、工作台**没有 `done` 分支**于是直接丢掉（界面那个数一直是按字数估的）。
-   * 现在它跟着这一步落盘，显示处据此**如实说明**"上面那个数是估的、真值是这个"。
-   *
+   * ⚠️ `usage` 一起交出去（C5）：provider 给的**真值**（原来主进程发了、工作台没接）。
    * 「默认模型失效、先退回上次」那句跟着返回值出去，由 `answerTurn` 挂到这一步上（§184）
    */
   return {
     text,
-    tools: view.traces,
+    /* G11：子智能体被拦下的动作要冒泡成父级待批行，否则用户只能看到"想做但没批" */
+    tools: withSubagentApprovals(view.traces),
     ...(view.usage ? { usage: view.usage } : {}),
     ...(fellBackNote ? { note: fellBackNote } : {}),
   };

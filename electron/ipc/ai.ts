@@ -10,6 +10,7 @@ import { canDecide, decidedByOf, DEFAULT_APPROVER, pendingFor, approvalRecord } 
 import { humanError, resolveTurnTarget, type TurnEvent } from "../../engine/runtime/loop";
 import { resolveSecret } from "../../engine/runtime/credentials";
 import { pluginHooks } from "../../engine/runtime/pluginHost";
+import { currentPermissionRules } from "./appSettings";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 
 /**
@@ -378,6 +379,15 @@ export function registerAiIpc(): void {
          * （它一比对就露：实测就是靠它发现桌面这条路只并了 MCP）。
          */
         tools: [...mcpToolEntries(), ...pluginToolEntries()],
+        /*
+         * ⭐ **权限规则**（U03）：用户在审批卡上点「总是允许」攒出来的那些。
+         *
+         * 这里原来**漏了这一项** —— 规则写进了设置、`runToolOnce`（批准后执行）也读它，
+         * 但**聊天回合建引擎时没传**：于是「总是允许」只在"已经批准过一次之后的执行"
+         * 里生效，下一轮同样的调用照样再问一遍。规则层的单测与设置层的单测都是绿的，
+         * 唯独这条装配线没人看（同一个教训：装配漏一项，功能就整条不存在）。
+         */
+        ...(currentPermissionRules().length ? { rules: currentPermissionRules() } : {}),
       });
 
       try {
