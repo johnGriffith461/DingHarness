@@ -166,6 +166,10 @@ async function main(): Promise<void> {
    */
   function checkoutAt(repoDir: string, instance: SweBenchInstance): void {
     const url = `https://github.com/${instance.repo}.git`;
+    /* 上次失败留下的半截目录（没有 .git）不能直接复用，否则 fetch 会报"不是仓库" */
+    if (fs.existsSync(repoDir) && !fs.existsSync(path.join(repoDir, ".git"))) {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
     if (!fs.existsSync(repoDir)) {
       sh("git", ["clone", "--quiet", "--filter=blob:none", "--no-checkout", url, repoDir]);
     }
