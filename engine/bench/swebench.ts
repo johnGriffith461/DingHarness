@@ -135,3 +135,59 @@ export type SweBenchPrediction = {
   model_name_or_path: string;
   model_patch: string;
 };
+
+/**
+ * 收补丁时要排除的路径（git pathspec，交给 `git diff -- …` 直接过滤）。
+ *
+ * 每一条都必须带 `:(exclude)`：裸路径在 `git diff` 里是**包含**过滤，
+ * 少写前缀会把补丁收成空文件 —— 那不是"更干净"，是"没改动"。
+ *
+ * 这份清单来自真跑：agent 为了跑测试会在仓库里装依赖、跑测试套，
+ * 生成物如果不排掉就会整棵进 patch。实测最离谱的一条 **1,276,898 行**
+ * （Sphinx 自己的测试套会在 `tests/roots` 下每个用例目录里生成 `_build` 整棵 HTML 树）。
+ * 补丁一旦这么大，官方 harness 必然判不过，而失败原因看起来像"模型没做对"。
+ */
+export const SWEBENCH_PATCH_EXCLUDES: readonly string[] = [
+  ":(exclude).testlibs/**",
+  ":(exclude)**/__pycache__/**",
+  ":(exclude).pytest_cache/**",
+  ":(exclude)**/.pytest_cache/**",
+  ":(exclude).mypy_cache/**",
+  ":(exclude)**/.mypy_cache/**",
+  ":(exclude).ruff_cache/**",
+  ":(exclude)**/.ruff_cache/**",
+  ":(exclude)**/*.egg-info/**",
+  ":(exclude).tox/**",
+  ":(exclude)**/.tox/**",
+  ":(exclude).nox/**",
+  ":(exclude)**/.nox/**",
+  ":(exclude)**/.hypothesis/**",
+  ":(exclude)node_modules/**",
+  ":(exclude).venv/**",
+  ":(exclude)venv/**",
+  ":(exclude)site-packages/**",
+  // Sphinx / setuptools / 覆盖率这些"跑一次测试就长出来"的目录
+  ":(exclude)**/_build/**",
+  ":(exclude)**/.doctrees/**",
+  ":(exclude)build/**",
+  ":(exclude)dist/**",
+  ":(exclude)htmlcov/**",
+  ":(exclude).coverage",
+  ":(exclude)**/.coverage",
+  ":(exclude)**/*.pyc",
+  ":(exclude)**/*.pyd",
+  ":(exclude)**/*.so",
+  ":(exclude)**/*.whl",
+];
+
+/**
+ * 正常"修复 + 几个测试"的补丁行数天花板。
+ * 超过它多半是把依赖/产物收进来了 —— 这种补丁不写进预测，单独计数。
+ */
+export const MAX_SOURCE_PATCH_LINES = 3000;
+
+/** 补丁是否超过行数上限（`text` 为 `git diff` 的原始输出；空串按 0 行）。 */
+export function isOversizePatch(text: string, limit = MAX_SOURCE_PATCH_LINES): boolean {
+  if (!text) return false;
+  return text.split("\n").length > limit;
+}

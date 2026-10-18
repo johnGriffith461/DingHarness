@@ -39,7 +39,14 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { parseSweBenchJsonl, toBenchTask, type SweBenchPrediction } from "../engine/bench/swebench";
+import {
+  isOversizePatch,
+  MAX_SOURCE_PATCH_LINES,
+  parseSweBenchJsonl,
+  SWEBENCH_PATCH_EXCLUDES,
+  toBenchTask,
+  type SweBenchPrediction,
+} from "../engine/bench/swebench";
 import { buildEngine } from "../hosts/cli/assembly";
 
 function arg(name: string, fallback?: string): string | undefined {
@@ -173,43 +180,25 @@ async function main(): Promise<void> {
        * 第一条实测里 flask 那条的补丁有 **87,278 行**：agent 为了能跑测试，
        * 在仓库里 `pip install -t .testlibs …`，而 `git add -A` 把整个依赖目录
        * 一起收进了 patch —— 官方 harness 当然判不过（而且这根本不是它的修复）。
-       * 这类目录还有 `__pycache__` / `.pytest_cache` / `.mypy_cache` / `*.egg-info` /
-       * `.tox` / `node_modules` / `.venv`。它们**不是补丁的一部分**，必须在 diff 里排除。
+       * 50 条那一轮又抓到更离谱的：`sphinx-10435` 的补丁 **1,276,898 行**，
+       * 是 Sphinx 自己的测试套在 `tests/roots` 下每个用例目录里生成的 `_build` HTML 树。
+       * 清单与行数上限收在 `engine/bench/swebench.ts`（一处定义、有测试钉住）。
        *
        * 排除用 pathspec（`:(exclude)`），而不是先 `git clean` —— clean 会把 agent
        * 真写下的新源文件也删掉（那是修复的一部分）。
        */
-      const JUNK_GLOBS = [
-        ":(exclude).testlibs/**",
-        ":(exclude)**/__pycache__/**",
-        ":(exclude).pytest_cache/**",
-        ":(exclude)**/.pytest_cache/**",
-        ":(exclude).mypy_cache/**",
-        ":(exclude).ruff_cache/**",
-        ":(exclude)**/*.egg-info/**",
-        ":(exclude).tox/**",
-        ":(exclude)**/.tox/**",
-        ":(exclude)node_modules/**",
-        ":(exclude).venv/**",
-        ":(exclude)venv/**",
-        ":(exclude)**/*.pyc",
-      ];
       sh("git", ["add", "-A"], repoDir);
-      const patch = sh("git", ["diff", "--cached", "--binary", "--", ".", ...JUNK_GLOBS], repoDir);
+      const patch = sh("git", ["diff", "--cached", "--binary", "--", ".", ...SWEBENCH_PATCH_EXCLUDES], repoDir);
       sh("git", ["reset", "--quiet"], repoDir);
 
-      /*
-       * 补丁体积守卫：**超大的补丁不写进预测**（写了也是必然判不过，还污染成绩口径）。
-       * 3000 行是"正常修复 + 几个测试"的天花板；超过它多半是把依赖/产物收进来了。
-       */
-      const MAX_PATCH_LINES = 3000;
-      const patchLines = patch ? patch.split("\n").length : 0;
-      if (patchLines > MAX_PATCH_LINES) {
+      if (isOversizePatch(patch)) {
+        const patchLines = patch.split("\n").length;
         process.stdout.write(
-          `⚠️ 补丁 ${patchLines} 行，超过 ${MAX_PATCH_LINES} 行上限 —— 视为"把非源码改动收进来了"，**不写入预测**（这一条按失败计）\n`,
+          `⚠️ 补丁 ${patchLines} 行，超过 ${MAX_SOURCE_PATCH_LINES} 行上限 —— 视为"把非源码改动收进来了"，**不写入预测**（这一条按失败计）\n`,
         );
         oversize += 1;
       } else {
+        const patchLines = patch ? patch.split("\n").length : 0;
         const line: SweBenchPrediction = { instance_id: instance.instance_id, model_name_or_path: modelName, model_patch: patch };
         out.write(JSON.stringify(line) + "\n");
         process.stdout.write(patch.trim() ? `完成（补丁 ${patchLines} 行）\n` : "完成（无改动）\n");

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSweBenchJsonl, toBenchTask } from "./swebench";
+import {
+  isOversizePatch,
+  MAX_SOURCE_PATCH_LINES,
+  parseSweBenchJsonl,
+  SWEBENCH_PATCH_EXCLUDES,
+  toBenchTask,
+} from "./swebench";
 
 /**
  * SWE-bench 适配层（V6-1a）。
@@ -52,5 +58,27 @@ describe("SWE-bench JSONL", () => {
     expect(task.source).toMatchObject({ kind: "swebench", instanceId: "django__django-11099" });
     expect(task.turns).toEqual(["Fix the thing."]);
     expect(task.replies).toBeUndefined();
+  });
+});
+
+describe("收补丁的排除规则", () => {
+  it("每一条都带 :(exclude)（漏了会把 diff 变成只收这些路径）", () => {
+    const wrong = SWEBENCH_PATCH_EXCLUDES.filter((glob) => !glob.startsWith(":(exclude)"));
+    expect(wrong, `这些路径没有 :(exclude) 前缀，git 会把它们当成包含过滤：${wrong.join("、")}`).toEqual([]);
+  });
+
+  it("覆盖实测到的三类污染：依赖树、Python 缓存、Sphinx 生成目录", () => {
+    const joined = SWEBENCH_PATCH_EXCLUDES.join("\n");
+    expect(joined).toContain(":(exclude).testlibs/**"); // 87,278 行那条
+    expect(joined).toContain(":(exclude)**/__pycache__/**");
+    expect(joined).toContain(":(exclude)**/_build/**"); // 1,276,898 行那条
+    expect(joined).toContain(":(exclude)**/*.pyc");
+  });
+
+  it("行数上限：空补丁不算超、刚好到上限不算超、多一行才算", () => {
+    expect(MAX_SOURCE_PATCH_LINES).toBe(3000);
+    expect(isOversizePatch("")).toBe(false);
+    expect(isOversizePatch("x\n".repeat(MAX_SOURCE_PATCH_LINES - 1) + "x")).toBe(false);
+    expect(isOversizePatch("x\n".repeat(MAX_SOURCE_PATCH_LINES) + "x")).toBe(true);
   });
 });
