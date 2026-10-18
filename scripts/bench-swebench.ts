@@ -58,6 +58,16 @@ function arg(name: string, fallback?: string): string | undefined {
 }
 const has = (name: string) => process.argv.includes(`--${name}`);
 
+/**
+ * 余额/鉴权/限流这类错误：**换一条实例也不会好**，继续跑只会一条条空烧。
+ * 命中就整轮停（已写出的预测保留，`--resume` 可续跑）。
+ */
+function isFatalProviderError(message: string): boolean {
+  return /insufficient|quota|balance|payment|credit|余额|欠费|额度|unauthorized|invalid api key|401|402|429|rate limit|too many requests/i.test(
+    message,
+  );
+}
+
 function sh(cmd: string, args: string[], cwd?: string, encoding: "utf8" | "buffer" = "utf8"): string {
   return execFileSync(cmd, args, {
     cwd,
@@ -183,8 +193,9 @@ async function main(): Promise<void> {
        * 现在把每步的 usage 累起来，算进这一条与整轮的总账。
        */
       const usage = { inputTokens: 0, outputTokens: 0, steps: 0 };
+      let turnError = "";
       try {
-        await built.engine.run({
+        const outcome = await built.engine.run({
           sessionId: `swe-${instance.instance_id}`,
           provider,
           model,
@@ -205,6 +216,7 @@ async function main(): Promise<void> {
             }
           },
         });
+        if (!outcome.ok) turnError = outcome.error ?? "模型回合失败（没有给出原因）";
       } finally {
         built.close();
       }
@@ -214,6 +226,12 @@ async function main(): Promise<void> {
       process.stdout.write(
         `（${usage.steps} 步 / 输入 ${usage.inputTokens} tok / 输出 ${usage.outputTokens} tok）`,
       );
+      if (turnError) {
+        process.stdout.write(`\n[${instance.instance_id}] 回合失败：${turnError}\n`);
+        counters.failed += 1;
+        if (isFatalProviderError(turnError)) counters.fatal = true;
+        return;
+      }
 
       /*
        * 收改动：`git add -A` 把新文件也纳入，`--cached` 出统一 diff。
@@ -256,7 +274,7 @@ async function main(): Promise<void> {
        * 余额/鉴权/限流这类错误**换实例也不会好**，而且会一条条空烧重试。
        * 命中就置 fatal，所有 worker 立刻收工（已写出的预测保留，可以 --resume 续跑）。
        */
-      if (/insufficient|quota|balance|余额|unauthorized|invalid api key|401|402|429/i.test(message)) {
+      if (isFatalProviderError(message)) {
         counters.fatal = true;
         process.stderr.write("⚠️ 命中余额/鉴权/限流错误，本轮停止；已产出的预测保留，可用 --resume 续跑。\n");
       }
