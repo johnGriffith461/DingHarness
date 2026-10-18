@@ -15,7 +15,9 @@
 ## 平台
 
 - 桌面只有 **Windows x64** 打包并启动验过；macOS/Linux 的桌面**没在真机上跑过**。
-- CLI 的 npm 路线只在 Windows 上执行过；单二进制在 WSL Ubuntu 上跑过 `eval`。
+- CLI 的 npm 路线只在 Windows 上执行过（**2026-10-18 干净安装复验**：空缓存空前缀装
+  `ding-harness@0.5.1`，版本对、`eval` 63/63）；macOS/Linux 的 npm 安装**没跑过**。
+  单二进制在 WSL Ubuntu 上跑过 `eval`。
 - `run_command` 的资源上限（作业对象）**只有 Windows**；macOS/Linux 没有。
 
 ## 安全

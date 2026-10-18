@@ -17,7 +17,7 @@ pnpm ding doctor          # 自检；失败项都写了下一步
 pnpm ding run "把 demo 里的 md 整理成一份纪要" --dir ./demo
 ```
 
-## 装好之后（npm 路线，发布后）
+## 装好之后（npm 路线）
 
 ```bash
 npm i -g ding-harness
@@ -25,6 +25,14 @@ ding doctor
 ding init
 ding run "…" --dir ./你的目录
 ```
+
+**干净机器验过（2026-10-18）**：空 `--cache`、空 `--prefix`，从
+`https://registry.npmjs.org` 装 `ding-harness@0.5.1`，装完 `ding --version` 是
+`0.5.1`、`ding eval` 是 **63/63**。要自己复验：`node scripts/verify-clean-install.mjs`
+（要联网，所以不串进 `pnpm verify`）。
+
+⚠️ **CLI 的 key 是明文**（`~/.dsh/.credentials.yaml` 的 `refs:` 段）：CLI 没有系统钥匙串
+集成，`ding init` 会照实说。想减少明文面就用环境变量，或在桌面端填（走系统加密库）。
 
 ## 第一轮该看见什么
 

@@ -56,7 +56,8 @@
     "sdk:split-repo": "node scripts/split-engine-repo.mjs",
     "verify:sdk": "node scripts/verify-sdk.mjs",
     "verify:canvas-mcp": "node scripts/verify-canvas-mcp.mjs",
-    "longtask:real": "tsx scripts/longtask-real.ts"
+    "longtask:real": "tsx scripts/longtask-real.ts",
+    "verify:clean-install": "node scripts/verify-clean-install.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
