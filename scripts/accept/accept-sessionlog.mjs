@@ -20,6 +20,8 @@ import { bootApp, connectWithRetry, freshDir, killTree, readAllSessionRecords, s
  * ③ 工具调用**成对**：有 `tool-call`（带参数）也有 `tool-result`（带结果），
  *    且参数里那个词（幸运数字）在日志里查得到（配对没丢）。
  * ④ **末行是 `done`**（这一轮有始有终，不是半截）。
+ *    ⚠️ 2026-10-18（U01）：`done` 之后还会落一条 `run-state: finished`（运行状态机），
+ *    所以判据是「**最后一条业务记录是 done**」—— 末尾允许跟 `run-state`，别的一律不行。
  * ⑤ ⭐ **正文能对上**：把日志里的 `text` 事件拼起来 == 界面上那条回复。
  *    这是 INV-1 的可证伪形式 —— 对不上就说明"界面显示的"与"日志记下的"
  *    走了两条路（那正是 C2 要消灭的东西）。
@@ -105,7 +107,12 @@ try {
   out.skipped = 0; // IPC 那侧已经把坏行跳过了（这里没有"行"可坏）
   out.types = records.map((r) => r.type);
   out.firstType = records[0]?.type ?? null;
-  out.lastType = records[records.length - 1]?.type ?? null;
+  /*
+   * 「末行」= **最后一条业务记录**（U01 之后 `done` 后面还会跟一条 `run-state: finished`）。
+   * 这里把末尾的 `run-state` 跳过再取 —— 判据仍然是"这一轮有始有终"。
+   */
+  const business = [...records].reverse().find((r) => r.type !== "run-state");
+  out.lastType = business?.type ?? null;
   out.requestHasUserText = Boolean(
     records[0]?.messages?.some((m) => typeof m.content === "string" && m.content.includes(MEMO_KEY)),
   );

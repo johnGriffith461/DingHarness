@@ -102,6 +102,9 @@ async function main(): Promise<void> {
   fs.mkdirSync(path.dirname(path.resolve(outFile)), { recursive: true });
   const out = fs.createWriteStream(path.resolve(outFile), { flags: "a" });
 
+  /** 整轮用量（跑完打一行总账；**不折算价格** —— 这个中转站的单价我们没有可信来源）。 */
+  const totals = { inputTokens: 0, outputTokens: 0, steps: 0 };
+
   for (let i = 0; i < chosen.length; i += 1) {
     const instance = chosen[i]!;
     const repoDir = path.join(workRoot, instance.instance_id);
@@ -119,6 +122,14 @@ async function main(): Promise<void> {
 
       const task = toBenchTask(instance);
       const built = await buildEngine([repoDir], storeDir);
+      /*
+       * 用量：**必须留下**（方案口径"不许编数"）。
+       *
+       * 这个脚本原来 `onEvent: () => undefined` —— 跑完只知道"生成了补丁"，
+       * 花了多少 token 一个字都没有，于是"要不要跑 500 条"只能靠猜。
+       * 现在把每步的 usage 累起来，算进这一条与整轮的总账。
+       */
+      const usage = { inputTokens: 0, outputTokens: 0, steps: 0 };
       try {
         await built.engine.run({
           sessionId: `swe-${instance.instance_id}`,
@@ -129,11 +140,27 @@ async function main(): Promise<void> {
           mode: "全部允许",
           useTools: true,
           maxSteps: task.maxSteps ?? 40,
-          onEvent: () => undefined,
+          onEvent: (event) => {
+            if (event.type !== "step-finish" && event.type !== "done") return;
+            const u = (event as { usage?: { inputTokens?: number; outputTokens?: number } }).usage;
+            if (!u) return;
+            /* `step-finish` 的 input 是"这一步发出去多少"，要**累加**（每步都重发历史） */
+            if (event.type === "step-finish") {
+              usage.steps += 1;
+              usage.inputTokens += u.inputTokens ?? 0;
+              usage.outputTokens += u.outputTokens ?? 0;
+            }
+          },
         });
       } finally {
         built.close();
       }
+      totals.inputTokens += usage.inputTokens;
+      totals.outputTokens += usage.outputTokens;
+      totals.steps += usage.steps;
+      process.stdout.write(
+        `（${usage.steps} 步 / 输入 ${usage.inputTokens} tok / 输出 ${usage.outputTokens} tok）`,
+      );
 
       /*
        * 收改动：`git add -A` 把新文件也纳入，`--cached` 出统一 diff。
@@ -154,8 +181,12 @@ async function main(): Promise<void> {
   }
 
   await new Promise<void>((resolve) => out.end(resolve));
+  const per = chosen.length;
   process.stdout.write(
-    `\n预测已写入 ${path.resolve(outFile)}\n` +
+    `\n用量：${per} 条 / ${totals.steps} 步 / 输入 ${totals.inputTokens} tok / 输出 ${totals.outputTokens} tok` +
+      `（每条平均 输入 ${per ? Math.round(totals.inputTokens / per) : 0} tok / 输出 ${per ? Math.round(totals.outputTokens / per) : 0} tok）\n` +
+      `⚠️ **不折算成金额**：这个通道的单价没有可信来源，token 数是真的、钱要你自己按账单核。\n` +
+      `预测已写入 ${path.resolve(outFile)}\n` +
       `判分请用官方 harness（见 bench/swebench/README.md）。**本脚本不产生成绩数字。**\n`,
   );
 }

@@ -167,16 +167,39 @@ try {
       reason: e.getAttribute("title") ?? "",
     })),
   );
-  /* 反馈：点下去 → 提示条给出真实路径 → 诊断包真的写出来了 */
+  /*
+   * 反馈：点下去 → **先开诊断包预览**（G17）→ 确认后导出 → 文件真的写出来。
+   *
+   * ⚠️ 2026-10-18（G17）：这一条原来断言"点完立刻有提示条 + 文件已写盘"。
+   * 行为是有意改的：用户对"要发给别人什么"要有过目机会，所以先预览再导出。
+   * 判据跟着改成：预览里有内容（且**此时还没写盘**）→ 点导出 → 文件出现。
+   */
+  out.feedbackPreview = false;
+  out.feedbackWroteBeforeExport = null;
   out.feedbackNote = null;
   out.feedbackFile = null;
   if (out.commands.some((c) => c.label === "反馈" && !c.disabled)) {
     await page.locator('[data-testid="wb-cmd-反馈"]').click();
-    await page.waitForTimeout(1200);
-    out.feedbackNote = (await page.locator('[data-testid="wb-material-note"]').textContent().catch(() => "")) ?? "";
-    const dir = `${DATA}/diagnostics`;
-    const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-    out.feedbackFile = files.find((f) => f.endsWith(".json")) ?? null;
+    await page.waitForTimeout(1500);
+    out.feedbackPreview = (await page.locator('[data-testid="wb-diagnostics-json"]').count()) > 0;
+    const dirBefore = `${DATA}/diagnostics`;
+    const before = fs.existsSync(dirBefore) ? fs.readdirSync(dirBefore).filter((f) => f.endsWith(".json")) : [];
+    out.feedbackWroteBeforeExport = before.length > 0;
+    if (out.feedbackPreview) {
+      await page.locator('[data-testid="wb-diagnostics-export"]').click();
+      for (let i = 0; i < 40; i += 1) {
+        const now = fs.existsSync(dirBefore) ? fs.readdirSync(dirBefore).filter((f) => f.endsWith(".json")) : [];
+        if (now.length) break;
+        await page.waitForTimeout(250);
+      }
+      out.feedbackNote = (await page.locator('[data-testid="wb-diagnostics-result"]').textContent().catch(() => "")) ?? "";
+      const dir = `${DATA}/diagnostics`;
+      const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+      out.feedbackFile = files.find((f) => f.endsWith(".json")) ?? null;
+      /* 关掉预览浮层（它盖着整页，不关后面点不到） */
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(700);
+    }
     /* 点完一条命令面板会自己关（`onPick` 之后 onClose）—— 后面的「技能管理」要重新打开它 */
     await page.locator('[data-testid="wb-skills"]').click();
     await page.waitForTimeout(700);
@@ -315,11 +338,11 @@ try {
     bad.push("⭐「反馈」本该能点（本机版反馈通道 = 导出诊断包）");
   }
   if (cmds.some((c) => c.label === "反馈" && !c.disabled)) {
-    if (!String(out.feedbackNote ?? "").includes("诊断包")) {
-      bad.push(`点「反馈」没有给出「诊断包…」的提示条（实际：${JSON.stringify(out.feedbackNote)}）`);
-    }
+    /* G17：先预览（此时不该写盘），确认后才导出 */
+    if (!out.feedbackPreview) bad.push("点「反馈」没有打开诊断包预览（G17 起走预览再导出）");
+    if (out.feedbackWroteBeforeExport) bad.push("预览阶段就已经写盘了 —— 用户还没来得及看内容");
     if (!out.feedbackFile) {
-      bad.push("点「反馈」之后数据目录的 diagnostics/ 里没有诊断包文件");
+      bad.push("在预览里点「导出」之后，diagnostics/ 里没有诊断包文件");
     }
   }
   if (!cmds.some((c) => c.label === "技能管理" && !c.disabled)) {

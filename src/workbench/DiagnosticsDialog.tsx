@@ -155,6 +155,16 @@ export function DiagnosticsDialog() {
         ) : null}
       </div>
     </div>,
-    document.body,
+    /*
+     * ⚠️ **必须挂到 `.wb` 里**，不能挂 `document.body`。
+     *
+     * `.wb-setfull` 用的是 `--surface` 与 `--win-titlebar-h` 两个变量，它们只定义在
+     * `.wb` 上（不是 `:root`）。挂到 body 之后两处一起失效：
+     *   · `background: var(--surface)` → 计算值无效 → **透明**，主页从底下透出来；
+     *   · `inset: var(--win-titlebar-h) 0 0 0` → 计算值无效 → 塌回 `auto`（静态流）。
+     * 表现就是"主页花了"：浮层变成一段半透明文字压在导航与任务列表上。
+     * 设置页（`SettingsDialog`）早就因为同一个坑改成挂 `.wb` 了 —— 这里照它的做法。
+     */
+    document.querySelector(".wb") ?? document.body,
   );
 }
