@@ -14,7 +14,7 @@
  * 输出到 `docs-site-dist/`（不入库）。托管任意静态服务器即可：
  *   python -m http.server -d docs-site-dist 8080
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +26,13 @@ const OUT = path.join(ROOT, "docs-site-dist");
 const escapeHtml = (text) =>
   String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** 行内：代码 → 粗体 → 斜体 → 链接（顺序保证代码里的星号不被当成粗体）。 */
+/**
+ * 行内：代码 → 粗体 → 斜体 → **图片** → 链接。
+ *
+ * ⚠️ 图片必须排在链接**前面**：Markdown 的 `![alt](src)` 里那对方括号
+ * 会被链接那条正则当成普通链接（结果渲染成 `<a>[alt]</a>` 加一串乱码）。
+ * 顺序这里是功能性的，不是风格。
+ */
 function inline(text) {
   const codes = [];
   let out = String(text).replace(/`([^`]+)`/g, (_, code) => {
@@ -36,6 +42,10 @@ function inline(text) {
   out = escapeHtml(out);
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+    const url = String(src).replace(/^\.\//, "");
+    return `<img src="${url}" alt="${alt}" loading="lazy" />`;
+  });
   out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => {
     const url = String(href).replace(/^\.\//, "").replace(/\.md(#.*)?$/, ".html$1");
     return `<a href="${url}">${label}</a>`;
@@ -298,6 +308,16 @@ ${body}
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(path.join(OUT, "en"), { recursive: true });
+/*
+ * 图片（G14：「截图与真实 UI 一致」）。
+ *
+ * 这些 PNG 是**验收脚本跑出来的真截图**（`scripts/accept/accept-*.mjs` 里 shot() 拍的），
+ * 不是手画的示意图 —— 文档里放示意图、界面却长得不一样，是文档最伤人的一种错。
+ * 它们放在 `docs-site/images/`（入库），生成时整目录拷过去。
+ */
+if (existsSync(path.join(ROOT, "docs-site", "images"))) {
+  cpSync(path.join(ROOT, "docs-site", "images"), path.join(OUT, "images"), { recursive: true });
+}
 
 const pages = [
   /* [输出文件, 标题, 源文件, 语言] */
@@ -410,9 +430,14 @@ walkHtml(OUT);
 const deadLinks = [];
 for (const file of allHtml) {
   const html = readFileSync(file, "utf8");
-  for (const m of html.matchAll(/href="([^"]+)"/g)) {
+  /*
+   * 链接**和图片**都要查。图片尤其容易坏：文档里写 `images/x.png`、而
+   * `docs-site/images/` 里没有这张 —— 页面照样"生成成功"，打开却是个破图。
+   * 只扫 `href` 时这一类完全看不见（第一版就是这样）。
+   */
+  for (const m of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
     const href = m[1];
-    if (/^(https?:|#|mailto:)/.test(href)) continue;
+    if (/^(https?:|#|mailto:|data:)/.test(href)) continue;
     const [target] = href.split("#");
     if (!target) continue;
     const resolved = path.resolve(path.dirname(file), target);
