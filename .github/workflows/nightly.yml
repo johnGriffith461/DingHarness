@@ -29,11 +29,15 @@ jobs:
       # 零出网闸：任何真调远程模型 / 图像通道的路径直接失败，而不是悄悄烧钱。
       DSH_NO_REAL_MODEL: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      # ⚠️ **不写 `version`**（2026-10-18 首次真跑抓到的）：
+      # `package.json` 里已有 `packageManager: pnpm@10.34.1`，这里再写 `version: 10`
+      # 会让 action 报 "Multiple versions of pnpm specified" 并**直接退出**
+      # （整条 nightly 14 秒就红了）。与 `ci.yml` 保持同一写法：交给 packageManager。
+      - uses: pnpm/action-setup@v6
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          run_install: false
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
