@@ -217,8 +217,28 @@ async function main(): Promise<void> {
     } catch (error) {
       process.stdout.write(`失败：${String((error as Error)?.message ?? error).split("\n")[0]}\n`);
     } finally {
-      fs.rmSync(storeDir, { recursive: true, force: true });
-      if (!keep) fs.rmSync(repoDir, { recursive: true, force: true });
+      /*
+       * ⚠️ 清理**必须尽力而为**（2026-10-18，50 条那轮实测）。
+       *
+       * Windows 上刚跑完的仓库目录里可能有还开着的文件句柄（agent 起的子进程刚退、
+       * 索引器还在扫），`rmSync` 会抛 EPERM —— 而那一下**把整轮 50 条带走了**
+       * （跑到第 9 条就整体退出，前面 8 条白跑）。清理失败只该留个目录，不该中断测量。
+       * 多试两次、再不行就留着（下一轮同 id 会先 `git reset --hard` 复用）。
+       */
+      for (const dir of [storeDir, ...(keep ? [] : [repoDir])]) {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            fs.rmSync(dir, { recursive: true, force: true });
+            break;
+          } catch {
+            try {
+              await new Promise((r) => setTimeout(r, 400));
+            } catch {
+              /* 忽略 */
+            }
+          }
+        }
+      }
     }
   }
 
