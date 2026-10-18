@@ -189,7 +189,34 @@ Docker 镜像构建 + 模型生成 + 本地全量测试三者同时跑，这台�
 **看起来像 40 条模型全错，实际是环境**。这条已经踩过一次，判分前务必先跑
 `which docker-credential-desktop`。
 
-### 7. 怎么把 500 条从"几十小时"压下来（2026-10-19）
+### 9. `patch.diff` 也是 CRLF（2026-10-19，第二次踩同族的坑）
+
+第 2 条修的是 `eval.sh` 的行尾；**同一个文件里还有第二处文本模式写盘**：
+
+```python
+patch_file.write_text(pred[KEY_PREDICTION] or "")   # Windows → CRLF
+```
+
+于是容器里 `git apply` 每一条都失配，报的却是**很像模型写错**的那几句：
+
+```
+The next patch would create the file _check_msg.py, which already exists!
+(Stripping trailing CRs from patch; use --binary to disable.)
+Hunk #1 FAILED at 1 (different line endings).
+```
+
+43 条里 **20 条**这么"失败"了。判据很干净：**预测 JSON 里的补丁一个 `\r` 都没有**，
+只有 harness 写出来的 `patch.diff` 有（`cat -A` 看是 `^M$`）—— 那是运输过程弄坏的，不是模型写的。
+
+修法与 `eval.sh` 完全相同：`write_bytes(...replace("\r\n","\n").encode("utf-8"))`。
+两个补丁都在 `patch_harness.py` 里，可重复执行；**重装 harness 会丢，要重打**，
+打完用 `file logs/.../patch.diff` 或 `cat -A | head -1` 验一下有没有 `^M`。
+
+⚠️ 顺带一条：宿主的 git 全局配置若是 `core.autocrlf=true`，工作树会被检出成 CRLF，
+agent 读到的就是 CRLF。容器里是 LF —— 所以生成侧现在显式
+`git -c core.autocrlf=false -c core.eol=lf`，让本地工作树和容器一致。
+
+### 10. 怎么把 500 条从"几十小时"压下来（2026-10-19）
 
 串行 500 条的实测外推是 **约 45 小时**（5.5 分钟/条）。两处杠杆，都是真改动：
 

@@ -209,7 +209,19 @@ async function main(): Promise<void> {
    * 这里用 partial clone（`--filter=blob:none`）保留 commit/tag（`setuptools_scm`
    * 这类构建脚本要靠 `git describe` 取版本），但只按需下载 base commit 的 blob。
    * 服务器不支持 filter 时 git 会自动退回整包，不影响正确性。
+   *
+   * ⚠️ **必须强制 `core.autocrlf=false` + `core.eol=lf`（2026-10-19 实测抓到的真缺陷）**。
+   *
+   * 这台机器的全局配置是 `core.autocrlf=true`，于是 `git checkout` 把仓库里的 LF
+   * 写成 CRLF —— agent 读到的是 CRLF、改出来的也是 CRLF，`git diff` 出来的**补丁每一行末尾都带 \r**。
+   * 官方 harness 在 Linux 容器里 `git apply` 那个补丁时全部失配：
+   * `Hunk #1 FAILED at 1 (different line endings)` —— 43 条里有 20 条就这么"失败"了，
+   * 而模型改的东西其实是对的。这不是模型的问题，是我们**造了一个和容器不一样的工作树**。
+   *
+   * 判据：容器里检出的是 LF（Linux 默认），所以本地也必须按 LF 检出。
    */
+  const GIT_EOL_ARGS = ["-c", "core.autocrlf=false", "-c", "core.eol=lf"];
+
   function checkoutAt(repoDir: string, instance: SweBenchInstance): void {
     const url = `https://github.com/${instance.repo}.git`;
     /* 上次失败留下的半截目录（没有 .git）不能直接复用，否则 fetch 会报"不是仓库" */
@@ -217,13 +229,13 @@ async function main(): Promise<void> {
       fs.rmSync(repoDir, { recursive: true, force: true });
     }
     if (!fs.existsSync(repoDir)) {
-      sh("git", ["clone", "--quiet", "--filter=blob:none", "--no-checkout", url, repoDir]);
+      sh("git", [...GIT_EOL_ARGS, "clone", "--quiet", "--filter=blob:none", "--no-checkout", url, repoDir]);
     }
-    sh("git", ["fetch", "--quiet", "origin", instance.base_commit], repoDir);
-    sh("git", ["checkout", "--quiet", "--force", instance.base_commit], repoDir);
+    sh("git", [...GIT_EOL_ARGS, "fetch", "--quiet", "origin", instance.base_commit], repoDir);
+    sh("git", [...GIT_EOL_ARGS, "checkout", "--quiet", "--force", instance.base_commit], repoDir);
     /* 每一轮都从干净的 base 开始（上一条的改动不能带进来） */
-    sh("git", ["reset", "--hard", "--quiet", instance.base_commit], repoDir);
-    sh("git", ["clean", "-fdq"], repoDir);
+    sh("git", [...GIT_EOL_ARGS, "reset", "--hard", "--quiet", instance.base_commit], repoDir);
+    sh("git", [...GIT_EOL_ARGS, "clean", "-fdq"], repoDir);
   }
 
   async function runOne(instance: SweBenchInstance, index: number): Promise<void> {
