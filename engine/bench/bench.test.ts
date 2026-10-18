@@ -117,5 +117,10 @@ describe("执行器", () => {
     expect(report.results[0]?.eventTypes).toContain("tool-result");
 
     for (const dir of storeDirs) fs.rmSync(dir, { recursive: true, force: true });
-  });
+    /*
+     * ⚠️ 2026-10-18（CI 在 windows-latest 上红）：这条**真启引擎、真建 SQLite、真跑工具**，
+     * 慢一点的 runner 上会超过 vitest 默认的 5 秒 —— 不是产品坏了，是预算没给。
+     * 30 秒：够慢机器跑完，真挂住时也能及时失败。
+     */
+  }, 30_000);
 });
