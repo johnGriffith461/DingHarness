@@ -144,6 +144,52 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  /*
+   * ⚠️ **同一个输出文件只允许一个进程写**（2026-10-19 实测）。
+   *
+   * 上一轮重启时，旧的 `pnpm → sh → node` 进程树**没有随外层 shell 一起退出**，
+   * 于是两个生成进程同时跑同一批实例、同时往同一个预测文件追加 ——
+   * 结果是重复调用真模型（重复花钱），日志里出现两套计数（`[N/457]` 与 `[N/456]`），
+   * 而 `--resume` 只在**启动时**读一次文件，拦不住中途的分叉。
+   *
+   * 锁文件写 PID：进程活着就拒跑；PID 已经不在了（崩过留下的残锁）自动接管。
+   */
+  const lockFile = `${path.resolve(outFile)}.lock`;
+  const pidAlive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (fs.existsSync(lockFile)) {
+    const holder = Number(fs.readFileSync(lockFile, "utf8").trim());
+    if (Number.isFinite(holder) && holder > 0 && holder !== process.pid && pidAlive(holder)) {
+      process.stderr.write(
+        `已有另一个生成进程（PID ${holder}）在写 ${path.resolve(outFile)}。\n` +
+          `  同时跑两份会重复调用模型、重复花钱；先停掉它，或换一个 --out。\n` +
+          `  确认那个 PID 已经不在了的话，删掉 ${lockFile} 再跑。\n`,
+      );
+      process.exit(2);
+    }
+  }
+  fs.writeFileSync(lockFile, String(process.pid));
+  const releaseLock = (): void => {
+    try {
+      if (Number(fs.readFileSync(lockFile, "utf8").trim()) === process.pid) fs.rmSync(lockFile, { force: true });
+    } catch {
+      /* 锁已经不在就算了 */
+    }
+  };
+  process.on("exit", releaseLock);
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      releaseLock();
+      process.exit(130);
+    });
+  }
+
   fs.mkdirSync(workRoot, { recursive: true });
   fs.mkdirSync(path.dirname(path.resolve(outFile)), { recursive: true });
   const out = fs.createWriteStream(path.resolve(outFile), { flags: "a" });
