@@ -138,3 +138,17 @@ Windows 上刚跑完的仓库目录里可能还有句柄，`rmSync` 抛 EPERM。
 | 磁盘 | 每个 eval 镜像 1–3 GB |
 
 500 条全量按这个量级外推是**几十小时 + 数亿输入 token**，先跑 50 条抽样更划算。
+
+### 6. 别在建模/判分时跑别的重活（2026-10-18 实测）
+
+Docker 镜像构建 + 模型生成 + 本地全量测试三者同时跑，这台机器上出现过两种坏结果：
+
+1. **Docker Desktop 直接起不来**（报 `Docker Desktop is unable to start`）。
+   恢复：杀掉 `Docker Desktop` / `com.docker.backend` / `com.docker.build` 三个进程，
+   执行 `wsl --shutdown`，再启动 Docker Desktop（约 1 分钟起来）；
+2. **本地全量测试集体假红**：SQLite / DOCX / 同步那批用例平时 1–2 秒，
+   负载高时跑到 6–14 秒并超时。判据是**单独跑同一条文件就绿** —— 那是环境，不是产品坏了。
+
+所以：判分与生成**串行**跑；这期间不要跑 `pnpm test`。
+判分前的镜像构建按仓库/版本合并（50 条实例实测只需要 9 个环境镜像），
+`--max_workers 1` 稳、`2` 会撞上面的管道错误。
