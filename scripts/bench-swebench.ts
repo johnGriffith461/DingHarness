@@ -45,6 +45,7 @@ import {
   parseSweBenchJsonl,
   SWEBENCH_PATCH_EXCLUDES,
   toBenchTask,
+  type SweBenchInstance,
   type SweBenchPrediction,
 } from "../engine/bench/swebench";
 import { buildEngine } from "../hosts/cli/assembly";
@@ -84,6 +85,16 @@ async function main(): Promise<void> {
   const modelName = arg("model-name", `ding/${provider}/${model}`)!;
   const workRoot = path.resolve(arg("work", path.join(os.tmpdir(), "ding-swebench"))!);
   const keep = has("keep");
+  /**
+   * 并发实例数（默认 1）。
+   *
+   * 500 条串行实测约 5.5 分钟/条 —— 单跑要 45 小时。每条实例的仓库、数据目录、
+   * 引擎实例都是独立的（`workRoot/<instance_id>` + 各自的临时 store），
+   * 所以并发是安全的；真正的上限是通道的速率限制与机器内存。
+   */
+  const concurrency = Math.max(1, Number(arg("concurrency", "1")) || 1);
+  /** 跳过输出文件里**已有非空补丁**的实例（断点续跑；空补丁会重试）。 */
+  const resume = has("resume");
 
   const { instances, badLines } = parseSweBenchJsonl(fs.readFileSync(instancesFile, "utf8"));
   if (badLines.length) {
@@ -95,10 +106,28 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const chosen = instances.slice(0, limit);
+  const done = new Set<string>();
+  if (resume && fs.existsSync(outFile)) {
+    for (const line of fs.readFileSync(outFile, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const p = JSON.parse(line) as SweBenchPrediction;
+        if (p.instance_id && typeof p.model_patch === "string" && p.model_patch.trim()) done.add(p.instance_id);
+      } catch {
+        /* 坏行忽略：它会在下面被重跑 */
+      }
+    }
+  }
+  const pending = instances.filter((x) => !done.has(x.instance_id)).slice(0, limit);
+  const chosen = pending;
+  if (!chosen.length) {
+    process.stdout.write("没有要跑的实例（输出文件里都已有非空补丁）。\n");
+    return;
+  }
   if (!has("yes-spend")) {
     process.stdout.write(
-      `计划：跑 ${chosen.length} 条实例（共 ${instances.length} 条），provider=${provider} model=${model}\n` +
+      `计划：跑 ${chosen.length} 条实例（共 ${instances.length} 条，已跳过 ${done.size} 条），` +
+        `provider=${provider} model=${model} 并发=${concurrency}\n` +
         `  这会调用真模型并产生费用；确认后加 --yes-spend。\n` +
         `  输出：${path.resolve(outFile)}\n`,
     );
@@ -113,21 +142,36 @@ async function main(): Promise<void> {
   const totals = { inputTokens: 0, outputTokens: 0, steps: 0 };
   /** 超大补丁（把依赖/产物收进来的那种）不写入预测，单独计数。 */
   let oversize = 0;
+  /** 失败/未完成计数（并发下也要如实报出来）。 */
+  const counters = { ok: 0, failed: 0, fatal: false };
 
-  for (let i = 0; i < chosen.length; i += 1) {
-    const instance = chosen[i]!;
+  /**
+   * 检出到 base commit。
+   *
+   * 一条实例只需要**一个 commit 的树**，但仓库可能有几百 MB 历史（django 尤其大）。
+   * 整仓 `git clone` 是 500 条串行里最大的固定开销之一。
+   * 这里用 partial clone（`--filter=blob:none`）保留 commit/tag（`setuptools_scm`
+   * 这类构建脚本要靠 `git describe` 取版本），但只按需下载 base commit 的 blob。
+   * 服务器不支持 filter 时 git 会自动退回整包，不影响正确性。
+   */
+  function checkoutAt(repoDir: string, instance: SweBenchInstance): void {
+    const url = `https://github.com/${instance.repo}.git`;
+    if (!fs.existsSync(repoDir)) {
+      sh("git", ["clone", "--quiet", "--filter=blob:none", "--no-checkout", url, repoDir]);
+    }
+    sh("git", ["fetch", "--quiet", "origin", instance.base_commit], repoDir);
+    sh("git", ["checkout", "--quiet", "--force", instance.base_commit], repoDir);
+    /* 每一轮都从干净的 base 开始（上一条的改动不能带进来） */
+    sh("git", ["reset", "--hard", "--quiet", instance.base_commit], repoDir);
+    sh("git", ["clean", "-fdq"], repoDir);
+  }
+
+  async function runOne(instance: SweBenchInstance, index: number): Promise<void> {
     const repoDir = path.join(workRoot, instance.instance_id);
     const storeDir = fs.mkdtempSync(path.join(os.tmpdir(), "dh-swe-store-"));
-    process.stdout.write(`[${i + 1}/${chosen.length}] ${instance.instance_id} … `);
+    process.stdout.write(`[${index + 1}/${chosen.length}] ${instance.instance_id} … `);
     try {
-      if (!fs.existsSync(repoDir)) {
-        sh("git", ["clone", "--quiet", `https://github.com/${instance.repo}.git`, repoDir]);
-      }
-      sh("git", ["fetch", "--quiet", "origin", instance.base_commit], repoDir);
-      sh("git", ["checkout", "--quiet", "--force", instance.base_commit], repoDir);
-      /* 每一轮都从干净的 base 开始（上一条的改动不能带进来） */
-      sh("git", ["reset", "--hard", "--quiet", instance.base_commit], repoDir);
-      sh("git", ["clean", "-fdq"], repoDir);
+      checkoutAt(repoDir, instance);
 
       const task = toBenchTask(instance);
       const built = await buildEngine([repoDir], storeDir);
@@ -201,10 +245,21 @@ async function main(): Promise<void> {
         const patchLines = patch ? patch.split("\n").length : 0;
         const line: SweBenchPrediction = { instance_id: instance.instance_id, model_name_or_path: modelName, model_patch: patch };
         out.write(JSON.stringify(line) + "\n");
-        process.stdout.write(patch.trim() ? `完成（补丁 ${patchLines} 行）\n` : "完成（无改动）\n");
+        process.stdout.write(`[${instance.instance_id}] ` + (patch.trim() ? `完成（补丁 ${patchLines} 行）\n` : "完成（无改动）\n"));
       }
+      counters.ok += 1;
     } catch (error) {
-      process.stdout.write(`失败：${String((error as Error)?.message ?? error).split("\n")[0]}\n`);
+      const message = String((error as Error)?.message ?? error);
+      process.stdout.write(`[${instance.instance_id}] 失败：${message.split("\n")[0]}\n`);
+      counters.failed += 1;
+      /*
+       * 余额/鉴权/限流这类错误**换实例也不会好**，而且会一条条空烧重试。
+       * 命中就置 fatal，所有 worker 立刻收工（已写出的预测保留，可以 --resume 续跑）。
+       */
+      if (/insufficient|quota|balance|余额|unauthorized|invalid api key|401|402|429/i.test(message)) {
+        counters.fatal = true;
+        process.stderr.write("⚠️ 命中余额/鉴权/限流错误，本轮停止；已产出的预测保留，可用 --resume 续跑。\n");
+      }
     } finally {
       /*
        * ⚠️ 清理**必须尽力而为**（2026-10-18，50 条那轮实测）。
@@ -231,12 +286,28 @@ async function main(): Promise<void> {
     }
   }
 
+  /*
+   * worker 池：每个 worker 取下一个待跑实例，互不等待。
+   * `chosen` 的顺序按实例文件原序（分层抽样已打散），所以先跑完的不代表更好跑。
+   */
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (!counters.fatal) {
+      const i = next;
+      next += 1;
+      if (i >= chosen.length) return;
+      await runOne(chosen[i]!, i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, chosen.length) }, () => worker()));
+
   await new Promise<void>((resolve) => out.end(resolve));
-  const per = chosen.length;
+  const per = counters.ok + counters.failed;
   process.stdout.write(
-    `\n用量：${per} 条 / ${totals.steps} 步 / 输入 ${totals.inputTokens} tok / 输出 ${totals.outputTokens} tok` +
+    `\n用量：${per} 条（成功 ${counters.ok} / 失败 ${counters.failed}） / ${totals.steps} 步 / 输入 ${totals.inputTokens} tok / 输出 ${totals.outputTokens} tok` +
       `（每条平均 输入 ${per ? Math.round(totals.inputTokens / per) : 0} tok / 输出 ${per ? Math.round(totals.outputTokens / per) : 0} tok）\n` +
       (oversize ? `⚠️ ${oversize} 条因补丁超大（疑似把依赖/产物收进来）未写入预测 —— 它们按失败计，别混进通过率。\n` : "") +
+      (counters.fatal ? "⚠️ 本轮因余额/鉴权/限流提前停止。\n" : "") +
       `⚠️ **不折算成金额**：这个通道的单价没有可信来源，token 数是真的、钱要你自己按账单核。\n` +
       `预测已写入 ${path.resolve(outFile)}\n` +
       `判分请用官方 harness（见 bench/swebench/README.md）。**本脚本不产生成绩数字。**\n`,

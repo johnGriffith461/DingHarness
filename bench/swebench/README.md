@@ -160,3 +160,27 @@ Docker 镜像构建 + 模型生成 + 本地全量测试三者同时跑，这台�
 所以：判分与生成**串行**跑；这期间不要跑 `pnpm test`。
 判分前的镜像构建按仓库/版本合并（50 条实例实测需要 **11 个**环境镜像），
 `--max_workers 1` 稳、`2` 会撞上面的管道错误。
+
+### 7. 怎么把 500 条从"几十小时"压下来（2026-10-19）
+
+串行 500 条的实测外推是 **约 45 小时**（5.5 分钟/条）。两处杠杆，都是真改动：
+
+1. **并行实例**：`--concurrency 6`。每条实例的仓库、临时 store、引擎实例彼此独立，
+   并发安全；唯一上限是通道速率与机器内存。
+2. **只检出 base commit，不拉全史**：`git clone --filter=blob:none --no-checkout`
+   + `git fetch origin <base_commit>` + `git checkout <sha>`。
+   实测 django：**16 秒 / .git 83 MB**（整仓克隆要几分钟、几百 MB）。
+   保留 commit 与 tag（`setuptools_scm` 这类构建脚本要靠 `git describe` 取版本），
+   只按需下载这棵树要用的 blob。
+
+配套：`--resume` 跳过输出文件里已有非空补丁的实例（空补丁会重跑），
+命中余额/鉴权/429 时整轮立即停（不会一条条空烧重试），已产出的预测保留可续跑。
+
+命令：
+
+```bash
+pnpm tsx scripts/bench-swebench.ts \
+  --instances verified.jsonl --out predictions.jsonl \
+  --provider tokenrhythm --model deepseek-v4.1-flash-1017 \
+  --concurrency 6 --resume --yes-spend
+```
