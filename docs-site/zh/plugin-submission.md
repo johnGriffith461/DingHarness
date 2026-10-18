@@ -45,6 +45,15 @@ ding plugins verify ./my-plugin      # 再跑一次：签名有效
 }
 ```
 
+提交前先自检索引本身：
+
+```bash
+ding plugins verify-index plugin-market/index.json
+ding plugins verify-index plugin-market/index.json --json   # 给 CI
+```
+
+它离线校验：结构/坏条目、签名或指纹、每条来源（npm 名形状、本地目录存在、`enginesDing` 是否覆盖当前宿主）。
+
 要求：
 
 - `id` 稳定（用户用它 `install index:<id>`）；

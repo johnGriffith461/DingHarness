@@ -51,7 +51,7 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding workflow run|validate|list|show … [--resume <运行.json>] [--retry-failed]  # 多 agent 工作流（断点续跑）",
       "  ding models",
       "  ding agents                                    # 内置专家（AgentSpec）",
-      "  ding plugins [list|search <词>|verify <目录>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",
+      "  ding plugins [list|search <词>|verify <目录>|verify-index <索引>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",
       "  ding config [show|set <键> <值>|unset <键>]    # 默认 provider / 模型 / 档位 / 目录",
       "  ding --json <命令>                             # 给脚本/CI 的 JSON 输出",
       ...(devMode
@@ -146,7 +146,7 @@ export const COMMAND_USAGE: Record<string, string> = {
   record: "ding record <会话 id> [--out <文件>]（工程模式）",
   replay: "ding replay <快照文件>（工程模式）",
   models: "ding models [--json]",
-  plugins: "ding plugins <list|search|verify|install|remove|enable|disable> …",
+  plugins: "ding plugins <list|search|verify|verify-index|install|remove|enable|disable> …",
   recipe: "ding recipe <list|show|run|export|import> …",
   space: "ding space <invite|join|members|roles|remove|share|unshare|takeover|rooms|room|usage|audit> …",
   sync: "ding sync <会话 id> --to <服务地址> --token <口令> [--owner <成员 id>] [--producer <id>]",

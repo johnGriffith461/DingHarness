@@ -118,3 +118,87 @@ describe("ding plugins verify", () => {
     expect(body.checks.map((c) => c.name)).toContain("隔离档位");
   });
 });
+
+/**
+ * **索引自检**（E04，`ding plugins verify-index`）：投稿者/维护者离线校验一份市场索引。
+ */
+describe("ding plugins verify-index", () => {
+  const writeIndex = (value: unknown): string => {
+    const file = path.join(root, `index-${Math.random().toString(36).slice(2, 8)}.json`);
+    writeFileSync(file, JSON.stringify(value, null, 2), "utf8");
+    return file;
+  };
+
+  async function verifyIndex(file: string, extra: string[] = []): Promise<{ code: number; out: string; err: string }> {
+    const logs: string[] = [];
+    const errs: string[] = [];
+    const log = console.log;
+    const error = console.error;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+    console.error = (...args: unknown[]) => errs.push(args.join(" "));
+    try {
+      const code = await cmdPlugins(parseArgv(["plugins", "verify-index", file, ...extra]), dataDir);
+      return { code, out: logs.join("\n"), err: errs.join("\n") };
+    } finally {
+      console.log = log;
+      console.error = error;
+    }
+  }
+
+  it("合法索引 → 0，三条检查都过", async () => {
+    const file = writeIndex({
+      format: 1,
+      plugins: [{ id: "word-count", name: "字数统计", version: "1.0.0", enginesDing: ">=0.5.0", npm: "word-count" }],
+    });
+    const got = await verifyIndex(file);
+    expect(got.code, got.err).toBe(0);
+    expect(got.out).toContain("索引结构");
+    expect(got.out).toContain("签名/指纹");
+    expect(got.out).toContain("条目来源与兼容");
+    expect(got.out).not.toContain("✗");
+  });
+
+  it("⭐ npm 包名像路径 → 非零（投稿者在这里就该被挡）", async () => {
+    const file = writeIndex({
+      format: 1,
+      plugins: [{ id: "x", name: "x", version: "1.0.0", enginesDing: ">=0.5.0", npm: "../evil" }],
+    });
+    const got = await verifyIndex(file);
+    expect(got.code).not.toBe(0);
+    expect(got.out).toContain("npm 包名形状不对");
+  });
+
+  it("local 指向不存在的目录 → 非零", async () => {
+    const file = writeIndex({
+      format: 1,
+      plugins: [{ id: "x", name: "x", version: "1.0.0", enginesDing: ">=0.5.0", local: "./not-there" }],
+    });
+    const got = await verifyIndex(file);
+    expect(got.code).not.toBe(0);
+    expect(got.out).toContain("local 指向的目录不在");
+  });
+
+  it("format 不对 / 文件不是 JSON → 非零并说明", async () => {
+    const wrongFormat = writeIndex({ format: 9, plugins: [] });
+    const got = await verifyIndex(wrongFormat);
+    expect(got.code).not.toBe(0);
+    expect(got.out).toContain("只认 format 1");
+
+    const notJson = path.join(root, "broken.json");
+    writeFileSync(notJson, "{ 坏", "utf8");
+    const got2 = await verifyIndex(notJson);
+    expect(got2.code).not.toBe(0);
+    expect(got2.err).toContain("读不了索引");
+  });
+
+  it("--json 给机器可读结果", async () => {
+    const file = writeIndex({
+      format: 1,
+      plugins: [{ id: "a", name: "a", version: "1.0.0", enginesDing: ">=0.5.0", npm: "a" }],
+    });
+    const got = await verifyIndex(file, ["--json"]);
+    const body = JSON.parse(got.out) as { ok: boolean; checks: Array<{ name: string; ok: boolean }> };
+    expect(body.ok).toBe(true);
+    expect(body.checks.every((c) => c.ok)).toBe(true);
+  });
+});

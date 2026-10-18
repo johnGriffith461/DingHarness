@@ -381,6 +381,85 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
   }
 
   /*
+   * **索引自检**（E04）：投稿者/维护者在本地校验一份市场索引，不联网、不安装。
+   *
+   * 判据与 `search` / `install` 共用 `parsePluginIndex` 与签名算法，
+   * 所以"这里说通过、用户那边用不了"不会发生。
+   */
+  if (sub === "verify-index") {
+    if (!name) {
+      console.error("用法：ding plugins verify-index <索引文件> [--json]");
+      return 2;
+    }
+    const file = path.resolve(name);
+    const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+    const push = (label: string, ok: boolean, detail: string): boolean => {
+      checks.push({ name: label, ok, detail });
+      return ok;
+    };
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await fs.readFile(file, "utf8"));
+    } catch (error) {
+      console.error(`读不了索引：${file}（${String((error as Error)?.message ?? error).slice(0, 120)}）`);
+      return 1;
+    }
+
+    const parsed = parsePluginIndex(raw);
+    if (!parsed.ok) {
+      if (p.flags.has("json")) {
+        console.log(JSON.stringify({ file, checks: [{ name: "索引结构", ok: false, detail: parsed.errors.join("；") }], ok: false }, null, 2));
+      } else {
+        console.log(`索引：${file}`);
+        console.log(`  ✗ 索引结构：${parsed.errors.join("；")}`);
+      }
+      return 1;
+    }
+    push("索引结构", true, `format ${parsed.index.format}，${parsed.index.plugins.length} 条（跳过 ${parsed.problems.length} 条坏条目）`);
+    if (parsed.problems.length) push("坏条目", false, parsed.problems.join("；"));
+
+    /*
+     * 签名/指纹：复用安装时的同一份判定（签名索引验签 + 换公钥拒绝）。
+     * `acceptChange: true` 是刻意的 —— 自检是**离线检查**，钉表变化不该挡住它
+     * （真要防篡改用 `search/install` 那条会读钉表的路径）。
+     */
+    const pinsFile = indexPinsFileOf(pluginPaths(dataDir).root);
+    const trust = checkIndexTrust({
+      source: file,
+      raw,
+      pins: readIndexPins(pinsFile),
+      acceptChange: true,
+    });
+    push("签名/指纹", trust.verdict.ok, trust.verdict.ok ? trust.verdict.note : trust.verdict.message);
+
+    /* 每条来源：npm 名字形状 / 本地目录存在（本地索引才检查） */
+    const localIssues: string[] = [];
+    for (const entry of parsed.index.plugins) {
+      if (entry.npm && !/^(@[a-z0-9-]+\/)?[a-z0-9][a-z0-9._-]*$/.test(entry.npm)) {
+        localIssues.push(`${entry.id}：npm 包名形状不对（${entry.npm}）`);
+      }
+      if (entry.local) {
+        const dir = path.resolve(path.dirname(file), entry.local);
+        if (!existsSync(dir)) localIssues.push(`${entry.id}：local 指向的目录不在（${entry.local}）`);
+      }
+      const incompatible = engineIncompatibility(entry.enginesDing, PRODUCT_VERSION);
+      if (incompatible) localIssues.push(`${entry.id}：${incompatible}`);
+    }
+    push("条目来源与兼容", localIssues.length === 0, localIssues.length ? localIssues.join("；") : "全部可用");
+
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify({ file, checks, ok: checks.every((c) => c.ok) }, null, 2));
+    } else {
+      console.log(`索引：${file}`);
+      for (const check of checks) console.log(`  ${check.ok ? "✓" : "✗"} ${check.name}：${check.detail}`);
+    }
+    const ok = checks.every((c) => c.ok);
+    if (!ok && !p.flags.has("json")) console.error("\n有检查没过 —— 修完再投稿。");
+    return ok ? 0 : 1;
+  }
+
+  /*
    * **投稿前自检**（E04）：在一个还没安装的目录上跑安装时会做的全部检查，但不真的装。
    * 判据与安装共用同一批函数（清单/兼容/入口/签名/隔离装载），
    * 所以不会出现"verify 说没问题、装的时候被拒"。
@@ -500,6 +579,6 @@ export async function cmdPlugins(p: Parsed, dataDir: string): Promise<number> {
     return 0;
   }
 
-  console.error(`不认识的子命令：${sub}（可用：list / search / install / enable / disable / remove / verify / doctor）`);
+  console.error(`不认识的子命令：${sub}（可用：list / search / verify / verify-index / install / enable / disable / remove / doctor）`);
   return 2;
 }

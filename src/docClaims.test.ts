@@ -471,7 +471,7 @@ describe("自述必须有判据 / 点名必须找得到（D9）", () => {
     const pluginsBody = existsSync(pluginsFile)
       ? readFileSync(pluginsFile, "utf8")
       : ding.slice(ding.indexOf("async function cmdPlugins"), ding.indexOf("function cmdConfig"));
-    const subs = new Set([...pluginsBody.matchAll(/sub === "([a-z]+)"/g)].map((m) => m[1]!));
+    const subs = new Set([...pluginsBody.matchAll(/sub === "([a-z-]+)"/g)].map((m) => m[1]!));
     expect(subs.size, "插件子命令解析不出来了").toBeGreaterThan(4);
 
     /*
