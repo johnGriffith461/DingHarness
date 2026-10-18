@@ -34,8 +34,21 @@ const flag = (name, fallback = "") => {
 /*
  * 判据模块是 TS：Node 22.6+ 的类型剥离（Node 24 默认开）能直接 import .ts。
  * 不用 tsx：发布脚本越少依赖越好，而这里只需要读一份纯函数模块。
+ * 老 Node 上这条 import 会报 "Unknown file extension .ts" —— 翻译成一句人话。
  */
-const { checkPromotion } = await import(pathToFileURL(path.join(ROOT, "shared", "release.ts")).href);
+let checkPromotion;
+try {
+  ({ checkPromotion } = await import(pathToFileURL(path.join(ROOT, "shared", "release.ts")).href));
+} catch (error) {
+  if (/Unknown file extension|Unexpected token|ERR_UNKNOWN_FILE_EXTENSION/i.test(String(error?.message ?? error))) {
+    console.error(
+      `这个脚本要用 Node 22.6+（类型剥离）直接读 shared/release.ts；当前是 ${process.version}。\n` +
+        "用仓里的 tsx 跑同一份逻辑：pnpm tsx scripts/promote-nightly.mjs …",
+    );
+    process.exit(1);
+  }
+  throw error;
+}
 
 const manifestPath = flag("manifest", path.join(".verify", "nightly-evidence.json"));
 const root = path.resolve(flag("root", ROOT));
