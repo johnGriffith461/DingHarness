@@ -148,6 +148,7 @@ const ZH_NAV = [
   ["video-script.html", "5 分钟演示脚本"],
   ["release-tracks.html", "发布轨道（nightly / stable）"],
   ["plugin-submission.html", "投稿一个插件"],
+  ["troubleshooting.html", "故障排查"],
   ["getting-started.html", "十分钟跑通"],
   ["knowledge.html", "本地知识库"],
   ["acp.html", "ACP（两个方向）"],
@@ -194,7 +195,9 @@ const PAGE_MAP = {
 };
 const EN_NAV = [
   ["en/index.html", "Home"],
+  ["en/getting-started.html", "Getting started"],
   ["en/tutorial.html", "Tutorial"],
+  ["en/troubleshooting.html", "Troubleshooting"],
   ["en/release-tracks.html", "Release tracks"],
   ["en/architecture.html", "Architecture"],
 ];
@@ -304,6 +307,9 @@ const pages = [
   ["video-script.html", "5 分钟演示脚本", "docs-site/zh/video-script.md", "zh"],
   ["release-tracks.html", "发布轨道（nightly / stable）", "docs-site/zh/release-tracks.md", "zh"],
   ["plugin-submission.html", "投稿一个插件", "docs-site/zh/plugin-submission.md", "zh"],
+  ["troubleshooting.html", "故障排查", "docs-site/zh/troubleshooting.md", "zh"],
+  ["en/getting-started.html", "Getting started", "docs-site/en/getting-started.md", "en"],
+  ["en/troubleshooting.html", "Troubleshooting", "docs-site/en/troubleshooting.md", "en"],
   ["getting-started.html", "十分钟跑通", "docs-site/zh/getting-started.md", "zh"],
   ["knowledge.html", "本地知识库", "docs-site/zh/knowledge.md", "zh"],
   ["acp.html", "ACP（两个方向）", "docs-site/zh/acp.md", "zh"],

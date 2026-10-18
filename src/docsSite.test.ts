@@ -32,10 +32,13 @@ describe("L10：文档站页面表与源文件", () => {
       ["examples.html", "docs-site/zh/examples.md"],
       ["video-script.html", "docs-site/zh/video-script.md"],
       ["en/tutorial.html", "docs-site/en/tutorial.md"],
-      /* E02 / E04：发布轨道与插件投稿 */
+      /* E02 / E04 / G14：发布轨道、插件投稿、双语故障排查 */
       ["release-tracks.html", "docs-site/zh/release-tracks.md"],
       ["plugin-submission.html", "docs-site/zh/plugin-submission.md"],
+      ["troubleshooting.html", "docs-site/zh/troubleshooting.md"],
       ["en/release-tracks.html", "docs-site/en/release-tracks.md"],
+      ["en/getting-started.html", "docs-site/en/getting-started.md"],
+      ["en/troubleshooting.html", "docs-site/en/troubleshooting.md"],
     ]) {
       expect(builder, `页面表里没有 ${out}`).toContain(`"${out}"`);
       expect(builder, `页面表里没有源 ${source}`).toContain(source);
