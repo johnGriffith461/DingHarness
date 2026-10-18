@@ -61,7 +61,8 @@
     "nightly:gates": "node scripts/nightly-gates.mjs",
     "nightly:promote": "node scripts/promote-nightly.mjs",
     "release:check": "node scripts/release-check.mjs",
-    "changelog:draft": "node scripts/changelog-draft.mjs"
+    "changelog:draft": "node scripts/changelog-draft.mjs",
+    "swebench:setup": "node scripts/swebench-setup.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
