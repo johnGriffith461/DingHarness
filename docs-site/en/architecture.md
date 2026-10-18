@@ -32,7 +32,9 @@ still byte-identical in the carried index (there is a regression test for it).
 
 - `ding eval`: 63 process-regression cases, deterministic, no API spend.
 - `ding bench`: 7 task-level cases grading files and commands, no API spend.
-- SWE-bench: 50-instance stratified sample graded by the **official harness**.
+- SWE-bench: 50-instance stratified sample graded by the **official harness** —
+  **31/50 resolved (62%)**, with all 11 unresolved cases having their patch
+  successfully applied (genuine model failures, not harness errors).
   This is an **external validity check and cost profile, not a score** — we do not
   rank against the leaderboard (it can no longer order its top entries; see
   `BENCHMARKS.md` §5.0), and we treat it as evidence that the loop runs on

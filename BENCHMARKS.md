@@ -117,14 +117,40 @@ CI 门禁（`pnpm test` 里的 `engine/eval/eval.test.ts`）：
 |---|---|
 | 数据集 | `princeton-nlp/SWE-bench_Verified`（500 条），**分层抽 50 条**：django 5 / sympy 5 / sphinx 5 / matplotlib 5 / scikit-learn 5 / astropy 5 / xarray 5 / pytest 4 / pylint 4 / requests 4 / seaborn 2 / flask 1 |
 | 模型 | `deepseek-v4.1-flash-1017`（通道 `tokenrhythm`，OpenAI 兼容协议） |
-| 判分 | 官方 harness `swebench 3.0.5`，Docker 29.8.2（WSL2），`--max_workers 4`，每实例独立镜像 |
+| 判分 | 官方 harness `swebench 3.0.5`，Docker 29.8.2（WSL2，44GB），`--max_workers 8`，每实例独立镜像 |
 | 生成 | `scripts/bench-swebench.ts`，单次自主 rollout，`maxSteps=40`，无重试/无 best-of-N |
-| 判分 `run_id` | `ding-final50c`（在 `ding-final50b` 上修掉补丁行尾缺陷后重判，见 §5.2 第 7 条） |
-| 结果 | 见下 |
+| 判分 `run_id` | `ding-final50d`（在 `ding-final50b` 上修掉补丁行尾缺陷后重判，见 §5.2 第 7 条） |
+| **结果（分母 50）** | **resolved 31 / 50 = 62.0%**；未解决 11；环境错误 1；空补丁 7 |
+| 结果（分母 43 有补丁的） | resolved 31 / 43 = **72.1%** |
+| 95% 置信区间 | **±13.4 个百分点**（n=50，正态近似，未做多重比较校正） |
 
-<!-- RESULT_TABLE -->
+**逐项拆解（这是这一节最该看的部分，不是那个百分比）**：
 
-⚠️ **样本量与置信区间**：50 条、n=50，95% 置信区间约 **±13 个百分点**。
+| 类别 | 条数 | 说明 |
+|---|---|---|
+| 解出 | **31** | FAIL_TO_PASS 全绿、PASS_TO_PASS 不红 |
+| 未解（真·模型失败） | **11** | **11 条全部 `patch_successfully_applied: True`** —— 补丁打上了、测试仍红。这是模型没做对，不是装置坏了 |
+| 环境/装置错误 | **1** | `django__django-10880`：**预测文件本身就带 `\r`**（宿主机 `core.autocrlf=true` 把工作树检成 CRLF），容器里 `git apply` 打不上。生成侧已修，但这批预测改不回来 |
+| 空补丁·真无改动 | **3** | `seaborn-3069`、`pylint-4604`、`pylint-4970`（模型 14–40 步后没落任何改动） |
+| 空补丁·超行数上限 | **2** | `sphinx-10435`（**1,276,898 行**，收了测试生成的 `_build` 树）、`sphinx-10466`（3,567 行） |
+| 空补丁·clone 断流 | **1** | `matplotlib-20488` |
+| 空补丁·批次崩溃漏跑 | **1** | `pylint-4551`（第一轮 `rmSync` EPERM 带走整轮；已加尽力清理） |
+
+**同一批预测、修缺陷前后对比（最能说明"测量缺陷有多贵"）**：
+
+| 批次 | 是否修 `patch.diff` 的 CRLF | resolved |
+|---|---|---|
+| `ding-final50b` | **否** | **15**（20 条补丁打不上、19 条记成环境错误） |
+| `ding-final50d` | **是** | **31** |
+
+**同一批预测，只因 harness 把一个文件写成 CRLF，就少了 16 条本该通过的结果。**
+如果不查这一步，我们会对外报 30%（15/50）而不是 62% —— 那就是一个假数字。
+
+**未解实例清单**（供复核）：`astropy-12907`、`astropy-13033`、`astropy-13453`、
+`matplotlib-20826`、`flask-5014`、`requests-1766`、`xarray-3095`、`pytest-10081`、
+`sphinx-10323`、`sympy-12096`、`sympy-12419`。
+
+⚠️ **样本量与置信区间**：n=50，95% CI 约 **±13.4 个百分点**。
 这个区间宽到**不足以区分「比某个模型强」**——与 §5.0 第 1 条是同一个结论的两种说法。
 它的用途是**证伪**（"在陌生仓库上根本跑不通"可以被这个数打掉），不是**排序**。
 
