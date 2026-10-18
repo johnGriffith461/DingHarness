@@ -1,6 +1,6 @@
 {
   "name": "ding-harness",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "description": "Ding Harness —— 本机优先的桌面 Agent 工作台（内核 + GUI/CLI 双宿主）",
   "license": "Apache-2.0",

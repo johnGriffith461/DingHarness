@@ -6,9 +6,9 @@
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| 发布状态 | **已发布 `0.5.1`（2026-10-18）** | registry `latest` = `0.5.1`；干净安装后 `--version` / `doctor` / DOCX 入库 / `eval` 都验过。`0.5.0` 已弃用（缺 `jszip`） |
+| 发布状态 | **已发布 `0.6.0`（2026-10-18）** | registry `latest` = `0.6.0`；空缓存空前缀干净安装后 `--version` = `0.6.0`、`eval` **63/63**。`0.5.0` 已弃用（缺 `jszip`） |
 | 包名 | **`ding-harness`** | 不带作用域。`@ding` 作用域属于另一个真实 npm 用户（与引擎包当初同一个病），**404 ≠ 可发布** |
-| 版本 | **`0.5.1`** | 与根 `package.json` / `PRODUCT_VERSION` / `shared/version.json` **同一份**（D09，2026-10-18）；`ding --version` 优先读**安装包自己**的 `package.json`，所以装的是哪版就报哪版 |
+| 版本 | **`0.6.0`** | 与根 `package.json` / `PRODUCT_VERSION` / `shared/version.json` **同一份**（D09）；`ding --version` 优先读**安装包自己**的 `package.json`，所以装的是哪版就报哪版 |
 | npm 账号 | `sunwenshan` | `~/.npmrc` 里的发布令牌：`bypass_2fa=true`、`package:write`、all packages、到期 2027-01-15（`zcode-cli-publish`，id `09bb80`） |
 | 2FA | **未开** | 不是卡点：profile 显示 `Enable 2FA`，首页横幅也写明未启用。旧令牌 `zcode-cli`（`bypass_2fa=false`，id `f4a245`）不要再用于发布 |
 
@@ -36,13 +36,20 @@ npm publish             # 未带作用域，默认 public
   `--version` → `0.5.1`；`doctor` → 10 项全通过；DOCX 入库 + 检索命中；
   `eval --json` → 63/63。
 - ⚠️ `npm view ding-harness versions` 里会看到一个 `0.0.0-stage`：那是 npm 的
-  **staged publishing** 处理窗口留下的占位（引擎包当初也一样），`latest` 指向 0.5.1。
+  **staged publishing** 处理窗口留下的占位（引擎包当初也一样），`latest` 指向 0.6.0。
+- **`0.6.0`（2026-10-18，本版）**：tarball 641.3 kB / 234 files，shasum `5e638846…`。
+  `npm publish` 返回 `+ ding-harness@0.6.0`，约 **150 秒**后 `latest` 才切到 `0.6.0`
+  （staged publishing 的传播窗口，与 0.5.x 一致）。
+  随后空缓存 + 空前缀从 registry 干净安装：`--version` = `0.6.0`、`eval` **63/63**
+  （`node scripts/verify-clean-install.mjs`）。
+  版本决定依据：本版只加不删（新增命令/工具/事件字段，SDK 冻结清单未改）→ 按
+  `RELEASE.md` 第一条走 **minor**。
 
 ## 发布后验证（干净安装）
 
 ```bash
 # 临时前缀装一份，避免污染本机全局
-npm i --prefix /tmp/ding-install ding-harness@0.5.1
+npm i --prefix /tmp/ding-install ding-harness@0.6.0
 /tmp/ding-install/node_modules/.bin/ding --version
 /tmp/ding-install/node_modules/.bin/ding --help
 DH_DATA_DIR=/tmp/ding-data /tmp/ding-install/node_modules/.bin/ding doctor

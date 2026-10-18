@@ -11,7 +11,7 @@
 Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无限画布」放在同一个工作台里。
 它本机运行、本机存数据，模型走你自己配置的通道（OpenAI 兼容 / Anthropic / Google 三种协议）——不依赖任何后端服务。
 
-> 状态：**v0.5.1**。目前仅提供 Windows 构建。
+> 状态：**v0.6.0**。目前仅提供 Windows 构建。
 
 ---
 
@@ -35,7 +35,7 @@ Electron 44 · React 19 · zustand · Vite 7 · React Flow v12 · Vercel AI SDK 
 
 ```bash
 # ① 装（三选一）
-#    a. 有 Node：从 npm 装（已发布 ding-harness@0.5.1）
+#    a. 有 Node：从 npm 装（已发布 ding-harness@0.6.0）
 npm i -g ding-harness
 #    b. 不想装 Node：用单文件可执行（目标机器什么都不用装）
 pnpm cli:bin && node scripts/install-cli.mjs --bin

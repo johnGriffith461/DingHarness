@@ -22,8 +22,8 @@ ding init
 ding run "…" --dir ./your-dir
 ```
 
-Verified on a clean machine (2026-10-18): empty npm cache and prefix, `ding-harness@0.5.1`,
-`ding --version` = `0.5.1`, `ding eval` = **63/63**. Re-run it yourself with
+Verified on a clean machine (2026-10-18): empty npm cache and prefix, `ding-harness@0.6.0`,
+`ding --version` = `0.6.0`, `ding eval` = **63/63**. Re-run it yourself with
 `node scripts/verify-clean-install.mjs` (needs network, so it is not part of `pnpm verify`).
 
 ⚠️ **CLI keys are plaintext** (`~/.dsh/.credentials.yaml`, under `refs:`). The CLI has no OS

@@ -27,8 +27,8 @@ ding run "…" --dir ./你的目录
 ```
 
 **干净机器验过（2026-10-18）**：空 `--cache`、空 `--prefix`，从
-`https://registry.npmjs.org` 装 `ding-harness@0.5.1`，装完 `ding --version` 是
-`0.5.1`、`ding eval` 是 **63/63**。要自己复验：`node scripts/verify-clean-install.mjs`
+`https://registry.npmjs.org` 装 `ding-harness@0.6.0`，装完 `ding --version` 是
+`0.6.0`、`ding eval` 是 **63/63**。要自己复验：`node scripts/verify-clean-install.mjs`
 （要联网，所以不串进 `pnpm verify`）。
 
 ⚠️ **CLI 的 key 是明文**（`~/.dsh/.credentials.yaml` 的 `refs:` 段）：CLI 没有系统钥匙串

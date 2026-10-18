@@ -1,6 +1,6 @@
 {
   "name": "ding-harness",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Ding Harness 的命令行宿主：本机优先的桌面 Agent 工作台（同一内核、同一套闸门）",
   "license": "Apache-2.0",
   "type": "commonjs",

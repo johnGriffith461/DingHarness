@@ -7,7 +7,7 @@ canvas in one workbench. It runs locally, stores data locally, and talks to the 
 providers **you** configure (OpenAI-compatible, Anthropic, or Google protocols) — there is
 no backend service.
 
-> Status: **v0.5.1**. Windows builds only at the moment.
+> Status: **v0.6.0**. Windows builds only at the moment.
 
 ## Features
 
