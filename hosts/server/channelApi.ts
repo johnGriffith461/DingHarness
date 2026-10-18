@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { MAIN_AGENT, type Actor } from "../../engine/core/actor";
+import { channelSessionId, endUserFromSessionId } from "../../shared/channel";
 import type { RequesterIdentity, ServerOptions } from "./agentServer";
 
 /**
@@ -30,23 +31,11 @@ import type { RequesterIdentity, ServerOptions } from "./agentServer";
  * 这个前缀也是账本那侧认 end_user 的依据（`endUserFromSessionId`）。
  */
 
-/** 渠道会话 id（同一渠道同一个人一段会话）。 */
-export function channelSessionId(channel: string, from: string): string {
-  const safe = (x: string) => x.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 40);
-  return `ch-${safe(channel)}-${safe(from)}`;
-}
-
-/**
- * 从会话 id 里认回"外面那个人"（账本与审计那侧用）。
- *
- * @param sessionId 会话 id
- * @returns `渠道:发送者`；不是渠道会话给 null
+/*
+ * 会话 id 的算法搬到了 `shared/channel.ts`（IM 桥也要用同一份，见那里的说明）。
+ * 这里继续 re-export：既有调用点与测试不用改。
  */
-export function endUserFromSessionId(sessionId: string): { channel: string; endUser: string } | null {
-  const m = /^ch-([A-Za-z0-9._-]+)-([A-Za-z0-9._-]+)$/.exec(sessionId);
-  if (!m) return null;
-  return { channel: m[1]!, endUser: m[2]! };
-}
+export { channelSessionId, endUserFromSessionId };
 
 /** 渠道名的形状（它进会话 id 与日志）。 */
 const CHANNEL_OK = /^[A-Za-z0-9._-]{1,32}$/;

@@ -1,11 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
+import { channelSessionId } from "../../shared/channel";
 import { askAgentViaChannel } from "./agentClient";
+import { CARD_TTL_MS, createCardRegistry, parseCardCommand } from "./approvalCards";
+import { cardText, decideApproval, fetchPendingApprovals, registerCard, type BridgeOptions } from "./approvalBridge";
 import type { ImConfig } from "./config";
 import { openSeenStore } from "./dedupe";
 import { createFeishuReplier, decryptFeishu, parseFeishuEvent, verifyFeishuSignature } from "./feishu";
 import { createSlackReplier, parseSlackEvent, verifySlackSignature } from "./slack";
-import { handleIncoming, type IncomingMessage as ImMessage } from "./types";
+import { handleIncoming, type ImReplier, type IncomingMessage as ImMessage } from "./types";
 
 /**
  * IM webhook 服务（V6-2f）。
@@ -94,6 +97,98 @@ export function createImServer(deps: ImServerDeps): ImServer {
   const feishuReply = config.feishu ? createFeishuReplier(config.feishu, fetchImpl) : null;
   const slackReply = config.slack ? createSlackReplier(config.slack, fetchImpl) : null;
 
+  /*
+   * ── 审批卡（G12）──
+   *
+   * 判定（短码/过期/first-come）在 `approvalCards.ts`；HTTP 那半在 `approvalBridge.ts`。
+   * 这里只做路由：`yes <码>` 不去问 agent（那是一句处置，不是新任务）；
+   * 普通消息跑完一轮之后，查一次待批并把新卡发回群里。
+   */
+  const cards = createCardRegistry();
+  const bridge: BridgeOptions = {
+    baseURL: config.agent.url,
+    token: config.agent.token,
+    ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+  };
+  /** 已经发过卡的短码（同一条待批不会每来一句话就重发一遍）。 */
+  const posted = new Set<string>();
+
+  /** 处置一句 `yes <码>` / `no <码>`。 */
+  async function handleCardCommand(
+    message: ImMessage,
+    cmd: { approved: boolean; code: string },
+    replier: ImReplier,
+  ): Promise<void> {
+    const card = cards.get(cmd.code);
+    if (!card) {
+      await replier({ ...message, eventId: `${message.eventId}:miss` }, `没有这个待批（${cmd.code}）—— 可能已经过期或已经批过了。`);
+      return;
+    }
+    /*
+     * **只有卡发去的那个会话能处置它**：群里别人看到卡片内容也拿不到短码，
+     * 但万一截图外泄，这一道仍然把处置范围钉在"发卡的那个会话"。
+     */
+    if (card.chat !== message.chatId) {
+      await replier({ ...message, eventId: `${message.eventId}:chat` }, "这张卡不属于这个会话，不能在这里处置。");
+      return;
+    }
+    /* first-come 在本地先判一次（四端里桌面那条走服务端，最终以服务端为准） */
+    const local = cards.resolve(cmd.code, cmd.approved, message.userId);
+    if (!local.ok) {
+      await replier({ ...message, eventId: `${message.eventId}:dup` }, local.error);
+      return;
+    }
+    const got = await decideApproval(bridge, {
+      sessionId: card.sessionId,
+      toolCallId: card.toolCallId,
+      approved: cmd.approved,
+      by: message.userId,
+    });
+    await replier({ ...message, eventId: `${message.eventId}:done` }, got.message);
+  }
+
+  /** 一轮跑完之后：把这一轮产生的待批发成卡。 */
+  async function postPendingCards(message: ImMessage, replier: ImReplier): Promise<void> {
+    const sessionId = channelSessionId(message.platform, message.userId);
+    const got = await fetchPendingApprovals(bridge, sessionId);
+    if (got.unsupported || got.error) {
+      /* 服务端没接审批索引是正常配置差异（不是故障）；连不上才值得记一笔 */
+      if (got.error) log(`查待批失败（${sessionId}）：${got.error}`);
+      return;
+    }
+    for (const row of got.rows) {
+      const card = registerCard(cards, row, {
+        chat: message.chatId,
+        platform: message.platform,
+        channel: message.platform,
+        from: message.userId,
+        ttlMs: CARD_TTL_MS,
+      });
+      if (!card || posted.has(card.code)) continue;
+      posted.add(card.code);
+      const sent = await replier({ ...message, eventId: `${message.eventId}:card:${card.code}` }, cardText(card));
+      if (!sent.ok) log(`发审批卡失败：${sent.error ?? "未知原因"}`);
+    }
+  }
+
+  /** 一条消息的统一入口：卡片指令走处置，其余走"问 agent → 回复 → 发卡"。 */
+  async function handleMessage(message: ImMessage, replier: ImReplier): Promise<void> {
+    const cmd = parseCardCommand(message.text);
+    if (cmd) {
+      if (seen.has(message.eventId)) return;
+      seen.add(message.eventId);
+      await handleCardCommand(message, cmd, replier);
+      return;
+    }
+    await handleIncoming(message, {
+      askAgent,
+      reply: replier,
+      seen,
+      log,
+      afterReply: (msg) => postPendingCards(msg, replier),
+    });
+  }
+
   const server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -104,6 +199,7 @@ export function createImServer(deps: ImServerDeps): ImServer {
           platforms: [config.feishu ? "feishu" : "", config.slack ? "slack" : ""].filter(Boolean),
           seen: seen.size(),
           allowUsers: allow.size,
+          pendingCards: cards.list().length,
         });
         return;
       }
@@ -163,7 +259,7 @@ export function createImServer(deps: ImServerDeps): ImServer {
         }
         /* 先 ACK：agent 可能跑很久，平台等不了 */
         json(res, 200, { ok: true });
-        void handleIncoming(event.message, { askAgent, reply: feishuReply, seen, log }).catch((error) =>
+        void handleMessage(event.message, feishuReply).catch((error) =>
           log(`处理失败：${String((error as Error)?.message ?? error)}`),
         );
         return;
@@ -211,7 +307,7 @@ export function createImServer(deps: ImServerDeps): ImServer {
           return;
         }
         json(res, 200, { ok: true });
-        void handleIncoming(event.message, { askAgent, reply: slackReply, seen, log }).catch((error) =>
+        void handleMessage(event.message, slackReply).catch((error) =>
           log(`处理失败：${String((error as Error)?.message ?? error)}`),
         );
         return;

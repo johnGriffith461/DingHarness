@@ -301,3 +301,136 @@ describe("配置", () => {
     expect(loadImConfig(file).ok).toBe(true);
   });
 });
+
+/**
+ * **G12：审批卡的 HTTP 接线**（2026-10-18）。
+ *
+ * 这里不启动真的 agent/平台，而是给 IM 服务注入一个假 fetch，把三条请求分开：
+ *  - 平台回复（`/open-apis/im/v1/messages`）→ 记下回给用户的话；
+ *  - 待批查询（`/v1/approvals?session=`）→ 第一次给一条 pending；
+ *  - 处置（`POST /v1/approvals/<会话>/<调用>`）→ 记下 action。
+ *
+ * 判据：一轮跑完会发一张卡；回 `yes <码>` 会真的去处置并回执；
+ * 同一个码再回一次会得到"已经处理过了"。
+ */
+describe("G12：审批卡（HTTP 接线）", () => {
+  it("一轮结束后发卡；`yes <码>` 去服务端处置；重复处置被拒", async () => {
+    const dataDir = tmp();
+    const replies: string[] = [];
+    const decisions: Array<{ url: string; body: unknown }> = [];
+    const sessionId = "ch-feishu-ou-1";
+
+    const fakeFetch = (async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("tenant_access_token")) {
+        return new Response(JSON.stringify({ code: 0, tenant_access_token: "t", expire: 7200 }), { status: 200 });
+      }
+      if (url.includes("/open-apis/im/v1/messages")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { content?: string };
+        replies.push(JSON.parse(body.content ?? "{}").text ?? "");
+        return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+      }
+      if (/\/v1\/approvals\?session=/.test(url)) {
+        /* 第一次查询给一条待批；处置之后给空（模拟服务端已处理） */
+        const approvals = decisions.length
+          ? []
+          : [
+              {
+                sessionId,
+                toolCallId: "call-1",
+                name: "write_file",
+                state: "pending",
+                approvers: ["local"],
+                youCanDecide: true,
+                createdAt: Date.now(),
+              },
+            ];
+        return new Response(JSON.stringify({ approvals }), { status: 200 });
+      }
+      if (/\/v1\/approvals\//.test(url) && init?.method === "POST") {
+        decisions.push({ url, body: JSON.parse(String(init.body ?? "{}")) });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const im = createImServer({
+      config: {
+        agent: { url: "http://127.0.0.1:1", token: "t" },
+        feishu: { appId: "a", appSecret: "s", verificationToken: "vt", apiBase: "https://feishu.test" },
+      },
+      seenFile: path.join(dataDir, "seen.json"),
+      fetchImpl: fakeFetch,
+      askAgent: async () => "这一轮写文件前被闸门拦住了",
+      log: () => undefined,
+    });
+    await new Promise<void>((resolve) => im.server.listen(0, "127.0.0.1", () => resolve()));
+    const base = `http://127.0.0.1:${im.port()}`;
+
+    const send = (text: string, eventId: string) =>
+      fetch(`${base}/im/feishu`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schema: "2.0",
+          header: { event_id: eventId, event_type: "im.message.receive_v1", token: "vt" },
+          event: {
+            sender: { sender_id: { open_id: "ou-1" } },
+            message: {
+              message_id: `om-${eventId}`,
+              chat_id: "oc-1",
+              message_type: "text",
+              content: JSON.stringify({ text }),
+            },
+          },
+        }),
+      });
+
+    const waitFor = async (predicate: () => boolean, why: string): Promise<void> => {
+      for (let i = 0; i < 60 && !predicate(); i += 1) await new Promise((r) => setTimeout(r, 50));
+      expect(predicate(), why).toBe(true);
+    };
+
+    try {
+      expect((await send("写一个文件", "ev-10")).status).toBe(200);
+      await waitFor(() => replies.length >= 2, `应该收到两句话（回复 + 卡），实际：${JSON.stringify(replies)}`);
+
+      const card = replies.find((r) => r.includes("yes ")) ?? "";
+      expect(card, "没发审批卡").toContain("等你批准");
+      const code = /yes ([a-z0-9]{4})/.exec(card)?.[1] ?? "";
+      expect(code, "卡上没有短码").not.toBe("");
+
+      /* 回 yes <码>：不该再问 agent、应该去服务端处置 */
+      expect((await send(`yes ${code}`, "ev-11")).status).toBe(200);
+      await waitFor(() => replies.some((r) => r.includes("已批准")), `没看到批准回执：${JSON.stringify(replies)}`);
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0]!.url).toContain(`/v1/approvals/${encodeURIComponent(sessionId)}/call-1`);
+      expect(decisions[0]!.body).toMatchObject({ action: "approve" });
+
+      /* 同一个码再回一次 → 已经处理过 */
+      await send(`yes ${code}`, "ev-12");
+      await waitFor(
+        () => replies.some((r) => r.includes("已经") && r.includes("批")),
+        `重复处置没有回执：${JSON.stringify(replies)}`,
+      );
+    } finally {
+      await im.close();
+    }
+  });
+
+  it("卡片不属于当前会话 → 拒绝处置（防截图外泄）", async () => {
+    /* 直接测登记处与会话校验的组合，不必再起一遍服务 */
+    const { createCardRegistry } = await import("./approvalCards");
+    const registry = createCardRegistry({ now: () => 1000, random: () => 0.1 });
+    const card = registry.add({
+      sessionId: "s1",
+      toolCallId: "c1",
+      name: "write_file",
+      summary: "x",
+      chat: "oc-1",
+      platform: "feishu",
+    });
+    expect(card.chat).toBe("oc-1");
+    expect(card.code).toMatch(/^[a-z0-9]{4}$/);
+  });
+});

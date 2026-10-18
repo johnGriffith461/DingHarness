@@ -39,6 +39,14 @@ export type ImHandlerDeps = {
   /** 去重（同一条事件重复投递只处理一次）。 */
   seen: { has: (eventId: string) => boolean; add: (eventId: string) => void };
   log?: (line: string) => void;
+  /**
+   * 回复之后再做一件事（G12：查这一轮的待批并发审批卡）。
+   *
+   * 单独一个钩子而不是塞进 `reply`：回复的语义是"把 agent 这轮的话送回去"，
+   * 卡片是**另一条消息**（另一个事件 id），混在一起会让"回复失败"与"发卡失败"
+   * 分不清。钩子抛错只记日志，不影响已经发出的回复。
+   */
+  afterReply?: (message: IncomingMessage) => Promise<void>;
 };
 
 /**
@@ -78,5 +86,16 @@ export async function handleIncoming(message: IncomingMessage, deps: ImHandlerDe
 
   const got = await deps.reply(message, answer);
   if (!got.ok) log(`回复失败：${got.error ?? "未知原因"}`);
+  /*
+   * 回复之后的钩子（G12 发审批卡）：**失败只记日志** —— 回复已经送出去了，
+   * 卡片没发成不该把这一轮说成失败（用户会收到重复回复或以为整轮没跑）。
+   */
+  if (deps.afterReply) {
+    try {
+      await deps.afterReply({ ...message, text });
+    } catch (error) {
+      log(`回复后的动作失败：${String((error as Error)?.message ?? error).slice(0, 200)}`);
+    }
+  }
   return "replied";
 }
