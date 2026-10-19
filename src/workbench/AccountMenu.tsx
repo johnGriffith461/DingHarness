@@ -170,10 +170,14 @@ export default function AccountMenu({ onClose, onOpenSettings, onOpenStarred }: 
       <div className="wb-acct-sep" />
 
       {/* 额度用量：本机版按已用量算不出"时段额度"，所以只显示用量本身 */}
+      {/*
+        T-11：本机版没有额度体系（按 token 计费直连 provider），
+        原来显示一个永远的"—"看起来像"还没加载"。
+      */}
       <div className="wb-acct-quota" data-testid="wb-acct-quota">
         <span className="wb-acct-radio" />
-        <span>当前时段额度用量</span>
-        <em>—</em>
+        <span>额度用量</span>
+        <em>本机版没有额度体系，按 token 直接计费</em>
       </div>
     </div>
   );

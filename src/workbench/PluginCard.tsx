@@ -34,7 +34,8 @@ export function PluginCard({
       <span className="wb-plugin-text">
         <b>{item.name}</b>
         <em>{item.hint}</em>
-        <span className="wb-plugin-users">{item.users}</span>
+        {/* T-14：本机版没有服务端，**没有**安装人数这个事实；空值就不渲染（不编数） */}
+        {item.users ? <span className="wb-plugin-users">{item.users}</span> : null}
       </span>
       {installed ? (
         <button

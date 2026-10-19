@@ -665,3 +665,24 @@
 
 /* T-06：档位选项前的勾位（未选中留空位，保证文字对齐） */
 .wb-chip-check-slot { display: inline-flex; width: 13px; justify-content: center; }
+
+/* ============================================================
+ * T-11：本机版不可用/只读能力的统一说明块（一处形态，六处使用）
+ * ============================================================ */
+.wb-localonly {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line-faint);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.wb-localonly-icon { flex: none; margin-top: 2px; color: var(--fg-3); }
+.wb-localonly-body { display: grid; gap: 2px; }
+.wb-localonly-body strong { color: var(--fg); font-size: 13px; font-weight: 600; }
+.wb-localonly-body em { color: var(--fg-3); font-style: normal; }

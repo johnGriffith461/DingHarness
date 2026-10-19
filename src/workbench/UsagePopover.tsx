@@ -43,13 +43,14 @@ export function UsagePopover({
         title="Token 用量（provider 给的真实值）"
         onClick={onToggle}
       >
-        <Gauge size={12} /> 用量
+        {/* T-12：口径写清是「本段对话」（与用量页/团队账本不是同一个范围） */}
+        <Gauge size={12} /> 本段对话
         {total === null ? null : <em className="wb-chip-badge">{total >= 10000 ? `${(total / 10000).toFixed(1)}万` : total}</em>}
       </button>
       {open ? (
         <div className="wb-usage-pop" data-testid="wb-usage-pop">
           <div className="wb-usage-head">
-            <b>Token 用量</b>
+            <b>本段对话的 Token 用量</b>
             <span className="mono">{seconds === null ? "本次对话" : `时长 ${clockOf(seconds)}`}</span>
           </div>
           {rows.length === 0 ? (

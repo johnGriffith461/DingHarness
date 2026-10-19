@@ -54,7 +54,8 @@ export function TerminalPanel() {
   return (
     <div className="wb-setpage" data-testid="wb-terminal-page">
       <div className="wb-setpage-head">
-        <b>终端</b>
+        {/* T-11：名字如实 —— 它是只读回放，不是终端 */}
+        <b>命令记录（只读）</b>
       </div>
       <div className="wb-setpage-note">
         本会话跑过的命令与输出（只读回放，不提供输入框）。数据来自工具留痕，缺输出时如实写「输出未记录」。

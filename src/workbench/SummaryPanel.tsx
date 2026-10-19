@@ -217,7 +217,7 @@ export function SummaryPanel({
           <div className="wb-summary-empty" data-testid={`wb-summary-empty-${tab}`}>
             {tab === "browser"
               ? "浏览器操作会话会出现在这里（需要「操作浏览器」能力接入）"
-              : "子智能体不单独列在这里：它跑完记在发起它的那一步上（工具留痕里写着步数与用量）"}
+              : "子智能体不单独列在这里：它跑完记在发起它的那一步上（工具留痕里写着步数与用量）；命令行侧可用 `ding agents` 查看内置专家。"}
           </div>
         </div>
       )}

@@ -46,14 +46,18 @@ export function PermissionMatrixPage() {
         ))}
       </div>
 
-      <p className="wb-setpage-note">
-        <strong>角色是上限，档位是旋钮</strong>：档位只能在角色允许的范围内收紧或放松。
-        所以「只读成员」的写操作在「全部允许」档下**也拒** —— 那一档说的是"我信这个模型"，
-        不是"改写文件的人是谁"。
+      {/*
+        T-15：把"角色是上限，档位是旋钮"这种写给开发者的措辞，
+        改成用户能直接对照自己处境的三句话（机制一个字没动）。
+      */}
+      <p className="wb-setpage-note" data-testid="wb-perm-plain">
+        <strong>这一页只回答一件事：你点某个档位之后，会发生什么。</strong>
+        「只读成员」即使选了「全部允许」，也依然不能改文件 —— 因为他本来就没有这个权限；
+        「全部允许」只表示"你信任这个模型、不再逐步确认"，不是"给谁换了个身份"。
       </p>
-      <p className="wb-setpage-note">
-        `不给模型`（hide）与角色无关：工具压根没注入，模型不知道它存在。这一页是**只读**的 ——
-        改规矩要改策略表与 ADR，不在这里放一个假开关。
+      <p className="wb-setpage-note" data-testid="wb-perm-readonly">
+        标着「不给模型」的工具，模型**根本看不到**，所以不会点了没反应。
+        这一页是只读说明：想改规则要改后端的策略表（不是界面上漏了个开关）。
       </p>
 
       <table className="wb-team-usage" data-testid="wb-perm-table">

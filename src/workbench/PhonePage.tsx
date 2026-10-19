@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import type { ShellBridge } from "@shared/ipc";
 import { Check, Clock, Monitor, Smartphone } from "lucide-react";
 import { NavCollapseButton } from "./NavCollapseButton";
+import { LocalOnlyNote } from "./LocalOnlyNote";
 
 export function PhonePage() {
   const bridge = (window as unknown as { shell?: ShellBridge }).shell;
@@ -85,6 +86,13 @@ export function PhonePage() {
           <p className="wb-page-p">
             用手机端在工作任务中，连接此电脑后，可远程继续任务，接收进度提醒，并调用这台电脑上的文件和工具。
           </p>
+          {/* T-11：说清边界与替代（原来只在二维码那里写了一句） */}
+          <LocalOnlyNote
+            testId="wb-phone-localonly"
+            title="手机遥控需要配套手机端"
+            why="本机版没有配套 App、也没有中转服务端，所以这里不画假二维码。"
+            alternative={<>本机替代：在电脑上直接用任务工作台；远程能力等手机端发布后接入。</>}
+          />
 
           <div className="wb-switch-list">
             <label className="wb-switch-row">

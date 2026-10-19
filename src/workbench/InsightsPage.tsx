@@ -99,7 +99,7 @@ export function InsightsPage() {
           aria-pressed={tab === "usage"}
           onClick={() => setTab("usage")}
         >
-          用量
+          用量（最近 90 天）
         </button>
         <button
           type="button"
@@ -134,7 +134,7 @@ export function InsightsPage() {
               <span className="wb-card-desc">只统计成功收尾的轮（失败轮用量不完整，不混进账单口径）</span>
             </div>
 
-            <h4>最近 90 天（按天）</h4>
+            <h4>最近 90 天（按天；范围是本机会话库，不是「本段对话」）</h4>
             {usage.byDay.length ? (
               <ul className="wb-card" data-testid="wb-insights-byday" style={{ listStyle: "none", margin: 0, padding: 8 }}>
                 {usage.byDay.map((day) => {

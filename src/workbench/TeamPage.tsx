@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { KeyRound, RefreshCw, Trash2, UserMinus } from "lucide-react";
 
 import { MEMBER_ROLES, type MemberRole } from "@engine/core/members";
+import { LocalOnlyNote } from "./LocalOnlyNote";
 
 /**
  * **设置 → 团队空间**（V5-3 3.1/3.2/3.4 的产品面；V5 收尾补）。
@@ -126,9 +127,26 @@ export function TeamPage() {
 
   return (
     <div className="wb-setpage-body" data-testid="wb-team">
-      <p className="wb-setpage-note">
-        空间主人：<strong>{state.owner}</strong>　账本：<code>{state.file}</code>
+      {/*
+        T-13：原来这一行把 `space.json` 叫"账本"，但成本数字实际来自本机会话库。
+        两件事分开写，避免用户拿着 space.json 找不到成本、或以为成本存在那里。
+      */}
+      <p className="wb-setpage-note" data-testid="wb-team-paths">
+        空间主人：<strong>{state.owner}</strong>
       </p>
+      <p className="wb-setpage-note" data-testid="wb-team-roster-file">
+        名册与口令：{state.file ? <code>{state.file}</code> : "还没开过空间（首次邀请后生成）"}
+      </p>
+      <p className="wb-setpage-note" data-testid="wb-team-cost-source">
+        成本数字：来自本机会话库（<code>sessions.db</code>），不在名册文件里。
+      </p>
+      {/* T-11：团队空间的边界与替代 */}
+      <LocalOnlyNote
+        testId="wb-team-localonly"
+        title="团队空间是本机数据 + 配对码"
+        why="没有云端后端：名册与口令写在本机，成员通过配对码连到这台机器（或同一局域网的 Agent Server）。"
+        alternative={<>本机替代：单人使用时用「用量与追踪」看本机成本；多人协作需要跑 <code>ding serve</code>。</>}
+      />
 
       {note ? <p className="wb-setpage-note" data-testid="wb-team-note">{note}</p> : null}
       {error ? <p className="wb-setpage-note wb-team-error" data-testid="wb-team-error">{error}</p> : null}
@@ -361,7 +379,7 @@ export function TeamPage() {
       </div>
 
       {/* ── 账本（按成员）────────────────────────────── */}
-      <h4>成本账本</h4>
+      <h4>团队账本（按成员；范围是团队空间，不是「本段对话」）</h4>
       <div className="wb-card-row">
         <button
           type="button"
