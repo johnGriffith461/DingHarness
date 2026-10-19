@@ -339,6 +339,12 @@ const api = {
   project: {
     context: () => ipcRenderer.invoke(PROJECT_CHANNEL.context) as ReturnType<ShellBridge["project"]["context"]>,
     reload: () => ipcRenderer.invoke(PROJECT_CHANNEL.reload) as ReturnType<ShellBridge["project"]["reload"]>,
+    mentions: (query: string) =>
+      ipcRenderer.invoke(PROJECT_CHANNEL.mentions, query) as ReturnType<ShellBridge["project"]["mentions"]>,
+    listDir: (dir: string) =>
+      ipcRenderer.invoke(PROJECT_CHANNEL.listDir, dir) as ReturnType<ShellBridge["project"]["listDir"]>,
+    readFile: (path: string) =>
+      ipcRenderer.invoke(PROJECT_CHANNEL.readFile, path) as ReturnType<ShellBridge["project"]["readFile"]>,
   },
   review: {
     list: (sessionId: string) => ipcRenderer.invoke(REVIEW_CHANNEL.list, sessionId) as ReturnType<

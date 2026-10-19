@@ -40,4 +40,19 @@ export type ProjectBridge = {
   context: () => Promise<ProjectContextResult>;
   /** 设置页「重新加载」：清缓存后重读。 */
   reload: () => Promise<ProjectContextResult>;
+  /** `@` 文件/目录候选（在工作区内搜，最多 20 条）。 */
+  mentions: (query: string) => Promise<MentionCandidateWire[]>;
+  /** 列一个目录的直接子项（目录引用展开用）。 */
+  listDir: (dir: string) => Promise<MentionCandidateWire[]>;
+  /** 读一个工作区文件（引用展开用；越界/二进制/敏感文件被拒）。 */
+  readFile: (path: string) => Promise<
+    { ok: true; text: string; path: string } | { ok: false; error: string }
+  >;
+};
+
+/** 与 `shared/mentions.ts` 的 `MentionCandidate` 同形（shared 不 import engine）。 */
+export type MentionCandidateWire = {
+  kind: "file" | "dir";
+  label: string;
+  path: string;
 };

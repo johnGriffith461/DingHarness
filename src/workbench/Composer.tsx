@@ -10,7 +10,15 @@ import { Blocks, Check, ChevronDown, Paperclip, Plus, Send, Sparkles, X } from "
 import { useWorkbenchStore } from "./store";
 import { draftKeyOf } from "./composerDraft";
 import { useTransientNote } from "@/utils/transientNote";
-import { PHRASE_LABELS, applyPhrase, detectAtTrigger, filterPhrases, phraseGroups, type AtTrigger, type Phrase } from "@shared/phrases";
+import { applyPhrase, filterPhrases, phraseGroups, type Phrase } from "@shared/phrases";
+import {
+  applyMention,
+  detectAtTrigger,
+  sensitivePathReason,
+  type AtTrigger,
+  type Mention,
+} from "@shared/mentions";
+import type { MentionCandidateWire } from "@shared/projectWire";
 import { COMPOSER_PLACEHOLDER } from "./copy";
 import { resolveImportedMaterials } from "./materialImport";
 import { UPLOAD_REASON_LABEL } from "@shared/upload";
@@ -19,7 +27,7 @@ import { WORKSPACE_LABELS, addedNote, workspaceLabel } from "@shared/workspace";
 import { fileContextBlock } from "./fileContext";
 import { useLibraryStore } from "./libraryStore";
 import { findItemIn } from "./libraryStore";
-import { type ConfirmMode } from "@shared/ipc";
+import { type ConfirmMode, type SessionSearchHit } from "@shared/ipc";
 import { useDocStore } from "./docStore";
 import { readConfirmMode, saveConfirmMode } from "./confirmMode";
 import { Square } from "lucide-react";
@@ -265,15 +273,40 @@ export function Composer({
      */
     let block = "";
     const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    const reads: Array<{ path: string; text: string | null }> = [];
     if (material.length) {
-      const reads = [];
       for (const file of material) {
         const text = await Promise.resolve(shell?.drive?.read?.(file.path)).catch(() => null);
         reads.push({ path: file.path, text: typeof text === "string" ? text : null });
       }
-      block = fileContextBlock(reads);
     }
+    /*
+     * B1：正文里的 `@` 引用在**发送这一刻**展开成内容。
+     * 只展开真正选中过、且文字还在正文里的那些（用户删掉那段字就不带了）。
+     */
+    for (const mention of mentionChips) {
+      if (!value.includes(mention.token)) continue;
+      if (mention.kind === "file" && mention.path) {
+        const got = await Promise.resolve(shell?.project?.readFile?.(mention.path)).catch(() => null);
+        reads.push({ path: mention.label, text: got?.ok ? got.text : null });
+      } else if (mention.kind === "dir" && mention.path) {
+        const listed = await Promise.resolve(shell?.project?.listDir?.(mention.path)).catch(() => null);
+        const listing = Array.isArray(listed) && listed.length
+          ? listed.map((e) => `- ${e.label}${e.kind === "dir" ? "/" : ""}`).join("\n")
+          : null;
+        reads.push({ path: `${mention.label}/`, text: listing });
+      } else if (mention.kind === "session") {
+        reads.push({
+          path: `[会话] ${mention.label}`,
+          text: `引用了历史会话「${mention.label}」（id ${mention.sessionId ?? ""}）。需要其中细节时向用户确认要看哪一段。`,
+        });
+      } else if (mention.kind === "skill") {
+        reads.push({ path: `[技能] ${mention.label}`, text: `按技能「${mention.label}」的方法执行本次任务。` });
+      }
+    }
+    if (reads.length) block = fileContextBlock(reads);
     setMaterial([]);
+    setMentionChips([]);
     const options = block ? { material: block } : undefined;
     // 传了 onSend 就按它的（任务视图 = 在这段对话里接着说）；没传就是新开一段
     if (onSend) onSend(value, options);
@@ -291,6 +324,57 @@ export function Composer({
    */
   const [atTrigger, setAtTrigger] = useState<AtTrigger | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  /**
+   * B1：`@` 菜单的五类候选。文件/目录由主进程读盘（只在工作区内），
+   * 会话走已有的 `session.search`（FTS + LIKE），技能走 `skills.list`，
+   * 动作就是原来的常用语。
+   */
+  const [fileHits, setFileHits] = useState<MentionCandidateWire[]>([]);
+  const [sessionHits, setSessionHits] = useState<SessionSearchHit[]>([]);
+  const [skillHits, setSkillHits] = useState<Array<{ name: string; description?: string }>>([]);
+  /** 这一轮真正选中过的引用（带绝对路径/会话 id），提交时按它展开。 */
+  type MentionChip = {
+    token: string;
+    kind: Mention["kind"];
+    label: string;
+    path?: string;
+    sessionId?: string;
+    skillName?: string;
+  };
+  const [mentionChips, setMentionChips] = useState<MentionChip[]>([]);
+
+  /** 拉候选（150ms 防抖由下面的 effect 负责）。 */
+  const loadMentionHits = async (query: string): Promise<void> => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    try {
+      const files = await Promise.resolve(shell?.project?.mentions?.(query)).catch(() => []);
+      setFileHits(Array.isArray(files) ? files : []);
+    } catch {
+      setFileHits([]);
+    }
+    try {
+      const hits = query.trim() ? await Promise.resolve(shell?.session?.search?.(query)).catch(() => []) : [];
+      setSessionHits(Array.isArray(hits) ? hits.slice(0, 6) : []);
+    } catch {
+      setSessionHits([]);
+    }
+    try {
+      const listed = await Promise.resolve(shell?.skills?.list?.()).catch(() => null);
+      const q = query.trim().toLowerCase();
+      const skills = (listed?.skills ?? [])
+        .filter((s: { name: string; description?: string }) => !q || s.name.toLowerCase().includes(q) || String(s.description ?? "").toLowerCase().includes(q))
+        .slice(0, 6);
+      setSkillHits(skills);
+    } catch {
+      setSkillHits([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!atTrigger) return;
+    const timer = setTimeout(() => void loadMentionHits(atTrigger.query), 150);
+    return () => clearTimeout(timer);
+  }, [atTrigger?.query]);
 
   /** 光标一动就重算（输入、点、方向键都算）。 */
   const syncTrigger = (el: HTMLTextAreaElement): void => {
@@ -301,8 +385,39 @@ export function Composer({
   };
 
   const matched = atTrigger ? filterPhrases(atTrigger.query) : [];
+  const mentionFiles = fileHits.filter((f) => f.kind === "file");
+  const mentionDirs = fileHits.filter((f) => f.kind === "dir");
 
-  /** 选中一条：替换 `@查询词`，并把光标放到插入内容的末尾。 */
+  /** 选中一条引用：替换 `@查询词`，记下展开用的绝对路径，光标落到末尾。 */
+  const pickMention = (mention: Omit<MentionChip, "token">, kind: Mention["kind"]): void => {
+    if (!atTrigger) return;
+    /*
+     * 正文里插**相对路径**（`@src/foo.ts`），chip 里留**绝对路径**（发送时读盘用）。
+     * 直接把绝对路径写进正文会让输入框一行被 `C:\...` 占满，而且换机器就失效。
+     */
+    const next = applyMention(text, atTrigger, {
+      kind,
+      label: mention.label,
+      path: mention.label,
+      ...(mention.sessionId ? { sessionId: mention.sessionId } : {}),
+      ...(mention.skillName ? { skillName: mention.skillName } : {}),
+    });
+    setText(next.text);
+    setMentionChips((prev) => [
+      ...prev.filter((c) => c.token !== next.token),
+      { ...mention, kind, token: next.token },
+    ]);
+    setAtTrigger(null);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(next.caret, next.caret);
+      }
+    });
+  };
+
+  /** 选中一条常用语（动作分组）：插入它的话术正文，不产生引用附件。 */
   const pickPhrase = (phrase: Phrase): void => {
     if (!atTrigger) return;
     const next = applyPhrase(text, atTrigger, phrase);
@@ -332,7 +447,7 @@ export function Composer({
           data-testid="wb-phrase-menu"
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="wb-phrase-head">{PHRASE_LABELS.title}</div>
+          <div className="wb-phrase-head">引用与动作</div>
           {/*
             资料（2026-10-14）：占位文案承诺的「@ 添加资料」。
             与常用语**同在一个选单里**，但两栏分开 —— 本体首页那条文案说的是资料，
@@ -358,11 +473,80 @@ export function Composer({
                 ))}
             </div>
           ) : null}
-          {matched.length === 0 ? (
+          {mentionDirs.length > 0 ? (
+            <div>
+              <div className="wb-phrase-group" data-testid="wb-mention-group-dir">
+                目录
+              </div>
+              {mentionDirs.map((d) => (
+                <button
+                  key={d.path}
+                  className="wb-phrase-item"
+                  data-testid={`wb-mention-dir-${d.label}`}
+                  onClick={() => pickMention({ kind: "dir", label: d.label, path: d.path }, "dir")}
+                >
+                  {d.label}/
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {mentionFiles.length > 0 ? (
+            <div>
+              <div className="wb-phrase-group" data-testid="wb-mention-group-file">
+                文件
+              </div>
+              {mentionFiles.map((f) => (
+                <button
+                  key={f.path}
+                  className="wb-phrase-item"
+                  data-testid={`wb-mention-file-${f.label}`}
+                  onClick={() => pickMention({ kind: "file", label: f.label, path: f.path }, "file")}
+                  title={sensitivePathReason(f.path) ?? f.path}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {sessionHits.length > 0 ? (
+            <div>
+              <div className="wb-phrase-group" data-testid="wb-mention-group-session">
+                会话
+              </div>
+              {sessionHits.map((s) => (
+                <button
+                  key={s.sessionId}
+                  className="wb-phrase-item"
+                  data-testid={`wb-mention-session-${s.sessionId}`}
+                  onClick={() => pickMention({ kind: "session", label: s.title || s.sessionId, sessionId: s.sessionId }, "session")}
+                >
+                  {s.title || s.sessionId}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {skillHits.length > 0 ? (
+            <div>
+              <div className="wb-phrase-group" data-testid="wb-mention-group-skill">
+                技能
+              </div>
+              {skillHits.map((s) => (
+                <button
+                  key={s.name}
+                  className="wb-phrase-item"
+                  data-testid={`wb-mention-skill-${s.name}`}
+                  onClick={() => pickMention({ kind: "skill", label: s.name, skillName: s.name }, "skill")}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {matched.length === 0 && mentionDirs.length + mentionFiles.length + sessionHits.length + skillHits.length === 0 ? (
             <p className="wb-phrase-empty" data-testid="wb-phrase-empty">
-              {PHRASE_LABELS.empty}
+              没有匹配的文件、会话、技能或动作
             </p>
-          ) : (
+          ) : matched.length === 0 ? null : (
             phraseGroups().map((group) => {
               const items = matched.filter((p) => p.group === group);
               if (!items.length) return null;
@@ -406,6 +590,27 @@ export function Composer({
           ))}
         </div>
       ) : null}
+      {mentionChips.length > 0 ? (
+        <div className="wb-material-chips" data-testid="wb-mention-chips">
+          {mentionChips.map((m) => (
+            <span key={m.token} className="wb-material-chip" data-testid={`wb-mention-chip-${m.label}`}>
+              {m.kind === "session" ? "会话：" : m.kind === "skill" ? "技能：" : ""}
+              {m.label}
+              <button
+                className="wb-material-x"
+                title="移除这个引用"
+                onClick={() => {
+                  const next = text.replace(m.token, "").replace(/\s{2,}/g, " ").trim();
+                  setText(next);
+                  setMentionChips((prev) => prev.filter((x) => x.token !== m.token));
+                }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <textarea
         ref={inputRef}
         className="wb-composer-input"
@@ -414,7 +619,10 @@ export function Composer({
         placeholder={placeholder}
         value={text}
         onChange={(e) => {
-          setText(e.target.value);
+          const next = e.target.value;
+          setText(next);
+          /* 文字里删掉某个引用 → 它的附件也一起失效（ZCode 同款） */
+          setMentionChips((prev) => prev.filter((c) => next.includes(c.token)));
           syncTrigger(e.target);
         }}
         onKeyUp={(e) => {
@@ -436,9 +644,17 @@ export function Composer({
               setAtTrigger(null);
               return;
             }
-            if (e.key === "Enter" && !e.shiftKey && matched.length) {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              pickPhrase(matched[0] as Phrase);
+              const dir = mentionDirs[0];
+              const file = mentionFiles[0];
+              const session = sessionHits[0];
+              const skill = skillHits[0];
+              if (dir) pickMention({ kind: "dir", label: dir.label, path: dir.path }, "dir");
+              else if (file) pickMention({ kind: "file", label: file.label, path: file.path }, "file");
+              else if (session) pickMention({ kind: "session", label: session.title || session.sessionId, sessionId: session.sessionId }, "session");
+              else if (skill) pickMention({ kind: "skill", label: skill.name, skillName: skill.name }, "skill");
+              else if (matched.length) pickPhrase(matched[0] as Phrase);
               return;
             }
           }

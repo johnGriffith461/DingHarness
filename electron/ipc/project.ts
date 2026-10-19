@@ -7,6 +7,11 @@ import {
   loadProjectContext,
   renderProjectContext,
 } from "../../engine/runtime/projectContext";
+import {
+  listWorkspaceDir,
+  readWorkspaceFile,
+  searchWorkspaceEntries,
+} from "../../engine/runtime/workspaceFiles";
 import type { ProjectContextResult } from "../../shared/projectWire";
 import { workspaceDirsSync } from "./workspaceStore";
 
@@ -28,6 +33,9 @@ import { workspaceDirsSync } from "./workspaceStore";
 export const PROJECT_CHANNEL = {
   context: "project:context",
   reload: "project:reload",
+  mentions: "project:mentions",
+  listDir: "project:listDir",
+  readFile: "project:readFile",
 } as const;
 
 /** 全局规则目录：用户把跨项目约定放这里（`~/.ding/AGENTS.md`）。 */
@@ -50,5 +58,17 @@ export function registerProjectIpc(ipc: Pick<typeof ipcMain, "handle">): void {
   ipc.handle(PROJECT_CHANNEL.reload, () => {
     clearProjectContextCache();
     return read();
+  });
+  ipc.handle(PROJECT_CHANNEL.mentions, async (_event, query: unknown) => {
+    if (typeof query !== "string") return [];
+    return await searchWorkspaceEntries(projectRoot(), query);
+  });
+  ipc.handle(PROJECT_CHANNEL.listDir, async (_event, dir: unknown) => {
+    if (typeof dir !== "string" || !dir.trim()) return [];
+    return await listWorkspaceDir(projectRoot(), dir);
+  });
+  ipc.handle(PROJECT_CHANNEL.readFile, async (_event, file: unknown) => {
+    if (typeof file !== "string" || !file.trim()) return { ok: false as const, error: "没有给路径" };
+    return await readWorkspaceFile(projectRoot(), file);
   });
 }
