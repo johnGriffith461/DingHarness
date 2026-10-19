@@ -50,28 +50,34 @@ await step("首页输入区可用", async () => {
 await step("⭐ 输入 @ 出引用菜单，且文件分组里有 README.md", async () => {
   await input.click();
   await input.fill("@");
-  await sleep(500);
+  /*
+   * 2026-10-20：候选是**异步扫盘**的，固定 sleep(500) 会偶发红
+   * （同一脚本两次跑一次有分组、一次没有）。改为等待条件。
+   */
   const menu = page.locator('[data-testid="wb-phrase-menu"]');
+  await menu.waitFor({ timeout: 8000 }).catch(() => undefined);
   if (!(await menu.count())) throw new Error("菜单没出现");
   const files = page.locator('[data-testid="wb-mention-group-file"]');
+  await files.waitFor({ timeout: 8000 }).catch(() => undefined);
   if (!(await files.count())) throw new Error("没有文件分组");
   const readme = page.locator('[data-testid="wb-mention-file-README.md"]');
+  await readme.waitFor({ timeout: 8000 }).catch(() => undefined);
   if (!(await readme.count())) throw new Error("文件分组里没有 README.md");
   return "菜单 / 文件分组 / README.md 都在";
 });
 
 await step("目录分组：输入 src 后出现目录候选", async () => {
   await input.fill("@src");
-  await sleep(500);
   const dirs = page.locator('[data-testid="wb-mention-group-dir"]');
+  await dirs.waitFor({ timeout: 8000 }).catch(() => undefined);
   if (!(await dirs.count())) throw new Error("没有目录分组");
   return "目录分组出现";
 });
 
 await step("⭐ 点选文件 → 正文出现 @README.md，并有引用 chip", async () => {
   await input.fill("@README");
-  await sleep(1500);
   const item = page.locator('[data-testid="wb-mention-file-README.md"]').first();
+  await item.waitFor({ timeout: 8000 }).catch(() => undefined);
   if (!(await item.count())) throw new Error("没有 README.md 候选");
   await item.click();
   await sleep(300);

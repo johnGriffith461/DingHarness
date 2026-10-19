@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, expandComposerMore, freshDir, killTree, waitForPage } from "./harness.mjs";
 
 /**
  * 验收 T-11 / T-12 / T-13 / T-14 / T-15 + T-16 的三条复现（**不调模型**）。
@@ -124,10 +124,19 @@ try {
     out.scheduleTaskText = (await page.locator('[data-testid="wb-task"]').first().innerText().catch(() => "")).slice(0, 200);
   }
 
-  /* T-11：手机遥控页的统一说明块 */
-  await page.locator('[data-testid="wb-nav-phone"]').click();
+  /*
+   * T-11：手机遥控页的统一说明块。
+   * C-01（2026-10-20）把它从主导航**移进了设置** —— 本机不可用，不该占主导航。
+   */
+  await page.locator('[data-testid="wb-account"]').click();
+  await page.waitForTimeout(400);
+  await page.locator('[data-testid="wb-acct-settings"]').click();
+  await page.waitForSelector('[data-testid="wb-set-手机遥控电脑"]', { timeout: 5000 });
+  await page.locator('[data-testid="wb-set-手机遥控电脑"]').click();
   await page.waitForTimeout(700);
   out.phoneLocalOnly = (await page.locator('[data-testid="wb-phone-localonly"]').innerText().catch(() => "")).trim();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
 
   /* T-11：终端页标题改成「命令记录（只读）」 */
   await page.locator('[data-testid="wb-nav-home"]').click();
@@ -144,6 +153,8 @@ try {
   /* T-12：输入区用量 chip 写「本段对话」 */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  /* C-01：用量 chip 收在首页的「更多」后面 */
+  await expandComposerMore(page);
   out.usageChip = (await page.locator('[data-testid="wb-usage"]').innerText().catch(() => "")).trim();
 
   /* T-12 / T-15：用量页与权限页（用左栏入口） */

@@ -253,12 +253,23 @@ await page.locator('[data-testid="wb-composer-input"]').fill(`请调用 memory_s
   await jobAllow.waitFor({ timeout: 120000 });
   await page.waitForTimeout(400);
   await jobAllow.click();
-  await page.waitForTimeout(2500);
-
-  out.jobLine = await page.evaluate(() => {
-    const lines = Array.from(document.querySelectorAll(".wb-tool-line")).map((e) => e.textContent?.trim() ?? "");
-    return lines.find((t) => t.includes("定时任务")) ?? null;
-  });
+  /*
+   * 2026-10-20：原来固定等 2.5s —— 放行之后这次工具调用的留痕在批跑机器上
+   * 偶尔还没渲染出来（磁盘已经写了，界面读早了）。改成轮询到那一行出现。
+   */
+  const jobDeadline = Date.now() + 15_000;
+  while (Date.now() < jobDeadline) {
+    out.jobLine = await page.evaluate(() => {
+      const lines = Array.from(document.querySelectorAll(".wb-tool-line")).map((e) => e.textContent?.trim() ?? "");
+      return lines.find((t) => t.includes("定时任务")) ?? null;
+    });
+    if (out.jobLine) break;
+    await page.waitForTimeout(500);
+  }
+  /* 诊断用：失败时能看到这一步到底有哪些留痕（不是只报 null） */
+  out.jobAllLines = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".wb-tool-line")).map((e) => e.textContent?.trim().slice(0, 80) ?? ""),
+  );
 
   const schedFile = path.join(DATA, "schedules.json");
   out.schedulesFileExists = fs.existsSync(schedFile);
@@ -296,7 +307,22 @@ await page.locator('[data-testid="wb-composer-input"]').fill(`请调用 memory_s
   await nodeAllow.waitFor({ timeout: 120000 });
   await page.waitForTimeout(400);
   await nodeAllow.click();
-  await page.waitForTimeout(3000);
+  /*
+   * 2026-10-20：原来固定等 3s —— 首次打开画布要载入示例文档（6 个节点），
+   * 批跑机器上会超过 3s，于是"节点没出现"是**读得太早**，不是没加。
+   * 改成轮询到节点出现（最多 20s；超时仍然如实红）。
+   */
+  const nodeByMark = () =>
+    page.evaluate((mark) => {
+      return Array.from(document.querySelectorAll(".react-flow__node")).some((e) =>
+        (e.textContent ?? "").includes(mark),
+      );
+    }, NODE_MARK);
+  const nodeDeadline = Date.now() + 20_000;
+  while (Date.now() < nodeDeadline) {
+    if (await nodeByMark()) break;
+    await page.waitForTimeout(500);
+  }
 
   out.canvasOpen = (await page.locator('[data-testid="wb-canvas"]').count()) > 0;
   out.canvasAfter = await page.locator(".react-flow__node").count();

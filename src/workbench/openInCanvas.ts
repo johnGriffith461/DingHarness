@@ -49,6 +49,22 @@ export async function openInCanvas(artifact: Artifact): Promise<string> {
   } catch {
     return "画布模块加载失败";
   }
+  /*
+   * 画布没开就先开、并**等载入完成**再加节点。
+   *
+   * 2026-10-20（accept-canvasopen 实测）：原来是"先 addNodeAt、再 toggleCanvas" ——
+   * 挂载后的 `usePersistence` 会 `loadDocument()` 覆盖整块画布，刚加的节点被冲掉，
+   * 用户点「在画布中打开」看到的是原来的 6 个示例节点。与画布命令那条是同一个竞态
+   * （见 `loadGate.ts`），所以用同一道闸。
+   */
+  const wb = await import("./store");
+  if (!wb.useWorkbenchStore.getState().canvasOpen) {
+    const { resetCanvasLoadGate, waitCanvasLoaded } = await import("@/canvas/loadGate");
+    resetCanvasLoadGate();
+    wb.useWorkbenchStore.getState().toggleCanvas();
+    const loaded = await waitCanvasLoaded(15_000);
+    if (!loaded) return "画布打开后 15 秒内没载入完，没有往里加节点";
+  }
   const canvas = store.useRuntimeStore.getState();
 
   /*
@@ -86,9 +102,6 @@ export async function openInCanvas(artifact: Artifact): Promise<string> {
     if (plan.nodes.length === 0) return "";
     canvas.commitHistory();
     store.useRuntimeStore.getState().appendNodes(plan.nodes, plan.edges);
-    /* 落到画布上之后把它显示出来（与下面那条路同一个收尾） */
-    const wb = await import("./store");
-    if (!wb.useWorkbenchStore.getState().canvasOpen) wb.useWorkbenchStore.getState().toggleCanvas();
     return "";
   }
 
@@ -108,11 +121,5 @@ export async function openInCanvas(artifact: Artifact): Promise<string> {
 
   store.useRuntimeStore.getState().patchNodeData(node.id, patch);
   store.useRuntimeStore.getState().selectNodes([node.id]);
-
-  // 把画布显示出来（用户点了"打开"，就该看见它）
-  const workbench = await import("./store");
-  if (!workbench.useWorkbenchStore.getState().canvasOpen) {
-    workbench.useWorkbenchStore.getState().toggleCanvas();
-  }
   return "";
 }

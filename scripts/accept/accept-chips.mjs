@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, expandComposerMore, pickPort, shot, waitForPort } from "./harness.mjs";
 
 /**
  * 验收：输入区三个 chip（用户报的三个问题）。
@@ -37,6 +37,8 @@ try {
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2200);
+  /* C-01：项目 / 插件收在首页的「更多」后面 */
+  await expandComposerMore(page);
 
   // ① 环境 chip 应该没了
   out.envChipGone = (await page.locator('[data-testid="wb-env"]').count()) === 0;
@@ -84,6 +86,8 @@ try {
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(2000);
+  /* 刷新后首页回到紧凑态：后面的项目/插件/技能面板步骤要重新展开「更多」 */
+  await expandComposerMore(page);
   out.confirmAfterReload = await page.evaluate(
     () => document.querySelector('[data-testid="wb-confirm"]')?.textContent?.trim() ?? null,
   );
@@ -214,6 +218,8 @@ try {
   /* 回到首页，再验「选择项目」——它该打开输入区那个项目 chip 的下拉 */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(900);
+  /* 回首页后 Composer 重新挂载：紧凑态，项目 chip 在「更多」后面 */
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-skills"]').click();
   await page.waitForTimeout(600);
   await page.locator('[data-testid="wb-cmd-选择项目"]').click();

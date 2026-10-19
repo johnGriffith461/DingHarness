@@ -129,6 +129,27 @@ export async function runSubagent(input: {
   if (outcome.aborted) {
     return { ok: false, summary: "", ...base, error: "子智能体被中止了（这一轮是用户停的，不是它没给出报告）" };
   }
+  /*
+   * T-02 之后：子智能体会在"待审批"上停下（不再拿着"还没执行"继续编）。
+   * 这时它**没有报告**，但 `blocked[]` 是有效的结构化结果 —— 不能当失败丢掉。
+   *
+   * 为什么返回 `ok: true` 且**不带 `pending`**：
+   * · `ok:false` 会让闸门执行体把整个载荷换成一句错误（`registry.ts`），
+   *   父级再也看不到 `blocked[]`，界面上也就不会有待批行（实测：
+   *   "子智能体没有给出报告" + 点了允许什么也没执行）；
+   * · `pending:true` 会让**父级那次 `spawn_agent` 自己也变成待批行** ——
+   *   点它的「允许」会重跑整支子智能体，而不是执行被拦下的那个动作。
+   *
+   * 所以父级这一行是"已完成（但子级有动作用等你批）"，真正待批的是
+   * `withSubagentApprovals` 展开出来的那一行（`blockedToTraces`）。
+   */
+  if (!summary && blocked.length) {
+    return {
+      ok: true,
+      summary: "子智能体停在待确认上（有动作等你批准）",
+      ...base,
+    };
+  }
   if (!summary) {
     return { ok: false, summary: "", ...base, error: "子智能体没有给出报告" };
   }

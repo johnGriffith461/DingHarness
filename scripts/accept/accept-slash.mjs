@@ -6,7 +6,7 @@
 //   ③ 未知命令按 Enter 不发出去，提示 /help；
 //   ④ `/help` 真的执行（输入框清空 + 提示条出现）。
 import { chromium } from "playwright";
-import { openApp, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
+import { openApp, expandComposerMore, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
 
 const bad = [];
 let count = 0;
@@ -38,6 +38,8 @@ const { browser, page, getLog } = await openApp(chromium, {
   cwd: ".",
 });
 await sleep(2200);
+/* 首页的高级 chip 收在「更多」后面（脚本后面要点其中几颗） */
+await expandComposerMore(page);
 const input = page.locator('[data-testid="wb-composer-input"]');
 
 await step("⭐ 输入 / 出命令菜单，10 条都在", async () => {

@@ -56,10 +56,15 @@ export function sendCanvasCommand(cmd: Omit<CanvasCommand, "id">): Promise<Canva
       resolve({ id, ok: false, error: "没有可用窗口" });
       return;
     }
+    /*
+     * 2026-10-20：5s 在批跑/CI 上会擦边（画布首次载入 + 机器忙时超 2.5s）。
+     * 放宽到 20s —— 它只是**兜底**（窗口关闭等），正常回执仍是毫秒级；
+     * 渲染层自己的载入等待（15s）小于它，所以真原因仍然能回给用户。
+     */
     const timer = setTimeout(() => {
       pendingCommands.delete(id);
-      resolve({ id, ok: false, error: "画布没有在 5 秒内回执（可能窗口正在关闭）" });
-    }, 5000);
+      resolve({ id, ok: false, error: "画布没有在 20 秒内回执（可能窗口正在关闭）" });
+    }, 20_000);
     pendingCommands.set(id, (result) => {
       clearTimeout(timer);
       pendingCommands.delete(id);

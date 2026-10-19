@@ -345,17 +345,16 @@ html[data-kb="1"] .wb-composer:focus-within {
 }
 
 /*
- * C-01：首页首屏收敛 —— 只留输入框 / 4 张卡 / 模型 chip / 档位 chip。
- * 项目、插件、计划、思考、用量、附件按钮在**任务页**仍然全有（同一个 Composer）。
- * 技能 chip 保留在首页：技能搜索/启用是首页的常用入口（而且验收脚本按它定位）。
+ * C-01：首页首屏收敛 —— 只留输入框 / 4 张卡 / 模型 chip / 档位 chip / 技能 / 更多。
+ * 项目、附件、插件、计划、思考、用量收进「更多」；**任务页不隐藏任何一项**。
  * 隐藏用 `display:none`（不是 disabled），所以不会留下"点了没反应"的控件。
  */
-.wb-composer[data-compact-home="true"] [data-testid="wb-project"],
-.wb-composer[data-compact-home="true"] [data-testid="wb-composer-add"],
-.wb-composer[data-compact-home="true"] [data-testid="wb-plugins"],
-.wb-composer[data-compact-home="true"] [data-testid="wb-plan-toggle"],
-.wb-composer[data-compact-home="true"] [data-testid="wb-effort"],
-.wb-composer[data-compact-home="true"] [data-testid="wb-usage"] {
+.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-project"],
+.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-composer-add"],
+.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-plugins"],
+.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-plan-toggle"],
+.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-effort"],
+.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-usage"] {
   display: none;
 }
 .wb-composer-bar > *:nth-child(3) .wb-chip { animation-delay: 60ms; }

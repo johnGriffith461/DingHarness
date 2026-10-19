@@ -152,8 +152,12 @@ try {
   );
   await page.locator('[data-testid="wb-send"]').click();
 
-  /* 等父级步上出现**待批**行（子智能体冒泡出来的那条） */
-  const deadline = Date.now() + 90_000;
+  /*
+   * 等父级步上出现**待批**行（子智能体冒泡出来的那条）。
+   * 2026-10-20：90s 在假通道 + 真 Electron 的冷启动下会擦边（实测行在 ~90s 后
+   * 才渲染出来），放宽到 150s；这不是产品变慢，是脚本的等待预算太紧。
+   */
+  const deadline = Date.now() + 150_000;
   let allowButtons = 0;
   while (Date.now() < deadline) {
     await page.waitForTimeout(1500);

@@ -4,7 +4,7 @@
 // `engine/runtime/messageTransform.ts`（有单测：模型没声明图片输入时发请求前抛错）。
 import fs from "node:fs";
 import { chromium } from "playwright";
-import { openApp, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
+import { openApp, expandComposerMore, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
 
 const bad = [];
 let count = 0;
@@ -39,6 +39,8 @@ let browser = app.browser;
 let page = app.page;
 let getLog = app.getLog;
 await sleep(2200);
+/* C-01：附件按钮收在首页的「更多」后面 */
+await expandComposerMore(page);
 
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
 

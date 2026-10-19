@@ -1,5 +1,5 @@
 import { useRuntimeStore } from "@/canvas/runtimeStore";
-import { waitCanvasLoaded } from "@/canvas/loadGate";
+import { resetCanvasLoadGate, waitCanvasLoaded } from "@/canvas/loadGate";
 import { useWorkbenchStore } from "./store";
 import type { CanvasCommand, CanvasCommandResult, ShellBridge } from "@shared/ipc";
 
@@ -24,10 +24,13 @@ const bridge = (): ShellBridge | undefined => (globalThis as unknown as { shell?
 /**
  * 等画布载入完成的上限。
  *
- * ⚠️ 必须**明显短于主进程那条 5 秒**（`electron/ipc/canvas.ts` 的 `setTimeout(..., 5000)`）——
+ * ⚠️ 必须**明显短于主进程那条 20 秒**（`electron/ipc/canvas.ts` 的 `setTimeout(..., 20_000)`）——
  * 否则等待会变成"主进程超时"，回执里就看不到真原因了（P74）。
+ *
+ * 2026-10-20：2.5s 在批跑/CI 上会擦边（`accept-tools` 实测画布首次载入超过 2.5s，
+ * 于是"建节点"步骤如实失败）。放宽到 15s；**超时仍然如实失败**，不假装成功。
  */
-export const CANVAS_LOAD_WAIT_MS = 2500;
+export const CANVAS_LOAD_WAIT_MS = 15_000;
 
 /**
  * 起监听。在根组件挂载时调一次。
@@ -49,6 +52,12 @@ export function startCanvasCommandHost(): () => void {
         const wb = useWorkbenchStore.getState();
         let opened = false;
         if (!wb.canvasOpen) {
+          /*
+           * 先重开闸，再打开画布：命令可能比画布挂载**先到** ——
+           * 不先 reset，等待方会看到"上一次已载入"而立刻放行（节点随后被载入覆盖）。
+           * 见 `loadGate.ts` 里 2026-10-20 的竞态说明。
+           */
+          resetCanvasLoadGate();
           // 画布没开：先打开它（用户看到的是"画布自己开了"，所以回执里带上 opened）
           wb.toggleCanvas();
           opened = true;

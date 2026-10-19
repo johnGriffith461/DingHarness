@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, expandComposerMore, freshDir, killTree, shot } from "./harness.mjs";
 
 /**
  * 验收：**创作广场**（§159，对应 `chat/coding`）。
@@ -77,6 +77,8 @@ try {
   /* ── ① 入口 ── */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  /* C-01：＋（附件/创作入口）收在首页的「更多」后面 */
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   out.menuHasCoding = await page.evaluate(
@@ -173,7 +175,12 @@ try {
     return e ? Math.round(e.getBoundingClientRect().width) : null;
   });
   out.previewButtons = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-testid^="wb-coding-preview-"]')).map((e) => ({
+    /*
+     * 2026-10-20（脚本过期）：页头另有两颗 `wb-coding-preview-url` / `wb-coding-preview-open`
+     * （当前预览地址 / 打开预览），它们不是卡片上的按钮。卡片按钮在 `.wb-coding-card` 里，
+     * 所以按容器限定，而不是拿前缀一把抓。
+     */
+    Array.from(document.querySelectorAll('.wb-coding-card [data-testid^="wb-coding-preview-"]')).map((e) => ({
       id: e.getAttribute("data-testid"),
       text: (e.textContent ?? "").trim(),
     })),

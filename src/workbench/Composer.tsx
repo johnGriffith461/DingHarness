@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Blocks, Check, ChevronDown, Paperclip, Plus, Send, Sparkles, X } from "lucide-react";
+import { Blocks, Check, ChevronDown, Paperclip, Plus, Sparkles, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { draftKeyOf } from "./composerDraft";
 import { useTransientNote } from "@/utils/transientNote";
@@ -40,7 +40,8 @@ import { findItemIn } from "./libraryStore";
 import { type ConfirmMode, type SessionSearchHit } from "@shared/ipc";
 import { useDocStore } from "./docStore";
 import { confirmOptionState, readConfirmMode, saveConfirmMode } from "./confirmMode";
-import { Square } from "lucide-react";
+import { ComposerMoreButton } from "./ComposerMoreButton";
+import { ComposerSendButton } from "./ComposerSendButton";
 import SkillPanel from "./SkillPanel";
 import { runFeedbackCommand } from "./feedbackExport";
 
@@ -207,6 +208,8 @@ export function Composer({
   const [openPop, setOpenPop] = useState<
     null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"
   >(null);
+  /* C-01：首页首屏收敛 —— 高级 chip（项目/插件/计划/思考/用量/附件）收进「更多」。 */
+  const [composerAdvanced, setComposerAdvanced] = useState(false);
   /*
    * 工作区（2026-10-14）：用户授权给 agent 干活的目录。
    * 列表在**菜单打开时**才拉（它是主进程的磁盘状态，没必要一直挂着）。
@@ -672,8 +675,9 @@ export function Composer({
   return (
     <div
       className="wb-composer"
-      /* C-01：首页首屏只留输入框/推荐卡/模型/档位；其余 chip 在任务页全有。 */
+      /* C-01：首页首屏只留输入框/推荐卡/模型/档位；其余 chip 收进「更多」。 */
       data-compact-home={view === "home" ? "true" : undefined}
+      data-advanced={composerAdvanced ? "true" : undefined}
       data-testid="wb-composer"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
@@ -1391,6 +1395,13 @@ export function Composer({
         </div>
 
         <span className="wb-spacer" />
+        {/*
+          C-01：首页的「更多」—— 项目/插件/计划/思考/用量/附件收在这里；
+          任务页不渲染它（那些 chip 直接全显示）。
+        */}
+        {view === "home" ? (
+          <ComposerMoreButton advanced={composerAdvanced} onToggle={() => setComposerAdvanced((v) => !v)} />
+        ) : null}
         {/* C1：计划模式 chip（真开关：只读工具面 + 计划提示） */}
         <button
           className={`wb-chip${planOn ? " is-on" : ""}`}
@@ -1445,37 +1456,13 @@ export function Composer({
           open={openPop === "usage"}
           onToggle={() => togglePop("usage")}
         />
-        {/*
-          ⚠️ **流式过程中这里是「停止」**（补完⑤）。
-          在此之前，工作台**没有任何停止入口**：`store.abort()` 实现了却只有提问卡的"关闭"
-          在调它 —— 用户发出去一条要跑一分钟的任务，就只能干看着（聊天侧早有 `chat-send-stop`，
-          两边不一致）。
-          这里点下去走的是 store 的 `abort()` → `abortStream(requestId)` → 主进程
-          `controller.abort()`（**连 provider 侧的连接一起断**，不是只停界面）。
-
-          文案取自本体证据：`button_stop` = 「停止」。
-        */}
-        {running ? (
-          <button
-            className="wb-send is-stop"
-            data-testid="wb-send-stop"
-            aria-label="停止" title="停止"
-            onClick={() => useWorkbenchStore.getState().abort(activeTask?.id)}
-          >
-            <Square size={14} />
-          </button>
-        ) : (
-          <button
-            className="wb-send"
-            data-testid="wb-send"
-            disabled={!text.trim()}
-            aria-label={sendLabel ?? "发送（Enter）"}
-            title={sendLabel ?? "发送（Enter）"}
-            onClick={submit}
-          >
-            <Send size={15} />
-          </button>
-        )}
+        <ComposerSendButton
+          running={running}
+          hasText={text.trim() !== ""}
+          {...(sendLabel ? { label: sendLabel } : {})}
+          onSend={submit}
+          onStop={() => useWorkbenchStore.getState().abort(activeTask?.id)}
+        />
       </div>
 
       {enabledNames.length > 0 ? (

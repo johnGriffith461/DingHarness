@@ -756,6 +756,15 @@ function sizeFromRequest(jsonBody, latin1Body) {
 }
 
 function startLocalFakeModel() {
+  /**
+   * 假通道发出的工具调用 id。**必须每次不同**（2026-10-20）。
+   *
+   * 原来写死 `accept-call-1`：同一条脚本里跨阶段/跨任务的所有工具调用都撞同一个 id，
+   * 而审批记录是**按 toolCallId 幂等**的 —— 于是第二次调用会被判成"已经处置过了"，
+   * 界面留痕变成 dedupe 文案（`accept-tools` 的定时任务那一段就是这么红的）。
+   * 真 provider 不会复用 id；假通道也不该。
+   */
+  let fakeCallSeq = 0;
   const server = createServer((req, res) => {
     const chunks = [];
     req.on("data", (d) => chunks.push(d));
@@ -972,7 +981,7 @@ function startLocalFakeModel() {
                   ? {
                       role: "assistant",
                       tool_calls: [
-                        { index: 0, id: "accept-call-1", type: "function", function: { name: askTool[1], arguments: delta } },
+                        { index: 0, id: `accept-call-${(fakeCallSeq += 1)}`, type: "function", function: { name: askTool[1], arguments: delta } },
                       ],
                     }
                   : { tool_calls: [{ index: 0, function: { arguments: delta } }] },

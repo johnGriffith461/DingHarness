@@ -254,6 +254,20 @@ export async function waitForPage(browser, timeoutMs = 20000) {
   return null;
 }
 
+/**
+ * C-01：首页把项目 / 附件 / 插件 / 计划 / 思考 / 用量 / 收进了「更多」。
+ *
+ * 操作这些 chip 的验收脚本先调它（有「更多」就展开；任务页没有这个按钮，直接跳过）。
+ * 这不是绕过 UI：用户也是这么点开高级选项的。
+ */
+export async function expandComposerMore(page) {
+  const more = page.locator('[data-testid="wb-composer-more"]');
+  if ((await more.count()) === 0) return false;
+  await more.click().catch(() => undefined);
+  await sleep(250);
+  return true;
+}
+
 /** 拿不到页面时的诊断话术（把最可能的原因直接写在报错里）。 */
 export const NO_PAGE_HINT =
   "应用起了但**一个页面都没建**。先查这一条：跑过 `npx tsc -p tsconfig.electron.json` 之后" +

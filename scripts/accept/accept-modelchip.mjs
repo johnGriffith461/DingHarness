@@ -8,7 +8,7 @@
 // 判据都是"点了要有真后果"：两类 chip 都在 → 模型列表真列出来 → 选一条真落盘（`resolveChatRoute`
 // 读的就是那个键）→ chip 文案跟着变 → 档位选真落盘、选回「默认」要把键**删掉**（默认 = 一个字段都不发）。
 import { chromium } from "playwright";
-import { failOnMarks, killLeftovers, openApp, pickPort, sleep, verdict } from "./harness.mjs";
+import { failOnMarks, expandComposerMore, killLeftovers, openApp, pickPort, sleep, verdict } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
 failOnMarks();
@@ -20,6 +20,8 @@ const port = await pickPort([9911]);
 await killLeftovers();
 const { browser, page } = await openApp(chromium, { port, dataDir: ".verify/accept-modelchip-data", cwd: "." });
 await sleep(2000);
+/* C-01：思考强度 chip 收在首页的「更多」后面 */
+await expandComposerMore(page);
 
 const chipText = (id) => page.locator(`[data-testid="${id}"]`).textContent().then((t) => (t ?? "").trim());
 const saved = () =>
@@ -36,24 +38,23 @@ try {
   if (!effort0) bad.push("输入区没有思考强度 chip（wb-effort）");
   note(`两颗 chip：${model0} ／ ${effort0}`);
 
-  /* ② 模型弹层：一级是 provider（ZCode 的形态：多 provider 时一级列 provider、悬停展开二级模型）；
-     **不许**有搜索框与拉取按钮（那是设置页的事） */
+  /*
+   * ② 模型弹层：一级是 provider（ZCode 的形态：多 provider 时一级列 provider、悬停展开二级模型）。
+   *
+   * 2026-10-20（脚本过期）：这条原来断言"不许有搜索框" —— 但 C3 给弹层加了搜索框
+   * （模型多时找不到），那是**有意的产品变化**。现在改成：
+   *   · 搜索框**必须**有（找不到模型时用户得有地方筛）；
+   *   · 「拉取模型」按钮仍然**不许**有（拉取是设置页的事）。
+   */
   await page.locator('[data-testid="wb-model"]').click();
   await sleep(800);
   const providers = await page.locator('[data-testid^="wb-model-provider-"]').count();
   const singleList = await page.locator('[data-testid^="wb-model-option-"]').count();
   if (providers < 1 && singleList < 1) bad.push("模型弹层里既没有 provider 也没有模型");
-  /*
-   * ⚠️ 2026-10-16 修：这一段原来是 `bad.push()` —— **空推送**，红的时候消息是 `undefined`，
-   * 读日志的人不知道哪条判据错了（等于判了也说不清）。顺手把这句补成人话。
-   */
   const searchBoxes = await page.locator('[data-testid="wb-model-search"]').count();
   const pullButtons = await page.locator('[data-testid^="wb-model-pull-"]').count();
-  if (searchBoxes || pullButtons) {
-    bad.push(
-      `模型弹层里不该有搜索框与「拉取模型」（那是设置页的事），现在各读到 ${searchBoxes} / ${pullButtons} 个`,
-    );
-  }
+  if (!searchBoxes) bad.push("模型弹层里没有搜索框（模型多时找不到）");
+  if (pullButtons) bad.push(`模型弹层里不该有「拉取模型」（那是设置页的事），现在有 ${pullButtons} 个`);
   /* 多 provider：悬停一级展开二级 */
   if (providers > 0) {
     await page.locator('[data-testid^="wb-model-provider-"]').first().hover();

@@ -211,8 +211,14 @@ try {
   if (!inBucket("近一年", "一年内")) bad.push("200 天前的没落在「近一年」");
   if (!inBucket("更早", "更早")) bad.push("500 天前的没落在「更早」");
   if (out.emptySummary !== "打开对话") bad.push(`空会话摘要不是「打开对话」，实际 ${out.emptySummary}`);
-  if (JSON.stringify(out.menuItems) !== JSON.stringify(["置顶", "重命名", "删除"])) {
-    bad.push(`行内菜单项不对：${JSON.stringify(out.menuItems)}`);
+  /*
+   * 2026-10-20（脚本过期）：行内菜单后来加了「从这一刻分叉」（fork）。
+   * 断言改成**集合相等**（顺序不算契约），并把这个新动作算进来。
+   */
+  const expectedMenu = ["置顶", "重命名", "从这一刻分叉", "删除"];
+  const gotMenu = [...(out.menuItems ?? [])].sort();
+  if (JSON.stringify(gotMenu) !== JSON.stringify([...expectedMenu].sort())) {
+    bad.push(`行内菜单项不对：${JSON.stringify(out.menuItems)}（期望 ${JSON.stringify(expectedMenu)}）`);
   }
   if (out.renamedAfterReload !== "改过名字的对话") bad.push(`重命名没保住（刷新后是 ${out.renamedAfterReload}）`);
 

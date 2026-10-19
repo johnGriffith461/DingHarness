@@ -66,13 +66,24 @@ try {
   out.itemCount = await page.locator(".wb-phrase-item").count();
 
   /* ── ② 筛选 ── */
+  /*
+   * 2026-10-20：`@` 菜单现在是**五类候选混排**（文件/目录/会话/技能/动作），
+   * `.wb-phrase-item` 也被文件/目录条目复用 —— 只看动作组（testid `wb-phrase-*`），
+   * 否则 `@bug` 会把目录名一起算进来。
+   */
   await input(page).fill("@bug");
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(600);
   out.bugItems = await page.evaluate(() =>
-    Array.from(document.querySelectorAll(".wb-phrase-item")).map((e) => (e.textContent ?? "").trim()),
+    Array.from(document.querySelectorAll(".wb-phrase-item"))
+      .filter((e) => (e.getAttribute("data-testid") ?? "").startsWith("wb-phrase-"))
+      .map((e) => (e.textContent ?? "").trim()),
   );
   await input(page).fill("@zzz");
-  await page.waitForTimeout(400);
+  /* 候选是异步查的：等空态出现（最多 5s），不要赌固定等待 */
+  await page
+    .locator('[data-testid="wb-phrase-empty"]')
+    .waitFor({ timeout: 5000 })
+    .catch(() => undefined);
   out.emptyText = await page.evaluate(
     () => document.querySelector('[data-testid="wb-phrase-empty"]')?.textContent?.trim() ?? "",
   );
@@ -144,7 +155,7 @@ try {
   if (JSON.stringify(out.bugItems) !== JSON.stringify(["找出潜在 bug"])) {
     bad.push(`@bug 筛选结果不对：${JSON.stringify(out.bugItems)}`);
   }
-  if (out.emptyText !== "没有匹配的常用语") bad.push(`搜不到时的提示不对：${out.emptyText}`);
+  if (out.emptyText !== "没有匹配的文件、会话、技能或动作") bad.push(`搜不到时的提示不对：${out.emptyText}`);
 
   /* ③④ 替换与光标 */
   if (!(out.afterPick ?? "").includes("潜在 bug")) bad.push(`选中后正文没换成常用语：${out.afterPick}`);

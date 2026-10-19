@@ -31,9 +31,15 @@
     color var(--dur-quick) var(--ease-out);
 }
 
-.wb-home-mode-btn[aria-pressed="true"] {
+.wb-home-mode-btn[aria-pressed="true"],
+.wb-home-mode-btn[aria-current="true"] {
   background: var(--accent);
   color: var(--on-accent);
+}
+
+/* 当前模式是静态标签（C-01）：不暗示可点 */
+.wb-home-mode-btn[aria-current="true"] {
+  cursor: default;
 }
 
 /*

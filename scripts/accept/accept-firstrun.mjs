@@ -105,13 +105,17 @@ try {
   out.meterHasBudget = /模型窗口\s*\d+(\.\d+)?(k|M)\s*token\s*可用/.test(out.meterText);
   out.meterNotUnknown = !out.meterText.includes("未记录");
 
-  /* 首屏默认身份：编码 */
+  /* 首屏默认身份：编码（C-01 起当前模式是静态标签，用 aria-current） */
   const codingPressed = await page
     .locator('[data-testid="wb-home-mode-coding"]')
     .getAttribute("aria-pressed")
     .catch(() => null);
-  out.homeMode = codingPressed === "true" ? "编码" : "非编码";
-  out.defaultCoding = codingPressed === "true";
+  const codingCurrent = await page
+    .locator('[data-testid="wb-home-mode-coding"]')
+    .getAttribute("aria-current")
+    .catch(() => null);
+  out.homeMode = codingPressed === "true" || codingCurrent === "true" ? "编码" : "非编码";
+  out.defaultCoding = codingPressed === "true" || codingCurrent === "true";
 
   await shot(page, ".verify/firstrun.png");
 } catch (error) {
