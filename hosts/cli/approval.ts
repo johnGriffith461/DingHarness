@@ -94,6 +94,16 @@ export function createCliApprover(opts: CliApproverOptions): CliApprover {
           const onEnd = () => finish(buffer.replace(/\r$/, ""));
           input.on("data", onData);
           input.on("end", onEnd);
+          /*
+           * stdin 可能**在我们挂监听之前就已经 EOF**（管道只写了一行、后面的
+           * 询问没有输入了）。Node 的流不会把 `end` 重放给后来者 —— 不补这一判，
+           * 第二次询问会一直等到看门狗（实测挂了 120 秒）。EOF = 没人回答 = 拒绝。
+           */
+          const maybeEnded = input as unknown as { readableEnded?: boolean; destroyed?: boolean };
+          if (maybeEnded.readableEnded || maybeEnded.destroyed) {
+            finish("");
+            return;
+          }
           /* 预缓冲的数据要有人读才会流出来 */
           input.resume?.();
         }),

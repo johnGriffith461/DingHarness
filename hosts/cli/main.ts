@@ -288,9 +288,15 @@ async function cmdRun(p: Parsed): Promise<number> {
    * 只有真终端才注入：无头环境（管道 / CI）没有"人"可问，这时**不注入**，
    * 让内核照常返回 `{pending:true}` → 宿主的 `awaitingApproval` 分支以退出码 6
    * 收尾并打印下一步。把无头当成"用户拒绝"会把它伪装成一次正常结束。
+   *
+   * `DING_CLI_INTERACTIVE=1` 是给**自动化验收**的显式声明：stdin 是管道，但
+   * 仍按交互处理（读一行 y/a/n）。它走的仍是同一条审批代码路径 ——
+   * 只是绕开"这台执行环境没有 ConPTY、拿不到 isTTY"的限制，不是另一条实现。
    */
-  const interactive = Boolean(process.stdin.isTTY);
-  const approve = interactive ? createCliApprover({ input: process.stdin, output: process.stderr, mode }) : undefined;
+  const interactive = Boolean(process.stdin.isTTY) || process.env.DING_CLI_INTERACTIVE === "1";
+  const approve = interactive
+    ? createCliApprover({ input: process.stdin, output: process.stderr, mode, interactive })
+    : undefined;
   const { engine, close, plugins } = await buildEngine(dirs, approve);
   for (const problem of plugins) process.stderr.write(`[plugin] ${problem}\n`);
 

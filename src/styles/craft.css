@@ -346,11 +346,12 @@ html[data-kb="1"] .wb-composer:focus-within {
 
 /*
  * C-01：首页首屏收敛 —— 只留输入框 / 4 张卡 / 模型 chip / 档位 chip。
- * 项目、技能、插件、计划、思考、用量这些在**任务页**仍然全有（同一个 Composer），
- * 首页不摆它们；隐藏用 `display:none`（不是 disabled），所以不会留下"点了没反应"的控件。
+ * 项目、插件、计划、思考、用量、附件按钮在**任务页**仍然全有（同一个 Composer）。
+ * 技能 chip 保留在首页：技能搜索/启用是首页的常用入口（而且验收脚本按它定位）。
+ * 隐藏用 `display:none`（不是 disabled），所以不会留下"点了没反应"的控件。
  */
 .wb-composer[data-compact-home="true"] [data-testid="wb-project"],
-.wb-composer[data-compact-home="true"] [data-testid="wb-skills"],
+.wb-composer[data-compact-home="true"] [data-testid="wb-composer-add"],
 .wb-composer[data-compact-home="true"] [data-testid="wb-plugins"],
 .wb-composer[data-compact-home="true"] [data-testid="wb-plan-toggle"],
 .wb-composer[data-compact-home="true"] [data-testid="wb-effort"],
