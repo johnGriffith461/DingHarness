@@ -152,3 +152,31 @@ describe("长会话（120 轮）里的实际效果", () => {
     }
   });
 });
+
+describe("keepRounds：最近 N 轮整轮不动", () => {
+  /** 造一轮：user + assistant(带可清工具块) */
+  function round(n: number): ChatMessage[] {
+    return [
+      { role: "user", content: `第 ${n} 问` },
+      { role: "assistant", content: `第 ${n} 答\n\n（本步工具：read_file a${n}.ts（输出：${"x".repeat(200)}））` },
+    ];
+  }
+
+  it("⭐ 最近两轮（按 user 消息计）里的一条都不清", () => {
+    const messages = [1, 2, 3, 4, 5].flatMap(round);
+    const got = microCompact(messages, { keepRecent: 2, keepRounds: 2 });
+
+    /* 最后一轮、倒数第二轮的工具块必须原样保留 */
+    expect(got.messages[9]?.content).toContain("输出：");
+    expect(got.messages[7]?.content).toContain("输出：");
+    /* 更早的会被清 */
+    expect(got.messages[1]?.content).toContain("已清理");
+  });
+
+  it("keepRounds=1 只保最后一轮", () => {
+    const messages = [1, 2, 3].flatMap(round);
+    const got = microCompact(messages, { keepRecent: 1, keepRounds: 1 });
+    expect(got.messages[5]?.content).toContain("输出：");
+    expect(got.messages[3]?.content).toContain("已清理");
+  });
+});

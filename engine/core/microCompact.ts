@@ -94,23 +94,36 @@ export type MicroCompactResult = {
  * 清理旧的可重取工具结果。
  *
  * @param messages 消息列表（旧 → 新）
- * @param opts `keepRecent`：最近多少条不动（默认 6）；`enabled`：总开关
+ * @param opts `keepRecent`：最近多少条不动（默认 6）；`keepRounds`：最近几轮整轮不动
+ *   （默认 2，按"用户消息"计轮）；`enabled`：总开关
  */
 export function microCompact(
   messages: readonly ChatMessage[],
-  opts: { keepRecent?: number; enabled?: boolean } = {},
+  opts: { keepRecent?: number; keepRounds?: number; enabled?: boolean } = {},
 ): MicroCompactResult {
   const enabled = opts.enabled !== false;
   const keepRecent = Math.max(1, opts.keepRecent ?? 6);
+  const keepRounds = Math.max(1, opts.keepRounds ?? 2);
   if (!enabled) return { messages: [...messages], cleared: 0, savedChars: 0 };
 
   const cutoff = Math.max(0, messages.length - keepRecent);
+  /* 最近 N 轮的起点：从后往前数第 N 条 user 消息（找不到就从头算） */
+  let seenRounds = 0;
+  let roundStart = 0;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role !== "user") continue;
+    seenRounds += 1;
+    if (seenRounds === keepRounds) {
+      roundStart = i;
+      break;
+    }
+  }
   let cleared = 0;
   let savedChars = 0;
 
   const out = messages.map((message, index) => {
-    /* ① 最近 N 条不动；② 最后一条永远不动（用户刚说的话） */
-    if (index >= cutoff || index === messages.length - 1) return message;
+    /* ① 最近 N 条不动；② 最近 N 轮整轮不动；③ 最后一条永远不动（用户刚说的话） */
+    if (index >= cutoff || index >= roundStart || index === messages.length - 1) return message;
     /* 只处理助手消息里带工具块的那些（用户说的话没有工具块） */
     const at = message.content.indexOf(TOOL_BLOCK_START);
     if (at < 0) return message;
