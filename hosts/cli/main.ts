@@ -301,11 +301,15 @@ async function cmdRun(p: Parsed): Promise<number> {
     dataDir: dataDir(),
   });
 
-  process.stdout.write(
-    `\x1b[2m工作区：${dirs.join(" / ")}\nprovider：${provider}　档位：${mode}　会话：${sessionId}\x1b[0m\n`,
-  );
+  /*
+   * `--json` 时**表头走 stderr**：stdout 必须是能直接 `JSON.parse` 的那一份。
+   * （实测：基线探针里 `JSON.parse(stdout)` 就是因为这几行表头而失败 ——
+   *   脚本消费的输出不能混人类可读行。）
+   */
+  const header = (line: string) => (p.flags.has("json") ? process.stderr : process.stdout).write(line);
+  header(`\x1b[2m工作区：${dirs.join(" / ")}\nprovider：${provider}　档位：${mode}　会话：${sessionId}\x1b[0m\n`);
   const abilityLine = describeRuntimeModel(chosenModel, modelRuntime, config);
-  if (abilityLine) process.stdout.write(`\x1b[2m${abilityLine}\x1b[0m\n`);
+  if (abilityLine) header(`\x1b[2m${abilityLine}\x1b[0m\n`);
 
   const request: EngineRunRequest = buildRunRequest({
     sessionId,
@@ -433,7 +437,10 @@ async function cmdRun(p: Parsed): Promise<number> {
     process.stderr.write(`\n\x1b[31m没跑完：${outcome.error ?? "未知原因"}\x1b[0m\n`);
     return exitCodeOf(outcome);
   }
-  process.stdout.write(`\n\x1b[2m会话已存：${sessionId}（ding sessions 可列出，ding record ${sessionId} 可录快照）\x1b[0m\n`);
+  /* `--json` 的那一份已经在上面打完了；这一行人话只给终端用户看 */
+  if (!p.flags.has("json")) {
+    process.stdout.write(`\n\x1b[2m会话已存：${sessionId}（ding sessions 可列出，ding record ${sessionId} 可录快照）\x1b[0m\n`);
+  }
   return exitCodeOf(outcome);
 }
 
