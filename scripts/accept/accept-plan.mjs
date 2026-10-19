@@ -120,12 +120,17 @@ await step("Shift+Tab 与 chip 是同一个开关", async () => {
   return "两种入口一致";
 });
 
-await step("C2：上下文压力条在输入区右侧（未登记模型标窗口未知）", async () => {
+await step("C2：上下文压力条在输入区右侧（没跑过任务时如实说「自动选择（未记录）」）", async () => {
   const meter = page.locator('[data-testid="wb-context-meter"]');
   if (!(await meter.count())) throw new Error("没有 wb-context-meter");
   const text = await meter.innerText();
-  if (!text.includes("20k")) throw new Error(`分母不是保守默认 20k：${text}`);
-  if (!text.includes("估算")) throw new Error(`来源没标估算：${text}`);
+  /*
+   * P0-08 改了这条口径：没有 lastRoute、也没有钉住模型时，**不再拿 20k 假充模型窗口**，
+   * 而是写"自动选择（未记录）"。有钉住但未登记的模型才显示"窗口未知 + 20k + 估算"。
+   */
+  const honestEmpty = text.includes("自动选择（未记录）");
+  const unknownWindow = text.includes("20k") && text.includes("估算");
+  if (!honestEmpty && !unknownWindow) throw new Error(`压力条既没有如实说未记录，也不是未知窗口：${text}`);
   return text.split("\n").join(" ");
 });
 

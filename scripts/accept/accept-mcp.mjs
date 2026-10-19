@@ -141,15 +141,25 @@ try {
   await input.fill("随便说一句话（只为让这一轮请求落进会话日志）");
   await page.locator('[data-testid="wb-send"]').click();
   await page.waitForFunction(() => !document.querySelector('[data-testid="wb-send-stop"]'), { timeout: 25000 });
-  await page.waitForTimeout(1200);
 
-  // ⚠️ 走 IPC 读记录（存储已换成 SQLite，直接读 sessions/*.jsonl 永远是空的）
-  const records = await readAllSessionRecords(page);
-  out.sessionFiles = records.length; // 名字留着（历史报告里有），值改成"读到几条"
+  /*
+   * ⚠️ 不能"等 1.2 秒再读一次"：`wb-send-stop` 可能还没出现就已消失，
+   * 于是读记录时这一轮的 `request` 还没落盘 —— 实测就是这个形状（读到 0 条）。
+   * 改成**轮询到出现带 tools 的 request**（最多 20 秒）。
+   */
+  let records = [];
   let toolsOffered = null;
-  for (const rec of records) {
-    if (rec.type === "request" && Array.isArray(rec.tools)) toolsOffered = rec.tools;
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    // ⚠️ 走 IPC 读记录（存储已换成 SQLite，直接读 sessions/*.jsonl 永远是空的）
+    records = await readAllSessionRecords(page);
+    for (const rec of records) {
+      if (rec.type === "request" && Array.isArray(rec.tools)) toolsOffered = rec.tools;
+    }
+    if (toolsOffered) break;
+    await page.waitForTimeout(600);
   }
+  out.sessionFiles = records.length; // 名字留着（历史报告里有），值改成"读到几条"
   out.toolsOffered = toolsOffered;
 
   /* ── ⑧ 重新连接 ── */
@@ -186,9 +196,10 @@ try {
 
   /* ③④⑤ */
   if (!out.echo?.ran) bad.push("③ 调用根本没跑到（ai:runTool 失败）");
-  if (out.echo?.text !== "echo:你好连接器") bad.push(`③ 服务端的回答没回来：${JSON.stringify(out.echo?.text)}`);
+  /* 连接器返回的内容会被包进 <untrusted> 数据块（安全边界），所以用 includes 而不是全等 */
+  if (!String(out.echo?.text ?? "").includes("echo:你好连接器")) bad.push(`③ 服务端的回答没回来：${JSON.stringify(out.echo?.text)}`);
   if (!String(out.echo?.line ?? "").includes("连接器已执行")) bad.push(`③ 留痕那句话不对：${JSON.stringify(out.echo?.line)}`);
-  if (out.boom?.text !== "夹具故意失败") bad.push(`④ 失败的返回值不对：${JSON.stringify(out.boom?.text)}`);
+  if (!String(out.boom?.text ?? "").includes("夹具故意失败")) bad.push(`④ 失败的返回值不对：${JSON.stringify(out.boom?.text)}`);
   if (!String(out.boom?.line ?? "").includes("连接器报错")) bad.push(`④ 服务端标的失败没在留痕里如实写出来：${JSON.stringify(out.boom?.line)}`);
   if (!String(out.missing?.error ?? "").includes("不可用")) bad.push(`⑤ 清单外的工具没被明确拒绝：${JSON.stringify(out.missing)}`);
 
