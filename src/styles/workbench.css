@@ -443,6 +443,31 @@
 
 .wb-chip:hover { background: var(--surface-active); }
 
+/*
+ * C2：上下文压力（输入区右侧）。
+ * 80% 变黄、100% 变红；数字本身不改颜色 —— 只有状态点跟随。
+ */
+.wb-context-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+.wb-context-meter em {
+  font-style: normal;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-hover);
+  color: var(--fg-4);
+}
+.wb-context-meter.is-warn { color: #b07a12; }
+.wb-context-meter.is-warn em { background: rgba(176, 122, 18, 0.12); color: #b07a12; }
+.wb-context-meter.is-full { color: #c0392b; }
+.wb-context-meter.is-full em { background: rgba(192, 57, 43, 0.12); color: #c0392b; }
+
 .wb-env { position: relative; }
 
 .wb-env-pop {

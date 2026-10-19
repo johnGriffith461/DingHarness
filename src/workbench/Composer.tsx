@@ -46,6 +46,7 @@ import { runFeedbackCommand } from "./feedbackExport";
 
 import { CONFIRM_MODES } from "./uiUtil";
 import { UsagePopover } from "./UsagePopover";
+import { ContextMeterBar } from "./ContextMeterBar";
 import { ModelChip } from "./ModelChip";
 import { EffortChip } from "./EffortChip";
 import { sumUsage } from "@shared/cost";
@@ -1400,6 +1401,7 @@ export function Composer({
           （`sumUsage` 逐项求和，吞吐量由 `usageRows` 用"总输出 ÷ 总耗时"现算）。
           没有任务、或 provider 没给用量时它显示空态 —— **不编数**。
         */}
+        <ContextMeterBar />
         <UsagePopover
           usage={sumUsage((activeTask?.steps ?? []).map((s) => s.usage))}
           open={openPop === "usage"}

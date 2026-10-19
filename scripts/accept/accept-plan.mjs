@@ -75,6 +75,15 @@ await step("Shift+Tab 与 chip 是同一个开关", async () => {
   return "两种入口一致";
 });
 
+await step("C2：上下文压力条在输入区右侧（未登记模型标窗口未知）", async () => {
+  const meter = page.locator('[data-testid="wb-context-meter"]');
+  if (!(await meter.count())) throw new Error("没有 wb-context-meter");
+  const text = await meter.innerText();
+  if (!text.includes("20k")) throw new Error(`分母不是保守默认 20k：${text}`);
+  if (!text.includes("估算")) throw new Error(`来源没标估算：${text}`);
+  return text.split("\n").join(" ");
+});
+
 await step("/plan 命令也切同一个开关", async () => {
   await input.fill("/plan");
   await sleep(300);
