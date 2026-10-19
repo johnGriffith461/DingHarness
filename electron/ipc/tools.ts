@@ -626,7 +626,12 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
   },
 
   [RUN_COMMAND_TOOL]: async (input, env) => {
-    const { command, workdir, timeout } = input as { command: string; workdir?: string; timeout?: number };
+    const { command, workdir, timeout, stdin } = input as {
+      command: string;
+      workdir?: string;
+      timeout?: number;
+      stdin?: string;
+    };
     /*
      * ⭐ **把中止信号传下去**（2026-10-16，审计 P35）。
      *
@@ -635,14 +640,16 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
      * 一直跑到 30 分钟超时（`timeout:0` 时更久）。同一份信号 `env.signal` 早就
      * 传给了 `search_files` 与子智能体，只有跑命令这一条漏了 —— 而它恰恰是
      * "把 shell 交出去"的那条，最需要有刹车。
+     *
+     * B-02：`stdin` 原样透传（上限与"总是 EOF"的口径在 `execTool` 里）。
      */
     const result = await runCommandForModel(
-      { command, workdir, timeout, ...(env.signal ? { signal: env.signal } : {}) },
+      { command, workdir, timeout, ...(stdin === undefined ? {} : { stdin }), ...(env.signal ? { signal: env.signal } : {}) },
       ownedDirs(),
     );
     return {
       ok: result.ok,
-      line: describeRunResult(result, command),
+      line: describeRunResult(result, command, typeof stdin === "string" ? { stdinChars: stdin.length } : {}),
       ...(result.ok
         ? {
             exitCode: result.exitCode,

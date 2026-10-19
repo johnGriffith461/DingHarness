@@ -56,6 +56,15 @@ export const COMMAND_MAX_OUTPUT_LINES = 2_000;
 export const COMMAND_MAX_OUTPUT_BYTES = 50 * 1024;
 
 /**
+ * B-02：喂给 `run_command` 的 stdin 上限（**字节**）。
+ *
+ * 为什么不是"多大都行"：stdin 会整个进入这一轮的请求参数与会话日志，
+ * 一个几 MB 的文本会把上下文挤爆。64 KiB 足够 `npm init`、yaml 输入、
+ * 一段测试数据这类真实用途；更大的东西应该写成文件再用管道读。
+ */
+export const COMMAND_MAX_STDIN_BYTES = 64 * 1024;
+
+/**
  * 边跑边留在内存里的**尾部上限**（2026-10-16，审计 P43）。
  *
  * 原来是 `out += chunk` 一直累加、结束时才 `clampOutput` 裁一次 ——
@@ -176,12 +185,22 @@ function clampOutput(raw: string): { output: string; truncated: boolean } {
  * @returns 输出与退出码；拒绝了给能照着做的理由
  */
 export async function runCommandForModel(
-  input: { command: string; workdir?: string; timeout?: number; signal?: AbortSignal },
+  input: { command: string; workdir?: string; timeout?: number; signal?: AbortSignal; stdin?: string },
   dirs: readonly string[],
   spawnImpl: typeof spawn = spawn,
 ): Promise<RunCommandResult> {
   const command = String(input.command ?? "").trim();
   if (!command) return { ok: false, error: "命令是空的" };
+  /*
+   * B-02：stdin 是**不可信输入**（模型给的），先量字节再交出去。
+   * 超限直接拒绝而不是截断 —— 截断后的输入会让命令读到半句话并做出错误的事。
+   */
+  if (input.stdin !== undefined && typeof input.stdin !== "string") {
+    return { ok: false, error: "stdin 必须是字符串" };
+  }
+  if (typeof input.stdin === "string" && Buffer.byteLength(input.stdin, "utf8") > COMMAND_MAX_STDIN_BYTES) {
+    return { ok: false, error: `stdin 不能超过 64 KiB（这次给了 ${Buffer.byteLength(input.stdin, "utf8")} 字节）` };
+  }
   /*
    * F2：沙箱模式（环境变量由宿主设置；缺省 = 现状 danger-full-access）。
    * `read-only` 直接拒绝；`workspace-write` 在 runner 不可用时**明确失败**（不裸跑）。
@@ -265,7 +284,7 @@ function runPlan(
     command: string;
     cwd: string;
     timeout: number;
-    input: { signal?: AbortSignal };
+    input: { signal?: AbortSignal; stdin?: string };
     spawnImpl: typeof spawn;
   },
 ): Promise<PlanRun> {
@@ -317,6 +336,20 @@ function runPlan(
     let timedOut = false;
     let aborted = false;
     let settled = false;
+
+    /*
+     * B-02：**总是关闭子进程的 stdin**。
+     *
+     * 给了 stdin 就把内容写进去再关；没给也关（读到 EOF）。
+     * 为什么必须是无条件关：不关时子进程继承父进程的 stdin ——
+     * 而 CLI 现在用同一个 stdin 问审批（A-03）。让模型起的命令有机会读用户的终端，
+     * 既会打乱审批，也会在 CI 里悄悄吃掉管道输入。
+     */
+    try {
+      child.stdin?.end(input.stdin);
+    } catch {
+      /* 子进程已经退出：写不进去不影响结局（下面 close 会给真实退出码） */
+    }
 
     /* stdout 与 stderr 合成一份：终端里看到的就是合在一起的（opencode 走 PTY 同理） */
     child.stdout?.on("data", (d: Buffer) => out.push(d));
@@ -417,9 +450,15 @@ function killTree(child: ReturnType<typeof spawn>): void {
  * 把结果说成**一句话**（界面留痕与回给模型的共用这一句）。
  *
  * @param result 上面的结果
+ * @param rawCommand 模型给的命令原文（用于留痕）
+ * @param opts.stdinChars 这一次喂进去的 stdin 字数（省略 = 没用 stdin，文案不变）
  * @returns 一句话
  */
-export function describeRunResult(result: RunCommandResult, rawCommand: string): string {
+export function describeRunResult(
+  result: RunCommandResult,
+  rawCommand: string,
+  opts: { stdinChars?: number } = {},
+): string {
   if (!result.ok) return `跑不了「${rawCommand}」：${result.error}`;
   const cmd = result.command.length > 60 ? `${result.command.slice(0, 60)}…` : result.command;
   const how = result.aborted
@@ -427,7 +466,8 @@ export function describeRunResult(result: RunCommandResult, rawCommand: string):
     : result.timedOut
       ? "超时中止"
       : `退出码 ${result.exitCode ?? "?"}`;
-  return `跑了「${cmd}」（${how}）`;
+  const stdin = typeof opts.stdinChars === "number" && opts.stdinChars > 0 ? `（已喂入 ${opts.stdinChars} 字输入）` : "";
+  return `跑了「${cmd}」（${how}）${stdin}`;
 }
 
 /** 命令的**工作目录**也可以只给相对名（与写文件同口径）。供测试与调用方用。 */

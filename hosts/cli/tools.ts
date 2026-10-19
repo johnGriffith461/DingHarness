@@ -270,11 +270,19 @@ export function createCliExecutor(opts: {
       }
 
       case "run_command": {
-        const { command, workdir, timeout } = input as { command: string; workdir?: string; timeout?: number };
-        const result = await runCommandForModel({ command, ...(workdir === undefined ? {} : { workdir }), timeout }, dirs);
+        const { command, workdir, timeout, stdin } = input as {
+          command: string;
+          workdir?: string;
+          timeout?: number;
+          stdin?: string;
+        };
+        const result = await runCommandForModel(
+          { command, ...(workdir === undefined ? {} : { workdir }), timeout, ...(stdin === undefined ? {} : { stdin }) },
+          dirs,
+        );
         const output = {
           ok: result.ok,
-          line: describeRunResult(result, command),
+          line: describeRunResult(result, command, typeof stdin === "string" ? { stdinChars: stdin.length } : {}),
           ...(result.ok
             ? { exitCode: result.exitCode, cwd: result.cwd, truncated: result.truncated, timedOut: result.timedOut, text: result.output }
             : { error: result.error }),

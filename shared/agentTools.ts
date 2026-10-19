@@ -377,6 +377,11 @@ export const RUN_COMMAND_INPUT = z.object({
   command: z.string().trim().min(1).describe("要执行的命令行"),
   workdir: z.string().trim().optional().describe("在哪个目录里执行（绝对路径）；不传就用授权目录的第一个"),
   timeout: z.number().int().min(0).optional().describe("超时毫秒数，默认 120000；0 表示不限时"),
+  /*
+   * B-02：需要喂输入的命令（`npm init`、读 stdin 的脚本）把内容放这里。
+   * 上限 64 KiB 由执行体按**字节**再判一次（schema 的 max 是字符数）。
+   */
+  stdin: z.string().max(64 * 1024).optional().describe("要喂给命令的 stdin（最多 64 KiB；不给则命令读到 EOF）"),
 });
 
 /* ── P0-01：todo_write ───────────────────────────────────────────
