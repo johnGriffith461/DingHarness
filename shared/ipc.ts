@@ -347,6 +347,11 @@ export type ShellBridge = {
   knowledge: import("./knowledgeWire").KnowledgeBridge;
   modelConfig: import("./modelConfigWire").ModelConfigBridge;
   providers: import("./providerWire").ProviderBridge;
+  /**
+   * 项目上下文（A1/A2）：主进程读 `AGENTS.md`/`CLAUDE.md` 与环境事实，
+   * 渲染层把 `rendered` 拼到系统提示词前面；设置页「项目规则」用 `context`。
+   */
+  project: import("./projectWire").ProjectBridge;
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;
     revert: (sessionId: string, path: string) => Promise<ReviewRevertResult>;

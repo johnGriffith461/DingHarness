@@ -30,6 +30,7 @@ import { AGENT_CHANNEL } from "./ipc/agentStore";
 import { SEARCH_HISTORY_CHANNEL } from "./ipc/searchStore";
 import { WORKSPACE_CHANNEL } from "./ipc/workspaceStore";
 import { MCP_CHANNEL } from "./ipc/mcpStore";
+import { PROJECT_CHANNEL } from "./ipc/project";
 import { TASK_CHANNEL } from "./ipc/taskStore";
 import { VIDEO_CHANNEL } from "./ipc/videoGen";
 import { REMOTE_CHANNEL } from "./ipc/remote";
@@ -335,6 +336,10 @@ const api = {
     remove: (id: string) => ipcRenderer.invoke(PROVIDER_CHANNEL.remove, id) as ReturnType<ShellBridge["providers"]["remove"]>,
   },
   /** 逐文件改动审阅（U08）：读改动清单 / 回滚某个文件 */
+  project: {
+    context: () => ipcRenderer.invoke(PROJECT_CHANNEL.context) as ReturnType<ShellBridge["project"]["context"]>,
+    reload: () => ipcRenderer.invoke(PROJECT_CHANNEL.reload) as ReturnType<ShellBridge["project"]["reload"]>,
+  },
   review: {
     list: (sessionId: string) => ipcRenderer.invoke(REVIEW_CHANNEL.list, sessionId) as ReturnType<
       ShellBridge["review"]["list"]

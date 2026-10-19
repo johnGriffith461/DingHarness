@@ -23,6 +23,7 @@
  * 坏法很具体：中止静默失效、校准系数永不更新。
  */
 import type { ChatMessage, ShellBridge } from "@shared/ipc";
+import type { ProjectContextResult } from "@shared/projectWire";
 import { streamChat, completeOnce } from "../ai/aiClient";
 import { buildFollowUpPrompt, parseAskReply } from "./agent";
 import { artifactFileName, extractArtifacts, type Artifact } from "./artifact";
@@ -467,6 +468,32 @@ export async function answerTurn(
 }
 
 /**
+ * 这一轮的项目上下文（A1/A2）。
+ *
+ * 读文件在主进程（`electron/ipc/project.ts`），这里只拿渲染好的块 ——
+ * 渲染进程既没有真实 cwd，也不该有任意读文件的权限。
+ *
+ * 失败不阻塞这一轮：规则读不到是"模型少知道一点"，不是"不能干活"。
+ * 但会 `console.warn` 留痕，且设置页可以单独触发重读（`project.reload`）。
+ */
+async function projectContextBlock(): Promise<string> {
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem("ding.projectContext") === "off") return "";
+  } catch {
+    /* 无 localStorage（测试/无窗）→ 按开启处理 */
+  }
+  const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+  if (!bridge?.project?.context) return "";
+  try {
+    const got: ProjectContextResult = await bridge.project.context();
+    return got.rendered;
+  } catch (error) {
+    console.warn("[project] 读取项目上下文失败（本轮继续，不阻塞）：", error);
+    return "";
+  }
+}
+
+/**
  * 跑一次流式请求，把增量写进当前任务的活动状态。
  *
  * @param user 用户内容
@@ -548,7 +575,12 @@ export async function runStream(
    * 选不到就是空串（不多出空行）。技能目录不存在也不报错 —— 那是正常状态。
    */
   const skillBlock = await skillsBlockFor(user);
-  const fullSystem = assembleSystem({ base: system, persona, memory: remembered, skills: skillBlock, abilities: extra });
+  /*
+   * A1/A2：项目规则与环境。放在人设之后、记忆之前（`assembleSystem` 的 `project` 槽）——
+   * 模型先知道"这个仓库的规则与测试命令"，再谈能力。
+   */
+  const projectBlock = await projectContextBlock();
+  const fullSystem = assembleSystem({ base: system, persona, project: projectBlock, memory: remembered, skills: skillBlock, abilities: extra });
   /**
    * 这一轮的**投影**（C2）：正文、工具留痕、用量只有一份算法。
    *

@@ -35,6 +35,7 @@ import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, 
 import { replPrecondition, runRepl } from "./repl";
 import { flag, flagAll, KNOWN_FLAGS, parseArgv, parseIntFlagValue, type Parsed } from "./args";
 import { AGENT_SPECS } from "../../engine/runtime/agents";
+import { loadProjectContext, renderProjectContext } from "../../engine/runtime/projectContext";
 
 /**
  * `ding` —— **CLI 宿主**（Phase 2）。
@@ -465,7 +466,20 @@ function cmdModels(p: Parsed = { command: "", args: [], flags: new Map() }): num
 
 /** CLI 的系统提示词：只讲"你在哪、能做什么、边界在哪"。 */
 function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
+  /*
+   * A1/A2：项目规则与环境。CLI 恒为编码场景，第一个工作区就是项目根；
+   * 没有工作区时用进程 cwd（`ding` 通常就在仓库里跑）。
+   * 读失败不阻塞：少一段上下文，不是不能干活。
+   */
+  let projectBlock = "";
+  try {
+    const ctx = loadProjectContext(dirs[0] ?? process.cwd(), { globalDir: path.join(os.homedir(), ".ding") });
+    projectBlock = renderProjectContext(ctx);
+  } catch (error) {
+    process.stderr.write(`[project] 项目规则读取失败（继续）：${error instanceof Error ? error.message : String(error)}\n`);
+  }
   return [
+    ...(projectBlock ? [projectBlock] : []),
     "你是 Ding Harness 无头命令行宿主里的一个 agent。",
     `你能操作的目录（白名单）：${dirs.join("、")}。白名单之外的路径一律碰不到，不要试。`,
     "工具有：list_files / list_dir / read_file / write_file / edit_file / search_files / run_command / spawn_agent。",
@@ -473,7 +487,7 @@ function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
       ? "当前档位「全部允许」：写文件与跑命令**会直接执行**。动手前先想清楚，尤其是覆盖已有文件。"
       : `当前档位「${mode}」：会改东西的调用会被拦下、交给人确认（无头模式下没人点，等于办不成）。`,
     "做完就把结果说清楚：改了哪些文件、下一步是什么。不要复述工具返回的原文。",
-  ].join("\n");
+  ].join("\n\n");
 }
 
 /**

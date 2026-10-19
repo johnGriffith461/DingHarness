@@ -11,6 +11,21 @@
   `docs/**` 的指引去找依据**，那些地方已经按"该依据未入库、无法复核"如实标注。
   真证据一律在仓内：`engine/eval/samples/`、`engine/eval/perf-baseline.md`、`SAFETY.md`、`ADR/`。
 
+## 未发布（地基重建 A 阶段，2026-10-19）
+
+### 新增：项目上下文（A1/A2）
+
+- **模型第一轮就能读到仓库规则**：从 cwd 向上到 git root 搜索
+  `AGENTS.override.md` → `AGENTS.md` → `CLAUDE.md`（同层取第一个），
+  可另加 `~/.ding/AGENTS.md` 作为全局规则；单文件 32 KiB / 总量 48 KiB 上限，
+  超限截断并写明。设置 → 通用 →「项目规则」可看到真正被读进来的文件、字节数与修改时间，
+  也可以手动重新加载。
+- **环境事实进系统提示词**：`<environment>` 块带 cwd、平台、git root、包管理器
+  （pnpm/npm/yarn/bun，按 lock 文件判断）与测试命令（只从 `package.json.scripts.test`
+  探测，探测不到就不写）。CLI 宿主同样注入。
+- 规则读取失败不阻塞对话：设置页标红并写明原因；`ding.projectContext=off`
+  可整体关掉（回滚开关）。
+
 ## 0.6.0（2026-10-18）
 
 > 主题：**从"能跑"到"能托付"** —— 权限更严、上下文更省、手机能批、插件隔离、文档能照做。

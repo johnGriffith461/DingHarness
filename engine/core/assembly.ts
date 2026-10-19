@@ -18,11 +18,13 @@
  *
  * 1. `base` —— 这一轮的任务要求（工作台按"问 / 干 / 追问"三档给不同的）
  * 2. `persona` —— **你是谁**（选中的 AI 智能体：设定描述 + 标签）
- * 3. `memory` —— **你记得什么**（长期记忆）
- * 4. `abilities` —— **你能用什么**（插件 / 技能 / 伙伴里开着的那些）
- * 5. `extra` —— 其它要额外交代的（例如"更早的对话已压缩为摘要"）
+ * 3. `project` —— **你在哪**（项目规则 + 环境事实，A1/A2）
+ * 4. `memory` —— **你记得什么**（长期记忆）
+ * 5. `abilities` —— **你能用什么**（插件 / 技能 / 伙伴里开着的那些）
+ * 6. `extra` —— 其它要额外交代的（例如"更早的对话已压缩为摘要"）
  *
- * 从"身份"到"能力"再到"临时交代"：越靠后越像本次的补充说明。
+ * 从"身份"到"所在项目"再到"能力"："你在哪"必须早于"你记得什么"——
+ * 模型先知道这个仓库的规则，才会用正确的测试命令去验证，而不是拿旧习惯套。
  */
 
 /** 装配的输入：**给了才拼**（空串/undefined 一律跳过，不留空段）。 */
@@ -31,6 +33,8 @@ export type AssemblyInput = {
   base?: string;
   /** 人设（选中的 AI 智能体）。 */
   persona?: string;
+  /** 项目规则与环境（A1/A2：`renderProjectContext` 的产物）。 */
+  project?: string;
   /** 长期记忆。 */
   memory?: string;
   /** 能力说明（插件 / 技能 / 伙伴）。 */
@@ -51,7 +55,7 @@ export const BLOCK_SEPARATOR = "\n\n";
  * @returns 拼好的 system；一块都没有时给空串（**不发一个空的 system**）
  */
 export function assembleSystem(input: AssemblyInput): string {
-  return [input.base, input.persona, input.memory, input.skills, input.abilities, input.extra]
+  return [input.base, input.persona, input.project, input.memory, input.skills, input.abilities, input.extra]
     .map((part) => (typeof part === "string" ? part.trim() : ""))
     .filter(Boolean)
     .join(BLOCK_SEPARATOR);

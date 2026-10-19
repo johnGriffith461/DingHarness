@@ -27,6 +27,7 @@ import { registerCanvasExportIpc } from "./ipc/canvasExport";
 import { registerAssetScheme, registerImageIpc, serveAssets } from "./ipc/imageGen";
 import { registerArtifactIpc } from "./ipc/artifactStore";
 import { registerDiagnosticsIpc } from "./ipc/diagnostics";
+import { registerProjectIpc } from "./ipc/project";
 import { recordCrash } from "./ipc/crashLog";
 import { registerDriveIpc } from "./ipc/driveStore";
 import { registerScheduleIpc } from "./ipc/scheduleStore";
@@ -512,6 +513,8 @@ safeRegister("image", () => registerImageIpc(), logRegisterFailure);
 safeRegister("artifact", () => registerArtifactIpc(ipcMain), logRegisterFailure);
 /* 诊断包导出（2026-10-17）：技能面板「反馈」的真归宿（本地形态，不上报） */
 safeRegister("diagnostics", () => registerDiagnosticsIpc(ipcMain), logRegisterFailure);
+/* 项目规则与环境（A1/A2）：主进程读 AGENTS.md / package.json，渲染层只收结果 */
+safeRegister("project", () => registerProjectIpc(ipcMain), logRegisterFailure);
 safeRegister("drive", () => registerDriveIpc(ipcMain, () => win), logRegisterFailure);
 safeRegister("memory", () => registerMemoryIpc(), logRegisterFailure);
 safeRegister("schedule", () => registerScheduleIpc(ipcMain), logRegisterFailure);
