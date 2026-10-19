@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { COMMAND_USAGE, KNOWN_COMMANDS } from "./help";
+import { COMMAND_USAGE, KNOWN_COMMANDS, renderHelp } from "./help";
 
 /**
  * CLI 帮助的完整性（U11，2026-10-18）。
@@ -25,5 +25,48 @@ describe("命令表与用法表", () => {
       expect(line, command).toMatch(/^ding /);
       if (command !== "help") expect(line.length, command).toBeGreaterThan(10);
     }
+  });
+});
+
+/**
+ * T-10：`--help` 的**主列表**必须列出所有非工程模式命令。
+ *
+ * 缺陷形状（WorkBuddy 实测）：`stats` / `tree` / `jobs` / `board` / `steer` /
+ * `export` / `import` 都能用，但主列表里没有 —— 用户看不到就不会用。
+ * 这一条是守卫：以后新增命令忘了写进 help，第一次 `pnpm test` 就红。
+ */
+const DEV_ONLY = new Set(["record", "replay"]);
+
+function helpText(devMode = false): string {
+  /* T-10：直接读纯渲染函数 —— stdout 在 vitest 下被接管，截流拿不到内容 */
+  return renderHelp(devMode, "C:/data");
+}
+
+
+describe("cmdHelp 主列表（T-10）", () => {
+  it("⭐ KNOWN_COMMANDS 里每个非工程模式命令都出现在主帮助里", () => {
+    const text = helpText(false);
+    const missing = [...KNOWN_COMMANDS]
+      .filter((cmd) => !DEV_ONLY.has(cmd))
+      .filter((cmd) => !new RegExp(`^\\s+ding ${cmd}\\b`, "m").test(text));
+    expect(missing, `这些命令没写进 --help：${missing.join(" / ")}`).toEqual([]);
+  });
+
+  it("七条补齐的命令各有一句用途", () => {
+    const text = helpText(false);
+    for (const cmd of ["stats", "tree", "jobs", "steer", "board", "export", "import"]) {
+      const line = text.split("\n").find((l) => l.trimStart().startsWith(`ding ${cmd}`));
+      expect(line, `${cmd} 没有出现在 help 里`).toBeTruthy();
+      expect(line, `${cmd} 那行没有用途说明`).toMatch(/#\s*\S/);
+    }
+  });
+
+  it("stats 的用途写的是可靠性统计", () => {
+    expect(helpText(false)).toMatch(/可靠性统计/);
+  });
+
+  it("工程模式命令只在 --dev 下出现", () => {
+    expect(helpText(false)).not.toMatch(/^\s+ding record\b/m);
+    expect(helpText(true)).toMatch(/^\s+ding record\b/m);
   });
 });

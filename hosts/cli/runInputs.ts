@@ -65,6 +65,8 @@ export function buildRunRequest(input: {
   steps: number;
   config: CliConfig;
   nextSteer: () => string[];
+  /** T-08：授权目录（记进会话日志，供 review --revert 继承）。 */
+  dirs?: readonly string[];
 }): EngineRunRequest {
   return {
     sessionId: input.sessionId,
@@ -78,6 +80,7 @@ export function buildRunRequest(input: {
     ...(input.runtime ? { modelConfig: input.runtime } : {}),
     /* 用户声明过这个模型（runtime.manual 或有 matched）→ 允许它不在 provider 清单里 */
     ...(input.runtime?.manual ? { allowUndeclaredModel: true } : {}),
+    ...(input.dirs?.length ? { workdirs: [...input.dirs] } : {}),
     nextSteer: input.nextSteer,
     ...(typeof input.config.maxBudgetUsd === "number" && input.config.maxBudgetUsd > 0
       ? { maxBudgetUsd: input.config.maxBudgetUsd }

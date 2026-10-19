@@ -16,9 +16,14 @@
  * @param dataDir 本次实际使用的数据目录（照实打出来 —— 它会被 `DH_DATA_DIR` /
  *   `DSH_CANVAS_DATA_DIR` 改，用户要能看见自己现在落在哪）
  */
-export function cmdHelp(devMode: boolean, dataDir: string): number {
-  process.stdout.write(
-    [
+/**
+ * T-10：帮助文本的**纯渲染**（单测直接读它，不用去截 stdout）。
+ *
+ * 为什么抽出来：`process.stdout.write` 在 vitest 下会被它自己的 console 拦截接管，
+ * 截流拿不到内容 —— 于是"帮助里缺了哪些命令"根本测不出来（实测踩过：38 条全红）。
+ */
+export function renderHelp(devMode: boolean, dataDir: string): string {
+  return [
       "ding —— Ding Harness 的命令行宿主",
       "",
       '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
@@ -53,6 +58,19 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
       "  ding agents                                    # 内置专家（AgentSpec）",
       "  ding plugins [list|search <词>|verify <目录>|verify-index <索引>|install <目录|npm:包名|index:id> --yes|enable|disable|remove|doctor] [--index <文件|URL>]",
       "  ding config [show|set <键> <值>|unset <键>]    # 默认 provider / 模型 / 档位 / 目录",
+      /*
+       * T-10：这七条**已经能用**但主列表里没有 —— `ding stats` 是全 CLI 最有用的
+       * 可靠性统计（成功率/工具失败数/p50/p95），用户看不到就不会用。
+       * 下面 `help.test.ts` 拿 KNOWN_COMMANDS 与这份输出对账，以后再漏会红。
+       */
+      "  ding stats [--days N] [--json]                # 可靠性统计：成功率 / 工具失败数 / p50 / p95",
+      "  ding tree [会话 id] [--json]                  # 分叉树（谁从哪一刻分出来的）",
+      "  ding jobs list|show|wait|cancel [任务 id]     # 后台任务",
+      "  ding steer <会话 id> \"要补的话\"               # 中途插话（下一段生效）",
+      "  ding board list|add|claim|done|fail|post|inbox …  # 任务板（认领 / 收件箱）",
+      "  ding export [--out <文件>] [--kind chat|task|cli]  # 导出（不含密钥）",
+      "  ding import <导出文件.json> [--dry-run]       # 导入（只补不覆盖）",
+      "  ding help [<命令>]                             # 这份总帮助，或某条命令自己的用法",
       "  ding --json <命令>                             # 给脚本/CI 的 JSON 输出",
       ...(devMode
         ? [
@@ -69,8 +87,11 @@ export function cmdHelp(devMode: boolean, dataDir: string): number {
        */
       `数据目录：${dataDir}（DH_DATA_DIR 可覆盖；桌面的 DSH_CANVAS_DATA_DIR 也认）`,
       "",
-    ].join("\n"),
-  );
+  ].join("\n");
+}
+
+export function cmdHelp(devMode: boolean, dataDir: string): number {
+  process.stdout.write(renderHelp(devMode, dataDir));
   return 0;
 }
 

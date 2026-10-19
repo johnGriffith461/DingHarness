@@ -34,7 +34,7 @@ import { KNOWN_COMMANDS, cmdCommandHelp, cmdHelp } from "./help";
 import { ensureConfigured } from "./wizard";
 import { configPaths, describeConfig, effectiveConfig, readConfig, writeConfig, type CliConfig } from "./config";
 import { replPrecondition, runRepl } from "./repl";
-import { flag, flagAll, KNOWN_FLAGS, parseArgv, parseIntFlagValue, type Parsed } from "./args";
+import { flag, flagAll, KNOWN_FLAGS, parseArgv, parseConfirmModeArg, parseIntFlagValue, type Parsed } from "./args";
 import { AGENT_SPECS } from "../../engine/runtime/agents";
 import { loadProjectContext, renderProjectContext } from "../../engine/runtime/projectContext";
 import { CODING_MODE_RULES } from "../../shared/codingPrompt";
@@ -241,7 +241,17 @@ async function cmdRun(p: Parsed): Promise<number> {
     return 3;
   }
 
-  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认");
+  /*
+   * T-09：**严格解析**（英文别名 + 未知值报错退出 2）。
+   * 原来直接 `normalizeConfirmMode`，`--mode allow` 被静默回落成「按需确认」——
+   * 用户以为放开了，实际每一步都在拦，而命令行没有任何提示。
+   */
+  const parsedMode = parseConfirmModeArg(flag(p, "mode") ?? config.mode);
+  if (!parsedMode.ok) {
+    process.stderr.write(`${parsedMode.error}\n`);
+    return 2;
+  }
+  const mode = parsedMode.mode;
   /*
    * 后台任务（G06）：父进程生成会话 id 交给子进程（`DSH_SESSION_HINT`），
    * 这样 `ding jobs show` 能直接给出"用哪个会话看状态"。
@@ -289,6 +299,7 @@ async function cmdRun(p: Parsed): Promise<number> {
     mode,
     steps: steps.value,
     config,
+    dirs,
     nextSteer: () => drainSteer(dataDir(), sessionId),
   });
 
@@ -711,7 +722,13 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
   for (const problem of built.plugins) process.stderr.write(`[plugin] ${problem}\n`);
 
   const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider(resolveSecret)!.id;
-  const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认");
+  /* T-09：REPL 与 `ding run` 同一套严格解析（未知值报错退出 2） */
+  const parsedMode = parseConfirmModeArg(flag(p, "mode") ?? config.mode);
+  if (!parsedMode.ok) {
+    process.stderr.write(`${parsedMode.error}\n`);
+    return 2;
+  }
+  const mode = parsedMode.mode;
   const sessionId = cliSessionId(`repl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
 
   try {

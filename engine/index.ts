@@ -159,6 +159,8 @@ export type EngineRunRequest = {
   mode: ConfirmMode;
   /** 给不给工具（起标题、翻译这类附带请求不给 —— 它们拿到工具会真的动手）。 */
   useTools?: boolean;
+  /** T-08：这一轮可操作的目录（宿主给；记进 request 供 `review --revert` 继承）。 */
+  workdirs?: readonly string[];
   /**
    * 只要这些工具（**角色白名单**，可选；2026-10-16，审计 P126）。
    *
@@ -439,6 +441,8 @@ export function createEngine(ports: EnginePorts): Engine {
         toolPolicy: request.mode,
         ...(request.useTools ? { useTools: true } : {}),
         tools: request.useTools ? namesActuallyOffered() : [],
+        /* T-08：记下可操作目录 —— review --revert 要按它找回白名单 */
+        ...(request.workdirs?.length ? { workdirs: [...request.workdirs] } : {}),
       });
 
       const events: TurnEvent[] = [];

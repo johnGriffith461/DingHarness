@@ -7,6 +7,8 @@
  * （它错了不会崩，只会表现为"某个参数没生效"）。
  */
 
+import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
+
 /** 解析结果。 */
 export type Parsed = {
   /**
@@ -309,3 +311,44 @@ export const flagAll = (p: Parsed, name: string): string[] => p.flags.get(name) 
 
 /** 取一个旗标的最后一个取值（`--k a --k b` → `b`）。 */
 export const flag = (p: Parsed, name: string): string | undefined => flagAll(p, name).at(-1);
+
+/**
+ * T-09：`--mode` 的**严格解析**（CLI 参数层）。
+ *
+ * ## 缺陷形状（WorkBuddy 实测）
+ *
+ * `normalizeConfirmMode` 只认中文三档，认不出就**静默回落**「按需确认」。
+ * 用户写 `--mode allow`（英文，别的 harness 的写法）时任务被拦下、文件没改，
+ * 而命令行**没有任何提示** —— 他只会以为"这东西不会干活"。
+ *
+ * ## 口径
+ *
+ * - 英文别名：`allow`/`yes`/`all` → 全部允许；`ask`/`confirm`/`default` → 按需确认；
+ *   `each`/`step`/`every` → 每步确认；
+ * - 中文三档原样通过；
+ * - 其它值：返回 `ok:false` 与一句**可用值**，调用方退出码 2（不回落）。
+ *
+ * ⚠️ `normalizeConfirmMode` 本身不动：契约层只认词表，别名是 CLI 的事。
+ */
+export function parseConfirmModeArg(raw: string | undefined): { ok: true; mode: ConfirmMode } | { ok: false; error: string } {
+  const value = String(raw ?? "").trim();
+  if (!value) return { ok: true, mode: "按需确认" };
+  if (CONFIRM_MODES.includes(value as ConfirmMode)) return { ok: true, mode: value as ConfirmMode };
+  const alias: Record<string, ConfirmMode> = {
+    allow: "全部允许",
+    yes: "全部允许",
+    all: "全部允许",
+    ask: "按需确认",
+    confirm: "按需确认",
+    default: "按需确认",
+    each: "每步确认",
+    step: "每步确认",
+    every: "每步确认",
+  };
+  const mapped = alias[value.toLowerCase()];
+  if (mapped) return { ok: true, mode: mapped };
+  return {
+    ok: false,
+    error: `不认识的档位：${value}（可用：${CONFIRM_MODES.join(" / ")}；英文别名 allow / ask / each）`,
+  };
+}

@@ -159,3 +159,33 @@ describe("旗标登记守卫（审计 P220 的配套）", () => {
     expect(misses, "这些旗标没登记进 KNOWN_FLAGS，会被入口当拼错拒掉").toEqual([]);
   });
 });
+
+/*
+ * T-09：`--mode` 严格解析（英文别名 + 未知值报错，不静默回落）。
+ */
+import { parseConfirmModeArg } from "./args";
+
+describe("parseConfirmModeArg（T-09）", () => {
+  it("中文三档原样通过", () => {
+    expect(parseConfirmModeArg("全部允许")).toEqual({ ok: true, mode: "全部允许" });
+    expect(parseConfirmModeArg("按需确认")).toEqual({ ok: true, mode: "按需确认" });
+    expect(parseConfirmModeArg("每步确认")).toEqual({ ok: true, mode: "每步确认" });
+  });
+
+  it("英文别名映射正确", () => {
+    expect(parseConfirmModeArg("allow")).toEqual({ ok: true, mode: "全部允许" });
+    expect(parseConfirmModeArg("ask")).toEqual({ ok: true, mode: "按需确认" });
+    expect(parseConfirmModeArg("each")).toEqual({ ok: true, mode: "每步确认" });
+    expect(parseConfirmModeArg("ALLOW")).toEqual({ ok: true, mode: "全部允许" });
+  });
+
+  it("缺省 → 按需确认", () => {
+    expect(parseConfirmModeArg(undefined)).toEqual({ ok: true, mode: "按需确认" });
+  });
+
+  it("⭐ 未知值报错（不静默回落）", () => {
+    const got = parseConfirmModeArg("乱写");
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.error).toContain("可用");
+  });
+});

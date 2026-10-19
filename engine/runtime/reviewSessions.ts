@@ -55,3 +55,23 @@ export async function loadReviewRecords(rawSessionId: string, load: SessionLoade
   for (const record of [...fallback.records, ...primary.records]) merged.set(keyOf(record), record);
   return [...merged.values()].sort((a, b) => (a.at === b.at ? a.seq - b.seq : a.at - b.at));
 }
+
+/**
+ * T-08：从会话记录里取**当初那个任务的运行目录**。
+ *
+ * `ding review <会话> --revert <文件>` 要知道白名单：那些文件当初是在哪个目录下改的。
+ * 取**最后一条**带 `workdirs` 的 `request` 记录（同一个会话里目录可能变过，
+ * 但回滚针对的是最近那次运行）。旧日志没有这个字段 → 返回空数组，调用方回落配置/cwd。
+ */
+export function workdirsFromRecords(records: readonly RecordLike[]): string[] {
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    const record = records[i];
+    if (!record || record.type !== "request") continue;
+    const dirs = record.workdirs;
+    if (Array.isArray(dirs)) {
+      const clean = dirs.filter((d): d is string => typeof d === "string" && d.trim() !== "").map((d) => d.trim());
+      if (clean.length) return clean;
+    }
+  }
+  return [];
+}

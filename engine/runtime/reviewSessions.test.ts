@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadReviewRecords, type RecordLike } from "./reviewSessions";
+import { loadReviewRecords, workdirsFromRecords, type RecordLike } from "./reviewSessions";
 
 /**
  * T-01：改动审阅的**读路径**要兼容旧数据。
@@ -65,5 +65,23 @@ describe("loadReviewRecords", () => {
     });
     expect(asked).toEqual([]);
     expect(got).toEqual([]);
+  });
+});
+
+describe("workdirsFromRecords（T-08）", () => {
+  it("取最后一条带 workdirs 的 request", () => {
+    const got = workdirsFromRecords([
+      { seq: 1, at: 1, type: "request", workdirs: ["C:/old"] },
+      { seq: 2, at: 2, type: "request", workdirs: ["C:/new", " C:/two "] },
+    ]);
+    expect(got).toEqual(["C:/new", "C:/two"]);
+  });
+
+  it("旧日志没有该字段 → 空数组（调用方回落配置/cwd）", () => {
+    expect(workdirsFromRecords([{ seq: 1, at: 1, type: "request" }])).toEqual([]);
+  });
+
+  it("不是 request 的记录不参与", () => {
+    expect(workdirsFromRecords([{ seq: 1, at: 1, type: "done", workdirs: ["C:/x"] }])).toEqual([]);
   });
 });

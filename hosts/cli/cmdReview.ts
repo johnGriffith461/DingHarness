@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { fileChangesFrom, groupByPath, lineDiff, rollbackOf, summarizeChanges } from "../../engine/runtime/fileReview";
+import { workdirsFromRecords } from "../../engine/runtime/reviewSessions";
 import { editFileForModel } from "../../engine/runtime/tools/editTool";
 import { insideDirs } from "../../engine/runtime/tools/drivePaths";
 import { flag, flagAll, type Parsed } from "./args";
@@ -65,12 +66,19 @@ export async function cmdReview(p: Parsed, dataDir: string): Promise<number> {
       return 1;
     }
     /*
-     * 目录白名单与 `ding run` 同一优先级：显式 `--dir` > 配置里的 dirs > 当前目录。
+     * 目录白名单（T-08）：显式 `--dir` > **该会话当初的运行目录** > 配置里的 dirs > 当前目录。
+     *
+     * 缺陷形状（WorkBuddy 实测）：用户照着 `ding review` 打印的建议敲
+     * `ding review <id> --revert <文件>`，但白名单里没有那个任务当初跑的目录，
+     * 于是回滚**必然**报"不在可改范围内" —— 而用户完全不知道要补 `--dir`。
+     * 会话日志里现在记了 `workdirs`（旧日志没有 → 回落配置/cwd，行为不变）。
+     *
      * 回滚是**写操作** —— 它必须落在同一个白名单里，不能因为换了一条命令就放宽。
      */
     const explicit = flagAll(p, "dir");
     const configured = readConfig(dataDir).config.dirs ?? [];
-    const dirs = (explicit.length ? explicit : configured.length ? configured : [process.cwd()]).map((d) => path.resolve(d));
+    const fromSession = workdirsFromRecords(records);
+    const dirs = resolveReviewDirs({ explicit, fromSession, configured, cwd: process.cwd() });
     /* 从**最后一条**开始回滚：同一文件改了多次时，逆序才能回到最初的样子 */
     let reverted = 0;
     for (const change of [...group.changes].reverse()) {
@@ -132,4 +140,26 @@ export async function cmdReview(p: Parsed, dataDir: string): Promise<number> {
   }
   process.stdout.write(`\n回滚某个文件：ding review ${sessionId} --revert <路径>\n`);
   return 0;
+}
+
+/**
+ * T-08：回滚时用哪一组目录（**纯函数**，便于单测）。
+ *
+ * 顺序：显式 `--dir` > 该会话当初的运行目录 > 配置里的 dirs > 当前目录。
+ * 回滚是写操作，四个来源都只决定"白名单是什么"，**不改变**「必须在白名单内」这条。
+ */
+export function resolveReviewDirs(input: {
+  explicit: readonly string[];
+  fromSession: readonly string[];
+  configured: readonly string[];
+  cwd: string;
+}): string[] {
+  const chosen = input.explicit.length
+    ? input.explicit
+    : input.fromSession.length
+      ? input.fromSession
+      : input.configured.length
+        ? input.configured
+        : [input.cwd];
+  return chosen.map((d) => path.resolve(d));
 }
