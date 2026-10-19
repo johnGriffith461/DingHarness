@@ -199,6 +199,18 @@ export type ProjectableEvent =
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
   | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number }; wroteFiles?: boolean }
+  /**
+   * 一次上下文压缩（E2）。**全部字段可选**：旧日志没有它照常读；
+   * 新日志里它是一条可回放的事实（压了哪一段、前后 token）。
+   */
+  | {
+      type: "compaction";
+      fromSeq?: number;
+      toSeq?: number;
+      summaryId?: string;
+      tokensBefore?: number;
+      tokensAfter?: number;
+    }
   | { type: "error"; message: string }
   /* 中途插话（G06）：只用于上屏，不改变正文投影 */
   | { type: "steer"; text: string }
@@ -274,6 +286,8 @@ export type TurnView = {
   done: boolean;
   /** D1：这一轮成功写过文件（宿主的验证闭环据此决定是否跑测试）。 */
   wroteFiles?: boolean;
+  /** E2：这段里发生过几次压缩（可回放）。 */
+  compactions?: number;
 };
 
 /**
@@ -384,6 +398,11 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
       // 配对掉了就从等待队列里移出（同一个 id 只配一次）
       waiting: state.waiting.filter((w) => w.toolCallId !== event.toolCallId),
     };
+  }
+
+  if (event.type === "compaction") {
+    /* E2：压缩是"发生过的事"，投影里只累计次数（内容看日志原文） */
+    return { ...state, compactions: (state.compactions ?? 0) + 1 };
   }
 
   if (event.type === "done") {
@@ -588,6 +607,7 @@ export function finishTurn(state: TurnState, opts: ProjectOptions = {}): TurnVie
     ...(usage ? { usage } : {}),
     ...(error ? { error } : {}),
     ...(wroteFiles ? { wroteFiles: true } : {}),
+    ...(state.compactions ? { compactions: state.compactions } : {}),
   };
   return base;
 }

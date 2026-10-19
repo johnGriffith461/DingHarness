@@ -66,7 +66,7 @@ export function compactPrompt(older: readonly ChatMessage[]): { system: string; 
    */
   const system = [
     "你把一段较早的对话压缩成**结构化检查点**，供后续对话接着做。",
-    "严格按下面八段输出（每段一两行；空段写「无」）：",
+    "严格按下面九段输出（每段一两行；空段写「无」）：",
     "1. Objective：这次要达成什么",
     "2. Requirements：用户明确提出的要求与约束",
     "3. Decisions：已经定下来的做法（含被否决的方案与原因）",
@@ -75,6 +75,7 @@ export function compactPrompt(older: readonly ChatMessage[]): { system: string; 
     "6. Relevant Files：改过或要改的文件（最多 15 个，一行一个）",
     "7. Important Context：数字、专有名词、外部依赖、踩过的坑",
     "8. Open Questions：还没答案的问题",
+    "9. Verification：已经跑过的验证与结果（命令 + pass/fail；没跑写「没跑」）",
     "不要写寒暄与客套；不要编造原文里没有的内容（看不清就写「无」）。",
   ].join("\n");
   const user = older.map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.content}`).join("\n\n");
