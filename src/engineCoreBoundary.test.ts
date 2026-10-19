@@ -112,8 +112,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * 2026-10-19（C1/E1）71 → 73：`engine/runtime/planMode.ts`（计划模式的纯状态/工具表）
  * 与 `engine/runtime/verifyLoop.ts` 之一由入口引入；两者都不碰 IO，
  * 属于"内核自己要知道的规则"，留在最小面里是对的。
+ *
+ * 2026-10-19（P0-02/06）73 → 75：`engine/runtime/finishContract.ts`（完成契约：
+ * 证据校验与 turn 账本）与 `engine/runtime/stall.ts`（重复调用检测）由主循环直接
+ * import —— 它们是"一轮怎么收尾"的规则，必须和循环住一起；两者都不碰 IO。
  */
-const CLOSURE_BUDGET = 73;
+const CLOSURE_BUDGET = 75;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

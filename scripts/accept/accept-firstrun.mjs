@@ -58,6 +58,25 @@ try {
   out.modelSelectVisible = (await page.locator('[data-testid="wb-firstrun-model"]').count()) > 0;
   if (!out.modelStepActive) throw new Error("向导没有落在「选模型」那一步（有 key 时第 1 步应被跳过）");
 
+  /*
+   * 布局：向导与首页是**上下**关系（不是左右两列）。
+   * ⚠️ 必须在**向导还开着**的时候量 —— 走完向导它就从 DOM 里消失了。
+   * 防的坏：`.wb-main` 是横排 flex，向导直接做兄弟会占一列，
+   * 首页被挤成窄条、画布被压到右边缘（2026-10-19 截图实测）。
+   */
+  const shell = page.locator('[data-testid="wb-home-shell"]');
+  out.shellVisible = (await shell.count()) > 0;
+  const homeBox = await page.locator('[data-testid="wb-home"]').boundingBox();
+  const cardBox = await guide.locator(".wb-firstrun-card").boundingBox();
+  out.homeWidth = homeBox ? Math.round(homeBox.width) : 0;
+  out.guideHeight = cardBox ? Math.round(cardBox.height) : 0;
+  /* 首页要有正经可用宽度（截图里被挤到 ~300px 就是坏的） */
+  out.homeWideEnough = out.homeWidth >= 600;
+  /* 向导卡不该被拉成全高 */
+  out.guideCompact = out.guideHeight > 0 && out.guideHeight < 500;
+  /* 向导开着时的样子（证据：给人看的，不是断言） */
+  await shot(page, ".verify/firstrun-guide.png");
+
   /* 选一个模型并走完 */
   const select = page.locator('[data-testid="wb-firstrun-model"]');
   const values = await select.locator("option").evaluateAll((els) =>
@@ -112,6 +131,9 @@ const checks = [
   ["上下文表显示按窗口推导的预算", out.meterHasBudget === true],
   ["上下文表不写「未记录」", out.meterNotUnknown === true],
   ["首屏默认身份是编码", out.defaultCoding === true],
+  ["首页外壳是上下布局（向导在首页上方）", out.shellVisible === true],
+  ["首页有可用宽度（≥600px，没有被向导挤成窄条）", out.homeWideEnough === true],
+  ["向导卡只占内容高度（<500px，没有被拉成全高）", out.guideCompact === true],
 ];
 
 if (out.error) process.stdout.write(`\n异常：${out.error}\n`);

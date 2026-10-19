@@ -220,3 +220,33 @@ pnpm bench:hillclimb --label "一句话说清这一轮只改了什么" --repeat 
 - `harness` 套是**确定性**的：通过率不随模型变，只随产品代码变。这是优点（防回归），
   也是限制（不能拿来比模型）。
 - 评测机与 CI 隔离：harness 套可以进 CI；SWE-bench 预测/判分走独立 workflow 与预算。
+
+## 8. 过程验收（2026-10-19，真 provider）
+
+口径：同一条命令、同一个模型（`tokenrhythm/deepseek-v4.1-flash-1017`，窗口按 1M 声明）、
+同一台机器（Windows 11，Node v24.18.0）。金额**未折算**：这个模型没有可核实的单价，
+所以只记 token 与墙钟，不写"约 ¥x"。
+
+- 命令：`ACCEPT_PROVIDER=tokenrhythm ACCEPT_MODEL=deepseek-v4.1-flash-1017 node scripts/accept/accept-harness.mjs --yes-spend`
+  - 结果：**通过**；临时仓库里 `src/sum.js` 被改、`test/sum.test.js` 未动；测试退出码 0
+  - 墙钟 **8.8s**，token **34,354**
+- 命令：`... accept-harness-multistep.mjs --yes-spend`
+  - 结果：**通过**；轨迹里有成功的 `todo_write` 与 `finish`，`src/mul.js` / `test/mul.test.js` 被创建，测试退出码 0
+  - 墙钟 **13.1s**，token **50,579**
+- 命令：`... accept-approval-real.mjs --yes-spend`
+  - 批准场景：按需确认下写文件被拦 → 执行体真执行 → 结果回注 → 第二轮继续，**没有重复写同一个文件**
+  - 拒绝场景：拒绝后文件**一个字节未变**，模型没有重复被拒绝的写操作
+  - token **83,110**（两条合计）；墙钟未单独记录
+- 命令：`DSH_ACCEPT_ONLY=accept-firstrun.mjs node scripts/verify-acceptances.mjs`
+  - 结果：10/10 通过；首跑落在「选模型」、chip 显示 `strata/deepseek-flash`、预算 `0 / 966k（0%）`、默认身份编码
+  - 不调模型、零出网
+
+本轮真调用合计约 **35 万 token**（含两次失败重跑）；预算闸：单任务 ≤¥2、整批 ≤¥8，未超出。
+
+**失败过、并已修的**（保留证据，不粉饰）：
+
+1. 首轮多步任务：模型明确回复"我这边实际可用的工具里没有 `todo_write` 和 `finish`"。
+   根因是 CLI 的 `CLI_TOOLS` 暴露面与 `ALWAYS_TOOLS` 都没收录这三个协议工具。
+2. 审批场景批准后执行失败："这个路径不在可改范围内"。
+   根因是 `resolveWriteTarget` 只认绝对路径与裸文件名，模型给的是 `src/a.txt`。
+   已把相对路径按第一个授权目录解析（仍过白名单，`..` 逃逸照样拒绝）。

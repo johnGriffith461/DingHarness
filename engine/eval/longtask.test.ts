@@ -119,18 +119,14 @@ describe("长任务评测（Phase 10.6）", () => {
 
     /*
      * 脚本：前 50 步每步列一次目录，第 51 次收尾。
-     * 注意**不能 50 步都吐同一帧** —— 那会让假 provider 与真模型的行为不同
-     * （真模型看到重复的工具结果会改口）。所以工具名在两步之间交替，
-     * 模拟"它在真的往前走"。
+     * ⚠️ 每一步的参数必须**不同**（P0-06）：同一个签名在最近窗口里出现 5 次
+     * 会被判"没有进展"并停止 —— 那是新行为的正确结果，不是这条用例要测的东西。
+     * 这里用 `step-<i>` 让每步都是一次**新的**调用。
      */
     const steps = 50;
     const replies: EvalReply[] = [];
     for (let i = 0; i < steps; i += 1) {
-      replies.push(
-        i % 2 === 0
-          ? { call: [{ name: "list_dir", args: { path: workDir, depth: 1 } }] }
-          : { call: [{ name: "list_files", args: {} }] },
-      );
+      replies.push({ call: [{ name: "list_dir", args: { path: path.join(workDir, `step-${i}`), depth: 1 } }] });
     }
     replies.push({ say: "五十步之后收尾。" });
 
@@ -247,7 +243,10 @@ describe("长任务评测（Phase 10.6）", () => {
 
     const steps = 12;
     const replies: EvalReply[] = [];
-    for (let i = 0; i < steps; i += 1) replies.push({ call: [{ name: "list_files", args: {} }] });
+    /* P0-06：每步参数不同，否则同一签名第 5 次就被判"没有进展"（那是正确行为） */
+    for (let i = 0; i < steps; i += 1) {
+      replies.push({ call: [{ name: "search_files", args: { query: `needle-${i}` } }] });
+    }
     replies.push({ say: "完了。" });
 
     const provider = await withProvider(replies, ["数一数成本"]);

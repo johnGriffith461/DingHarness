@@ -69,10 +69,10 @@ const conversation: EvalCase[] = [
   {
     id: "chat-empty-reply",
     category: "纯对话",
-    title: "模型一个字都不吐时，这一轮也要正常收尾（不能卡住）",
+    title: "模型一个字都不吐时，这一轮**明确报错**（不假装成功，也不能卡住）",
     turns: ["（空回）"],
     replies: [[{ say: "" }]],
-    expect: { events: ["done"], minSteps: 1 },
+    expect: { events: ["error"], minSteps: 1 },
   },
   {
     id: "chat-empty-then-real",
@@ -80,7 +80,7 @@ const conversation: EvalCase[] = [
     title: "空回之后再问一轮，照样能出内容",
     turns: ["第一句", "第二句"],
     replies: [[{ say: "" }], [{ say: "这次有内容了。" }]],
-    expect: { events: ["done", "done"], copy: ["这次有内容了"], minSteps: 2 },
+    expect: { events: ["error", "done"], copy: ["这次有内容了"], minSteps: 2 },
   },
 ];
 

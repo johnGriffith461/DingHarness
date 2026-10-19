@@ -7,7 +7,7 @@
  * 新文件真的建出来，测试真的跑过，最后 `finish` 真的通过证据校验。
  *
  * 用法：
- *   node scripts/accept/harness-smoke-multistep.mjs --yes-spend
+ *   node scripts/accept/accept-harness-multistep.mjs --yes-spend
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

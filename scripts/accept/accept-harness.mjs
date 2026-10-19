@@ -16,7 +16,7 @@
  *
  * 用法：
  *   pnpm build && pnpm cli:build
- *   node scripts/accept/harness-smoke.mjs --yes-spend
+ *   node scripts/accept/accept-harness.mjs --yes-spend
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

@@ -64,7 +64,13 @@ describe("宿主一致性：内核直连 vs ACP（Phase 17 的「评测集零漂
 
     let toolCallingCases = 0;
     for (const c of CASES) {
+      /*
+       * ⚠️ 两条路各用一个工作目录：共用一个的话，direct 写出来的文件会让 ACP 那次
+       * 写同一个文件报「已经有一个同名文件」—— 那是**装置串台**，不是产品差异。
+       * P0-03 之后"改过文件才会提醒"暴露了这处耦合：ACP 拿不到提醒，正文少一段。
+       */
       const workDir = tmp(`dh-parity-${c.id}-`);
+      const acpWorkDir = tmp(`dh-parity-acp-work-${c.id}-`);
       const storeDir = tmp(`dh-parity-store-${c.id}-`);
       /*
        * ⚠️ **两条路各起一个假 provider**：它按"本实例收到第几个请求"取脚本，
@@ -108,7 +114,7 @@ describe("宿主一致性：内核直连 vs ACP（Phase 17 的「评测集零漂
           model: "deepseek-flash",
           send: (m) => sent.push(m),
         });
-        await agent.handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: workDir, mcpServers: [] } }));
+        await agent.handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: acpWorkDir, mcpServers: [] } }));
         const sessionId = String((sent.find((m) => m.id === 1)?.result as { sessionId: string }).sessionId);
         let promptId = 2;
         for (const turn of c.turns ?? []) {

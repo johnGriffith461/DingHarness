@@ -287,11 +287,18 @@ export default function Workbench() {
         return <VideoGenPage />;
       default:
         return (
-          <>
-            {/* U06：没配好 key 时先带用户走一遍（配好了就不出现） */}
+          /*
+           * ⚠️ 首跑向导与首页必须是**上下**关系，不能并排。
+           * `.wb-main` 是 `display:flex`（横排）—— 直接放两个兄弟的话，
+           * 向导会变成一列（620px）、首页被挤成窄条，画布也被压到右边缘；
+           * 而且向导卡默认 `align-items:stretch`，会被拉成全高。
+           * 外面这一层 `wb-home-shell` 把它们收成同一列。
+           */
+          <div className="wb-home-shell" data-testid="wb-home-shell">
+            {/* U06：没配好 key / 没钉模型时先带用户走一遍（配好了就不出现） */}
             <FirstRunGuide />
             <HomeView />
-          </>
+          </div>
         );
     }
   }, [view]);
