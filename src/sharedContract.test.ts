@@ -11,7 +11,16 @@ import { DEFAULT_SIZE_CHOICE, resolveChoice, resolveSize } from "@shared/imageSi
 import { mcpToolName, normalizeMcpConfig } from "@shared/mcp";
 import { isTableDivider, parseMarkdown } from "@shared/minimark";
 import { addMemory, clearMemory, removeMemory, normalizeMemory } from "@shared/memory";
-import { REPEAT_VALUES as REPEAT_FROM_AGENT } from "@shared/agentTools";
+import {
+  EDIT_FILE_DESC,
+  LIST_DIR_DESC,
+  LIST_FILES_DESC,
+  READ_FILE_DESC,
+  REPEAT_VALUES as REPEAT_FROM_AGENT,
+  RUN_COMMAND_DESC,
+  SEARCH_FILES_DESC,
+  WRITE_FILE_DESC,
+} from "@shared/agentTools";
 import { MAX_CUSTOM_MINUTES, MIN_CUSTOM_MINUTES, REPEAT_VALUES as REPEAT_FROM_SCHEDULE } from "@shared/schedule";
 
 /**
@@ -209,5 +218,50 @@ describe("shared/ 里那些「两份」必须对账（第 6 单）", () => {
     const doc = src.slice(src.indexOf("审批档位（§143）"), src.indexOf("toolPolicy?: ConfirmMode;"));
     expect(doc, `契约注释没写实现里那一档（${fallback![1]}）—— 读契约的人会按旧事实行事`).toContain(fallback![1]!);
     expect(doc, "注释里还留着 Phase 11.5 之前那句「省略按全部允许」").not.toContain("省略按「全部允许」");
+  });
+});
+
+describe("A4 工具说明是工作区心智（不是云盘助手）", () => {
+  const fileTools: Array<[string, string]> = [
+    ["list_files", LIST_FILES_DESC],
+    ["read_file", READ_FILE_DESC],
+    ["write_file", WRITE_FILE_DESC],
+    ["list_dir", LIST_DIR_DESC],
+    ["search_files", SEARCH_FILES_DESC],
+    ["edit_file", EDIT_FILE_DESC],
+    ["run_command", RUN_COMMAND_DESC],
+  ];
+
+  it("⭐ 文件/命令类工具说明都指向工作区或授权目录，且没有空说明", () => {
+    for (const [name, desc] of fileTools) {
+      expect(desc.trim(), `${name} 的说明是空的`).not.toBe("");
+      expect(desc, `${name} 的说明还在用云盘/产物目录的心智`).toMatch(/工作区|授权目录/);
+    }
+  });
+
+  it("⭐ 源码里不再出现「云盘 / 产物」这种旧口径（drive 工具除外）", () => {
+    expect(read("shared/agentTools.ts")).not.toContain("云盘 / 产物");
+  });
+
+  it("读文件说明写了分页与失败路径", () => {
+    expect(READ_FILE_DESC).toContain("offset");
+    expect(READ_FILE_DESC).toContain("二进制");
+    expect(READ_FILE_DESC).toContain("过期");
+  });
+
+  it("改文件说明要求先读、并写清过期内容会被拒", () => {
+    expect(EDIT_FILE_DESC).toContain("编辑前先 read_file");
+    expect(EDIT_FILE_DESC).toContain("拒绝");
+    expect(WRITE_FILE_DESC).toContain("优先用 edit_file");
+  });
+
+  it("搜索说明讲清是正则/关键词，不是语义搜索", () => {
+    expect(SEARCH_FILES_DESC).toContain("不是语义搜索");
+    expect(SEARCH_FILES_DESC).toContain("include");
+  });
+
+  it("跑命令说明要求用它验证改动", () => {
+    expect(RUN_COMMAND_DESC).toContain("跑相关测试或构建");
+    expect(RUN_COMMAND_DESC).toContain("2000 行");
   });
 });
