@@ -32,6 +32,7 @@ import { desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
 import { buildEngine as buildEngineIn } from "./assembly";
 import { createCliApprover } from "./approval";
 import { exitCodeOf, EXIT_AWAITING_APPROVAL } from "./exitCode";
+import { cliVerify } from "./verify";
 import { renderRecords } from "./renderRecords";
 import { KNOWN_COMMANDS, cmdCommandHelp, cmdHelp } from "./help";
 import { ensureConfigured } from "./wizard";
@@ -342,9 +343,21 @@ async function cmdRun(p: Parsed): Promise<number> {
   const outcome = run.outcome;
   {
     const note = failoverNote(run, provider);
-    if (note) process.stderr.write(`[2m${note}[0m
+    if (note) process.stderr.write(`\x1b[2m${note}\x1b[0m
 `);
   }
+  /*
+   * A-04：改完文件之后怎么验证。
+   *
+   * 决策复用桌面那份 `planVerification`（唯一实现）；这里只把 CLI 的事实喂进去。
+   * 放在渲染之前，是为了让 `--json` 里能带上 `verification` 字段。
+   */
+  const verification = await cliVerify({
+    outcome,
+    mode,
+    cwd: dirs[0] ?? process.cwd(),
+    dirs,
+  });
   if (p.flags.has("json")) {
     /*
      * JSON 输出给脚本用：**只把"发生过什么"结构化**，不夹一句人话。
@@ -368,6 +381,8 @@ async function cmdRun(p: Parsed): Promise<number> {
           /* A-03：脚本要能看见"停在谁身上"和"有没有改过文件"（旧字段一个不动） */
           awaitingApproval: outcome.awaitingApproval ?? null,
           wroteFiles: outcome.wroteFiles === true,
+          /* A-04：验证决策与结果（auto 才有 exitCode/excerpt） */
+          verification,
         },
         null,
         2,
@@ -375,6 +390,21 @@ async function cmdRun(p: Parsed): Promise<number> {
     );
   } else {
     process.stdout.write(renderRecords(outcome.records));
+  }
+  /*
+   * A-04：验证的结果打在 **stderr**（stdout 是结果正文）。
+   * auto = 已经跑过；offer = 这一档不自动跑，给一条可照做的命令；
+   * skip = 说清"未验证"的原因（不许让"没验证"看起来像"验证通过"）。
+   */
+  if (verification.action === "auto") {
+    process.stderr.write(
+      `\n\x1b[2m验证：${verification.command}（${verification.ok ? "通过" : "失败"}，退出码 ${verification.exitCode ?? "?"}）\x1b[0m\n` +
+        `${verification.excerpt}\n`,
+    );
+  } else if (verification.action === "offer") {
+    process.stderr.write(`\n\x1b[2m${verification.reason}：建议运行 ${verification.command}\x1b[0m\n`);
+  } else {
+    process.stderr.write(`\n\x1b[2m${verification.reason}\x1b[0m\n`);
   }
   close();
 
