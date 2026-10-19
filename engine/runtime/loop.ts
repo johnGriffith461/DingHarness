@@ -12,6 +12,7 @@ import {
   type FinishRecord,
   type TurnEvidence,
 } from "./finishContract";
+import { toolArgsSummary } from "../../shared/agentTools";
 import { STALL_NUDGE, STALL_STOPPED, createStallDetector, emptyResponseOutcome, signatureOf } from "./stall";
 
 import type { StepUsage } from "../../shared/cost";
@@ -902,11 +903,66 @@ async function runTurnOnce(
 export const COMPLETION_REMINDER = [
   "<completion_reminder>",
   "你这一轮改了文件，但还没有完成收尾。",
-  '如果已经做完：先跑测试或构建验证，然后调用 finish（status="done"），并在 evidence.commands 里原样写你实际跑过的命令。',
+  '如果已经做完：只补做还没做的验证（上面列过的不要重跑），然后调用 finish（status="done"），并在 evidence.commands 里原样写你实际跑过的命令。',
   '如果没做完或被卡住：调用 finish（status="blocked"），在 reason 里说明卡在哪、试过什么。',
   "不要只回一句话就停下。",
   "</completion_reminder>",
 ].join("\n");
+
+/**
+ * A-01：上一轮工具结果摘要的上限（字符）。
+ *
+ * 为什么要有：提醒那一轮是**新的一次请求**，工具往返不在 messages 里。
+ * 不给摘要，模型看到的是"用户让我收尾"，会误以为文件还没写、验证还没跑，
+ * 于是重复执行（本地假通道实测：第二次又写同一个文件 → "同名文件已存在"）。
+ */
+export const PREVIOUS_TOOLS_LIMIT = 2000;
+
+/** 一条上一轮工具调用的可读摘要。 */
+export type PreviousTool = { name: string; args: string; ok: boolean; result: string };
+
+/**
+ * 把上一轮的工具调用渲染成一段**给模型看的** user 消息。
+ *
+ * 上限 2000 字；放不下时按行截断并显式写"共 N 条，省略 M 条"（不许静默丢）。
+ */
+export function previousTurnToolsBlock(tools: readonly PreviousTool[]): string {
+  if (!tools.length) return "";
+  const header = "<previous_turn_tools>\n你这一轮已经执行过下面这些调用，不要重复执行：";
+  const footer = "</previous_turn_tools>";
+  const lines = tools.map((t) => {
+    const args = t.args ? `（${t.args}）` : "";
+    const result = t.result.length > 320 ? `${t.result.slice(0, 320)}…` : t.result;
+    return `- ${t.name}${args} → ${result}`;
+  });
+  let kept: string[] = [];
+  for (const line of lines) {
+    const next = [...kept, line];
+    const omitted = lines.length - next.length;
+    const note = omitted > 0 ? `（共 ${lines.length} 条，省略 ${omitted} 条）` : "";
+    const text = [header, ...next, ...(note ? [note] : []), footer].join("\n");
+    if (text.length > PREVIOUS_TOOLS_LIMIT) break;
+    kept = next;
+  }
+  const omitted = lines.length - kept.length;
+  const note = omitted > 0 ? [`（共 ${lines.length} 条，省略 ${omitted} 条）`] : [];
+  return [header, ...kept, ...note, footer].join("\n");
+}
+
+/** 把一次工具结果压成一句"它干了什么"（给上一轮摘要用，不追求完整）。 */
+function previousToolResult(name: string, ok: boolean, output: unknown, error?: string): string {
+  if (!ok) {
+    const reason = (error ?? "失败").replace(/\s+/g, " ").trim();
+    return `error：${reason || "失败（没有说明原因）"}`;
+  }
+  if (name === "run_command") {
+    const code = (output as { exitCode?: unknown } | undefined)?.exitCode;
+    if (typeof code === "number") return `exit ${code}`;
+  }
+  const line = (output as { line?: unknown } | undefined)?.line;
+  if (typeof line === "string" && line.trim()) return line.replace(/\s+/g, " ").trim();
+  return "ok";
+}
 
 /**
  * 跑一轮（**对外入口**）：先跑一次，必要时补一次完成提醒。
@@ -921,6 +977,18 @@ export async function runTurn(
   const evidence = input.turnEvidence ?? createTurnEvidence();
   let firstDone: TurnEvent | undefined;
   let firstText = "";
+  /*
+   * A-01：第一轮的工具往返要**留给第二轮看**。
+   *
+   * 第二轮的 messages 是新建的（`input.messages` + assistant 文本 + 提醒），
+   * 第一轮的工具调用与结果不在里面。不给摘要，模型会以为"还没写过/还没跑过"，
+   * 于是重复执行已经成功的写操作（实测：同名文件已存在）。
+   *
+   * 用 user 消息而不是伪造 assistant/tool 配对：配对一旦不合法，
+   * 各家 provider 的校验规则不一样（Anthropic 会直接 400），而 user 文本谁都能收。
+   */
+  const firstCalls = new Map<string, { name: string; input: unknown }>();
+  const firstTools: PreviousTool[] = [];
   const first = await runTurnOnce(
     { ...input, turnEvidence: evidence },
     (event) => {
@@ -930,6 +998,25 @@ export async function runTurn(
         return;
       }
       if (event.type === "text") firstText += event.text;
+      if (event.type === "tool-call") {
+        firstCalls.set(event.toolCallId, { name: event.toolName, input: event.input });
+        onEvent(event);
+        return;
+      }
+      if (event.type === "tool-result") {
+        const call = firstCalls.get(event.toolCallId);
+        const name = event.toolName || call?.name || "";
+        const ok = !event.error;
+        firstTools.push({
+          name,
+          args: toolArgsSummary(name, call?.input),
+          ok,
+          result: previousToolResult(name, ok, event.output, event.error),
+        });
+        firstCalls.delete(event.toolCallId);
+        onEvent(event);
+        return;
+      }
       onEvent(event);
     },
     deps,
@@ -944,19 +1031,21 @@ export async function runTurn(
   }
 
   onEvent({ type: "steer", text: COMPLETION_REMINDER });
+  const toolsBlock = previousTurnToolsBlock(firstTools);
+  const reminderBody = toolsBlock ? `${toolsBlock}\n\n${COMPLETION_REMINDER}` : COMPLETION_REMINDER;
   const second = await runTurnOnce(
     {
       ...input,
       turnEvidence: evidence,
       /*
-       * 第二轮是**新的一次请求**：模型需要知道上一轮自己说了什么。
-       * 工具调用不在这里重放（它们的结果已经落盘/落轨迹），
-       * 提醒里会写清"改过文件但没 finish"，模型可以重新读文件、重新跑测试。
+       * 第二轮是**新的一次请求**：模型需要知道上一轮自己说了什么、做过什么。
+       * 工具调用不重放（结果已经落盘/落轨迹），但**调用与结果摘要必须带上** ——
+       * 否则模型会重复执行（见上面 `firstTools` 的说明）。
        */
       messages: [
         ...input.messages,
         ...(firstText.trim() ? [{ role: "assistant" as const, content: firstText }] : []),
-        { role: "user" as const, content: COMPLETION_REMINDER },
+        { role: "user" as const, content: reminderBody },
       ],
     },
     (event) => {

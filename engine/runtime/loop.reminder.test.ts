@@ -72,11 +72,14 @@ beforeEach(() => {
   script = () => [];
 });
 
-function executor(evidence: TurnEvidence): ToolExecutor {
+function executor(evidence: TurnEvidence, opts: { failCommand?: boolean } = {}): ToolExecutor {
   return {
     run: async (name, input) => {
       if (name === "write_file") return { ok: true, output: { line: "已写入", path: "a.ts" } };
-      if (name === "run_command") return { ok: true, output: { line: "ok", exitCode: 0 } };
+      if (name === "run_command") {
+        if (opts.failCommand) return { ok: false, error: "命令失败：exit 2" };
+        return { ok: true, output: { line: "ok", exitCode: 0 } };
+      }
       if (name === FINISH_TOOL) {
         const got = validateFinish(input, evidence);
         return got.ok
@@ -88,11 +91,11 @@ function executor(evidence: TurnEvidence): ToolExecutor {
   };
 }
 
-function toolsFor(evidence: TurnEvidence) {
+function toolsFor(evidence: TurnEvidence, opts: { failCommand?: boolean } = {}) {
   return buildToolSet({
     registry: createToolRegistry(),
     mode: "全部允许",
-    executor: executor(evidence),
+    executor: executor(evidence, opts),
     ctx: { mode: "全部允许", provider: "strata", turnEvidence: evidence },
   });
 }
@@ -181,5 +184,93 @@ describe("主循环 · 完成提醒", () => {
 
     expect(outcome.aborted).toBe(true);
     expect(bodies.some((b) => includesReminder(b))).toBe(false);
+  });
+
+  /*
+   * A-01：提醒必须**带上上一轮已经执行过的工具结果**。
+   *
+   * 缺陷事实（本地假通道实测）：第二轮消息只有 system/user/assistant/user(reminder)，
+   * 工具往返整段丢了 —— 模型据此认为"还没写过"，于是又写一遍同名文件。
+   */
+  it("有成功写文件 → 第二次请求里带 previous_turn_tools 与本次写入摘要", async () => {
+    const evidence = createTurnEvidence();
+    script = () => {
+      if (bodies.length === 1) {
+        return [toolChunk("c1", "write_file", '{"path":"probe2.txt","content":"hi"}'), finish("tool_calls")];
+      }
+      return [text("补验证后收尾"), finish("stop")];
+    };
+    const outcome = await runTurn(
+      {
+        provider: "strata",
+        messages: [{ role: "user", content: "建 probe2.txt" }],
+        tools: toolsFor(evidence),
+        maxSteps: 2,
+        turnEvidence: evidence,
+      },
+      () => undefined,
+    );
+
+    expect(outcome.unfinished).toBe(true);
+    const reminderBody = JSON.stringify(bodies[bodies.length - 1]);
+    expect(reminderBody).toContain("<previous_turn_tools>");
+    expect(reminderBody).toContain("write_file");
+    expect(reminderBody).toContain("不要重复执行");
+  });
+
+  it("有成功的 run_command（exit 0）→ 摘要里带退出码", async () => {
+    const evidence = createTurnEvidence();
+    script = () => {
+      if (bodies.length === 1) {
+        return [
+          toolChunk("c1", "write_file", '{"path":"a.ts","content":"x"}'),
+          toolChunk("c2", "run_command", '{"command":"pnpm test"}'),
+          finish("tool_calls"),
+        ];
+      }
+      return [text("好了"), finish("stop")];
+    };
+    await runTurn(
+      {
+        provider: "strata",
+        messages: [{ role: "user", content: "改并跑测试" }],
+        tools: toolsFor(evidence),
+        maxSteps: 3,
+        turnEvidence: evidence,
+      },
+      () => undefined,
+    );
+
+    const reminderBody = JSON.stringify(bodies[bodies.length - 1]);
+    expect(reminderBody).toContain("run_command");
+    expect(reminderBody).toContain("exit 0");
+  });
+
+  it("第一轮工具失败 → 摘要里标 error，提醒仍要求处理", async () => {
+    const evidence = createTurnEvidence();
+    script = () => {
+      if (bodies.length === 1) {
+        return [
+          toolChunk("c1", "write_file", '{"path":"a.ts","content":"x"}'),
+          toolChunk("c2", "run_command", '{"command":"pnpm test"}'),
+          finish("tool_calls"),
+        ];
+      }
+      return [text("还是没修好"), finish("stop")];
+    };
+    await runTurn(
+      {
+        provider: "strata",
+        messages: [{ role: "user", content: "改并跑测试" }],
+        tools: toolsFor(evidence, { failCommand: true }),
+        maxSteps: 3,
+        turnEvidence: evidence,
+      },
+      () => undefined,
+    );
+
+    const reminderBody = JSON.stringify(bodies[bodies.length - 1]);
+    expect(reminderBody).toContain("error");
+    expect(reminderBody).toContain("completion_reminder");
   });
 });
