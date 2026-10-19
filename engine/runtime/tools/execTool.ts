@@ -2,7 +2,13 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 
 import { insideDirs } from "./drivePaths";
-import { planFor, planSandboxed, type SandboxPlan } from "../../adapters/sandbox";
+import {
+  assertSandboxAvailable,
+  parseSandboxMode,
+  planFor,
+  planSandboxed,
+  type SandboxPlan,
+} from "../../adapters/sandbox";
 import { SANDBOX_MEMORY_MB, SANDBOX_PROCESSES } from "../../adapters/sandbox";
 
 /**
@@ -176,6 +182,21 @@ export async function runCommandForModel(
 ): Promise<RunCommandResult> {
   const command = String(input.command ?? "").trim();
   if (!command) return { ok: false, error: "命令是空的" };
+  /*
+   * F2：沙箱模式（环境变量由宿主设置；缺省 = 现状 danger-full-access）。
+   * `read-only` 直接拒绝；`workspace-write` 在 runner 不可用时**明确失败**（不裸跑）。
+   */
+  const sandboxMode = parseSandboxMode(process.env.DING_SANDBOX_MODE);
+  if (sandboxMode === "read-only") {
+    return { ok: false, error: "当前沙箱模式是「read-only」—— 不允许执行命令" };
+  }
+  if (sandboxMode === "workspace-write") {
+    try {
+      assertSandboxAvailable(sandboxMode);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
   /* 已经中止了就别起了：起完再杀等于白花一次进程创建（也可能有副作用） */
   if (input.signal?.aborted) return { ok: false, error: "已中止" };
 

@@ -37,6 +37,11 @@ export const MCP_CHANNEL = {
   list: "mcp:list",
   reload: "mcp:reload",
   openConfig: "mcp:openConfig",
+  /* F1：资源 / 提示词 */
+  resources: "mcp:resources",
+  readResource: "mcp:readResource",
+  prompts: "mcp:prompts",
+  getPrompt: "mcp:getPrompt",
 } as const;
 
 const FILE = "mcp.json";
@@ -226,12 +231,62 @@ async function ensureConfigFile(): Promise<void> {
 }
 
 /** 注册 IPC。 */
+/**
+ * F1：把所有**在线**连接器的资源/提示词汇总出来（带 server 名）。
+ * 服务端不声明这些能力时就是空数组 —— 界面据此显示"该 server 未声明"。
+ */
+export async function listMcpResources(): Promise<Array<{ server: string; uri: string; name: string; mimeType?: string; description?: string }>> {
+  const out: Array<{ server: string; uri: string; name: string; mimeType?: string; description?: string }> = [];
+  for (const server of config.servers) {
+    const client = clients.get(server.name);
+    if (!client || client.status() !== "on" || !client.listResources) continue;
+    for (const item of await client.listResources()) out.push({ server: server.name, ...item });
+  }
+  return out;
+}
+
+export async function readMcpResource(server: string, uri: string): Promise<Array<{ uri: string; mimeType?: string; text: string }>> {
+  const client = clients.get(server);
+  if (!client || client.status() !== "on" || !client.readResource) return [];
+  return await client.readResource(uri);
+}
+
+export async function listMcpPrompts(): Promise<Array<{ server: string; name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }>> {
+  const out: Array<{ server: string; name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }> = [];
+  for (const server of config.servers) {
+    const client = clients.get(server.name);
+    if (!client || client.status() !== "on" || !client.listPrompts) continue;
+    for (const item of await client.listPrompts()) out.push({ server: server.name, ...item });
+  }
+  return out;
+}
+
+export async function getMcpPrompt(
+  server: string,
+  name: string,
+  args?: Record<string, string>,
+): Promise<Array<{ role: string; text: string }>> {
+  const client = clients.get(server);
+  if (!client || client.status() !== "on" || !client.getPrompt) return [];
+  return await client.getPrompt(name, args);
+}
+
 export function registerMcpIpc(): () => void {
   ipcMain.handle(MCP_CHANNEL.list, async () => {
     await ensureConfigFile();
     return { file: filePath(), servers: mcpServerViews(), empty: MCP_LABELS.empty };
   });
   ipcMain.handle(MCP_CHANNEL.reload, async () => reloadMcp());
+  ipcMain.handle(MCP_CHANNEL.resources, async () => listMcpResources());
+  ipcMain.handle(MCP_CHANNEL.readResource, async (_e, server: unknown, uri: unknown) => {
+    if (typeof server !== "string" || typeof uri !== "string") return [];
+    return await readMcpResource(server, uri);
+  });
+  ipcMain.handle(MCP_CHANNEL.prompts, async () => listMcpPrompts());
+  ipcMain.handle(MCP_CHANNEL.getPrompt, async (_e, server: unknown, name: unknown, args: unknown) => {
+    if (typeof server !== "string" || typeof name !== "string") return [];
+    return await getMcpPrompt(server, name, args && typeof args === "object" ? (args as Record<string, string>) : undefined);
+  });
   ipcMain.handle(MCP_CHANNEL.openConfig, async () => {
     await ensureConfigFile();
     const res = await shell.openPath(filePath());

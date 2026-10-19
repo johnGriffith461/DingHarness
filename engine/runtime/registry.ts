@@ -14,7 +14,7 @@ import { decideCall, type PermissionRule } from "../core/permissionRules";
 import { DEFAULT_APPROVER } from "../core/gates";
 import type { MemberRole } from "../core/members";
 import type { ExecutorContext, ToolExecutor } from "../ports/executor";
-import { noopHooks, type HooksPort } from "../ports/hooks";
+import { noopHooks, runHookWithTimeout, type HooksPort } from "../ports/hooks";
 import type { SpillPort } from "../ports/spill";
 import { applySpill } from "./spill";
 import { selectToolNames } from "./toolSearch";
@@ -389,8 +389,22 @@ export function buildToolSet(input: {
          *
          * 钩子的异常由端口实现内部吞掉并打日志（插件坏了不该变成用户的故障）。
          */
-        await hooks.run("tool:before", { name: entry.name, input: value });
-        const invoke = (): ReturnType<ToolExecutor["run"]> => executor.run(entry.name, value, ctx);
+        /*
+         * F5：`tool:before` 的返回值**会被消费**（allow / deny / modify）。
+         * 超时与抛错一律 deny（fail-closed）—— 插件的故障不该变成用户的故障，
+         * 但更不该变成"钩子没说话 = 放行"。
+         */
+        const before = await runHookWithTimeout(hooks, "tool:before", { name: entry.name, input: value });
+        if (!before.ok) throw new Error(`工具调用被钩子拦下：${before.reason}`);
+        let effectiveValue = value;
+        const decision = before.value as { action?: unknown; input?: unknown; reason?: unknown } | undefined;
+        if (decision && typeof decision === "object") {
+          if (decision.action === "deny") {
+            throw new Error(`工具调用被插件拒绝：${typeof decision.reason === "string" && decision.reason ? decision.reason : "没有说明原因"}`);
+          }
+          if (decision.action === "modify" && "input" in decision) effectiveValue = decision.input;
+        }
+        const invoke = (): ReturnType<ToolExecutor["run"]> => executor.run(entry.name, effectiveValue, ctx);
         const result = entry.concurrency === "exclusive" ? await runSerialized(entry.name, invoke) : await invoke();
         await hooks.run("tool:after", { name: entry.name, ok: result.ok, ...(result.error ? { error: result.error } : {}) });
         /*

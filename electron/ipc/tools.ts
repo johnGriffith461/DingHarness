@@ -23,6 +23,7 @@ import type { ConfirmMode } from "../../shared/ipc";
 import { unknownToolNotice } from "../../engine/core/notices";
 import { buildToolSet, createToolRegistry, type ToolEntryInput } from "../../engine/runtime/registry";
 import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
+import { parseSandboxMode, writeEffectAllowed } from "../../engine/adapters/sandbox";
 import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/fileState";
 import type { ToolInfoWire } from "../../shared/ipc";
 /* 插件工具从 pluginHost 直接来（registry 不再转手 re-export —— V5-4 4.1 把 IO 移出最小面） */
@@ -123,6 +124,17 @@ const serializeWrite = createSerialQueue();
  * 只锁**同一个路径**：改十个不同文件仍然并行（全局队列会让重构变成十次串行磁盘往返）。
  */
 const serializePathWrite = createKeyedSerialQueue();
+
+/**
+ * F2：沙箱模式对写文件的**效果检查**（read-only 一律拒；workspace-write 只允许工作区内）。
+ * 缺省模式是 danger-full-access —— 与以前行为一致。
+ */
+function sandboxWriteError(target: string): string | null {
+  const mode = parseSandboxMode(process.env.DING_SANDBOX_MODE);
+  const root = ownedDirs()[0] ?? process.cwd();
+  const got = writeEffectAllowed(mode, root, target);
+  return got.ok ? null : got.error;
+}
 
 /**
  * 把一条内容存进记忆。
@@ -354,6 +366,11 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     if (!parsed.ok) {
       return { ok: false, line: `⚙ 补丁解析失败（第 ${parsed.line ?? "?"} 行）：${parsed.error}`, error: parsed.error };
     }
+    for (const op of parsed.ops) {
+      const target = resolveWriteTarget(op.path, ownedDirs());
+      const denied = target ? sandboxWriteError(target) : null;
+      if (denied) return { ok: false, line: `⚙ 补丁未应用：${denied}`, error: denied };
+    }
     const result = await serializePathWrite("__apply_patch__", () =>
       applyPatch(process.cwd(), parsed.ops, {
         restrictToCwd: false,
@@ -375,6 +392,8 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       replaceAll?: boolean;
     };
     const resolved = resolveWriteTarget(path, ownedDirs());
+    const denied = resolved ? sandboxWriteError(resolved) : null;
+    if (denied) return { ok: false, line: `⚙ 改不了：${denied}`, error: denied };
     const expected = resolved ? expectedFingerprint(env.sessionId, resolved) : undefined;
     const result = await serializePathWrite(path, () =>
       editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true, expected),

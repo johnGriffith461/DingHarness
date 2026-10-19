@@ -61,9 +61,22 @@ export const SANDBOXED_PERMISSIONS: readonly PluginPermission[] = ["fs:read", "f
 export const DECLARATION_ONLY_PERMISSIONS: readonly PluginPermission[] = ["net"];
 
 /** 生命周期点（Phase 8.3）。 */
-export type HookName = "session:start" | "tool:before" | "tool:after" | "turn:end";
+export type HookName =
+  | "session:start"
+  | "user:prompt"
+  | "tool:before"
+  | "tool:after"
+  | "turn:end"
+  | "turn:stop";
 
-export const HOOK_NAMES: readonly HookName[] = ["session:start", "tool:before", "tool:after", "turn:end"];
+export const HOOK_NAMES: readonly HookName[] = [
+  "session:start",
+  "user:prompt",
+  "tool:before",
+  "tool:after",
+  "turn:end",
+  "turn:stop",
+];
 
 /** 插件清单。 */
 /** 发布者（`publisher` 字段）：身份是 `id`，证据是 `key`。 */

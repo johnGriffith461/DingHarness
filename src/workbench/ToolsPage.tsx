@@ -22,6 +22,10 @@ export function ToolsPage() {
   const [tools, setTools] = useState<ToolInfoWire[]>([]);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  /* F1：连接器资源与提示词（服务端没声明就是空数组） */
+  const [resources, setResources] = useState<Array<{ server: string; uri: string; name: string; mimeType?: string }>>([]);
+  const [prompts, setPrompts] = useState<Array<{ server: string; name: string; description?: string }>>([]);
+  const [preview, setPreview] = useState("");
 
   useEffect(() => {
     void (async () => {
@@ -31,6 +35,11 @@ export function ToolsPage() {
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
+      const mcp = bridge()?.mcp;
+      const res = await Promise.resolve(mcp?.resources?.()).catch(() => []);
+      setResources(Array.isArray(res) ? res : []);
+      const listedPrompts = await Promise.resolve(mcp?.prompts?.()).catch(() => []);
+      setPrompts(Array.isArray(listedPrompts) ? listedPrompts : []);
     })();
   }, []);
 
@@ -46,6 +55,38 @@ export function ToolsPage() {
         模型当前够得着的工具与元数据（来自注册表，不是另一份清单）。只读工具可并行；
         写与命令类串行执行，避免一次回复里两个写动作同时落盘。
       </div>
+      <div className="wb-setpage-note">连接器资源（F1）：{resources.length ? `${resources.length} 个` : "没有 server 声明 resources"}</div>
+      {resources.slice(0, 30).map((item) => (
+        <div className="wb-setpage-row" key={`${item.server}:${item.uri}`} data-testid={`wb-mcp-resource-${item.name}`}>
+          <span className="wb-setpage-label">
+            {item.server} / {item.name}
+          </span>
+          <button
+            className="wb-setpage-btn"
+            onClick={() =>
+              void Promise.resolve(bridge()?.mcp?.readResource?.(item.server, item.uri))
+                .then((contents) => setPreview((contents ?? []).map((c) => c.text).join("\n\n") || "（资源没有文本内容）"))
+                .catch((err) => setPreview(`读取失败：${err instanceof Error ? err.message : String(err)}`))
+            }
+          >
+            读取
+          </button>
+        </div>
+      ))}
+      {preview ? (
+        <pre className="wb-terminal-output" data-testid="wb-mcp-preview">
+          {preview}
+        </pre>
+      ) : null}
+      <div className="wb-setpage-note">连接器提示词（F1）：{prompts.length ? `${prompts.length} 个` : "没有 server 声明 prompts"}</div>
+      {prompts.slice(0, 30).map((item) => (
+        <div className="wb-setpage-row" key={`${item.server}:${item.name}`}>
+          <span className="wb-setpage-label">
+            {item.server} / {item.name}
+          </span>
+          <em>{item.description ?? ""}</em>
+        </div>
+      ))}
       <input
         className="wb-model-search"
         data-testid="wb-tools-search"

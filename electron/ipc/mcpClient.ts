@@ -52,6 +52,21 @@ export type McpCallResult =
  * `mcpStore` 只认这个接口 —— 加第三种传输时是"再写一个实现"，
  * 不是"在 store 里加一串 if"。
  */
+export type McpResourceInfo = {
+  uri: string;
+  name: string;
+  mimeType?: string;
+  description?: string;
+};
+
+export type McpPromptInfo = {
+  name: string;
+  description?: string;
+  arguments?: Array<{ name: string; description?: string; required?: boolean }>;
+};
+
+export type McpResourceContent = { uri: string; mimeType?: string; text: string };
+
 export type McpConnection = {
   status(): McpStatus;
   errorText(): string;
@@ -59,6 +74,11 @@ export type McpConnection = {
   start(): Promise<boolean>;
   call(tool: string, args: unknown): Promise<McpCallResult>;
   stop(): void;
+  /* F1：resources/prompts 是**可选**能力（服务端没声明就不实现） */
+  listResources?(): Promise<McpResourceInfo[]>;
+  readResource?(uri: string): Promise<McpResourceContent[]>;
+  listPrompts?(): Promise<McpPromptInfo[]>;
+  getPrompt?(name: string, args?: Record<string, string>): Promise<Array<{ role: string; text: string }>>;
 };
 
 /** JSON-RPC 的最小形状。 */
@@ -195,7 +215,8 @@ export class McpClient implements McpConnection {
         "initialize",
         {
           protocolVersion: "2024-11-05",
-          capabilities: {},
+          /* F1：声明 resources/prompts 能力，服务端才会在 list 里给出它们 */
+          capabilities: { resources: {}, prompts: {} },
           clientInfo: { name: "ding-harness", version: "0.3.0" },
         },
         this.timeouts.handshakeMs,
@@ -252,6 +273,91 @@ export class McpClient implements McpConnection {
     }
     this.tools = parsed;
     return true;
+  }
+
+  /** F1：列资源（服务端不声明就返回空数组，不报错）。 */
+  async listResources(): Promise<McpResourceInfo[]> {
+    if (this.state !== "on") return [];
+    const listed = await this.request("resources/list", {}, this.timeouts.handshakeMs);
+    if (listed.error) return [];
+    const raw = (listed.result ?? {}) as { resources?: unknown };
+    if (!Array.isArray(raw.resources)) return [];
+    return raw.resources.flatMap((item) => {
+      const o = (item ?? {}) as Record<string, unknown>;
+      if (typeof o.uri !== "string" || !o.uri) return [];
+      return [
+        {
+          uri: o.uri,
+          name: typeof o.name === "string" && o.name ? o.name : o.uri,
+          ...(typeof o.mimeType === "string" ? { mimeType: o.mimeType } : {}),
+          ...(typeof o.description === "string" ? { description: o.description } : {}),
+        },
+      ];
+    });
+  }
+
+  /** F1：读一个资源（文本内容原样返回；二进制内容给出 uri 与 mime）。 */
+  async readResource(uri: string): Promise<McpResourceContent[]> {
+    if (this.state !== "on") return [];
+    const res = await this.request("resources/read", { uri }, this.timeouts.callMs);
+    if (res.error) return [];
+    const raw = (res.result ?? {}) as { contents?: unknown };
+    if (!Array.isArray(raw.contents)) return [];
+    return raw.contents.flatMap((item) => {
+      const o = (item ?? {}) as Record<string, unknown>;
+      if (typeof o.text === "string") {
+        return [{ uri: typeof o.uri === "string" ? o.uri : uri, ...(typeof o.mimeType === "string" ? { mimeType: o.mimeType } : {}), text: o.text }];
+      }
+      return [{ uri: typeof o.uri === "string" ? o.uri : uri, text: "（这个资源不是文本内容）" }];
+    });
+  }
+
+  /** F1：列提示词。 */
+  async listPrompts(): Promise<McpPromptInfo[]> {
+    if (this.state !== "on") return [];
+    const listed = await this.request("prompts/list", {}, this.timeouts.handshakeMs);
+    if (listed.error) return [];
+    const raw = (listed.result ?? {}) as { prompts?: unknown };
+    if (!Array.isArray(raw.prompts)) return [];
+    return raw.prompts.flatMap((item) => {
+      const o = (item ?? {}) as Record<string, unknown>;
+      if (typeof o.name !== "string" || !o.name) return [];
+      const args = Array.isArray(o.arguments)
+        ? o.arguments.flatMap((a) => {
+            const arg = (a ?? {}) as Record<string, unknown>;
+            if (typeof arg.name !== "string") return [];
+            return [
+              {
+                name: arg.name,
+                ...(typeof arg.description === "string" ? { description: arg.description } : {}),
+                ...(arg.required === true ? { required: true } : {}),
+              },
+            ];
+          })
+        : [];
+      return [
+        {
+          name: o.name,
+          ...(typeof o.description === "string" ? { description: o.description } : {}),
+          ...(args.length ? { arguments: args } : {}),
+        },
+      ];
+    });
+  }
+
+  /** F1：取一个提示词的内容（转成 role + text 的普通消息）。 */
+  async getPrompt(name: string, args?: Record<string, string>): Promise<Array<{ role: string; text: string }>> {
+    if (this.state !== "on") return [];
+    const res = await this.request("prompts/get", { name, arguments: args ?? {} }, this.timeouts.callMs);
+    if (res.error) return [];
+    const raw = (res.result ?? {}) as { messages?: unknown };
+    if (!Array.isArray(raw.messages)) return [];
+    return raw.messages.flatMap((item) => {
+      const o = (item ?? {}) as Record<string, unknown>;
+      const content = (o.content ?? {}) as Record<string, unknown>;
+      if (typeof content.text !== "string") return [];
+      return [{ role: typeof o.role === "string" ? o.role : "user", text: content.text }];
+    });
   }
 
   /**
@@ -372,6 +478,9 @@ export class McpClient implements McpConnection {
        * 删掉的工具调到超时）。
        */
       if (msg.method === "notifications/tools/list_changed") void this.refreshTools();
+      /* F1：资源/提示词清单变了不需要缓存刷新（每次都现查），这里只留着口子 */
+      if (msg.method === "notifications/resources/list_changed") void this.refreshTools();
+      if (msg.method === "notifications/prompts/list_changed") void this.refreshTools();
       return;
     }
     const waiting = this.pending.get(Number(msg.id));

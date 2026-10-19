@@ -132,6 +132,31 @@
 - 新增 `compaction` 事件类型（字段全部可选）：旧日志照常读，新日志可回放并累计压缩次数。
   边界：桌面这一轮还没有写入该事件的宿主 API（详见交付报告）。
 
+### 连接器资源与提示词（F1，部分）
+
+- MCP 初始化声明 `resources`/`prompts` 能力；stdio 连接器可列资源、读资源、列提示词、
+  取提示词内容；工具页显示资源（可读取预览）与提示词清单。
+- 边界：**OAuth 未实现**；HTTP 传输只做了 tools（resources/prompts 在 stdio 连接器上可用）。
+
+### 沙箱模式（F2，部分）
+
+- 新增模式词表 `read-only / workspace-write / danger-full-access`（环境变量
+  `DING_SANDBOX_MODE`，缺省仍是现状）；`read-only` 拒绝写文件与跑命令；
+  `workspace-write` 在 runner 不可用时返回明确错误、**不裸跑**；
+  写文件前按模式做效果检查（工作区外拒绝）。
+- 边界：macOS/Linux 的 OS 级隔离仍未做（与 `SAFETY.md` 口径一致）。
+
+### 终端面板（F4）
+
+- 左侧新增「终端」：只读回放本会话 `run_command` 的命令、退出码与输出，可搜索/只看失败；
+  **不提供输入框**（不造第二套执行路径）。
+
+### hooks 扩展（F5）
+
+- 新增 `user:prompt` 与 `turn:stop` 两个钩子；`tool:before` 的返回值现在会被消费：
+  `allow` / `deny`（模型拿到可读原因、工具不执行）/ `modify`（换掉参数）；
+  钩子抛错或 1 秒超时**一律 deny**（fail-closed）。
+
 ## 0.6.0（2026-10-18）
 
 > 主题：**从"能跑"到"能托付"** —— 权限更严、上下文更省、手机能批、插件隔离、文档能照做。

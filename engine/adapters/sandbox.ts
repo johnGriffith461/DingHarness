@@ -391,3 +391,71 @@ export function planSandboxed(
 ): SandboxPlan {
   return planFor(command, probeSandbox(), opts);
 }
+
+/* ============================================================
+ * F2：模式词表 + fail-closed
+ * ============================================================ */
+
+/**
+ * 沙箱模式（照 DSH / Codex 的词表）。
+ *
+ * - `read-only`：只读。写文件与跑命令一律拒绝。
+ * - `workspace-write`：只允许改工作区内；**要求沙箱 runner 可用**，不可用就明确失败
+ *   （`SANDBOX_UNAVAILABLE`），不裸跑。
+ * - `danger-full-access`：现状（默认）。**如实**：没有 OS 级隔离，只有资源上限。
+ */
+export const SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
+export type SandboxMode = (typeof SANDBOX_MODES)[number];
+
+export function parseSandboxMode(raw: unknown): SandboxMode {
+  return raw === "read-only" || raw === "workspace-write" ? raw : "danger-full-access";
+}
+
+/** 不可用时的错误码（DSH 同款）：宿主据此提示"去装依赖 / 切模式"，不静默降级。 */
+export const SANDBOX_UNAVAILABLE = "SANDBOX_UNAVAILABLE" as const;
+
+export class SandboxUnavailableError extends Error {
+  readonly code = SANDBOX_UNAVAILABLE;
+  constructor(message: string) {
+    super(message);
+    this.name = "SandboxUnavailableError";
+  }
+}
+
+/**
+ * 在**动手之前**判定这个模式能不能用。
+ *
+ * @param mode 模式
+ * @param info 能力（默认现问一次；测试注入）
+ * @throws SandboxUnavailableError `workspace-write` 但 runner 不可用
+ */
+export function assertSandboxAvailable(mode: SandboxMode, info: SandboxInfo = probeSandbox()): void {
+  if (mode !== "workspace-write") return;
+  if (!info.found) {
+    throw new SandboxUnavailableError(
+      `沙箱模式「workspace-write」需要 ding-sandbox，但没找到（编它：pnpm sandbox:build；或切到 danger-full-access）`,
+    );
+  }
+  if (!info.bounded) {
+    throw new SandboxUnavailableError(
+      `沙箱模式「workspace-write」在本平台（${info.platform}）没有可用隔离 —— 任务已暂停，不裸跑。` +
+        `切到 danger-full-access 需二次确认。`,
+    );
+  }
+}
+
+/** 文件写入的效果检查：读文件不受限；写要按模式。 */
+export function writeEffectAllowed(
+  mode: SandboxMode,
+  root: string,
+  target: string,
+): { ok: true } | { ok: false; error: string } {
+  if (mode === "read-only") return { ok: false, error: "当前沙箱模式是「read-only」—— 不允许写文件" };
+  if (mode === "workspace-write") {
+    const rel = path.relative(path.resolve(root), path.resolve(target));
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      return { ok: false, error: "当前沙箱模式是「workspace-write」—— 只能改工作区内的文件" };
+    }
+  }
+  return { ok: true };
+}

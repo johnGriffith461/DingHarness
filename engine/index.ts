@@ -453,6 +453,18 @@ export function createEngine(ports: EnginePorts): Engine {
 
       // 钩子：会话开始（Phase 8.3）。只看不改，异常不会影响这一轮
       await hooks.run("session:start", { sessionId: request.sessionId, provider: request.provider, model: request.model });
+      /* F5：用户这一轮说了什么（插件可做审计/预处理；返回值不看） */
+      await hooks.run("user:prompt", {
+        sessionId: request.sessionId,
+        prompt: request.messages
+          .filter((m) => m.role === "user")
+          .map((m) =>
+            typeof m.content === "string"
+              ? m.content
+              : m.content.filter((p) => p.type === "text").map((p) => p.text).join("\n"),
+          )
+          .join("\n"),
+      });
 
       /*
        * 委派进度（Phase 7.3）：执行体上报 → 内核**记成事件**并转给宿主上屏。
@@ -558,6 +570,8 @@ export function createEngine(ports: EnginePorts): Engine {
       }
 
       await hooks.run("turn:end", { sessionId: request.sessionId, ok: outcome.ok, aborted: outcome.aborted });
+      /* F5：`turn:stop` 是"这一轮停了"的通用名；保留 turn:end 兼容老插件 */
+      await hooks.run("turn:stop", { sessionId: request.sessionId, ok: outcome.ok, aborted: outcome.aborted });
 
       /*
        * 收尾运行态（U01）：`pending>0` 时是 `waiting_for_confirmation`，

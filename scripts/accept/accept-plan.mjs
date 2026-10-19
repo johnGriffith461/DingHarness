@@ -108,6 +108,20 @@ await step("D2：工具面板列出注册表里的工具与元数据", async () 
   return `${rows} 行`;
 });
 
+await step("F4：终端面板只读空态", async () => {
+  await page.locator('[data-testid="wb-nav-terminal"]').click();
+  await sleep(500);
+  const empty = page.locator('[data-testid="wb-terminal-empty"]');
+  const list = page.locator('[data-testid="wb-terminal-list"]');
+  if (!(await list.count())) throw new Error("没有终端列表");
+  if (await empty.count()) {
+    const text = await empty.innerText();
+    if (!text.includes("还没有命令")) throw new Error(text);
+  }
+  if (await page.locator('[data-testid="wb-terminal-input"]').count()) throw new Error("终端面板不该有输入框");
+  return "只读回放（无输入框）";
+});
+
 await step("/plan 命令也切同一个开关", async () => {
   await page.locator('[data-testid="wb-nav-home"]').click();
   await sleep(600);

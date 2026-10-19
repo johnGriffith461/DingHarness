@@ -82,7 +82,9 @@ export type WorkbenchView =
   /* V6-2l：多 agent 工作流（泳道与断点续跑；运行在 CLI，见 WorkflowPage） */
   | "workflow"
   /* D2：工具面板（注册表里的工具与元数据） */
-  | "tools";
+  | "tools"
+  /* F4：终端（只读回放本会话的命令） */
+  | "terminal";
 
 export type WorkbenchState = {
   view: WorkbenchView;

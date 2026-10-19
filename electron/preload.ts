@@ -262,6 +262,12 @@ const api = {
     list: () => ipcRenderer.invoke(MCP_CHANNEL.list),
     reload: () => ipcRenderer.invoke(MCP_CHANNEL.reload),
     openConfig: () => ipcRenderer.invoke(MCP_CHANNEL.openConfig),
+    resources: () => ipcRenderer.invoke(MCP_CHANNEL.resources) as ReturnType<ShellBridge["mcp"]["resources"]>,
+    readResource: (server: string, uri: string) =>
+      ipcRenderer.invoke(MCP_CHANNEL.readResource, server, uri) as ReturnType<ShellBridge["mcp"]["readResource"]>,
+    prompts: () => ipcRenderer.invoke(MCP_CHANNEL.prompts) as ReturnType<ShellBridge["mcp"]["prompts"]>,
+    getPrompt: (server: string, name: string, args?: Record<string, string>) =>
+      ipcRenderer.invoke(MCP_CHANNEL.getPrompt, server, name, args) as ReturnType<ShellBridge["mcp"]["getPrompt"]>,
   },
   /** 工作区（2026-10-14）：授权给 agent 干活的目录。 */
   workspace: {

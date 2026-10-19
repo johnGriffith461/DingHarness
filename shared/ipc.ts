@@ -699,6 +699,11 @@ export type ShellBridge = {
     }>;
     reload: () => Promise<unknown>;
     openConfig: () => Promise<{ ok: boolean; error: string }>;
+    /** F1：资源与提示词（服务端没声明就是空数组）。 */
+    resources: () => Promise<Array<{ server: string; uri: string; name: string; mimeType?: string; description?: string }>>;
+    readResource: (server: string, uri: string) => Promise<Array<{ uri: string; mimeType?: string; text: string }>>;
+    prompts: () => Promise<Array<{ server: string; name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }>>;
+    getPrompt: (server: string, name: string, args?: Record<string, string>) => Promise<Array<{ role: string; text: string }>>;
   };
   workspace: {
     list: () => Promise<{ dirs: string[] }>;
