@@ -14,8 +14,8 @@ import { trapTabKey } from "./focusTrap";
 import { useAppSettings } from "./appSettings";
 import { listProviders } from "@/ai/aiClient";
 import { useMemoryStore } from "./memoryStore";
-import MemoryPanel from "./MemoryPanel";
 import SettingsPages, { type SettingsSubPage } from "./SettingsPages";
+import { subPageForLabel } from "./settingsSubPage";
 import { THEME_OPTIONS, readTheme } from "./theme";
 
 /** 左轨的两段（照 ZCode 的分段：能力在前、基础在后）。 */
@@ -42,7 +42,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [setQuery, setSetQuery] = useState("");
   /** 当前分区名（面包屑用）—— 点哪一项就记哪个，不靠 subPage 反查（一个分区可能开多个子页）。 */
   const [sectionLabel, setSectionLabel] = useState("");
-  const [memoryOpen, setMemoryOpen] = useState(false);
   const memCount = useMemoryStore((s) => s.lib.entries.length);
   /** 记忆开关（列表里那一行的 value 用它）。 */
   const memOn = useMemoryStore((s) => s.lib.enabled !== false);
@@ -285,22 +284,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           setSubPage("plugins");
                           return;
                         }
-                        if (r.label === "模型") {
-                          setSubPage("models");
-                          return;
-                        }
-                        /* 团队空间（V5-3 的产品面）：名册 / 配对码 / 共享接管 / 账本 */
-                        if (r.label === "团队空间") {
-                          setSubPage("team");
-                          return;
-                        }
-                        if (r.label === "知识库") {
-                          setSubPage("knowledge");
-                          return;
-                        }
-                        if (r.label === "记忆") {
-                          setMemoryOpen((v) => !v);
-                          return;
+                        /*
+                         * T-05：标签 → 子页**只有一份映射**（`subPageForLabel`）。
+                         * 「记忆」原来走的是"在左栏内联展开"，右侧主面板停在上一页 ——
+                         * 用户点完以为自己点错了（WorkBuddy 跨两个构建复现）。
+                         */
+                        {
+                          const target = subPageForLabel(r.label);
+                          if (target) {
+                            setSubPage(target);
+                            return;
+                          }
                         }
                         /*
                           本机档案 / 账号：本体里是**独立路由**
@@ -340,7 +334,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       ) : null}
                       <ChevronRight size={13} />
                     </button>
-                    {r.label === "记忆" && memoryOpen ? <MemoryPanel /> : null}
                   </div>
                 ))}
             </div>
@@ -414,7 +407,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       data-testid={`wb-homecard-${c.key}`}
                       onClick={() => {
                         if (c.key === "memory") {
-                          setMemoryOpen(true);
+                          setSubPage("memory");
                           setSectionLabel("记忆");
                           return;
                         }

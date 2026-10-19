@@ -4,6 +4,7 @@ import { ModelSettingsPage } from "./ModelSettingsPage";
 import { TeamPage } from "./TeamPage";
 import { PluginsPage } from "./PluginsPage";
 import { KnowledgePage } from "./KnowledgePage";
+import MemoryPanel from "./MemoryPanel";
 import { PersonalizePanel } from "./PersonalizePanel";
 import { ProjectRulesPanel } from "./ProjectRulesPanel";
 import { LspPanel } from "./LspPanel";
@@ -22,7 +23,17 @@ import { spacing } from "../utils/spacing";
  * 而不是画一个点了没反应的按钮。
  */
 
-export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team" | "knowledge";
+export type SettingsSubPage =
+  | "profile"
+  | "account"
+  | "general"
+  | "about"
+  | "models"
+  | "plugins"
+  | "team"
+  | "knowledge"
+  /* T-05：记忆是独立子页（右侧主面板跟着切，不再在左栏内联展开） */
+  | "memory";
 
 export type SettingsPagesProps = {
   /** 显示哪一页。 */
@@ -46,6 +57,7 @@ const META: Record<SettingsSubPage, { title: string; note: string }> = {
   },
   models: { title: "模型", note: "配哪些 provider、拉它们的模型清单、选默认模型" },
   knowledge: { title: "知识库", note: "导入资料 → 自己检索 → 回答带引用。与 ding knowledge 是同一个库文件。" },
+  memory: { title: "记忆", note: "长期记住的事；每次对话都会自动带上（关掉开关就停注入）。" },
   profile: {
     title: "个人资料",
     note: "本机版没有账号服务端：昵称与头像是本地显示用的，不会同步到任何服务器。",
@@ -116,6 +128,19 @@ export default function SettingsPages({
           <b>知识库</b>
         </header>
         <KnowledgePage />
+      </div>
+    );
+  }
+
+  if (page === "memory") {
+    /* T-05：独立子页 —— 右侧主面板跟着切到记忆，不再在左栏内联展开 */
+    return (
+      <div className="wb-setpage" data-testid="wb-setpage-memory">
+        <header className="wb-setpage-head">
+          <button className="wb-icon" data-testid="wb-setpage-back" onClick={onBack} aria-label="返回">‹</button>
+          <b>记忆</b>
+        </header>
+        <MemoryPanel />
       </div>
     );
   }
