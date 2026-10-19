@@ -22,7 +22,7 @@
  * 模块级状态（跟着这段逻辑一起搬过来）。别在 store.ts 或别处再声明一份 —— 两份的形状一样、
  * 坏法很具体：中止静默失效、校准系数永不更新。
  */
-import type { ChatMessage, ShellBridge } from "@shared/ipc";
+import type { ChatMessage, ChatPart, ShellBridge } from "@shared/ipc";
 import type { ProjectContextResult } from "@shared/projectWire";
 import { streamChat, completeOnce } from "../ai/aiClient";
 import { buildCodingFollowUpPrompt, buildFollowUpPrompt, parseAskReply } from "./agent";
@@ -401,6 +401,8 @@ export async function answerTurn(
   extraNote?: string,
   /** 这一轮随用户话一起带的资料（见 `WorkTask.material`）：空则只用任务上那份。 */
   material?: string,
+  /** B3：这一轮的多模态片段（图片 / PDF）。 */
+  parts?: ChatPart[],
 ): Promise<void> {
   /*
    * ⚠️ 与下面 `compactKeepTokens()` 用**同一把尺**（审计 P156：两把尺会让"该压就压"失真）。
@@ -477,6 +479,7 @@ export async function answerTurn(
     },
     effective,
     taskId,
+    parts,
   );
 
   /*
@@ -552,8 +555,16 @@ export async function runStream(
    * 起标题这类附带请求走的是别的函数，压根不到这里。
    */
   sessionId = "",
+  /**
+   * B3：这一轮的多模态片段（图片 / PDF）。省略 = 纯文本。
+   * 有片段时最后那条 user 消息带 `parts`，引擎会在发请求前校验模型模态。
+   */
+  parts?: ChatPart[],
 ): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string }> {
-  const messages: ChatMessage[] = [...history, { role: "user", content: user }];
+  const messages: ChatMessage[] = [
+    ...history,
+    { role: "user", content: user, ...(parts?.length ? { parts } : {}) },
+  ];
   /**
    * 这一轮的登记键（P46）：**每轮一个**，同一会话并发两轮也不会互相顶掉。
    * 用后固定顺序（编号 + 会话）便于排查："这是哪段对话的第几轮"。

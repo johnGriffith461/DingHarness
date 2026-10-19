@@ -31,7 +31,7 @@ import { SlashMenu } from "./SlashMenu";
 import { COMPOSER_PLACEHOLDER } from "./copy";
 import { resolveImportedMaterials } from "./materialImport";
 import { UPLOAD_REASON_LABEL } from "@shared/upload";
-import type { ShellBridge } from "@shared/ipc";
+import type { ChatPart, ShellBridge } from "@shared/ipc";
 import { WORKSPACE_LABELS, addedNote, workspaceLabel } from "@shared/workspace";
 import { fileContextBlock } from "./fileContext";
 import { useLibraryStore } from "./libraryStore";
@@ -87,7 +87,7 @@ export function Composer({
    * **任务视图传的是 `sendInTask`**（在这段对话里接着说），
    * 这也是这个组件从"只能发起任务"变成"能续聊"的那个接缝。
    */
-  onSend?: (text: string, options?: { material?: string }) => void;
+  onSend?: (text: string, options?: { material?: string; parts?: ChatPart[] }) => void;
 }) {
   /** 正在跑一轮（流式）—— 决定发送键是「发送」还是「停止」（补完⑤）。 */
   const running = useWorkbenchStore((st) => Boolean(st.runningRequestId));
@@ -326,9 +326,30 @@ export function Composer({
       }
     }
     if (reads.length) block = fileContextBlock(reads);
+    /*
+     * B3：附件转成这一轮的多模态片段；落盘是**尽力而为**（记路径与 sha256 用），
+     * 落盘失败不影响发送 —— 内容已经在 parts 里。
+     */
+    const parts: ChatPart[] = attachments.map((a) =>
+      a.kind === "image"
+        ? { type: "image", data: a.data, mediaType: a.mediaType }
+        : { type: "file", data: a.data, mediaType: a.mediaType, filename: a.name },
+    );
+    if (attachments.length) {
+      const sessionId = useWorkbenchStore.getState().activeTaskId ?? "draft";
+      for (const a of attachments) {
+        void Promise.resolve(shell?.attachments?.save?.({ sessionId, name: a.name, mediaType: a.mediaType, data: a.data })).catch(
+          () => null,
+        );
+      }
+    }
+    setAttachments([]);
     setMaterial([]);
     setMentionChips([]);
-    const options = block ? { material: block } : undefined;
+    const options =
+      block || parts.length
+        ? { ...(block ? { material: block } : {}), ...(parts.length ? { parts } : {}) }
+        : undefined;
     // 传了 onSend 就按它的（任务视图 = 在这段对话里接着说）；没传就是新开一段
     if (onSend) onSend(value, options);
     else void createTask(value, options);
@@ -366,6 +387,49 @@ export function Composer({
     skillName?: string;
   };
   const [mentionChips, setMentionChips] = useState<MentionChip[]>([]);
+
+  /**
+   * B3：图片 / PDF 附件（粘贴、拖拽、`+` 三路都进这里）。
+   * `data` 是 base64，提交时转成 `ChatPart`；发送前还会尽力落盘（记路径/sha256）。
+   */
+  type AttachmentDraft = { id: string; name: string; mediaType: string; data: string; kind: "image" | "file" };
+  const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const addAttachments = async (files: File[]): Promise<void> => {
+    const accepted: AttachmentDraft[] = [];
+    for (const file of files) {
+      const mediaType = file.type || "application/octet-stream";
+      const kind: "image" | "file" | null = mediaType.startsWith("image/")
+        ? "image"
+        : mediaType === "application/pdf"
+          ? "file"
+          : null;
+      if (!kind) {
+        showMaterialNote(`只支持图片与 PDF：${file.name}`);
+        continue;
+      }
+      if (file.size > 25 * 1024 * 1024) {
+        showMaterialNote(`${file.name} 超过 25 MiB，没有加进来`);
+        continue;
+      }
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result ?? "");
+          resolve(result.includes(",") ? result.slice(result.indexOf(",") + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error ?? new Error("读文件失败"));
+        reader.readAsDataURL(file);
+      }).catch(() => "");
+      if (!data) {
+        showMaterialNote(`读不到 ${file.name}`);
+        continue;
+      }
+      accepted.push({ id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`, name: file.name, mediaType, data, kind });
+    }
+    if (accepted.length) setAttachments((prev) => [...prev, ...accepted]);
+  };
 
   /** 拉候选（150ms 防抖由下面的 effect 负责）。 */
   const loadMentionHits = async (query: string): Promise<void> => {
@@ -581,7 +645,28 @@ export function Composer({
   };
 
   return (
-    <div className="wb-composer" data-testid="wb-composer">
+    <div
+      className="wb-composer"
+      data-testid="wb-composer"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer?.files ?? []);
+        if (files.length) void addAttachments(files);
+      }}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,application/pdf"
+        multiple
+        style={{ display: "none" }}
+        data-testid="wb-attach-input"
+        onChange={(e) => {
+          void addAttachments(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
       {slashTrigger ? (
         <SlashMenu commands={slashMatches} selected={slashIndex} onPick={(command) => void runSlash(command)} />
       ) : null}
@@ -761,10 +846,24 @@ export function Composer({
           ))}
         </div>
       ) : null}
+      {attachments.length > 0 ? (
+        <div className="wb-material-chips" data-testid="wb-attachment-chips">
+          {attachments.map((a) => (
+            <span key={a.id} className="wb-material-chip" data-testid={`wb-attachment-chip-${a.name}`}>
+              {a.kind === "image" ? "图片：" : "PDF："}
+              {a.name}
+              <button
+                className="wb-material-x"
+                title="移除附件"
+                onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <textarea
-        ref={inputRef}
-        className="wb-composer-input"
-        data-testid="wb-composer-input"
         rows={2}
         placeholder={placeholder}
         value={text}
@@ -785,6 +884,14 @@ export function Composer({
           syncTrigger(e.currentTarget);
         }}
         onClick={(e) => syncTrigger(e.currentTarget)}
+        onPaste={(e) => {
+          /* B3：粘贴截图 / 复制的 PDF → 直接进附件 chip（纯文本粘贴走默认） */
+          const files = Array.from(e.clipboardData?.files ?? []);
+          if (files.length) {
+            e.preventDefault();
+            void addAttachments(files);
+          }
+        }}
         onBlur={() => {
           setAtTrigger(null);
           setSlashTrigger(null);
@@ -856,6 +963,17 @@ export function Composer({
           </button>
           {openPop === "add" ? (
             <div className="wb-chip-pop" data-testid="wb-add-pop" onMouseLeave={() => setOpenPop(null)}>
+              {/* B3：图片 / PDF（与粘贴、拖拽同一入口） */}
+              <button
+                className="wb-chip-option"
+                data-testid="wb-add-attachment"
+                onClick={() => {
+                  setOpenPop(null);
+                  fileInputRef.current?.click();
+                }}
+              >
+                图片 / PDF
+              </button>
               <button
                 className="wb-chip-option"
                 data-testid="wb-add-doc"

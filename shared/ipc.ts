@@ -41,7 +41,35 @@ export type { CanvasDocument, CanvasLoadResult, CanvasSaveResult, CanvasSnapshot
 
 export type ChatRole = "system" | "user" | "assistant";
 
-export type ChatMessage = { role: ChatRole; content: string };
+/**
+ * 一条消息里的内容片段（B3）：图片 / PDF / 视频。
+ *
+ * `data` 是 **base64**（不带 `data:` 前缀）。引擎侧 `toAiParts` 直接吃这个形状；
+ * 旧调用方不传 `parts` 时仍走 `content: string` —— **加法式扩展**，11 处现有调用零改动。
+ */
+export type ChatPart =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mediaType: string }
+  | { type: "file"; data: string; mediaType: string; filename?: string };
+
+export type ChatMessage = {
+  role: ChatRole;
+  content: string;
+  /** B3：多模态片段；省略 = 纯文本（旧行为）。 */
+  parts?: ChatPart[];
+};
+
+/** 附件落盘结果（B3）：事件/步骤只记路径、mime、大小与 sha256。 */
+export type AttachmentSaved = {
+  ok: true;
+  path: string;
+  bytes: number;
+  sha256: string;
+  mediaType: string;
+  name: string;
+};
+
+export type AttachmentSaveResult = AttachmentSaved | { ok: false; error: string };
 
 /** 脱敏后的 provider 信息。 */
 export type ProviderInfo = {
@@ -352,6 +380,10 @@ export type ShellBridge = {
    * 渲染层把 `rendered` 拼到系统提示词前面；设置页「项目规则」用 `context`。
    */
   project: import("./projectWire").ProjectBridge;
+  /** 附件落盘（B3）：渲染层给 base64，主进程写进会话目录并回报 sha256。 */
+  attachments: {
+    save: (input: { sessionId: string; name: string; mediaType: string; data: string }) => Promise<AttachmentSaveResult>;
+  };
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;
     revert: (sessionId: string, path: string) => Promise<ReviewRevertResult>;

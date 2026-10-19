@@ -396,7 +396,13 @@ export function registerAiIpc(): void {
           provider: request.provider,
           model: target.model,
           ...(request.system ? { system: request.system } : {}),
-          messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+          /*
+           * B3：有 `parts` 走多模态（引擎的 `toAiParts` 会在发请求前校验模型模态），
+           * 没有就仍发字符串 —— 旧会话、旧调用零改动。
+           */
+          messages: request.messages.map((m) =>
+            m.parts?.length ? { role: m.role, content: m.parts } : { role: m.role, content: m.content },
+          ),
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           mode: request.toolPolicy ?? "按需确认",

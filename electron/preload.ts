@@ -31,6 +31,7 @@ import { SEARCH_HISTORY_CHANNEL } from "./ipc/searchStore";
 import { WORKSPACE_CHANNEL } from "./ipc/workspaceStore";
 import { MCP_CHANNEL } from "./ipc/mcpStore";
 import { PROJECT_CHANNEL } from "./ipc/project";
+import { ATTACHMENT_CHANNEL } from "./ipc/attachments";
 import { TASK_CHANNEL } from "./ipc/taskStore";
 import { VIDEO_CHANNEL } from "./ipc/videoGen";
 import { REMOTE_CHANNEL } from "./ipc/remote";
@@ -334,6 +335,11 @@ const api = {
       ipcRenderer.invoke(PROVIDER_CHANNEL.fetchModels, input) as ReturnType<ShellBridge["providers"]["fetchModels"]>,
     add: (input) => ipcRenderer.invoke(PROVIDER_CHANNEL.add, input) as ReturnType<ShellBridge["providers"]["add"]>,
     remove: (id: string) => ipcRenderer.invoke(PROVIDER_CHANNEL.remove, id) as ReturnType<ShellBridge["providers"]["remove"]>,
+  },
+  /** 附件落盘（B3） */
+  attachments: {
+    save: (input: { sessionId: string; name: string; mediaType: string; data: string }) =>
+      ipcRenderer.invoke(ATTACHMENT_CHANNEL.save, input) as ReturnType<ShellBridge["attachments"]["save"]>,
   },
   /** 逐文件改动审阅（U08）：读改动清单 / 回滚某个文件 */
   project: {

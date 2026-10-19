@@ -1,5 +1,5 @@
 import { create, type StoreApi } from "zustand";
-import type { ShellBridge } from "@shared/ipc";
+import type { ChatPart, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "../ai/aiClient";
 import {
   buildAskPrompt,
@@ -200,9 +200,9 @@ export type WorkbenchState = {
   openFloat: (seed?: string) => void;
   closeFloat: () => void;
   /** 新建一个任务并立刻开始跑（对应原版"发消息或创建任务"）。 */
-  createTask: (message: string, options?: { background?: boolean; material?: string }) => Promise<string | undefined>;
+  createTask: (message: string, options?: { background?: boolean; material?: string; parts?: ChatPart[] }) => Promise<string | undefined>;
   /** 在已有对话里继续说一句（§147）—— 与 `createTask` 的区别是带上历史。 */
-  sendInTask: (taskId: string, message: string, options?: { material?: string }) => Promise<void>;
+  sendInTask: (taskId: string, message: string, options?: { material?: string; parts?: ChatPart[] }) => Promise<void>;
   /**
    * 手动压缩当前对话（B2 的 `/compact`）。
    * 与自动压缩同一条路径；没有更早内容/摘要失败时返回可读错误。
@@ -695,7 +695,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      * ⚠️ 历史取的是**加新消息之前**的那份 steps —— 新那句话要作为
      * 这一次请求的 `user` 单独发（否则模型会看到同一个问题出现两次）。
      */
-    await answerTurn(port, taskId, task.steps, text, undefined, withNew.material);
+    await answerTurn(port, taskId, task.steps, text, undefined, withNew.material, options?.parts);
   },
 
   /**
@@ -826,6 +826,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       },
       [],
       task.id,
+      options?.parts,
     );
 
     nextStep(port, task.id, reply.text, false, user, reply.tools, undefined, reply.usage);

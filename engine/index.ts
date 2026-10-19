@@ -15,6 +15,7 @@ import { toolArgsSummary } from "../shared/agentTools";
 import { diffSnapshot, snapshotOf, type Snapshot, type SnapshotDiff } from "./core/snapshot";
 import { ledgerOf, rollup } from "./core/ledger";
 import { modelInfoOf } from "./runtime/models";
+import type { ContentPart } from "./runtime/messageTransform";
 import type { MemberRole } from "./core/members";
 import type { ExecutorContext, ToolExecutor } from "./ports/executor";
 import type { HealthStore } from "./ports/health";
@@ -117,7 +118,8 @@ export type EngineRunRequest = {
   provider: string;
   model?: string;
   system?: string;
-  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  /** B3：`content` 可以是纯文本，也可以是图片/PDF 片段数组（多模态）。 */
+  messages: { role: "system" | "user" | "assistant"; content: string | ContentPart[] }[];
   /**
    * **这一轮之前的对话历史**（可选，2026-10-16，审计 P127）。
    *
@@ -401,7 +403,12 @@ export function createEngine(ports: EnginePorts): Engine {
        * 与 `buildToolSet` 的判定**同一个函数** —— 日志不能为"下发了全套"作证，
        * 而实际只发了几件（审计 P126 的同一条口径）。
        */
-      const queryText = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+      /* B3：多模态消息在"工具搜索/日志文本"这两处只取文字片段（图片不参与关键词） */
+      const textOf = (content: string | ContentPart[]): string =>
+        typeof content === "string"
+          ? content
+          : content.filter((p) => p.type === "text").map((p) => p.text).join("\n");
+      const queryText = textOf([...messages].reverse().find((m) => m.role === "user")?.content ?? "");
       const namesActuallyOffered = (): string[] => {
         const base = offeredToolNames(registry, request.mode, 0, request.only);
         if (!queryText.trim()) return base;
@@ -414,7 +421,7 @@ export function createEngine(ports: EnginePorts): Engine {
         provider: request.provider,
         model: request.model ?? "",
         ...(request.system ? { system: request.system } : {}),
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: messages.map((m) => ({ role: m.role, content: textOf(m.content) })),
         toolPolicy: request.mode,
         ...(request.useTools ? { useTools: true } : {}),
         tools: request.useTools ? namesActuallyOffered() : [],
@@ -489,7 +496,7 @@ export function createEngine(ports: EnginePorts): Engine {
                   /* G03：把这一轮用户说的话作为工具搜索的查询（工具少时不影响） */
                   ...(() => {
                     const lastUser = [...messages].reverse().find((m) => m.role === "user");
-                    return lastUser ? { query: lastUser.content } : {};
+                    return lastUser ? { query: textOf(lastUser.content) } : {};
                   })(),
                 }),
                 maxSteps: request.maxSteps ?? 4,

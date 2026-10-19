@@ -124,6 +124,22 @@ describe("A1/A2：项目上下文真的进了请求", () => {
     expect(system).not.toContain("<project_instructions>");
   });
 
+  it("B3：多模态片段真的进了请求的最后一条 user 消息", async () => {
+    const fake = installBridge("");
+    const port = makePort();
+    const parts = [{ type: "image" as const, data: "AAAA", mediaType: "image/png" }];
+
+    const turn = runStream(port, "看看这张图", "系统", () => undefined, [], "task-4", parts);
+    await waitFor(() => fake.requests.length === 1, "多模态请求");
+    fake.finish();
+    await turn;
+
+    const message = fake.requests[0].messages.at(-1);
+    expect(message?.role).toBe("user");
+    expect(message?.parts).toEqual(parts);
+    expect(message?.content).toBe("看看这张图");
+  });
+
   it("读取失败不阻塞本轮（仍发出请求）", async () => {
     const fake = installBridge("");
     const shell = (globalThis as unknown as { shell: { project: unknown } }).shell;
