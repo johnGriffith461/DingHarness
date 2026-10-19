@@ -14,6 +14,7 @@ import {
   searchWorkspaceEntries,
 } from "../../engine/runtime/workspaceFiles";
 import { buildRepoMap } from "../../engine/runtime/repoMap";
+import { writePlanFile } from "../../engine/runtime/planMode";
 import type { ProjectContextResult } from "../../shared/projectWire";
 import { workspaceDirsSync } from "./workspaceStore";
 
@@ -40,6 +41,7 @@ export const PROJECT_CHANNEL = {
   readFile: "project:readFile",
   writeAgents: "project:writeAgents",
   repoMap: "project:repoMap",
+  writePlan: "project:writePlan",
 } as const;
 
 /** 全局规则目录：用户把跨项目约定放这里（`~/.ding/AGENTS.md`）。 */
@@ -105,5 +107,22 @@ export function registerProjectIpc(ipc: Pick<typeof ipcMain, "handle">): void {
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
+  });
+  /*
+   * G1：计划落盘。路径与清洗都在引擎里（`writePlanFile`），这里只提供真实写盘端口。
+   * 写失败不抛：渲染层要显示"未落盘"并继续执行。
+   */
+  ipc.handle(PROJECT_CHANNEL.writePlan, async (_event, input: unknown) => {
+    const raw = (input ?? {}) as { sessionId?: unknown; text?: unknown };
+    if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) {
+      return { ok: false as const, path: "", error: "没有给会话 id", truncated: false };
+    }
+    if (typeof raw.text !== "string") {
+      return { ok: false as const, path: "", error: "计划内容不是文本", truncated: false };
+    }
+    return await writePlanFile(projectRoot(), raw.sessionId, raw.text, async (file, text) => {
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, text, "utf8");
+    });
   });
 }

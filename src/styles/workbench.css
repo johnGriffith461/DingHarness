@@ -257,6 +257,9 @@
 .wb-task-title b { font-size: 14px; font-weight: 600; }
 .wb-task-title em { font-style: normal; font-size: 11px; color: var(--fg-faint); }
 
+/* G1：流区域 + 右侧计划面板并排；面板不出现时流区域仍占满 */
+.wb-task-body { flex: 1; min-height: 0; display: flex; }
+
 .wb-stream {
   flex: 1;
   min-height: 0;
@@ -267,6 +270,41 @@
   gap: 14px;
 }
 
+.wb-plan-panel {
+  flex: 0 0 340px;
+  min-width: 280px;
+  max-width: 42%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-left: 1px solid var(--bg-4);
+  background: var(--bg-2);
+  overflow-y: auto;
+}
+.wb-plan-panel.is-collapsed { flex-basis: auto; padding: 8px 12px; }
+.wb-plan-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--fg-dim); }
+.wb-plan-hint, .wb-plan-note { font-size: 11.5px; line-height: 1.5; color: var(--fg-faint); }
+.wb-plan-input {
+  flex: 1;
+  min-height: 180px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.wb-plan-actions { display: flex; gap: 8px; }
+.wb-plan-actions .wb-plan-btn { display: inline-flex; align-items: center; gap: 4px; }
+.wb-plan-collapsed { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--fg-dim); }
+.wb-plan-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-faint); font-size: 11.5px; }
+.wb-plan-error { font-size: 11.5px; line-height: 1.5; color: var(--danger, var(--fg)); }
+
 .wb-bubble-user {
   align-self: flex-end;
   max-width: 74%;
@@ -276,6 +314,60 @@
   font-size: 13.5px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* G2：用户气泡里的附件缩略图 */
+.wb-step-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.wb-step-attachment { display: inline-flex; align-items: center; }
+.wb-attachment-thumb {
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: zoom-in;
+  line-height: 0;
+}
+.wb-attachment-thumb img { width: 84px; height: 84px; object-fit: cover; display: block; }
+.wb-attachment-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-attachment-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: var(--scrim);
+  cursor: zoom-out;
+}
+.wb-attachment-preview img { max-width: 92vw; max-height: 88vh; border-radius: 12px; }
+.wb-attachment-preview-x {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
 }
 
 .wb-assistant { display: flex; flex-direction: column; gap: 6px; }

@@ -1,5 +1,5 @@
 import { create, type StoreApi } from "zustand";
-import type { ChatPart, ShellBridge } from "@shared/ipc";
+import type { AttachmentDraftWire, ChatPart, SavedAttachmentMeta, ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "../ai/aiClient";
 import {
   buildAskPrompt,
@@ -18,7 +18,8 @@ import { taskSessionId } from "@engine/core/events";
 import { fabricatedCost } from "@shared/cost";
 import { branchFrom, editedBranchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";
-import { readPlanMode } from "./planMode";
+import { readPlanMode, savePlanMode } from "./planMode";
+import { isPlanTransitionAllowed, planApprovalError, truncatePlan } from "@engine/runtime/planMode";
 import { pickSuggestions, HOME_MODE_KEY, parseHomeMode, suggestionsFor, type HomeMode } from "./copy";
 import { rememberAlwaysAllow } from "./permissionRules";
 import {
@@ -59,6 +60,43 @@ import {
  * 都由模型按 `buildAskPrompt` 里的约定现场产出 —— 原版也是这样
  * （同一个任务每次给的选项都不一样，实测两次就换了一批）。
  */
+
+/**
+ * G2：把这一轮的附件草稿写进**当前会话目录**，回元数据。
+ *
+ * 这一步必须在拿得到任务 id 之后做（新建任务时 id 是刚生成的），
+ * 否则附件会落到 `draft/` 里、重启后按会话目录校验就读不到。
+ * 单个失败不阻塞发送：内容已经在 `parts` 里，元数据只是"重启后还能看"的凭据。
+ */
+async function persistAttachmentDrafts(
+  sessionId: string,
+  drafts: AttachmentDraftWire[] | undefined,
+): Promise<SavedAttachmentMeta[]> {
+  if (!drafts?.length) return [];
+  const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+  const out: SavedAttachmentMeta[] = [];
+  for (const draft of drafts) {
+    try {
+      const got = await bridge?.attachments?.save?.({
+        sessionId,
+        name: draft.name,
+        mediaType: draft.mediaType,
+        data: draft.data,
+      });
+      if (!got?.ok) continue;
+      out.push({
+        path: got.path,
+        mediaType: got.mediaType,
+        bytes: got.bytes,
+        sha256: got.sha256,
+        name: got.name,
+      });
+    } catch {
+      /* 落盘失败不影响发送 */
+    }
+  }
+  return out;
+}
 
 /** 工作台里的一个"页面"。 */
 export type WorkbenchView =
@@ -206,9 +244,27 @@ export type WorkbenchState = {
   openFloat: (seed?: string) => void;
   closeFloat: () => void;
   /** 新建一个任务并立刻开始跑（对应原版"发消息或创建任务"）。 */
-  createTask: (message: string, options?: { background?: boolean; material?: string; parts?: ChatPart[] }) => Promise<string | undefined>;
+  createTask: (
+    message: string,
+    options?: { background?: boolean; material?: string; parts?: ChatPart[]; attachmentDrafts?: AttachmentDraftWire[] },
+  ) => Promise<string | undefined>;
   /** 在已有对话里继续说一句（§147）—— 与 `createTask` 的区别是带上历史。 */
-  sendInTask: (taskId: string, message: string, options?: { material?: string; parts?: ChatPart[] }) => Promise<void>;
+  sendInTask: (
+    taskId: string,
+    message: string,
+    options?: { material?: string; parts?: ChatPart[]; attachmentDrafts?: AttachmentDraftWire[] },
+  ) => Promise<void>;
+  /** G1：编辑计划面板里的文本（只改草稿，不写盘）。 */
+  setPlanText: (taskId: string, text: string) => void;
+  /**
+   * G1：批准计划 —— 只在 `awaiting_approval` 时可用。
+   *
+   * 顺序是"先落盘，再执行"：写失败也继续执行（面板显示"未落盘"），
+   * 但状态机不允许从 `idle` 跳过计划直接进入 `executing`。
+   */
+  approvePlan: (taskId: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** G1：放弃计划 —— 回 `idle`、不写盘、工具面恢复。 */
+  abandonPlan: (taskId: string) => void;
   /**
    * 手动压缩当前对话（B2 的 `/compact`）。
    * 与自动压缩同一条路径；没有更早内容/摘要失败时返回可读错误。
@@ -686,11 +742,22 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     if (!task) return;
 
     const now = Date.now();
+    /* G2：先落盘（拿到会话目录内的路径），再把引用挂到这一步上。 */
+    const attachments = await persistAttachmentDrafts(taskId, options?.attachmentDrafts);
     const withNew: WorkTask = {
       ...task,
       /* 这一轮带的资料（没给就沿用任务上原来那份）—— 与"先问再干"那条路的口径一致。 */
       ...(options?.material ?? task.material ? { material: options?.material ?? task.material } : {}),
-      steps: [...task.steps, { id: makeStepId(task.steps.length + 1), role: "user", text, at: now }],
+      steps: [
+        ...task.steps,
+        {
+          id: makeStepId(task.steps.length + 1),
+          role: "user",
+          text,
+          at: now,
+          ...(attachments.length ? { attachments } : {}),
+        },
+      ],
       stage: "running",
       finishedAt: null,
       activity: "正在思考",
@@ -707,6 +774,82 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      * 这一次请求的 `user` 单独发（否则模型会看到同一个问题出现两次）。
      */
     await answerTurn(port, taskId, task.steps, text, undefined, withNew.material, options?.parts);
+  },
+
+  /** G1：面板里的编辑只改草稿，不动磁盘（批准那一刻才写）。 */
+  setPlanText: (taskId, text) => {
+    const state = get();
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    if (task.planState !== "awaiting_approval" && task.planState !== "planning") return;
+    const next = truncatePlan(text).text;
+    set((s) => ({ tasks: upsertTask(s.tasks, { ...task, planText: next }) }));
+  },
+
+  /**
+   * G1：放弃计划。
+   *
+   * 状态机拒绝非法迁移（执行中不能"放弃"回 idle —— 那会让界面以为没执行过）；
+   * 清理草稿与路径，下一次计划重新开始。
+   */
+  abandonPlan: (taskId) => {
+    const state = get();
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const from = task.planState ?? "idle";
+    if (!isPlanTransitionAllowed(from, "idle")) return;
+    savePlanMode(false);
+    set((s) => ({
+      tasks: upsertTask(s.tasks, {
+        ...task,
+        planState: "idle",
+        planText: undefined,
+        planPath: undefined,
+        planWriteError: undefined,
+      }),
+    }));
+  },
+
+  /**
+   * G1：批准计划 → 写盘 → 进入执行态 → 自动发一句"开始执行"。
+   *
+   * 三条守卫都在**动作体**里，而不只在按钮的 disabled 上 ——
+   * 按钮能绕过（键盘、测试、别的入口），状态机不能。
+   */
+  approvePlan: async (taskId) => {
+    const state = get();
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) return { ok: false, error: "没有打开的对话" };
+    /* 状态机、非空、五段齐全：判据只有一份（`planApprovalError`）。 */
+    const blocked = planApprovalError(task.planState, task.planText);
+    if (blocked) return { ok: false, error: blocked };
+    const text = String(task.planText ?? "").trim();
+
+    const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    let path = "";
+    let writeError = "";
+    try {
+      const got = await bridge?.project?.writePlan?.({ sessionId: taskId, text });
+      if (got?.ok) path = got.path;
+      else writeError = got?.error ?? "写盘通道不可用";
+    } catch (error) {
+      writeError = error instanceof Error ? error.message : String(error);
+    }
+
+    /* 批准后全局计划开关必须关掉：执行轮要拿回写工具（工具面由内核按 plan 标志决定）。 */
+    savePlanMode(false);
+    set((s) => ({
+      tasks: upsertTask(s.tasks, {
+        ...current(s.tasks, taskId),
+        planState: "executing",
+        planText: text,
+        ...(path ? { planPath: path } : {}),
+        ...(writeError ? { planWriteError: writeError } : { planWriteError: undefined }),
+      }),
+    }));
+
+    await get().sendInTask(taskId, "计划已批准，请按计划开始执行。");
+    return { ok: true, ...(path ? { path } : {}), ...(writeError ? { error: writeError } : {}) };
   },
 
   /**
@@ -797,9 +940,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      * 切一下首页不该让一段已有对话换身份。
      */
     const mode: HomeMode = get().homeMode;
+    /* G1：计划模式对编码/办公都生效；任务从 `planning` 起步。 */
+    const plan = readPlanMode();
+    const id = nextId("t");
+    /* G2：新任务的 id 先生成，附件才能落到**这段会话自己的目录**里。 */
+    const attachments = await persistAttachmentDrafts(id, options?.attachmentDrafts);
     const task: WorkTask = {
-      id: nextId("t"),
+      id,
       mode,
+      ...(plan ? { planState: "planning" as const } : {}),
       /*
        * 先用本地启发式给一个**即时**标题。
        *
@@ -815,7 +964,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       stage: "running",
       startedAt: now,
       finishedAt: null,
-      steps: [{ id: makeStepId(1), role: "user", text, at: now }],
+      steps: [
+        {
+          id: makeStepId(1),
+          role: "user",
+          text,
+          at: now,
+          ...(attachments.length ? { attachments } : {}),
+        },
+      ],
       questions: [],
       questionIndex: 0,
       activity: "正在思考",
@@ -852,12 +1009,28 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       [],
       task.id,
       options?.parts,
-      mode === "coding" && readPlanMode(),
+      plan,
       mode === "coding",
     );
 
     const verifyNote = reply.wroteFiles && mode === "coding" ? await runVerificationNote(task.id) : "";
     nextStep(port, task.id, reply.text, false, user, reply.tools, verifyNote || undefined, reply.usage);
+    /*
+     * G1：计划阶段收尾。若这一轮又问了澄清问题（`stage === "awaiting"`），
+     * 计划还没成形 —— 保持在 planning，等用户答完的 do 阶段再收。
+     */
+    if (plan) {
+      const after = current(get().tasks, task.id);
+      if (after && after.stage !== "awaiting") {
+        set((s) => ({
+          tasks: upsertTask(s.tasks, {
+            ...current(s.tasks, task.id),
+            planState: "awaiting_approval",
+            planText: truncatePlan(reply.text).text,
+          }),
+        }));
+      }
+    }
     return task.id;
   },
 
@@ -881,6 +1054,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const { system, user } = taskMode(advanced) === "coding"
       ? buildCodingDoPrompt(advanced.brief, background, advanced.material)
       : buildDoPrompt(advanced.brief, background, advanced.material);
+    /* G1：澄清答完后，do 阶段仍然属于计划阶段 —— 不能因为一次往返丢掉只读工具面。 */
+    const planRequested = Boolean(readPlanMode() && advanced.planState !== "executing");
     const reply = await runStream(
       port,
       user,
@@ -890,10 +1065,24 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       },
       [],
       advanced.id,
+      undefined,
+      planRequested,
     );
 
     // 第二段如果又吐了提问块，也照收（模型有时会追问，原版也允许）
     nextStep(port, advanced.id, reply.text, true, user, reply.tools, undefined, reply.usage);
+    if (planRequested) {
+      const after = current(get().tasks, advanced.id);
+      if (after && after.stage !== "awaiting") {
+        set((s) => ({
+          tasks: upsertTask(s.tasks, {
+            ...current(s.tasks, advanced.id),
+            planState: "awaiting_approval",
+            planText: truncatePlan(reply.text).text,
+          }),
+        }));
+      }
+    }
   },
 }));
 

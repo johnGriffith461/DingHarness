@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   PLAN_MODE_TOOLS,
+  PLAN_TEXT_LIMIT,
   isPlanTransitionAllowed,
+  missingPlanSections,
   planFilePath,
   planToolNames,
+  renderApprovedPlan,
   renderPlanPrompt,
+  truncatePlan,
+  writePlanFile,
   type PlanState,
 } from "./planMode";
 
@@ -64,6 +69,68 @@ describe("计划文件与提示", () => {
     for (const section of ["目标", "范围", "步骤", "验证", "风险"]) expect(text).toContain(section);
     expect(text).toContain("不能修改任何文件");
     expect(text).toContain("重构登录");
+  });
+});
+
+describe("计划落盘（G1）", () => {
+  const full = ["1. 目标：能跑", "2. 范围：src", "3. 步骤：改两处", "4. 验证：pnpm test", "5. 风险：回滚 commit"].join("\n");
+
+  it("五段齐全时缺段为空；缺一段能指出来", () => {
+    expect(missingPlanSections(full)).toEqual([]);
+    expect(missingPlanSections(full.replace(/^4\..*$/m, ""))).toEqual(["验证"]);
+  });
+
+  it("正文里顺口提「风险」不算那一段", () => {
+    expect(missingPlanSections("目标：做一件事，可能有点风险")).toContain("风险");
+  });
+
+  it("超 20 KiB 截断并标记", () => {
+    const got = truncatePlan("x".repeat(PLAN_TEXT_LIMIT + 10));
+    expect(got.truncated).toBe(true);
+    expect(got.text.length).toBe(PLAN_TEXT_LIMIT);
+  });
+
+  it("写到 .ding/plans 下，内容与传入一致", async () => {
+    const writes: Array<{ path: string; text: string }> = [];
+    const got = await writePlanFile("C:/data", "t-1", full, async (path, text) => {
+      writes.push({ path, text });
+    });
+    expect(got.ok).toBe(true);
+    if (got.ok) expect(got.path).toContain(".ding/plans/t-1.md");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.text).toBe(full);
+  });
+
+  it("非法 sessionId 被清洗，不会逃出计划目录", async () => {
+    let written = "";
+    await writePlanFile("C:/data", "../../etc/passwd", "目标：x", async (path) => {
+      written = path;
+    });
+    expect(written).not.toContain("..");
+    expect(written).toContain(".ding/plans/");
+  });
+
+  it("写失败返回可读错误（不抛）", async () => {
+    const got = await writePlanFile("C:/data", "t-1", full, async () => {
+      throw new Error("磁盘满了");
+    });
+    expect(got.ok).toBe(false);
+    if (!got.ok) {
+      expect(got.error).toContain("磁盘满了");
+      expect(got.path).toContain(".ding/plans");
+    }
+  });
+
+  it("空计划拒绝写", async () => {
+    const got = await writePlanFile("C:/data", "t-1", "   ", async () => undefined);
+    expect(got.ok).toBe(false);
+  });
+
+  it("批准后的注入块带路径与计划正文", () => {
+    const block = renderApprovedPlan(full, "C:/p/.ding/plans/t-1.md");
+    expect(block).toContain("<approved_plan>");
+    expect(block).toContain("计划文件：C:/p/.ding/plans/t-1.md");
+    expect(block).toContain("步骤：改两处");
   });
 });
 

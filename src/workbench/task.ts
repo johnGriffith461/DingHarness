@@ -14,6 +14,8 @@
 export type TaskStage = "running" | "awaiting" | "done" | "failed";
 
 import type { ContextIndex } from "@engine/core/contextManager";
+import type { PlanState } from "@engine/runtime/planMode";
+import type { SavedAttachmentMeta } from "@shared/ipc";
 import { ARTIFACT_FORMATS, type Artifact, type ArtifactKind } from "./artifact";
 import { normalizeToolTraces, type ToolTrace } from "@shared/agentTools";
 import type { StepUsage } from "@shared/cost";
@@ -58,6 +60,13 @@ export type TaskStep = {
    * 回头翻这段对话会不知道当时发生了什么。
    */
   note?: string;
+  /**
+   * G2：这一步随消息发出的附件（**只存引用**，不存 base64）。
+   *
+   * 重启后 `TaskView` 按 `path` 通过主进程读回缩略图；文件被清理时显示占位。
+   * 旧盘没有该字段 = 这一步没有附件（不补空数组，免得旧数据多出一个字段）。
+   */
+  attachments?: SavedAttachmentMeta[];
 };
 
 /**
@@ -187,6 +196,26 @@ export type WorkTask = {
    * 只能按那句说明认一次（见 `continueTargetOf` 的兜底）。
    */
   interrupted?: boolean;
+
+  /**
+   * 计划模式（G1）的**每任务状态机**。
+   *
+   * 全局开关（`planMode.ts` 的 localStorage）只表示"用户想用计划模式"；
+   * 这一段对话走到哪一步是任务自己的事实，必须随任务落盘 ——
+   * 否则重启之后面板消失，批准过的计划也无从续上。
+   *
+   * 可选：旧盘没有该字段 = `idle`。
+   */
+  planState?: PlanState;
+
+  /** 模型给出的计划原文（可编辑；批准时写盘的就是它）。可选 = 还没生成。 */
+  planText?: string;
+
+  /** 批准后写进 `.ding/plans/<sessionId>.md` 的路径。 */
+  planPath?: string;
+
+  /** 写盘失败的原因（面板显示"未落盘"，但**不阻塞执行**）。 */
+  planWriteError?: string;
 
   /**
    * 这段会话已经做过几次**摘要式压缩**（V6-1c ICM 的计数）。
@@ -528,6 +557,7 @@ export function normalizeStep(raw: unknown, index: number): TaskStep {
   const s = (raw ?? {}) as Record<string, unknown>;
   const note = typeof s.note === "string" ? s.note.trim().slice(0, STEP_NOTE_LIMIT) : "";
   const tools = normalizeToolTraces(s.tools);
+  const attachments = normalizeAttachments(s.attachments);
   // 先算一次再判（分两次调用的话 TS 收不窄，会变成 `{…} | null`）
   const usage = usageOf(s.usage);
   return {
@@ -549,7 +579,36 @@ export function normalizeStep(raw: unknown, index: number): TaskStep {
      * 而恢复时原来把它丢了 —— **等于又变回了"刷新就没"**。
      */
     ...(note ? { note } : {}),
+    ...(attachments.length ? { attachments } : {}),
   };
+}
+
+/**
+ * G2：附件元数据收窄（磁盘内容不可信）。
+ *
+ * 只认五个字段都合法的条目；`data`/base64 一律**不收** —— 步骤里不该有正文，
+ * 旧版本若误写过也会在恢复时被丢掉。
+ */
+export function normalizeAttachments(raw: unknown): SavedAttachmentMeta[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SavedAttachmentMeta[] = [];
+  for (const item of raw.slice(0, 20)) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Record<string, unknown>;
+    if (typeof a.path !== "string" || !a.path || a.path.length > 1000) continue;
+    if (typeof a.mediaType !== "string" || !a.mediaType) continue;
+    if (typeof a.name !== "string" || !a.name) continue;
+    if (typeof a.sha256 !== "string") continue;
+    if (typeof a.bytes !== "number" || !Number.isFinite(a.bytes) || a.bytes < 0) continue;
+    out.push({
+      path: a.path,
+      mediaType: a.mediaType,
+      bytes: a.bytes,
+      sha256: a.sha256,
+      name: a.name.slice(0, 200),
+    });
+  }
+  return out;
 }
 
 /* ────────────────── 恢复产物 / 澄清卡（§179） ────────────────── */

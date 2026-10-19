@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
 
-import { parseLog, type LogInput } from "../../engine/core/events";
+import { parseLog, SYSTEM_ACTOR, type LogInput } from "../../engine/core/events";
 import { forkSession, forkSessionAt } from "../../engine/core/fork";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import type { SessionStore } from "../../engine/ports/store";
@@ -74,6 +74,8 @@ export const SESSION_CHANNEL = {
   load: "session:load",
   /** 全文检索会话记录（Phase 12.4；左栏搜索框走它）。 */
   search: "session:search",
+  /** G3：压缩事件回写（只接受压缩这一种记录）。 */
+  appendCompaction: "session:append-compaction",
 } as const;
 
 /* ────────────────────── 桌面会话库 ────────────────────── */
@@ -269,5 +271,41 @@ export function registerSessionIpc(ipcMain: Electron.IpcMain): void {
     const q = typeof query === "string" ? query.trim().slice(0, 200) : "";
     if (!q) return [];
     return desktopSessionStore().search(q, { limit: 30 });
+  });
+  /*
+   * G3：压缩事件补记。
+   *
+   * 只收压缩字段（不是通用的"渲染层可写日志"通道）：`type` 由这里写死，
+   * 数字字段逐个收窄。写失败返回错误，但调用方**不允许**因此回滚压缩本身。
+   */
+  ipcMain.handle(SESSION_CHANNEL.appendCompaction, async (_event, sessionId: unknown, info: unknown) => {
+    await ready();
+    const id = safeSessionId(sessionId);
+    if (!id) return { ok: false as const, error: "会话 id 形状不对" };
+    const raw = (info ?? {}) as Record<string, unknown>;
+    const num = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+    const fromSeq = num(raw.fromSeq);
+    const toSeq = num(raw.toSeq);
+    const tokensBefore = num(raw.tokensBefore);
+    const tokensAfter = num(raw.tokensAfter);
+    const summaryId = typeof raw.summaryId === "string" ? raw.summaryId.slice(0, 120) : undefined;
+    try {
+      await desktopSessionStore().append(id, [
+        {
+          requestId: `compact-${Date.now().toString(36)}`,
+          type: "compaction",
+          actor: SYSTEM_ACTOR,
+          ...(fromSeq === undefined ? {} : { fromSeq }),
+          ...(toSeq === undefined ? {} : { toSeq }),
+          ...(tokensBefore === undefined ? {} : { tokensBefore }),
+          ...(tokensAfter === undefined ? {} : { tokensAfter }),
+          ...(summaryId ? { summaryId } : {}),
+        },
+      ]);
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 }

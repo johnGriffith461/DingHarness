@@ -87,10 +87,18 @@ export function PluginsPage() {
       line: string;
       error: string;
       tools: Array<{ localName: string; name: string; description: string }>;
+      oauth?: { authorized: boolean; expiresAt?: number };
     }>;
   } | null>(null);
   /* 提示条自己会消失（P91）：句柄由 hook 管，后一条不许被前一条的定时器提前擦掉 */
   const [mcpNote, showMcpNote] = useTransientNote(3000);
+  /**
+   * G4：正在进行的 OAuth 授权（HTTP 连接器）。
+   *
+   * `state` 必须留着：手动粘贴授权码那条路要靠它找回 PKCE verifier。
+   * 回环回调成功时界面轮询 `oauthStatus` 知道结果并自动重连。
+   */
+  const [mcpAuth, setMcpAuth] = useState<{ server: string; state: string; url: string; code: string } | null>(null);
 
   const pullMcp = useCallback(() => {
     const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
@@ -99,6 +107,21 @@ export function PluginsPage() {
       .then((r) => setMcp(r ?? null))
       .catch(() => setMcp(null));
   }, []);
+
+  /* 授权进行中：每 2 秒问一次主进程（回环成功 = token 已保存）。 */
+  useEffect(() => {
+    if (!mcpAuth) return;
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    const timer = setInterval(() => {
+      void shell?.mcp?.oauthStatus?.(mcpAuth.server).then((got) => {
+        if (!got?.authorized) return;
+        setMcpAuth(null);
+        pullMcp();
+        showMcpNote("授权完成，已重新连接");
+      });
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [mcpAuth, pullMcp, showMcpNote]);
 
   /* 进「连接器」页签时才拉（它是主进程的状态，没必要一直挂着） */
   useEffect(() => {
@@ -360,6 +383,32 @@ export function PluginsPage() {
                           {srv.tools.map((t) => t.localName).join("、")}
                         </span>
                       ) : null}
+                      {/* G4：HTTP 连接器的授权入口（stdio 没有这一行） */}
+                      {srv.url ? (
+                        srv.oauth?.authorized ? (
+                          <span className="wb-mcp-oauth-ok" data-testid={`wb-mcp-oauth-ok-${srv.name}`}>
+                            已授权
+                          </span>
+                        ) : (
+                          <button
+                            className="wb-page-btn wb-mcp-oauth-btn"
+                            data-testid={`wb-mcp-oauth-${srv.name}`}
+                            onClick={() => {
+                              const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                              void shell?.mcp?.oauthBegin?.(srv.name).then((got) => {
+                                if (!got?.ok) {
+                                  showMcpNote(`授权没开始：${got?.error ?? "未知原因"}`);
+                                  return;
+                                }
+                                setMcpAuth({ server: srv.name, state: got.state, url: got.url, code: "" });
+                                showMcpNote("浏览器已打开授权页；没打开就复制下面的链接");
+                              });
+                            }}
+                          >
+                            授权
+                          </button>
+                        )
+                      ) : null}
                     </div>
                   </div>
                 ))
@@ -397,6 +446,69 @@ export function PluginsPage() {
                   </span>
                 ) : null}
               </div>
+              {/* G4：授权面板（浏览器没打开/回调打不通时的手动回退） */}
+              {mcpAuth ? (
+                <div className="wb-mcp-oauth-panel" data-testid="wb-mcp-oauth-panel">
+                  <div className="wb-mcp-oauth-hint">
+                    在「{mcpAuth.server}」的授权页完成授权。没自动回来时，复制下面的链接手动打开，
+                    再把页面上的授权码粘进来。
+                  </div>
+                  <code className="wb-mcp-oauth-url" data-testid="wb-mcp-oauth-url">
+                    {mcpAuth.url}
+                  </code>
+                  <div className="wb-mcp-oauth-actions">
+                    <button
+                      className="wb-page-btn"
+                      data-testid="wb-mcp-oauth-copy"
+                      onClick={() => {
+                        void navigator.clipboard
+                          ?.writeText(mcpAuth.url)
+                          .then(() => showMcpNote("授权链接已复制"))
+                          .catch(() => showMcpNote("复制失败：请手动选中链接复制"));
+                      }}
+                    >
+                      复制链接
+                    </button>
+                    <input
+                      className="wb-mcp-oauth-code"
+                      data-testid="wb-mcp-oauth-code"
+                      placeholder="粘贴授权码"
+                      value={mcpAuth.code}
+                      onChange={(e) => setMcpAuth({ ...mcpAuth, code: e.target.value })}
+                    />
+                    <button
+                      className="wb-page-btn"
+                      data-testid="wb-mcp-oauth-complete"
+                      disabled={!mcpAuth.code.trim()}
+                      onClick={() => {
+                        const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                        void shell?.mcp?.oauthComplete?.(mcpAuth.server, mcpAuth.state, mcpAuth.code).then((got) => {
+                          if (!got?.ok) {
+                            showMcpNote(`授权失败：${got?.error ?? "未知原因"}`);
+                            return;
+                          }
+                          setMcpAuth(null);
+                          pullMcp();
+                          showMcpNote(got.persisted === false ? `已授权，但 token 没存住：${got.persistError ?? ""}` : "授权完成");
+                        });
+                      }}
+                    >
+                      完成授权
+                    </button>
+                    <button
+                      className="wb-page-btn"
+                      data-testid="wb-mcp-oauth-cancel"
+                      onClick={() => {
+                        const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                        void shell?.mcp?.oauthCancel?.(mcpAuth.state);
+                        setMcpAuth(null);
+                      }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {mcp?.file ? (
                 <div className="wb-mcp-file" data-testid="wb-mcp-file">
                   配置文件：{mcp.file}

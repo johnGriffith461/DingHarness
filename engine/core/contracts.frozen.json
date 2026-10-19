@@ -33,8 +33,8 @@
       "adr": "0008-审批裁决权归属与流转.md"
     },
     "record.types": {
-      "value": "approval,approval-grant,delegation,done,error,request,run-state,steer,text,tool-call,tool-result",
-      "adr": "0019-运行状态机记录.md"
+      "value": "approval,approval-grant,compaction,delegation,done,error,request,run-state,steer,text,tool-call,tool-result",
+      "adr": "0020-压缩事件记录与桌面回写.md"
     },
     "session.owner": {
       "value": "sessions.owner (TEXT NOT NULL DEFAULT 'local')",

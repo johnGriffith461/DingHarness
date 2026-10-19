@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ATTACHMENT_MAX_BYTES, saveAttachment } from "./attachments";
+import {
+  ATTACHMENT_MAX_BYTES,
+  attachmentPathWithin,
+  readAttachmentDataUrl,
+  saveAttachment,
+} from "./attachments";
 
 /**
  * B3：附件落盘的边界。
@@ -76,5 +81,37 @@ describe("saveAttachment", () => {
     const got = await saveAttachment(dir, { sessionId: "s", name: "big.png", mediaType: "image/png", data: big });
     expect(got.ok).toBe(false);
     if (!got.ok) expect(got.error).toContain("过大");
+  });
+});
+
+describe("G2 重启后读回", () => {
+  it("会话目录内的文件能读成 data URL（mime 按扩展名）", async () => {
+    const saved = await saveAttachment(dir, {
+      sessionId: "t-1",
+      name: "shot.png",
+      mediaType: "image/png",
+      data: png.toString("base64"),
+    });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    const got = await readAttachmentDataUrl(dir, saved.path);
+    expect(got.ok).toBe(true);
+    if (got.ok) {
+      expect(got.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+      expect(got.mediaType).toBe("image/png");
+    }
+  });
+
+  it("⭐ 目录外路径被拒（不能变成任意文件读取）", async () => {
+    expect(attachmentPathWithin(dir, path.join(dir, "..", "secret.txt"))).toBeNull();
+    expect(attachmentPathWithin(dir, "C:/Windows/win.ini")).toBeNull();
+    const got = await readAttachmentDataUrl(dir, path.join(dir, "..", "secret.txt"));
+    expect(got.ok).toBe(false);
+  });
+
+  it("文件被清理 → 返回可读占位错误（不抛）", async () => {
+    const got = await readAttachmentDataUrl(dir, path.join(dir, "t-1", "attachments", "gone.png"));
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.error).toContain("已清理");
   });
 });

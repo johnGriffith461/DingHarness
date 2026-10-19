@@ -58,6 +58,15 @@ export type ProjectBridge = {
   }>;
   /** 写 `AGENTS.md`（`/init` 用；内容由调用方预览确认后给）。 */
   writeAgents: (content: string) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
+  /**
+   * G1：把批准后的计划写进 `.ding/plans/<sessionId>.md`。
+   *
+   * 写盘失败也返回 `path`：面板要显示"未落盘"并保留用户编辑的内容，
+   * 而不是让整个批准动作失败。
+   */
+  writePlan: (input: { sessionId: string; text: string }) => Promise<
+    { ok: true; path: string; truncated: boolean } | { ok: false; path: string; error: string; truncated: boolean }
+  >;
 };
 
 /** 与 `shared/mentions.ts` 的 `MentionCandidate` 同形（shared 不 import engine）。 */

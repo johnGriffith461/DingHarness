@@ -20,6 +20,8 @@ import { PenIcon } from "./uiUtil";
 import { QuestionCard } from "./QuestionCard";
 import { MessageActions } from "./MessageActions";
 import { Composer } from "./Composer";
+import { PlanPanel } from "./PlanPanel";
+import { StepAttachments } from "./StepAttachments";
 
 export function TaskView() {
   const task = useWorkbenchStore((s) => s.tasks.find((t) => t.id === s.activeTaskId) ?? null);
@@ -134,10 +136,14 @@ export function TaskView() {
         </button>
       </header>
 
-      <div className="wb-stream" ref={scroller} data-testid="wb-stream">
+      {/* G1：右侧计划面板（只在计划状态时出现；流区域仍占满剩余宽度） */}
+      <div className="wb-task-body">
+        <div className="wb-stream" ref={scroller} data-testid="wb-stream">
         {task.steps.map((step) =>
           step.role === "user" ? (
             <div className="wb-bubble-user" key={step.id}>
+              {/* G2：附件缩略图（重启后按路径读回；被清理时显示占位） */}
+              <StepAttachments attachments={step.attachments ?? []} />
               {step.text}
             </div>
           ) : (
@@ -231,6 +237,8 @@ export function TaskView() {
             </div>
           </div>
         ) : null}
+        </div>
+        <PlanPanel task={task} />
       </div>
 
       {currentQuestion(task) ? <QuestionCard task={task} /> : null}

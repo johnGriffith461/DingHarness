@@ -1,7 +1,7 @@
 import { app, ipcMain } from "electron";
 import path from "node:path";
 
-import { saveAttachment } from "../../engine/runtime/attachments";
+import { readAttachmentDataUrl, saveAttachment } from "../../engine/runtime/attachments";
 import type { AttachmentSaveResult } from "../../shared/ipc";
 
 /**
@@ -14,6 +14,7 @@ import type { AttachmentSaveResult } from "../../shared/ipc";
 
 export const ATTACHMENT_CHANNEL = {
   save: "attachments:save",
+  readAsDataUrl: "attachments:readAsDataUrl",
 } as const;
 
 function sessionsDir(): string {
@@ -41,4 +42,9 @@ export function registerAttachmentIpc(ipc: Pick<typeof ipcMain, "handle">): void
       });
     },
   );
+  /* G2：重启后按需读回（只允许会话目录内；越界/被清理都返回可读错误）。 */
+  ipc.handle(ATTACHMENT_CHANNEL.readAsDataUrl, async (_event, file: unknown) => {
+    if (typeof file !== "string" || !file.trim()) return { ok: false as const, error: "没有给附件路径" };
+    return await readAttachmentDataUrl(sessionsDir(), file);
+  });
 }

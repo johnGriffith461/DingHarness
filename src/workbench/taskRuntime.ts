@@ -45,7 +45,12 @@ import {
 } from "@engine/core/contextManager";
 import { buildHistory } from "./history";
 import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
-import { renderPlanPrompt } from "@engine/runtime/planMode";
+import {
+  isPlanTransitionAllowed,
+  renderApprovedPlan,
+  renderPlanPrompt,
+  truncatePlan,
+} from "@engine/runtime/planMode";
 import { shouldSuggestReset, shouldVerify, summarizeVerify } from "@engine/runtime/verifyLoop";
 
 import { readSavedRoute } from "@/ai/route";
@@ -328,6 +333,25 @@ async function summaryFor(taskId: string, older: ChatMessage[]): Promise<string>
  * 复用与自动压缩**同一条**路径（`buildHistory` + `summaryFor`），不另写一套摘要。
  * 没有更早的对话、或摘要失败时如实返回错误，不假装压过了。
  */
+/**
+ * G3：把一次压缩作为**事实**写进会话日志。
+ *
+ * 压缩本身已经完成，日志写不进去只留一条 warning —— 不能因为记账失败
+ * 把用户刚压缩好的上下文回滚回去。
+ */
+export async function recordCompaction(
+  sessionId: string,
+  info: { tokensBefore?: number; tokensAfter?: number; fromSeq?: number; toSeq?: number },
+): Promise<void> {
+  try {
+    const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    const got = await bridge?.session?.appendCompaction?.(sessionId, info);
+    if (got && !got.ok) console.warn("[session] 压缩事件没记上（压缩本身已完成）：", got.error);
+  } catch (error) {
+    console.warn("[session] 压缩事件没记上（压缩本身已完成）：", error);
+  }
+}
+
 export async function compactNow(
   port: StorePort,
   taskId: string,
@@ -348,6 +372,11 @@ export async function compactNow(
         contextIndex: undefined,
       }),
     };
+  });
+  /* G3：手动压缩也要留一条可回放的事实（与自动压缩同一条口径）。 */
+  await recordCompaction(taskId, {
+    tokensBefore: totalTokens(built.all),
+    tokensAfter: totalTokens(built.messages) + estimateTokens(summary),
   });
   return { ok: true, older: older.length };
 }
@@ -432,6 +461,23 @@ export async function answerTurn(
   const task = current(port.getState().tasks, taskId);
 
   /*
+   * G1：这一轮是不是「计划阶段」。
+   *
+   * 全局开关只表达"用户想计划"；任务自身走到 `executing` 之后，
+   * 即使开关因为别的会话还被打开，也不许把写工具再收走。
+   */
+  const planRequested = Boolean(readPlanMode() && task?.planState !== "executing");
+  if (planRequested && task) {
+    const from = task.planState ?? "idle";
+    /* `awaiting_approval → planning` 是用户要求改计划；从 idle 开始新一轮计划。 */
+    if (isPlanTransitionAllowed(from, "planning")) {
+      port.setState((s) => ({
+        tasks: upsertTask(s.tasks, { ...current(s.tasks, taskId), planState: "planning" }),
+      }));
+    }
+  }
+
+  /*
    * ICM 裁决（V6-1c）：不是所有超额度都该摘要。
    *
    *   · `compact`   —— 旧内容可以压成要点（一次模型调用，有成本）；
@@ -460,6 +506,11 @@ export async function answerTurn(
             }),
           };
         });
+        /* G3：这一次压缩落成日志里的一条事实（渲染层记，主进程写）。 */
+        await recordCompaction(taskId, {
+          tokensBefore: totalTokens(all),
+          tokensAfter: totalTokens(messages) + estimateTokens(summary),
+        });
       }
     } else {
       /*
@@ -473,7 +524,11 @@ export async function answerTurn(
           ...(task ? unansweredQuestions(task) : []),
           ...(decision.action === "fork_index" ? [decision.reason] : []),
         ],
-        artifacts: (task?.artifacts ?? []).map((a) => a.filePath || a.title).filter(Boolean),
+        artifacts: [
+          ...(task?.artifacts ?? []).map((a) => a.filePath || a.title).filter(Boolean),
+          /* G1：压缩后计划路径必须在索引里，否则"计划第 3 步"无从问起。 */
+          ...(task?.planPath ? [task.planPath] : []),
+        ],
       });
       olderCount = older.length;
       port.setState((s) => ({ tasks: upsertTask(s.tasks, { ...current(s.tasks, taskId), contextIndex: contextIndex ?? undefined }) }));
@@ -482,9 +537,16 @@ export async function answerTurn(
 
   const followUp = taskMode(task) === "coding" ? buildCodingFollowUpPrompt : buildFollowUpPrompt;
   const { system: baseSystem, user } = followUp(text, truncated, material);
+  /*
+   * G1：批准后的计划每轮都注入。压缩会把早期消息摘掉；只靠历史里那一轮，
+   * 模型会"忘了计划第 3 步"（这也是面板之外唯一能保证计划还在上下文里的地方）。
+   */
+  const approvedPlan =
+    task?.planState === "executing" ? renderApprovedPlan(task.planText ?? "", task.planPath) : "";
+  const systemWithPlan = approvedPlan ? `${baseSystem}\n${approvedPlan}` : baseSystem;
   const system = contextIndex
-    ? withContextIndex(baseSystem, renderContextIndex(contextIndex))
-    : withSummary(baseSystem, summary);
+    ? withContextIndex(systemWithPlan, renderContextIndex(contextIndex))
+    : withSummary(systemWithPlan, summary);
   const reply = await runStream(
     port,
     user,
@@ -495,8 +557,22 @@ export async function answerTurn(
     effective,
     taskId,
     parts,
-    taskMode(task) === "coding" && readPlanMode(),
+    planRequested,
   );
+
+  /*
+   * G1：计划阶段结束 → 面板进入「等确认」，模型这一次的正文就是计划草稿。
+   * 计划模式对所有任务类型都生效（计划语义与编码/办公无关）。
+   */
+  if (planRequested) {
+    port.setState((s) => ({
+      tasks: upsertTask(s.tasks, {
+        ...current(s.tasks, taskId),
+        planState: "awaiting_approval",
+        planText: truncatePlan(reply.text).text,
+      }),
+    }));
+  }
 
   /*
    * 这一步要额外告诉用户的话。两种来源合并：

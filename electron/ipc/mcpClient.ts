@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { McpServerConfig } from "../../shared/mcp";
 import { wrapExternalContent } from "../../shared/untrusted";
+import { parseWwwAuthenticate } from "./mcpOAuth";
 
 /**
  * MCP 客户端（stdio 传输，2026-10-14）。
@@ -79,6 +80,11 @@ export type McpConnection = {
   readResource?(uri: string): Promise<McpResourceContent[]>;
   listPrompts?(): Promise<McpPromptInfo[]>;
   getPrompt?(name: string, args?: Record<string, string>): Promise<Array<{ role: string; text: string }>>;
+  /**
+   * G4：最近一次 401 的 `WWW-Authenticate`（授权按钮发现元数据用）。
+   * 只对 HTTP 传输有意义；没遇到 401 时返回 undefined。
+   */
+  authHint?(): { resourceMetadata?: string; scope?: string } | undefined;
 };
 
 /** JSON-RPC 的最小形状。 */
@@ -638,6 +644,8 @@ export class HttpMcpClient implements McpConnection {
   private lastError = "";
   private sessionId = "";
   private nextId = 1;
+  /** G4：最近一次 401 的鉴权头（授权按钮据此发现资源元数据）。 */
+  private wwwAuthenticate = "";
 
   constructor(
     private readonly config: McpServerConfig,
@@ -645,6 +653,8 @@ export class HttpMcpClient implements McpConnection {
     private readonly opts: {
       attachmentsDir?: string;
       onToolsChanged?: (tools: McpToolInfo[]) => void;
+      /** G4：取/刷新 OAuth access token；没配置 = 不做 OAuth。 */
+      oauth?: { getToken: (forceRefresh?: boolean) => Promise<string | null> };
     } = {},
   ) {}
 
@@ -658,6 +668,12 @@ export class HttpMcpClient implements McpConnection {
 
   toolList(): McpToolInfo[] {
     return [...this.tools];
+  }
+
+  authHint(): { resourceMetadata?: string; scope?: string } | undefined {
+    if (!this.wwwAuthenticate) return undefined;
+    const got = parseWwwAuthenticate(this.wwwAuthenticate);
+    return Object.keys(got).length ? got : undefined;
   }
 
   async start(): Promise<boolean> {
@@ -787,12 +803,18 @@ export class HttpMcpClient implements McpConnection {
    */
   private async post(
     body: Record<string, unknown>,
-    opts: { silent?: boolean } = {},
+    opts: { silent?: boolean; retriedAfterAuth?: boolean } = {},
   ): Promise<{ ok: true; message: RpcMessage; sessionId: string; toolsChanged: boolean } | { ok: false; error: string }> {
     const url = this.config.url!;
+    /*
+     * G4：有授权就把 token 注入 `Authorization`。显式配置的 headers 优先级更高 ——
+     * 用户手写了 `Authorization` 就不该被 OAuth 静默覆盖。
+     */
+    const accessToken = this.opts.oauth ? await this.opts.oauth.getToken().catch(() => null) : null;
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
+      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
       ...(this.config.headers ?? {}),
       ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}),
     };
@@ -819,6 +841,23 @@ export class HttpMcpClient implements McpConnection {
         const re = await this.start();
         if (!re) return { ok: false, error: `会话过期且重新握手失败：${this.lastError}` };
         return this.post(body, opts);
+      }
+      if (res.status === 401) {
+        /* 留住鉴权头：授权按钮要靠它发现 `resource_metadata`（OAuth 发现的第一跳）。 */
+        this.wwwAuthenticate = res.headers.get("www-authenticate") ?? this.wwwAuthenticate;
+        if (this.opts.oauth && !opts.retriedAfterAuth) {
+          const refreshed = await this.opts.oauth.getToken(true).catch(() => null);
+          if (refreshed && refreshed !== accessToken) {
+            return this.post(body, { ...opts, retriedAfterAuth: true });
+          }
+          return {
+            ok: false,
+            error: "需要授权：在「插件·技能·伙伴 → 连接器」里点「授权」，完成后会自动重连",
+          };
+        }
+        if (this.opts.oauth) {
+          return { ok: false, error: "授权已过期：请重新授权" };
+        }
       }
       if (!res.ok) {
         const text = await res.text().catch(() => "");

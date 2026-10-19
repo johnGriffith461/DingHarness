@@ -58,6 +58,9 @@
 - 发送时转成多模态片段（图片 / 文件 part）随请求过去；主进程落盘到
   `sessions/<会话>/attachments/<uuid>.<ext>` 并记录 sha256。模型未声明该模态时
   **在发请求前报错**（引擎 `assertModalities`），不会静默降级成 `[图片]` 文本。
+- **重启后附件仍在**（G2）：步骤里只存 `{path, mediaType, bytes, sha256, name}` 引用，
+  **不把 base64 写进任务库**；界面按需向主进程读回缩略图，点开可预览。
+  文件被清理时显示「附件已清理」，路径越界（`../`、目录外）一律拒绝。
 
 ### 输入区统一（B4）
 
@@ -70,7 +73,13 @@
 - 输入区「计划」chip / `Shift+Tab` / `/plan` 三处同一个开关：进入后引擎**只下发只读工具**
   （`read_file`/`search_files`/`list_dir`/`list_files` 等），写文件与跑命令**根本不在工具面里**，
   模型无从"先写一点"。系统提示要求按「目标/范围/步骤/验证/风险」五段给计划。
-- 计划模式下输入区出现提示条；给过计划后出现「开始执行」，点它退出计划模式并让模型开始执行。
+- 计划模式下输入区出现提示条；给过计划后右侧出现**计划面板**（G1）：
+  模型给出的五段计划可编辑，「开始执行」会先把计划写入
+  `.ding/plans/<会话 id>.md` 再进入执行态（写盘失败也继续执行，面板如实显示「未落盘」）。
+  「放弃」不写盘、回到 idle。空计划或缺段时按钮置灰并说明缺哪一段；
+  状态机拒绝 `idle → executing` 这类跳步。
+- 批准后的计划每轮都注入执行提示词；压缩后计划路径仍进 `contextIndex`，
+  长会话里问「计划第 3 步」还能答。
 
 ### 新增：上下文压力显示（C2）
 
@@ -130,13 +139,20 @@
 - 摘要从 8 段升到 **9 段**（新增 Verification：跑过哪些验证、pass/fail；没跑写「没跑」），
   文件清单仍 ≤15；空段写「无」。
 - 新增 `compaction` 事件类型（字段全部可选）：旧日志照常读，新日志可回放并累计压缩次数。
-  边界：桌面这一轮还没有写入该事件的宿主 API（详见交付报告）。
+- **桌面压缩真的回写**（G3）：自动压缩与 `/compact` 都通过专用通道
+  `session:append-compaction` 记一条带 `tokensBefore/tokensAfter` 的事实；
+  写入失败只留 warning，不回滚压缩。记录类型进 `LogRecord` 并登记 ADR-0020。
 
 ### 连接器资源与提示词（F1，部分）
 
 - MCP 初始化声明 `resources`/`prompts` 能力；stdio 连接器可列资源、读资源、列提示词、
   取提示词内容；工具页显示资源（可读取预览）与提示词清单。
-- 边界：**OAuth 未实现**；HTTP 传输只做了 tools（resources/prompts 在 stdio 连接器上可用）。
+- **HTTP 连接器支持 OAuth**（G4）：401 时按 `WWW-Authenticate` 发现授权服务器，
+  授权码 + PKCE（S256），本地回环回调（5 分钟超时），token 加密存进 `secrets.dat`
+  （不进 `mcp.json`），到期自动刷新（401 后强制刷新一次）。
+  动态注册（RFC 7591）可用；没有系统浏览器时可在面板复制链接、手动粘贴授权码。
+  `mcp.json` 的 `oauth:false` 或 `DING_MCP_OAUTH=off` 是回滚开关。
+  边界：只覆盖标准 `WWW-Authenticate`/RFC 8414；不做 sampling / elicitation。
 
 ### 沙箱模式（F2，部分）
 
@@ -156,6 +172,36 @@
 - 新增 `user:prompt` 与 `turn:stop` 两个钩子；`tool:before` 的返回值现在会被消费：
   `allow` / `deny`（模型拿到可读原因、工具不执行）/ `modify`（换掉参数）；
   钩子抛错或 1 秒超时**一律 deny**（fail-closed）。
+
+### 新增：LSP 诊断（G6）
+
+- 配置 `<userData>/lsp.json`（`{enabled, servers:[{languageId, command, args?, extensions?, rootPatterns?}]}`）
+  之后，`write_file` / `edit_file` / `apply_patch` 成功后会请求语言服务器诊断，
+  只把**新引入的 error** 附在工具结果里（warning 不报）；没有新错误写「无新诊断」。
+- 传输按 LSP 规范走 `Content-Length` 帧（不是 MCP 的一行一条 JSON）；半包/粘包有单测；
+  超时 3 秒、服务器崩溃重启一次、启动失败只影响诊断不阻塞编辑。
+- 没配置时**完全跳过**（零成本）；设置 → 通用 →「LSP 诊断」可看配置与状态，
+  `enabled:false` 是回滚开关。
+- 边界：CLI 宿主未接（诊断依赖桌面常驻的语言服务器进程）。
+
+### 验证（2026-10-19 晚，真实模型）
+
+- 模型通道：`tokenrhythm/deepseek-v4.1-flash-1017`（真 provider，非假服务器）。
+- 十任务实测：7 条真跑 **7/7 通过**（第一轮 6/7，唯一失败是基准提示词歧义；
+  改成"标题行之外"后第二轮全过），两轮合计 ≈¥0.10。
+  3 条桌面能力（预览 / 浏览器 agent / CUA）按脚本设计只引用已有验收，未重跑，
+  因此**不宣称**「≥8/10」达标。
+- 计划模式真模型验收：五段计划齐全、request 记录里只有只读工具、工作区一字节未变。
+- 全量门：`pnpm test` 3870/3870、`pnpm eval` 63/63、`DSH_NO_REAL_MODEL=1 pnpm bench` 7/7、
+  `accept-smoke` 7/7、`accept-plan` 12/12、`accept-attachments` 6/6。
+
+### 如实记下的边界（G 系列）
+
+- **G5 事件级导航未做**：方案明确"除非十任务证明硬阻断，否则不做"。
+- LSP 的端到端用**协议级假 server**（真子进程 + 真帧）验证；
+  本机未安装 `typescript-language-server`，因此没有对真实 TS server 跑一次。
+- MCP OAuth 的端到端用**真实 HTTP 假授权服务器**（401 → 元数据 → DCR → 授权码 → 调用）；
+  没有可用的真实 OAuth MCP server，因此"真 server 授权一次、重启仍有效"未验。
 
 ## 0.6.0（2026-10-18）
 

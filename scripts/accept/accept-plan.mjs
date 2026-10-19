@@ -3,6 +3,8 @@
 // 工具面本身（计划模式下 `write_file`/`run_command` 不下发）由
 // `engine/runtime/planMode.test.ts` 的 `planToolNames` 断言；
 // 这条验收问的是"用户点得到、状态看得见、进得去出得来"。
+import fs from "node:fs";
+import path from "node:path";
 import { chromium } from "playwright";
 import { openApp, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
 
@@ -29,6 +31,49 @@ async function step(name, fn) {
 
 await killLeftovers();
 await freshDir(".verify/accept-plan-data");
+/*
+ * G1：预置一段「计划已生成、等批准」的任务（不花真钱、不依赖模型）。
+ * 这样面板、编辑、批准、落盘这条链可以在验收里完整走一遍。
+ */
+const PLAN_TEXT = [
+  "1. 目标：把计划面板与落盘接上",
+  "2. 范围：src/workbench 与 electron/ipc",
+  "3. 步骤：先渲染面板，再写盘",
+  "4. 验证：accept-plan 全绿",
+  "5. 风险：写盘失败时仍继续执行",
+].join("\n");
+const PLAN_MARK = "补充：验收标记 PLAN-ACCEPT";
+fs.mkdirSync(".verify/accept-plan-data", { recursive: true });
+fs.writeFileSync(
+  path.join(".verify/accept-plan-data", "tasks.json"),
+  JSON.stringify({
+    __schema: 1,
+    data: [
+      {
+        id: "t-plan",
+        title: "计划验收",
+        brief: "重构计划流程",
+        createdAt: 1,
+        stage: "done",
+        startedAt: 1,
+        finishedAt: 2,
+        steps: [
+          { id: "s1", role: "user", text: "重构计划流程", at: 1 },
+          { id: "s2", role: "assistant", text: PLAN_TEXT, at: 2 },
+        ],
+        questions: [],
+        questionIndex: 0,
+        activity: "",
+        artifacts: [],
+        planState: "awaiting_approval",
+        planText: PLAN_TEXT,
+      },
+    ],
+  }),
+  "utf8",
+);
+const planFile = path.resolve(".ding/plans/t-plan.md");
+fs.rmSync(planFile, { force: true });
 const port = await pickPort([10031]);
 const { browser, page, getLog } = await openApp(chromium, {
   port,
@@ -122,6 +167,42 @@ await step("F4：终端面板只读空态", async () => {
   return "只读回放（无输入框）";
 });
 
+await step("G1：预置的待批准计划 → 打开任务 → 右侧面板出现", async () => {
+  await page.locator('[data-testid="wb-center-open"]').click();
+  await sleep(500);
+  await page.locator('[data-testid="wb-center-row-t-plan"] button').first().click();
+  await sleep(500);
+  const panel = page.locator('[data-testid="wb-plan-panel"]');
+  if (!(await panel.count())) throw new Error("没有计划面板");
+  if ((await panel.getAttribute("data-plan-state")) !== "awaiting_approval") {
+    throw new Error(`面板状态不是 awaiting_approval：${await panel.getAttribute("data-plan-state")}`);
+  }
+  const input = page.locator('[data-testid="wb-plan-input"]');
+  if ((await input.inputValue()) !== PLAN_TEXT) throw new Error("面板内容与计划文本不一致");
+  return "面板可见、内容一致";
+});
+
+await step("G1：⭐ 改一行 → 开始执行 → 计划写入 .ding/plans/<id>.md", async () => {
+  const input = page.locator('[data-testid="wb-plan-input"]');
+  await input.fill(`${PLAN_TEXT}\n${PLAN_MARK}`);
+  await page.locator('[data-testid="wb-plan-approve"]').click();
+  /* 批准后会立刻发一轮"开始执行"（没有 provider 会失败，但不影响写盘） */
+  await sleep(1500);
+  if (!fs.existsSync(planFile)) throw new Error(`计划文件没写出来：${planFile}`);
+  const written = fs.readFileSync(planFile, "utf8");
+  if (!written.includes(PLAN_MARK)) throw new Error("落盘内容不是面板里编辑后的版本");
+  const state = await page.locator('[data-testid="wb-plan-panel"]').getAttribute("data-plan-state");
+  if (state !== "executing") throw new Error(`批准后状态是 ${state}`);
+  return planFile;
+});
+
+await step("G1：执行态面板折叠成一行「计划已批准」", async () => {
+  const panel = page.locator('[data-testid="wb-plan-panel"]');
+  const text = await panel.innerText();
+  if (!text.includes("计划已批准")) throw new Error(text.slice(0, 120));
+  return "一行摘要";
+});
+
 await step("/plan 命令也切同一个开关", async () => {
   await page.locator('[data-testid="wb-nav-home"]').click();
   await sleep(600);
@@ -143,4 +224,10 @@ if (bad.length) {
 
 await browser.close();
 await killLeftovers();
+/* 验收产物不留在仓库里（.ding 不是要提交的数据） */
+try {
+  fs.rmSync(planFile, { force: true });
+} catch {
+  /* 没写出来就不用删 */
+}
 process.exit(bad.length ? 1 : 0);

@@ -46,6 +46,15 @@ export type McpServerConfig = {
   url?: string;
   /** HTTP 传输的自定义请求头（鉴权用：`Authorization: Bearer …`）。 */
   headers?: Record<string, string>;
+  /**
+   * G4：OAuth 客户端 id（可选）。
+   *
+   * 不给时尝试 RFC 7591 动态注册；授权服务器不支持动态注册又不给 clientId
+   * 会明确报错，而不是假装授权成功。
+   */
+  clientId?: string;
+  /** G4：要申请的 scope（空格分隔；不给则用服务器元数据里的）。 */
+  scope?: string;
   /** `false` = 保留配置但不连接。 */
   enabled?: boolean;
 };
@@ -58,8 +67,13 @@ export function transportOf(server: McpServerConfig): "http" | "stdio" | "none" 
   return "none";
 }
 
-/** 落盘形状。 */
-export type McpConfig = { servers: McpServerConfig[] };
+/**
+ * 落盘形状。
+ *
+ * `oauth` = 是否允许 HTTP 传输走 OAuth（G4）。缺省开启；
+ * 写 `false` 是回滚开关：401 直接报错，不弹授权。
+ */
+export type McpConfig = { servers: McpServerConfig[]; oauth?: boolean };
 
 /** 最多连几个（连太多会让每次请求的工具定义膨胀，也会拖慢启动）。 */
 export const MAX_MCP_SERVERS = 8;
@@ -151,11 +165,15 @@ export function normalizeMcpConfig(raw: unknown): McpConfig {
       ...(env ? { env } : {}),
       ...(url ? { url } : {}),
       ...(headers ? { headers } : {}),
+      ...(typeof o.clientId === "string" && o.clientId.trim() ? { clientId: o.clientId.trim() } : {}),
+      ...(typeof o.scope === "string" && o.scope.trim() ? { scope: o.scope.trim() } : {}),
       ...(o.enabled === false ? { enabled: false } : {}),
     });
     if (servers.length >= MAX_MCP_SERVERS) break;
   }
-  return { servers };
+  const oauthRaw =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { oauth?: unknown }).oauth : undefined;
+  return { servers, ...(oauthRaw === false ? { oauth: false } : {}) };
 }
 
 /** 把一段文本里的非法字符换成下划线（工具名要能安全地出现在各处）。 */

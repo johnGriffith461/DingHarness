@@ -16,6 +16,7 @@
 import type { ShellBridge } from "@shared/ipc";
 import { CONTEXT_INDEX_VERSION, type ContextIndex } from "@engine/core/contextManager";
 import { interruptedFromStage } from "@engine/core/recovery";
+import { truncatePlan } from "@engine/runtime/planMode";
 import { INTERRUPTED_NOTE, normalizeArtifacts, normalizeQuestions, normalizeStep, type WorkTask } from "./task";
 import type { StorePort } from "./store";
 
@@ -99,6 +100,15 @@ export function normalizeTask(raw: unknown): WorkTask | null {
    */
   const interrupted = interruptedFromStage(stage);
   const contextIndex = normalizeContextIndex(t.contextIndex);
+  /*
+   * G1：计划状态也按不可信数据收窄。只有四个合法状态；文本按 20 KiB 截断
+   * （与引擎的 `PLAN_TEXT_LIMIT` 同一口径），路径只收字符串。
+   */
+  const planState =
+    t.planState === "planning" || t.planState === "awaiting_approval" || t.planState === "executing" || t.planState === "idle"
+      ? t.planState
+      : undefined;
+  const planText = typeof t.planText === "string" ? truncatePlan(t.planText).text : undefined;
   return {
     id: t.id,
     /* A3：只认这两个值；旧盘没有该字段就不带（`taskMode` 会按 office 读） */
@@ -133,6 +143,10 @@ export function normalizeTask(raw: unknown): WorkTask | null {
       ? { contextCompactions: Math.floor(t.contextCompactions) }
       : {}),
     ...(contextIndex ? { contextIndex } : {}),
+    ...(planState ? { planState } : {}),
+    ...(planText ? { planText } : {}),
+    ...(typeof t.planPath === "string" && t.planPath ? { planPath: t.planPath } : {}),
+    ...(typeof t.planWriteError === "string" && t.planWriteError ? { planWriteError: t.planWriteError } : {}),
   };
 }
 

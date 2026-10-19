@@ -39,6 +39,7 @@ import { registerAgentIpc } from "./ipc/agentStore";
 import { registerSearchHistoryIpc } from "./ipc/searchStore";
 import { loadWorkspaces, registerWorkspaceIpc } from "./ipc/workspaceStore";
 import { registerMcpIpc, startAllMcp, stopAllMcp } from "./ipc/mcpStore";
+import { registerLspIpc, stopAllLsp } from "./ipc/lsp";
 import { closeBrowserHost } from "./ipc/browserHost";
 import { registerLibraryIpc } from "./ipc/libraryStore";
 import { registerTaskIpc } from "./ipc/taskStore";
@@ -528,6 +529,7 @@ safeRegister("agent", () => registerAgentIpc(), logRegisterFailure);
 safeRegister("search-history", () => registerSearchHistoryIpc(), logRegisterFailure);
 safeRegister("workspace", () => registerWorkspaceIpc(() => win), logRegisterFailure);
 safeRegister("mcp", () => registerMcpIpc(), logRegisterFailure);
+safeRegister("lsp", () => registerLspIpc(ipcMain), logRegisterFailure);
 safeRegister("library", () => registerLibraryIpc(ipcMain), logRegisterFailure);
 safeRegister("task", () => registerTaskIpc(ipcMain), logRegisterFailure);
 safeRegister("video", () => registerVideoIpc(ipcMain), logRegisterFailure);
@@ -621,6 +623,8 @@ app.on("child-process-gone", (_event, details) => {
 /* 退出前把连接器的子进程收掉，别在系统里留孤儿进程 */
 app.on("before-quit", () => {
   stopAllMcp();
+  /* G6：语言服务器也是子进程，退出时一并收掉 */
+  stopAllLsp();
   /* G04：agent 浏览器窗口也不留（它是我们开的，用户没手动关就还在） */
   try {
     closeBrowserHost();

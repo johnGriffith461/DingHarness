@@ -130,8 +130,29 @@ export type { RunPendingApproval, RunState, RunStateRecord } from "./runState";
 export { PENDING_TTL_MS, RUN_STATE_LABEL, RUN_STATES, canTransition, endStateOf, foldRunState } from "./runState";
 
 
+/**
+ * 一次上下文压缩（E2/G3）：可回放的事实，不是流事件。
+ *
+ * ⚠️ 它**没有** `requestId` 的硬要求（压缩可能由手动 `/compact` 触发，
+ * 那时没有正在跑的一轮）；字段全可选，旧日志没有它照常读。
+ * 之所以要单列一条记录类型：只把它放进 `ProjectableEvent` 只能让投影认得，
+ * **落盘与回放**（`parseLog`）会把它当坏行丢掉 —— 那就是"类型有、事实没有"。
+ */
+export type CompactionRecord = {
+  seq: number;
+  at: number;
+  actor?: Actor;
+  requestId?: string;
+  type: "compaction";
+  fromSeq?: number;
+  toSeq?: number;
+  summaryId?: string;
+  tokensBefore?: number;
+  tokensAfter?: number;
+};
+
 /** 日志里可能出现的一条记录。 */
-export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord | ApprovalGrantRecord | RunStateRecord;
+export type LogRecord = LoggedEvent | TurnRequest | ApprovalRecord | ApprovalGrantRecord | RunStateRecord | CompactionRecord;
 
 /**
  * 会话 id 的前缀：**会话日志要能分清"这是哪条路写下来的"**。
@@ -891,6 +912,31 @@ export function parseLogLine(line: string): LogRecord | null {
   if (o.type === "approval-grant") return normalizeApprovalGrantRecord({ ...o });
   /* 运行态（U01）：形状规矩在 `runState.ts` 的 normalizeRunStateRecord */
   if (o.type === "run-state") return normalizeRunStateRecord(o);
+  /*
+   * G3：压缩记录。`requestId` 可有可无（手动压缩没有正在跑的一轮）；
+   * 数字字段逐个收窄，坏值丢掉而不是把整条记录判成坏行 ——
+   * "压缩发生过"这件事比"前后 token 是多少"更重要。
+   */
+  if (o.type === "compaction") {
+    const num = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+    const fromSeq = num(o.fromSeq);
+    const toSeq = num(o.toSeq);
+    const tokensBefore = num(o.tokensBefore);
+    const tokensAfter = num(o.tokensAfter);
+    return {
+      seq: o.seq,
+      at: o.at,
+      ...(o.actor === undefined ? {} : { actor: o.actor as Actor }),
+      ...(typeof o.requestId === "string" ? { requestId: o.requestId } : {}),
+      type: "compaction",
+      ...(fromSeq === undefined ? {} : { fromSeq }),
+      ...(toSeq === undefined ? {} : { toSeq }),
+      ...(tokensBefore === undefined ? {} : { tokensBefore }),
+      ...(tokensAfter === undefined ? {} : { tokensAfter }),
+      ...(typeof o.summaryId === "string" ? { summaryId: o.summaryId } : {}),
+    };
+  }
   if (typeof o.requestId !== "string") return null;
   /*
    * 委派进度：`delegationId` / `agent` / `status` 少一样就不是一条能重放的记录

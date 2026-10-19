@@ -85,6 +85,28 @@ export type AttachmentSaved = {
 
 export type AttachmentSaveResult = AttachmentSaved | { ok: false; error: string };
 
+/**
+ * G2：挂在步骤上的附件元数据。
+ *
+ * **只存引用，不存 base64** —— 一张几 MB 的图写进 `tasks.json` 会把任务账本撑爆。
+ * `data` 只存在于发送那一轮的 `ChatPart` 里（进程内），重启后按需从 `path` 读回。
+ */
+export type SavedAttachmentMeta = {
+  path: string;
+  mediaType: string;
+  bytes: number;
+  sha256: string;
+  name: string;
+};
+
+/** G2：渲染层交给 store 去落盘的附件草稿（base64 只在内存里过一手）。 */
+export type AttachmentDraftWire = {
+  name: string;
+  mediaType: string;
+  /** base64（不带 `data:` 前缀）。 */
+  data: string;
+};
+
 /** 脱敏后的 provider 信息。 */
 export type ProviderInfo = {
   /**
@@ -408,9 +430,14 @@ export type ShellBridge = {
   tools: {
     list: () => Promise<ToolInfoWire[]>;
   };
-  /** 附件落盘（B3）：渲染层给 base64，主进程写进会话目录并回报 sha256。 */
+  /** 附件落盘（B3/G2）：渲染层给 base64，主进程写进会话目录并回报 sha256。 */
   attachments: {
     save: (input: { sessionId: string; name: string; mediaType: string; data: string }) => Promise<AttachmentSaveResult>;
+    /**
+     * G2：按路径读回附件（缩略图/预览）。只允许读会话目录内的文件；
+     * 文件被清理时返回 `ok:false`，界面显示占位而不是崩。
+     */
+    readAsDataUrl: (path: string) => Promise<{ ok: true; dataUrl: string; mediaType: string } | { ok: false; error: string }>;
   };
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;
@@ -689,21 +716,73 @@ export type ShellBridge = {
       servers: Array<{
         name: string;
         command: string;
+        /** HTTP 端点（stdio 时为空串）。 */
+        url: string;
         args: string[];
         enabled: boolean;
         status: "starting" | "on" | "error" | "off";
         line: string;
         error: string;
         tools: Array<{ localName: string; name: string; description: string }>;
+        /** G4：HTTP 连接器的授权状态（stdio 没有）。 */
+        oauth?: { authorized: boolean; expiresAt?: number };
       }>;
     }>;
     reload: () => Promise<unknown>;
     openConfig: () => Promise<{ ok: boolean; error: string }>;
+    /** G4：授权状态（有没有可用 token）。 */
+    oauthStatus: (server: string) => Promise<{ authorized: boolean; expiresAt?: number }>;
+    /**
+     * G4：开始授权。返回授权 URL 与 state；宿主会同时尝试打开系统浏览器。
+     * 打不开时用户可复制 `url` 手动打开，再回来粘贴授权码。
+     */
+    oauthBegin: (
+      server: string,
+    ) => Promise<{ ok: true; url: string; state: string } | { ok: false; error: string }>;
+    /** G4：手动回退 —— 提交授权码完成交换。 */
+    oauthComplete: (
+      server: string,
+      state: string,
+      code: string,
+    ) => Promise<
+      | { ok: true; token: { accessToken: string; expiresAt?: number }; persisted: boolean; persistError?: string }
+      | { ok: false; error: string }
+    >;
+    /** G4：取消一条挂起的授权（关闭回环）。 */
+    oauthCancel: (state: string) => Promise<{ ok: true }>;
     /** F1：资源与提示词（服务端没声明就是空数组）。 */
     resources: () => Promise<Array<{ server: string; uri: string; name: string; mimeType?: string; description?: string }>>;
     readResource: (server: string, uri: string) => Promise<Array<{ uri: string; mimeType?: string; text: string }>>;
     prompts: () => Promise<Array<{ server: string; name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }>>;
     getPrompt: (server: string, name: string, args?: Record<string, string>) => Promise<Array<{ role: string; text: string }>>;
+  };
+  /**
+   * G6：LSP 语言服务器（配置在 `lsp.json`；编辑后只报新引入的 error）。
+   * 没配置时列表为空、编辑路径完全不受影响。
+   */
+  lsp: {
+    list: () => Promise<{
+      file: string;
+      enabled: boolean;
+      servers: Array<{
+        languageId: string;
+        command: string;
+        args: string[];
+        status: "stopped" | "starting" | "on" | "error";
+        error: string;
+      }>;
+    }>;
+    reload: () => Promise<{
+      file: string;
+      enabled: boolean;
+      servers: Array<{
+        languageId: string;
+        command: string;
+        args: string[];
+        status: "stopped" | "starting" | "on" | "error";
+        error: string;
+      }>;
+    }>;
   };
   workspace: {
     list: () => Promise<{ dirs: string[] }>;
@@ -786,6 +865,16 @@ export type ShellBridge = {
      * 这里只搬结果。空串查询回空数组（不是"全部"）。
      */
     search: (query: string) => Promise<SessionSearchHit[]>;
+    /**
+     * G3：补记一条 `compaction` 事件。
+     *
+     * 压缩发生在渲染层（`taskRuntime`），日志写在主进程；这条通道只接受
+     * **压缩这一种记录**，不让渲染层借它伪造任意事件。
+     */
+    appendCompaction: (
+      sessionId: string,
+      info: { fromSeq?: number; toSeq?: number; tokensBefore?: number; tokensAfter?: number; summaryId?: string },
+    ) => Promise<{ ok: true } | { ok: false; error: string }>;
   };
   /**
    * 请求追踪与用量统计（V6-2c / V6-2d）。

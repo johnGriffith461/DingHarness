@@ -11,8 +11,10 @@ import {
   type McpConfig,
   type McpServerConfig,
 } from "../../shared/mcp";
+import { readSecrets, writeSecret } from "../../engine/adapters/secretStore";
 import { createJsonStore } from "./jsonStore";
 import { HttpMcpClient, McpClient, type McpCallResult, type McpConnection, type McpStatus } from "./mcpClient";
+import { McpOAuthFlow, type StoredOAuth, type TokenStore } from "./mcpOAuth";
 
 /**
  * 连接器（MCP server）的配置、生命周期与工具暴露（2026-10-14）。
@@ -42,6 +44,11 @@ export const MCP_CHANNEL = {
   readResource: "mcp:readResource",
   prompts: "mcp:prompts",
   getPrompt: "mcp:getPrompt",
+  /* G4：OAuth（仅 HTTP 传输） */
+  oauthStatus: "mcp:oauthStatus",
+  oauthBegin: "mcp:oauthBegin",
+  oauthComplete: "mcp:oauthComplete",
+  oauthCancel: "mcp:oauthCancel",
 } as const;
 
 const FILE = "mcp.json";
@@ -62,6 +69,60 @@ let config: McpConfig = emptyMcpConfig();
 /** 正在跑的连接（按 server 名）。两种传输共用一个形状（`McpConnection`）。 */
 const clients = new Map<string, McpConnection>();
 
+/* ────────────────────── G4：OAuth token ────────────────────── */
+
+/** 凭据库里的键：按 server 名（只留大写安全字符）。 */
+function oauthRef(serverName: string): string {
+  return `MCP_OAUTH_${serverName.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`;
+}
+
+/**
+ * token 落点：**加密凭据库**（`secrets.dat`），不进 `mcp.json`。
+ *
+ * 读回来的东西按不可信处理：五字段齐全才认；坏 JSON 当没有（表现为"需要重新授权"）。
+ */
+const oauthTokenStore: TokenStore = {
+  load(serverName) {
+    try {
+      const raw = readSecrets(app.getPath("userData"))[oauthRef(serverName)] ?? "";
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<StoredOAuth>;
+      if (
+        typeof parsed.accessToken !== "string" ||
+        typeof parsed.tokenEndpoint !== "string" ||
+        typeof parsed.clientId !== "string" ||
+        typeof parsed.serverUrl !== "string"
+      ) {
+        return null;
+      }
+      return parsed as StoredOAuth;
+    } catch {
+      return null;
+    }
+  },
+  save(serverName, token) {
+    const got = writeSecret(app.getPath("userData"), oauthRef(serverName), JSON.stringify(token));
+    return got.ok ? { ok: true } : { ok: false, error: got.reason };
+  },
+  clear(serverName) {
+    /* 没有删除 API：写空串，读侧把空串当"没有"。 */
+    writeSecret(app.getPath("userData"), oauthRef(serverName), "");
+  },
+};
+
+/** 一个进程一份：回环服务器与 pending 状态必须共享（IPC 之间要接得上）。 */
+const oauthFlow = new McpOAuthFlow({
+  tokenStore: oauthTokenStore,
+  openBrowser: async (url) => {
+    await shell.openExternal(url);
+  },
+});
+
+/** 回滚开关：`mcp.json` 的 `oauth:false` 或环境变量 `DING_MCP_OAUTH=off`。 */
+function oauthEnabled(): boolean {
+  return config.oauth !== false && process.env.DING_MCP_OAUTH !== "off";
+}
+
 /** 一个连接器给界面看的样子。 */
 export type McpServerView = {
   name: string;
@@ -77,6 +138,8 @@ export type McpServerView = {
   /** 连不上时的原因（界面要显示它，不能一片空白） */
   error: string;
   tools: Array<{ localName: string; name: string; description: string }>;
+  /** G4：HTTP 连接器的授权状态（stdio 没有这个字段）。 */
+  oauth?: { authorized: boolean; expiresAt?: number };
 };
 
 /** 读配置（不连接）。 */
@@ -106,7 +169,12 @@ export async function startAllMcp(): Promise<void> {
       if (server.enabled === false) return;
       const client =
         transportOf(server) === "http"
-          ? new HttpMcpClient(server, undefined, { attachmentsDir })
+          ? new HttpMcpClient(server, undefined, {
+              attachmentsDir,
+              ...(oauthEnabled()
+                ? { oauth: { getToken: (force?: boolean) => oauthFlow.getToken(server.name, force) } }
+                : {}),
+            })
           : new McpClient(server, undefined, { attachmentsDir });
       clients.set(server.name, client);
       const ok = await client.start();
@@ -215,6 +283,7 @@ export function mcpServerViews(): McpServerView[] {
       line: serverStatusLine(server, status === "on" ? "on" : status === "off" ? "off" : status === "starting" ? "starting" : "error", tools.length),
       error: client && status !== "on" ? client.errorText() : "",
       tools,
+      ...(server.url ? { oauth: oauthFlow.status(server.name) } : {}),
     };
   });
 }
@@ -292,6 +361,52 @@ export function registerMcpIpc(): () => void {
     const res = await shell.openPath(filePath());
     return { ok: !res, error: res };
   });
+
+  /* ── G4：OAuth（仅 HTTP；stdio 没有这条路径） ── */
+  ipcMain.handle(MCP_CHANNEL.oauthStatus, (_e, server: unknown) => {
+    if (typeof server !== "string") return { authorized: false };
+    return oauthFlow.status(server);
+  });
+  ipcMain.handle(MCP_CHANNEL.oauthBegin, async (_e, serverName: unknown) => {
+    if (!oauthEnabled()) return { ok: false as const, error: "OAuth 已被配置关闭（mcp.json 的 oauth:false）" };
+    if (typeof serverName !== "string") return { ok: false as const, error: "没有给连接器名" };
+    const server = config.servers.find((s) => s.name === serverName);
+    if (!server?.url) return { ok: false as const, error: "这个连接器不是 HTTP 传输，或没有 url" };
+    const hint = clients.get(server.name)?.authHint?.();
+    const begun = await oauthFlow.begin(
+      {
+        name: server.name,
+        url: server.url,
+        ...(server.scope ? { scope: server.scope } : {}),
+        ...(server.clientId ? { clientId: server.clientId } : {}),
+      },
+      hint,
+    );
+    if (!begun.ok) return begun;
+    /* 浏览器打不开也不丢链接：返回值里有 url，界面可以复制/手动打开。 */
+    void shell.openExternal(begun.url).catch(() => undefined);
+    /*
+     * 回环回调成功后自动重连（用户不用再点一次「重新连接」）。
+     * 这里不 await：IPC 先把 URL 交回界面，等待由 `wait` 在后台完成。
+     */
+    void oauthFlow.wait(begun.state).then((result) => {
+      if (result.ok) void reloadMcp();
+    });
+    return begun;
+  });
+  ipcMain.handle(MCP_CHANNEL.oauthComplete, async (_e, serverName: unknown, state: unknown, code: unknown) => {
+    if (typeof serverName !== "string" || typeof state !== "string" || typeof code !== "string") {
+      return { ok: false as const, error: "参数不完整" };
+    }
+    const result = await oauthFlow.complete(state, code);
+    if (result.ok) await reloadMcp();
+    return result;
+  });
+  ipcMain.handle(MCP_CHANNEL.oauthCancel, (_e, state: unknown) => {
+    if (typeof state === "string") oauthFlow.cancel(state);
+    return { ok: true };
+  });
+
   return () => {
     for (const ch of Object.values(MCP_CHANNEL)) ipcMain.removeHandler(ch);
   };

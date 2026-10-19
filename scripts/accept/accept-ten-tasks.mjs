@@ -25,8 +25,9 @@
  * 所以本脚本跑 6 条真模型任务 + 4 条"引用已有验收结论"的条目，
  * 报告里逐条写明哪条是这次真跑的、哪条是引用。
  *
- * 用法：
- *   node scripts/accept/accept-ten-tasks.mjs --yes-spend
+ * 用法（脚本动态 import `.ts`，需要 tsx loader）：
+ *   node --import tsx scripts/accept/accept-ten-tasks.mjs --yes-spend
+ *   或：pnpm exec tsx scripts/accept/accept-ten-tasks.mjs --yes-spend
  */
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -426,7 +427,7 @@ try {
     title: "导入技能：读 SKILL.md 并按其要求产出",
     workspace: ws9,
     prompt:
-      "工作区里 skills/demo/SKILL.md 有一条技能说明。读它，然后按它的要求做：创建一个文件 result.txt，内容写该技能第一行非空正文。",
+      "工作区里 skills/demo/SKILL.md 有一条技能说明。读它，然后按它的要求做：创建一个文件 result.txt，内容写该技能**标题行之外**的第一行正文（不含以 # 开头的标题行）。",
     maxSteps: 15,
     judge: async ({ workspace }) => {
       const file = path.join(workspace, "result.txt");

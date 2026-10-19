@@ -298,6 +298,25 @@ describe("日志行（jsonl）", () => {
     expect(parsed.records[0]?.actor).toEqual({ id: "legacy", kind: "legacy" });
   });
 
+  it("G3：compaction 记录能解析并保留（不是坏行，也不要求 requestId）", () => {
+    const line = `${JSON.stringify({
+      seq: 3,
+      at: T(3),
+      type: "compaction",
+      tokensBefore: 900,
+      tokensAfter: 120,
+    })}\n`;
+    const parsed = parseLog(line);
+    expect(parsed.skipped).toBe(0);
+    const record = parsed.records[0];
+    expect(record?.type).toBe("compaction");
+    if (record?.type === "compaction") {
+      expect(record.tokensBefore).toBe(900);
+      expect(record.tokensAfter).toBe(120);
+    }
+    expect(fold(parsed.records).compactions).toBe(1);
+  });
+
   it("⭐ 坏行只跳过它自己（断电/强杀留下的半行不许让整段历史消失）", () => {
     const text = [
       logLine(ev({ type: "text", text: "一" }), 1, T(1)),
@@ -596,6 +615,17 @@ describe("fold · 事件溯源（state = fold(events)）", () => {
     expect(state.text).toBe(view.text);
     expect(state.usage).toEqual(view.usage);
     expect(state.done).toBe(view.done);
+  });
+
+  it("G3：compaction 事件计数，旧日志没有它照常 fold", () => {
+    const withCompaction = fold([
+      ev({ type: "text", text: "压缩前" }),
+      { type: "compaction", tokensBefore: 1000, tokensAfter: 120 },
+      { type: "compaction" },
+    ]);
+    expect(withCompaction.compactions).toBe(2);
+    /* 旧日志（只有正文）没有 compaction → 不编一个次数出来 */
+    expect(fold([ev({ type: "text", text: "旧日志" })]).compactions).toBeUndefined();
   });
 
   it("fold 保留**还没配对**的调用（那是 finishTurn 才剔掉的东西）", () => {

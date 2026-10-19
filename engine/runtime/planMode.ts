@@ -41,6 +41,47 @@ export function planToolNames(only?: readonly string[]): string[] {
   return only?.length ? only.filter((name) => allowed.includes(name)) : [...allowed];
 }
 
+/**
+ * 计划文本上限（20 KiB）。
+ *
+ * 计划是给人审阅的短文档，不是代码库快照；超限只截断并如实告诉用户，
+ * 不静默接受一份几 MB 的文本写进磁盘。
+ */
+export const PLAN_TEXT_LIMIT = 20 * 1024;
+
+/** 写盘端口：由宿主注入（engine 不 import `node:fs`，最小面有守卫）。 */
+export type PlanWriter = (path: string, text: string) => Promise<void>;
+
+/** 五段计划的段名（与 `renderPlanPrompt` 的约定一致）。 */
+export const PLAN_SECTIONS = ["目标", "范围", "步骤", "验证", "风险"] as const;
+
+/** 超过上限就截断（返回截断后的文本与是否截断过）。 */
+export function truncatePlan(text: string): { text: string; truncated: boolean } {
+  const raw = String(text ?? "");
+  if (raw.length <= PLAN_TEXT_LIMIT) return { text: raw, truncated: false };
+  return { text: raw.slice(0, PLAN_TEXT_LIMIT), truncated: true };
+}
+
+/**
+ * 检查计划缺哪几段。
+ *
+ * 宽松匹配：段名出现在行首（可带 `1.`、`一、`、`##` 等前缀）才算 ——
+ * 正文里顺口提到"风险"不该被当成有「风险」这一段。
+ */
+export function missingPlanSections(text: string): string[] {
+  const lines = String(text ?? "").split(/\r?\n/);
+  const present = new Set<string>();
+  for (const line of lines) {
+    const head = line
+      .replace(/^\s*(?:#{1,6}\s*)?(?:\d+[.、)]|[一二三四五六七八九十]+[、.)])\s*/, "")
+      .trim();
+    for (const section of PLAN_SECTIONS) {
+      if (head.startsWith(section)) present.add(section);
+    }
+  }
+  return PLAN_SECTIONS.filter((section) => !present.has(section));
+}
+
 /** 计划文件：`.ding/plans/<sessionId>.md`（sessionId 只留安全字符）。 */
 export function planFilePath(dataDir: string, sessionId: string): string {
   const safe = String(sessionId ?? "").replace(/[^A-Za-z0-9._-]/g, "-").replace(/\.{2,}/g, "-") || "session";
@@ -50,6 +91,74 @@ export function planFilePath(dataDir: string, sessionId: string): string {
    */
   const base = String(dataDir ?? "").split("\\").join("/").replace(/\/+$/, "");
   return `${base}/.ding/plans/${safe}.md`;
+}
+
+/**
+ * 把批准后的计划写进 `.ding/plans/<sessionId>.md`。
+ *
+ * 写盘是本文件唯一的 IO —— 由宿主注入 `write`（桌面注入 `fs.writeFile`，
+ * 单测注入内存实现）。失败不抛：调用方要把"未落盘"显示在面板上，
+ * 而不是让批准动作整个失败。
+ */
+export async function writePlanFile(
+  dataDir: string,
+  sessionId: string,
+  text: string,
+  write: PlanWriter,
+): Promise<{ ok: true; path: string; truncated: boolean } | { ok: false; path: string; error: string; truncated: boolean }> {
+  const path = planFilePath(dataDir, sessionId);
+  const { text: body, truncated } = truncatePlan(text);
+  if (!body.trim()) return { ok: false, path, error: "计划是空的，没有内容可写", truncated };
+  try {
+    await write(path, body);
+    return { ok: true, path, truncated };
+  } catch (error) {
+    return {
+      ok: false,
+      path,
+      error: error instanceof Error ? error.message : String(error),
+      truncated,
+    };
+  }
+}
+
+/**
+ * 已批准计划注入给模型的块。
+ *
+ * 每次执行轮都重新注入（而不是只发一次）：压缩会把早期消息摘掉，
+ * 只靠历史里那一轮，模型会"忘了计划第 3 步"。
+ */
+export function renderApprovedPlan(text: string, path?: string): string {
+  const body = String(text ?? "").trim();
+  if (!body) return "";
+  return [
+    "",
+    "<approved_plan>",
+    "用户已经批准下面这份计划，现在进入执行阶段：请按步骤执行；每完成一步用工具留下可验证的结果。",
+    ...(path ? [`计划文件：${path}`] : []),
+    body,
+    "</approved_plan>",
+  ].join("\n");
+}
+
+/**
+ * 批准的**唯一判据**（状态机 + 非空 + 五段齐全）。
+ *
+ * 放在引擎里是为了让按钮、动作体、测试用的是同一条规则 ——
+ * UI 的 disabled 只是提示，真正拦人的是这里。
+ *
+ * @returns 不能批准的原因；`null` = 可以批准
+ */
+export function planApprovalError(planState: PlanState | undefined, text: string | undefined): string | null {
+  const from = planState ?? "idle";
+  if (!isPlanTransitionAllowed(from, "executing")) {
+    return from === "executing" ? "计划已经在执行" : "还没有可批准的计划（先让模型给出计划）";
+  }
+  const body = String(text ?? "").trim();
+  if (!body) return "计划是空的，没有内容可批准";
+  const missing = missingPlanSections(body);
+  if (missing.length) return `计划缺少：${missing.join("、")}（补全后再开始执行）`;
+  return null;
 }
 
 /**

@@ -18,7 +18,9 @@ Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无
 ## 功能
 
 - **Agent 工具面**：文件与命令（`list_files` / `read_file` / `write_file` / `list_dir` / `search_files` / `edit_file` / `run_command`）、记忆（`memory_save` / `memory_list`）、定时任务（`schedule_create` / `schedule_list`）、画布（`canvas_add_node`）、本地知识库（`knowledge_search`）、浏览器与电脑操作，以及子智能体（`spawn_agent` / 小队）。**权威清单以 `shared/agentTools.ts` 的注册表为准**（这里不写死数量，免得又旧了）。
-- **连接器（MCP）**：以 stdio 子进程接入 MCP server（最多 8 个），工具以 `mcp__<server>__<tool>` 暴露给模型。
+- **连接器（MCP）**：stdio 子进程或 streamable HTTP 接入 MCP server（最多 8 个），工具以 `mcp__<server>__<tool>` 暴露给模型；HTTP 连接器支持 OAuth（授权码 + PKCE，token 加密存本机）。
+- **计划模式**：只读探索 → 五段计划 → 右侧面板可编辑 → 批准后写入 `.ding/plans/` 并开始执行；计划阶段不下发写/命令工具。
+- **LSP 诊断**：配置语言服务器后，编辑成功只报**新引入的** error（warning 不报）；没配置时完全跳过。
 - **审批闸门**：三档模式（全部允许 / 按需确认 / 每步确认）；每个工具按读/写分级，MCP 工具默认按写对待；被拦下的调用可就地允许或拒绝，决策写入会话日志。
 - **子智能体**：独立上下文、只回要点报告、token 成本上卷父级；共用同一张闸门表，不穿透审批。
 - **上下文管理**：唯一的切分点，只在消息边界切、保留段以 user 开头、最后一条必留；用 provider 返回的真实 `usage` 校准估算系数。

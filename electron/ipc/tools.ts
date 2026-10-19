@@ -1,4 +1,5 @@
 import { jsonSchema, type ToolSet } from "ai";
+import fs from "node:fs/promises";
 import { isMcpTool, parseMcpToolName } from "../../shared/mcp";
 import {
   CANVAS_ADD_NODE_TOOL,
@@ -72,6 +73,7 @@ import { app } from "electron";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
 import { currentPermissionRules } from "./appSettings";
 import { KNOWLEDGE_SEARCH_TOOL } from "../../shared/knowledgeTools";
+import { lspActive, lspNoteForEdits } from "./lsp";
 
 /**
  * 工具结果落盘目录（U02）：`<userData>/tool-results`。
@@ -124,6 +126,22 @@ const serializeWrite = createSerialQueue();
  * 只锁**同一个路径**：改十个不同文件仍然并行（全局队列会让重构变成十次串行磁盘往返）。
  */
 const serializePathWrite = createKeyedSerialQueue();
+
+/**
+ * G6：读编辑前的文本（只用于 LSP 差异）。
+ *
+ * 超过 2 MB 不读：语言服务器处理大文件本身就可能卡住，拿不到"编辑前"时
+ * 宁可本次不报差异，也不要让一次编辑多等十几秒。
+ */
+async function readBeforeForLsp(file: string): Promise<string | null> {
+  try {
+    const stat = await fs.stat(file);
+    if (stat.size > 2_000_000) return null;
+    return await fs.readFile(file, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 /**
  * F2：沙箱模式对写文件的**效果检查**（read-only 一律拒；workspace-write 只允许工作区内）。
@@ -306,12 +324,25 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
    */
   [WRITE_FILE_TOOL]: async (input) => {
     const { path, content, overwrite } = input as { path: string; content: string; overwrite?: boolean };
-    const result = await serializePathWrite(path, () => writeFileForModel(path, content, ownedDirs(), overwrite === true));
+    const resolved = resolveWriteTarget(path, ownedDirs());
+    let before: string | null = null;
+    const result = await serializePathWrite(path, async () => {
+      before = resolved && (await lspActive()) ? await readBeforeForLsp(resolved) : null;
+      return writeFileForModel(path, content, ownedDirs(), overwrite === true);
+    });
+    /* G6：编辑成功后只报**新引入**的 error（没配 LSP 时为空串、零等待）。 */
+    const lsp = result.ok ? await lspNoteForEdits([{ path: result.path, before }]) : { line: "", errors: [] };
     return {
       ok: result.ok,
-      line: describeWriteResult(result, path),
+      line: [describeWriteResult(result, path), lsp.line].filter(Boolean).join("；"),
       ...(result.ok
-        ? { path: result.path, chars: result.chars, bytes: result.bytes, created: result.created }
+        ? {
+            path: result.path,
+            chars: result.chars,
+            bytes: result.bytes,
+            created: result.created,
+            ...(lsp.errors.length ? { lsp: { newErrors: lsp.errors.length, diagnostics: lsp.errors } } : {}),
+          }
         : { error: result.error }),
     };
   },
@@ -371,16 +402,27 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       const denied = target ? sandboxWriteError(target) : null;
       if (denied) return { ok: false, line: `⚙ 补丁未应用：${denied}`, error: denied };
     }
-    const result = await serializePathWrite("__apply_patch__", () =>
-      applyPatch(process.cwd(), parsed.ops, {
+    const beforeByPath = new Map<string, string | null>();
+    const result = await serializePathWrite("__apply_patch__", async () => {
+      const wantBefore = await lspActive();
+      for (const op of parsed.ops) {
+        const target = resolveWriteTarget(op.path, ownedDirs());
+        if (target && wantBefore && !beforeByPath.has(target)) beforeByPath.set(target, await readBeforeForLsp(target));
+      }
+      return applyPatch(process.cwd(), parsed.ops, {
         restrictToCwd: false,
         resolvePath: (p) => resolveWriteTarget(p, ownedDirs()),
-      }),
-    );
+      });
+    });
+    const lsp = result.ok
+      ? await lspNoteForEdits(result.changed.map((file) => ({ path: file, before: beforeByPath.get(file) ?? null })))
+      : { line: "", errors: [] };
     return {
       ok: result.ok,
-      line: result.ok ? `⚙ 已应用补丁：${result.changed.join("、")}` : `⚙ 补丁未应用：${result.error ?? ""}`,
-      ...(result.ok ? { changed: result.changed } : { error: result.error }),
+      line: [result.ok ? `⚙ 已应用补丁：${result.changed.join("、")}` : `⚙ 补丁未应用：${result.error ?? ""}`, lsp.line]
+        .filter(Boolean)
+        .join("；"),
+      ...(result.ok ? { changed: result.changed, ...(lsp.errors.length ? { lsp: { newErrors: lsp.errors.length } } : {}) } : { error: result.error }),
     };
   },
 
@@ -395,15 +437,25 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const denied = resolved ? sandboxWriteError(resolved) : null;
     if (denied) return { ok: false, line: `⚙ 改不了：${denied}`, error: denied };
     const expected = resolved ? expectedFingerprint(env.sessionId, resolved) : undefined;
-    const result = await serializePathWrite(path, () =>
-      editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true, expected),
-    );
+    let before: string | null = null;
+    const result = await serializePathWrite(path, async () => {
+      before = resolved && (await lspActive()) ? await readBeforeForLsp(resolved) : null;
+      return editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true, expected);
+    });
     if (result.ok) noteWrite(env.sessionId, result.path, await statFingerprint(result.path));
+    const lsp = result.ok ? await lspNoteForEdits([{ path: result.path, before }]) : { line: "", errors: [] };
     return {
       ok: result.ok,
-      line: describeEditResult(result, path),
+      line: [describeEditResult(result, path), lsp.line].filter(Boolean).join("；"),
       /* ⚠️ 字段名不能叫 `line`：那是留痕那一行用的键，重名会被静默覆盖 */
-      ...(result.ok ? { path: result.path, replaced: result.replaced, atLine: result.line } : { error: result.error }),
+      ...(result.ok
+        ? {
+            path: result.path,
+            replaced: result.replaced,
+            atLine: result.line,
+            ...(lsp.errors.length ? { lsp: { newErrors: lsp.errors.length, diagnostics: lsp.errors } } : {}),
+          }
+        : { error: result.error }),
     };
   },
 

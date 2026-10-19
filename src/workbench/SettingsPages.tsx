@@ -6,6 +6,7 @@ import { PluginsPage } from "./PluginsPage";
 import { KnowledgePage } from "./KnowledgePage";
 import { PersonalizePanel } from "./PersonalizePanel";
 import { ProjectRulesPanel } from "./ProjectRulesPanel";
+import { LspPanel } from "./LspPanel";
 import { useMemoryStore } from "./memoryStore";
 import { useAppSettings } from "./appSettings";
 import { spacing } from "../utils/spacing";
@@ -217,6 +218,9 @@ export default function SettingsPages({
 
           {/* A1/A2：项目规则与环境（真的被读进第一轮系统提示词的那几个文件） */}
           <ProjectRulesPanel />
+
+          {/* G6：LSP 语言服务器（编辑后只报新引入的 error） */}
+          <LspPanel />
 
           {/* L06 个性化：主题 / 快捷键 / 助手人格（独立组件，见 PersonalizePanel 的说明） */}
           <PersonalizePanel />

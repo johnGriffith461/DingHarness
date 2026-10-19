@@ -30,6 +30,7 @@ import { AGENT_CHANNEL } from "./ipc/agentStore";
 import { SEARCH_HISTORY_CHANNEL } from "./ipc/searchStore";
 import { WORKSPACE_CHANNEL } from "./ipc/workspaceStore";
 import { MCP_CHANNEL } from "./ipc/mcpStore";
+import { LSP_CHANNEL } from "./ipc/lsp";
 import { PROJECT_CHANNEL } from "./ipc/project";
 import { ATTACHMENT_CHANNEL } from "./ipc/attachments";
 import { TOOLS_CHANNEL } from "./ipc/tools";
@@ -268,6 +269,19 @@ const api = {
     prompts: () => ipcRenderer.invoke(MCP_CHANNEL.prompts) as ReturnType<ShellBridge["mcp"]["prompts"]>,
     getPrompt: (server: string, name: string, args?: Record<string, string>) =>
       ipcRenderer.invoke(MCP_CHANNEL.getPrompt, server, name, args) as ReturnType<ShellBridge["mcp"]["getPrompt"]>,
+    oauthStatus: (server: string) => ipcRenderer.invoke(MCP_CHANNEL.oauthStatus, server),
+    oauthBegin: (server: string) =>
+      ipcRenderer.invoke(MCP_CHANNEL.oauthBegin, server) as ReturnType<ShellBridge["mcp"]["oauthBegin"]>,
+    oauthComplete: (server: string, state: string, code: string) =>
+      ipcRenderer.invoke(MCP_CHANNEL.oauthComplete, server, state, code) as ReturnType<
+        ShellBridge["mcp"]["oauthComplete"]
+      >,
+    oauthCancel: (state: string) => ipcRenderer.invoke(MCP_CHANNEL.oauthCancel, state),
+  },
+  /** G6：LSP 语言服务器（配置与状态）。 */
+  lsp: {
+    list: () => ipcRenderer.invoke(LSP_CHANNEL.list) as ReturnType<ShellBridge["lsp"]["list"]>,
+    reload: () => ipcRenderer.invoke(LSP_CHANNEL.reload) as ReturnType<ShellBridge["lsp"]["reload"]>,
   },
   /** 工作区（2026-10-14）：授权给 agent 干活的目录。 */
   workspace: {
@@ -347,10 +361,14 @@ const api = {
   tools: {
     list: () => ipcRenderer.invoke(TOOLS_CHANNEL.list) as ReturnType<ShellBridge["tools"]["list"]>,
   },
-  /** 附件落盘（B3） */
+  /** 附件落盘（B3/G2） */
   attachments: {
     save: (input: { sessionId: string; name: string; mediaType: string; data: string }) =>
       ipcRenderer.invoke(ATTACHMENT_CHANNEL.save, input) as ReturnType<ShellBridge["attachments"]["save"]>,
+    readAsDataUrl: (file: string) =>
+      ipcRenderer.invoke(ATTACHMENT_CHANNEL.readAsDataUrl, file) as ReturnType<
+        ShellBridge["attachments"]["readAsDataUrl"]
+      >,
   },
   /** 逐文件改动审阅（U08）：读改动清单 / 回滚某个文件 */
   project: {
@@ -366,6 +384,8 @@ const api = {
       ipcRenderer.invoke(PROJECT_CHANNEL.writeAgents, content) as ReturnType<ShellBridge["project"]["writeAgents"]>,
     repoMap: (opts?: { maxTokens?: number }) =>
       ipcRenderer.invoke(PROJECT_CHANNEL.repoMap, opts) as ReturnType<ShellBridge["project"]["repoMap"]>,
+    writePlan: (input: { sessionId: string; text: string }) =>
+      ipcRenderer.invoke(PROJECT_CHANNEL.writePlan, input) as ReturnType<ShellBridge["project"]["writePlan"]>,
   },
   review: {
     list: (sessionId: string) => ipcRenderer.invoke(REVIEW_CHANNEL.list, sessionId) as ReturnType<
@@ -440,6 +460,11 @@ const api = {
       ipcRenderer.invoke(SESSION_CHANNEL.forkAt, sourceSessionId, at),
     /** 全文检索会话记录（Phase 12.4）：左栏那颗搜索键走它（结果里带命中的那一小段）。 */
     search: (query: string) => ipcRenderer.invoke(SESSION_CHANNEL.search, query),
+    /** G3：压缩事件回写（渲染层只报事实，通道只收压缩字段）。 */
+    appendCompaction: (
+      sessionId: string,
+      info: { fromSeq?: number; toSeq?: number; tokensBefore?: number; tokensAfter?: number; summaryId?: string },
+    ) => ipcRenderer.invoke(SESSION_CHANNEL.appendCompaction, sessionId, info),
   },
   /** 请求追踪与用量（V6-2c/2d）：只读派生数据，不上报。 */
   stats: {

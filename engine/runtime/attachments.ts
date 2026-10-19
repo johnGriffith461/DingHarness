@@ -98,3 +98,57 @@ export async function saveAttachment(sessionsDir: string, input: SaveAttachmentI
     name: String(input.name ?? "").slice(0, 200) || path.basename(file),
   };
 }
+
+/** 扩展名 → mime（读回时用；`saveAttachment` 那张表反过来再补几个常见的）。 */
+const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  pdf: "application/pdf",
+};
+
+/**
+ * G2：把附件路径收窄到**会话目录内**。
+ *
+ * 渲染层给的是磁盘路径（不可信）：`../../` 或绝对路径必须被拒，
+ * 否则「看缩略图」就变成了任意文件读取。
+ *
+ * @returns 规范化后的绝对路径；越界返回 null
+ */
+export function attachmentPathWithin(sessionsDir: string, file: string): string | null {
+  if (typeof file !== "string" || !file.trim()) return null;
+  const root = path.resolve(sessionsDir);
+  const target = path.resolve(file);
+  const rel = path.relative(root, target);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  return target;
+}
+
+/**
+ * G2：读回附件为 data URL（界面缩略图/预览用）。
+ *
+ * 只读、只允许会话目录内、上限与写入一致（25 MiB）。
+ * 文件被清理时返回可读错误，界面显示占位而不是崩。
+ */
+export async function readAttachmentDataUrl(
+  sessionsDir: string,
+  file: string,
+): Promise<{ ok: true; dataUrl: string; mediaType: string } | { ok: false; error: string }> {
+  const target = attachmentPathWithin(sessionsDir, file);
+  if (!target) return { ok: false, error: "路径不在会话附件目录内" };
+  let bytes: Buffer;
+  try {
+    bytes = await fs.readFile(target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    return { ok: false, error: code === "ENOENT" ? "附件已清理" : `读不到（${(error as Error)?.message ?? "未知原因"}）` };
+  }
+  if (bytes.length > ATTACHMENT_MAX_BYTES) {
+    return { ok: false, error: `附件过大（${bytes.length} 字节）` };
+  }
+  const ext = path.extname(target).replace(/^\./, "").toLowerCase();
+  const mediaType = MIME_BY_EXT[ext] ?? "application/octet-stream";
+  return { ok: true, dataUrl: `data:${mediaType};base64,${bytes.toString("base64")}`, mediaType };
+}

@@ -339,20 +339,22 @@ export function Composer({
         ? { type: "image", data: a.data, mediaType: a.mediaType }
         : { type: "file", data: a.data, mediaType: a.mediaType, filename: a.name },
     );
-    if (attachments.length) {
-      const sessionId = useWorkbenchStore.getState().activeTaskId ?? "draft";
-      for (const a of attachments) {
-        void Promise.resolve(shell?.attachments?.save?.({ sessionId, name: a.name, mediaType: a.mediaType, data: a.data })).catch(
-          () => null,
-        );
-      }
-    }
+    /*
+     * G2：落盘交给 store（那里才拿得到**这次真正写入的任务 id**）。
+     * 原来是在这里 `void save(...)` 到 `activeTaskId ?? "draft"`：
+     * 新任务会落到 draft 目录、重启后被会话目录校验拒掉 —— 图就"消失"了。
+     */
+    const attachmentDrafts = attachments.map((a) => ({ name: a.name, mediaType: a.mediaType, data: a.data }));
     setAttachments([]);
     setMaterial([]);
     setMentionChips([]);
     const options =
-      block || parts.length
-        ? { ...(block ? { material: block } : {}), ...(parts.length ? { parts } : {}) }
+      block || parts.length || attachmentDrafts.length
+        ? {
+            ...(block ? { material: block } : {}),
+            ...(parts.length ? { parts } : {}),
+            ...(attachmentDrafts.length ? { attachmentDrafts } : {}),
+          }
         : undefined;
     // 传了 onSend 就按它的（任务视图 = 在这段对话里接着说）；没传就是新开一段
     if (onSend) onSend(value, options);
@@ -877,11 +879,21 @@ export function Composer({
               className="wb-setpage-btn"
               data-testid="wb-plan-execute"
               onClick={() => {
-                const id = useWorkbenchStore.getState().activeTaskId;
+                const store = useWorkbenchStore.getState();
+                const id = store.activeTaskId;
                 if (!id) return;
                 savePlanMode(false);
                 setPlanOn(false);
-                void useWorkbenchStore.getState().sendInTask(id, "按上面的计划开始执行");
+                /*
+                 * G1：有正式的计划草稿就走"落盘 + 状态机"那条路；
+                 * 旧任务（模型已经答过、但还没有 planState）保持原来的直接发一句。
+                 */
+                const task = store.tasks.find((t) => t.id === id);
+                if (task?.planState === "awaiting_approval") {
+                  void store.approvePlan(id);
+                  return;
+                }
+                void store.sendInTask(id, "按上面的计划开始执行");
               }}
             >
               开始执行
