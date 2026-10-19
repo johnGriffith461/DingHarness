@@ -74,7 +74,12 @@ const noSessions = {
 };
 
 describe("备份与恢复（Phase 12.3）", () => {
-  it("① roundtrip：配置型 store 真落 KV、真键形状，读回来还是同一份", async () => {
+  /*
+   * ⚠️ 显式 30s 超时（2026-10-19，CI 实测）：这条要起两份真实存储、写会话、导出、
+   * 再导入并逐字段比对。本机 ~1s，但 CI 的 windows-latest 上超过默认 5s ——
+   * 那是机器慢，不是产品坏了。同批的 bench 那条也这么修过。
+   */
+  it("① roundtrip：配置型 store 真落 KV、真键形状，读回来还是同一份", { timeout: 30_000 }, async () => {
     const src = tempDir("dh-backup-");
     const store = openStore(src);
     const sid = chatSessionId("bk");
