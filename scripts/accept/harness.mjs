@@ -263,6 +263,8 @@ export async function waitForPage(browser, timeoutMs = 20000) {
 export async function expandComposerMore(page) {
   const more = page.locator('[data-testid="wb-composer-more"]');
   if ((await more.count()) === 0) return false;
+  /* 幂等：已经展开就不要再点（再点会收起 —— accept-attachments 实测踩过） */
+  if ((await more.getAttribute("aria-expanded").catch(() => null)) === "true") return true;
   await more.click().catch(() => undefined);
   await sleep(250);
   return true;

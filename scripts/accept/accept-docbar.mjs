@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**文档的「粘贴」与「插入附件」**（§173，`aiDoc_actionBar_paste` /
@@ -61,6 +61,7 @@ try {
 
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   await page.locator('[data-testid="wb-add-doc"]').click();

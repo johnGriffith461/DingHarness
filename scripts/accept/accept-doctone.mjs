@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, waitForPage, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**调整语气真的改了文风**（§168）。
@@ -50,6 +50,7 @@ try {
 
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   await page.locator('[data-testid="wb-add-doc"]').click();

@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**文档的调整语气 / 调整格式**（§168，对应 `aiDoc_keyboard_actionBar_*`）。
@@ -56,6 +56,7 @@ try {
   /* 打开一个文档并写点东西 */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   await page.locator('[data-testid="wb-add-doc"]').click();

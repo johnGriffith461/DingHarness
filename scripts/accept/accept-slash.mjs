@@ -124,6 +124,7 @@ await step("C1：Shift+Tab 切换计划模式", async () => {
   await input.press("Shift+Tab");
   await sleep(300);
   if (!(await page.locator('[data-testid="wb-plan-banner"]').count())) throw new Error("计划提示条没出现");
+  await expandComposerMore(page);
   const pressed = await page.locator('[data-testid="wb-plan-toggle"]').getAttribute("aria-pressed");
   if (pressed !== "true") throw new Error(`chip aria-pressed=${pressed}`);
   await input.press("Shift+Tab");

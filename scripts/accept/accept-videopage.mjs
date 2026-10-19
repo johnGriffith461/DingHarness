@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**生成视频独立页**（§174，对应 `chat/create-video`）。
@@ -57,6 +57,7 @@ try {
   /* ① 入口 */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(700);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   out.menuHasVideo = await page.evaluate(

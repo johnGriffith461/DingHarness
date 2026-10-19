@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, shot, waitForPage, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**agent 真的能在一个目录里干活**（2026-10-14）。
@@ -151,6 +151,7 @@ try {
   out.outside = { ok: escape.ok, error: String(escape.error ?? "") };
 
   /* ── ⑨ 界面上列着这个授权 ── */
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(500);
   out.menuItems = await page.$$eval('[data-testid^="wb-workspace"]', (els) =>

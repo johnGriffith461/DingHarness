@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, failOnMarks, freshDir, killTree, pickPort, shot, verdict } from "./harness.mjs";
+import { bootApp, connectWithRetry, failOnMarks, freshDir, killTree, pickPort, shot, verdict, expandComposerMore } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
 failOnMarks();
@@ -56,6 +56,7 @@ await page.waitForTimeout(2000);
 const tasksBeforeFloat = await page.locator('[data-testid^="wb-recent-"]').count();
 
 /* 思考档位：在主输入区选「高」—— 下面用浮窗那一格来验"两处同源"（§2.4 #5） */
+await expandComposerMore(page);
 await page.locator('[data-testid="wb-effort"]').click();
 await page.waitForTimeout(400);
 if ((await page.locator('[data-testid="wb-effort-high"]').count()) === 1) {

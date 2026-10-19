@@ -84,6 +84,7 @@ await step("点 × 移除一个附件", async () => {
 });
 
 await step("+ 菜单里有「图片 / PDF」入口", async () => {
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await sleep(250);
   if (!(await page.locator('[data-testid="wb-add-attachment"]').count())) throw new Error("菜单里没有入口");

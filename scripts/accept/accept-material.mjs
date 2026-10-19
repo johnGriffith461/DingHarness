@@ -38,13 +38,17 @@ fs.writeFileSync(path.join(DATA, "drive", "季度总结.md"), `# 季度总结\n\
  * 「provider 预检用 resolveSecret」之后不成立了：没有 key 时**连 request 都不会写**
  * （宿主在解析目标阶段就报错），于是读到 0 条 request，四个断言一起假红。
  *
- * 现在：有真实凭据就用真实的（请求一定会发出，模型回不回都不影响判据）；
- * 没有凭据才退回空文件（那种环境下这条会明确红，而不是静默）。
+ * 现在：
+ * - **批跑里**（`DSH_ACCEPT_ONLY` 设了、`DSH_CREDENTIALS_FILE` 指向批跑假通道凭据）——
+ *   必须沿用批跑的凭据，否则真 key 会与假 `STRATA_BASE_URL` 错配（2026-10-20 实测：
+ *   requestRecords 0）；
+ * - **单独跑**（没设凭据文件）—— 有真实凭据就用真实的，没有才退回空文件。
  */
 const realKeys = path.join(os.homedir(), ".ding", ".credentials.yaml");
 const EMPTY_KEYS = ".verify/material-keys-empty.yaml";
 fs.writeFileSync(EMPTY_KEYS, "refs:\n", "utf8");
-const KEYS_FILE = fs.existsSync(realKeys) ? realKeys : EMPTY_KEYS;
+const providedKeys = process.env.DSH_CREDENTIALS_FILE?.trim();
+const KEYS_FILE = providedKeys || (fs.existsSync(realKeys) ? realKeys : EMPTY_KEYS);
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;

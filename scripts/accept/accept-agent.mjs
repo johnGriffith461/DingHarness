@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**创建 AI 智能体**（§156，对应 `chat/bot/create`）。
@@ -71,6 +71,7 @@ try {
   /* ── ① 入口 ── */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   out.menuHasAgent = await page.evaluate(

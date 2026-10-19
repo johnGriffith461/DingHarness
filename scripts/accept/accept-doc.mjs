@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**AI 文档**（§153）—— 对应本体 `chat/new-doc` / `chat/write`。
@@ -61,6 +61,7 @@ try {
   /* ── ① 入口：输入区的 + → 新建文档 ── */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   out.addPopOpened = (await page.locator('[data-testid="wb-add-pop"]').count()) > 0;

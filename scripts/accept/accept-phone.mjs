@@ -51,12 +51,25 @@ async function launch(port) {
   return { child, browser, page };
 }
 
+/**
+ * C-01（2026-10-20）：手机遥控从主导航移进了设置。
+ * 走"账号菜单 → 设置 → 手机遥控电脑"这条真实用户路径。
+ */
+async function openPhone(page) {
+  await page.locator('[data-testid="wb-account"]').click();
+  await page.waitForTimeout(400);
+  await page.locator('[data-testid="wb-acct-settings"]').click();
+  await page.waitForSelector('[data-testid="wb-set-手机遥控电脑"]', { timeout: 8000 });
+  await page.locator('[data-testid="wb-set-手机遥控电脑"]').click();
+  await page.waitForTimeout(1800);
+}
+
 const report = {};
 const shots = ".verify/shots-final";
 let { child, browser, page } = await launch(12680);
 
 try {
-  await page.locator('[data-testid="wb-nav-phone"]').click();
+  await openPhone(page);
   await page.waitForTimeout(1800);
 
   // 默认：许可开、唤醒关（与实机截图一致）
@@ -109,7 +122,7 @@ try {
   await new Promise((r) => setTimeout(r, 2500));
 
   ({ child, browser, page } = await launch(12681));
-  await page.locator('[data-testid="wb-nav-phone"]').click();
+  await openPhone(page);
   await page.waitForTimeout(2000);
   report.afterRestartConnect = await page.locator('[data-testid="wb-switch-connect"]').getAttribute("aria-pressed");
   report.afterRestartAwake = await page.locator('[data-testid="wb-switch-awake"]').getAttribute("aria-pressed");

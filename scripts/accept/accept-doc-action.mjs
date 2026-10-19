@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**AI 文档的操作条**（§153）—— 缩写 / 扩写 / 润色 / 总结概括。
@@ -49,6 +49,7 @@ try {
 
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   await page.locator('[data-testid="wb-add-doc"]').click();

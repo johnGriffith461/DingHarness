@@ -50,6 +50,7 @@ try {
   );
 
   // ② 项目 → 下拉
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-project"]').click();
   await page.waitForTimeout(600);
   out.projectPopOpened = (await page.locator('[data-testid="wb-project-pop"]').count()) === 1;

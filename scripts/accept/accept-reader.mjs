@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**AI 阅读**（§155，对应 `chat/read-web`）。
@@ -78,6 +78,7 @@ try {
   /* ── ① 入口 ── */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   out.menuHasReader = await page.evaluate(

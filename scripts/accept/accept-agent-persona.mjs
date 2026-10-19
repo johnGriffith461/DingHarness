@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd, expandComposerMore } from "./harness.mjs";
 
 /**
  * 验收：**AI 智能体的人设真的生效**（§156）。
@@ -63,6 +63,7 @@ try {
 
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(300);
   await page.locator('[data-testid="wb-add-agent"]').click();

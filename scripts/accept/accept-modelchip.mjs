@@ -8,7 +8,7 @@
 // 判据都是"点了要有真后果"：两类 chip 都在 → 模型列表真列出来 → 选一条真落盘（`resolveChatRoute`
 // 读的就是那个键）→ chip 文案跟着变 → 档位选真落盘、选回「默认」要把键**删掉**（默认 = 一个字段都不发）。
 import { chromium } from "playwright";
-import { failOnMarks, expandComposerMore, killLeftovers, openApp, pickPort, sleep, verdict } from "./harness.mjs";
+import { failOnMarks, expandComposerMore, freshDir, killLeftovers, openApp, pickPort, sleep, verdict } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
 failOnMarks();
@@ -18,7 +18,16 @@ const note = (m) => console.log("   " + m);
 
 const port = await pickPort([9911]);
 await killLeftovers();
-const { browser, page } = await openApp(chromium, { port, dataDir: ".verify/accept-modelchip-data", cwd: "." });
+/*
+ * 2026-10-20：原来复用数据目录不清 —— 上次被杀掉的运行会留下一条 stage=running 的任务，
+ * 启动后模型 chip 处于"运行中禁止换模型"的禁用态，点选项一直超时。
+ */
+const DATA = ".verify/accept-modelchip-data";
+if (!(await freshDir(DATA))) {
+  console.error("✗ 数据目录 " + DATA + " 删不掉 —— 先手工关掉占着它的 Electron");
+  process.exit(1);
+}
+const { browser, page } = await openApp(chromium, { port, dataDir: DATA, cwd: "." });
 await sleep(2000);
 /* C-01：思考强度 chip 收在首页的「更多」后面 */
 await expandComposerMore(page);
@@ -78,6 +87,7 @@ try {
   await sleep(600);
   const afterCtrlM = await page.locator('[data-testid="wb-model-pop"]').count();
   if (!afterCtrlM) bad.push("Ctrl+M 没有唤起模型菜单");
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-effort"]').click();
   await sleep(500);
   const modelStill = await page.locator('[data-testid="wb-model-pop"]').count();
@@ -89,7 +99,21 @@ try {
   note(`Ctrl+M 唤起 ${afterCtrlM ? "✓" : "✗"} / 互斥（开档位时模型菜单 ${modelStill ? "还在 ✗" : "已关 ✓"}）`);
 
   /* ③ 选一条 → 真落盘 + 文案跟着走 */
-  const first = page.locator('[data-testid^="wb-model-option-"]').first();
+  /*
+   * 2026-10-20（脚本过期）：第一条选项可能属于**没有可用密钥**的 provider（禁用态）。
+   * 先切到第一个"有密钥"的 provider（它的徽标会写「无密钥」），再点第一条可用选项。
+   */
+  const provs = page.locator('[data-testid^="wb-model-provider-"]');
+  for (let i = 0; i < (await provs.count()); i += 1) {
+    const prov = provs.nth(i);
+    const label = (await prov.textContent()) ?? "";
+    if (label.includes("无密钥")) continue;
+    await prov.click();
+    await sleep(400);
+    break;
+  }
+  const first = page.locator('[data-testid^="wb-model-option-"]:not([disabled])').first();
+  if ((await first.count()) === 0) bad.push("没有任何可用（有密钥）的模型选项");
   const picked = ((await first.getAttribute("data-testid")) ?? "").replace("wb-model-option-", "");
   await first.click();
   await sleep(500);
