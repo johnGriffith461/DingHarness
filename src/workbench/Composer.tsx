@@ -39,7 +39,7 @@ import { useLibraryStore } from "./libraryStore";
 import { findItemIn } from "./libraryStore";
 import { type ConfirmMode, type SessionSearchHit } from "@shared/ipc";
 import { useDocStore } from "./docStore";
-import { readConfirmMode, saveConfirmMode } from "./confirmMode";
+import { confirmOptionState, readConfirmMode, saveConfirmMode } from "./confirmMode";
 import { Square } from "lucide-react";
 import SkillPanel from "./SkillPanel";
 import { runFeedbackCommand } from "./feedbackExport";
@@ -1262,19 +1262,32 @@ export function Composer({
           </button>
           {openPop === "confirm" ? (
             <div className="wb-chip-pop" data-testid="wb-confirm-pop" onMouseLeave={() => setOpenPop(null)}>
-              {CONFIRM_MODES.map((m) => (
-                <button
-                  key={m}
-                  className={`wb-chip-option${confirmMode === m ? " is-on" : ""}`}
-                  data-testid={`wb-confirm-option-${m}`}
-                  onClick={() => {
-                    setConfirmMode(m);
-                    setOpenPop(null);
-                  }}
-                >
-                  <Check size={13} /> {m} {confirmMode === m ? <Check size={13} /> : null}
-                </button>
-              ))}
+              {CONFIRM_MODES.map((m) => {
+                const state = confirmOptionState(m, confirmMode);
+                return (
+                  <button
+                    key={m}
+                    className={`wb-chip-option${state.checked ? " is-on" : ""}`}
+                    data-testid={`wb-confirm-option-${m}`}
+                    /*
+                     * T-06：radio 语义 + **只有一个勾**。
+                     * 原来每个选项前都画了一个 Check，选中项再加一个 ——
+                     * 三个全有勾（WorkBuddy 截图可见）。
+                     */
+                    role="menuitemradio"
+                    aria-checked={state.checked}
+                    onClick={() => {
+                      setConfirmMode(m);
+                      setOpenPop(null);
+                    }}
+                  >
+                    <span className="wb-chip-check-slot" aria-hidden>
+                      {state.marker === "check" ? <Check size={13} /> : null}
+                    </span>
+                    {m}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
         </div>

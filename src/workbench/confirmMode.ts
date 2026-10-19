@@ -32,3 +32,19 @@ export function saveConfirmMode(mode: ConfirmMode): void {
     /* 存不进去也不影响这次会话里已经生效的选择 */
   }
 }
+
+/**
+ * T-06：档位弹层里一个选项的状态（**纯函数**，供界面与单测共用）。
+ *
+ * `marker` 只有两种取值：
+ * - `check` —— 当前档位，画一个勾；
+ * - `none` —— 其它档位，**不画任何勾**（原来每个选项前面都画了一个 Check，
+ *   于是三个选项全有勾，用户看不出自己在哪一档）。
+ */
+export function confirmOptionState(
+  mode: ConfirmMode,
+  current: ConfirmMode,
+): { checked: boolean; marker: "check" | "none" } {
+  const checked = mode === current;
+  return { checked, marker: checked ? "check" : "none" };
+}
