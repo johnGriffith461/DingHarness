@@ -30,6 +30,9 @@ export function subPageForLabel(label: string): SettingsSubPage | null {
     /* T-05：记忆是**独立子页**（右侧跟着切），不再在左栏内联展开 */
     case "记忆":
       return "memory";
+    /* C-01：从主导航搬进来的「手机遥控电脑」 */
+    case "手机遥控电脑":
+      return "phone";
     default:
       return null;
   }

@@ -58,7 +58,7 @@ describe("设置子页的分支（P260）", () => {
        * ⚠️ 放行的前提是"它真被渲染"（上面那条 `ids` 断言仍要求 profile/account/general/about
        * 用精确匹配，而 types 里多出来的名字必须在这里说清为什么）。
        */
-      if (["models", "plugins", "team", "knowledge", "memory"].includes(name)) continue;
+      if (["models", "plugins", "team", "knowledge", "memory", "phone"].includes(name)) continue;
       expect(rendered.has(name), `类型里声明了「${name}」这一页，但这里没有渲染分支`).toBe(true);
     }
   });

@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, X, Library } from "lucide-react";
+import { Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, X, Library, Smartphone } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { trapTabKey } from "./focusTrap";
@@ -213,6 +213,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     { group: 1, icon: <Brain size={13} />, label: "记忆", value: memCount === 0 ? "暂无" : `${memCount} 条` },
     /* 知识库（G15）：导入 / 检索 / 引用，与 ding knowledge 同一个库 */
     { group: 1, icon: <Library size={13} />, label: "知识库", value: "导入 / 检索" },
+    /*
+     * C-01：原来在主导航里（本机不可用还占着首屏入口）。
+     * 搬进来之后仍然如实标"本机不可用"，不画一个假的可用状态。
+     */
+    { group: 1, icon: <Smartphone size={13} />, label: "手机遥控电脑", value: "本机不可用" },
   ];
   return createPortal(
     <div

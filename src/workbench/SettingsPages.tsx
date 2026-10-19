@@ -5,6 +5,7 @@ import { TeamPage } from "./TeamPage";
 import { PluginsPage } from "./PluginsPage";
 import { KnowledgePage } from "./KnowledgePage";
 import MemoryPanel from "./MemoryPanel";
+import { PhonePage } from "./PhonePage";
 import { PersonalizePanel } from "./PersonalizePanel";
 import { ProjectRulesPanel } from "./ProjectRulesPanel";
 import { LspPanel } from "./LspPanel";
@@ -23,7 +24,7 @@ import { spacing } from "../utils/spacing";
  * 而不是画一个点了没反应的按钮。
  */
 
-export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team" | "knowledge" | "memory";
+export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team" | "knowledge" | "memory" | "phone";
 
 export type SettingsPagesProps = {
   /** 显示哪一页。 */
@@ -68,6 +69,10 @@ const META: Record<SettingsSubPage, { title: string; note: string }> = {
   account: {
     title: "账号",
     note: "本机版没有账号服务端：登录、切换账号、退出登录都需要服务器，这里只显示当前状态。",
+  },
+  phone: {
+    title: "手机遥控电脑",
+    note: "本机版没有中转服务：这里只能看到这台机器的开关状态，配不上手机（不是坏了，是还没做）。",
   },
 };
 
@@ -131,6 +136,22 @@ export default function SettingsPages({
           <b>记忆</b>
         </header>
         <MemoryPanel />
+      </div>
+    );
+  }
+
+  if (page === "phone") {
+    /*
+     * C-01：「手机遥控电脑」从主导航搬进设置（本机不可用，不该占首屏入口）。
+     * 内容仍是原来那一整页（功能零改动）；`embedded` 只是不再重复画页面头。
+     */
+    return (
+      <div className="wb-setpage" data-testid="wb-setpage-phone">
+        <header className="wb-setpage-head">
+          <button className="wb-icon" data-testid="wb-setpage-back" onClick={onBack} aria-label="返回">‹</button>
+          <b>手机遥控电脑</b>
+        </header>
+        <PhonePage embedded />
       </div>
     );
   }

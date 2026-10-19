@@ -17,11 +17,10 @@ import {
   Minus,
   Pencil,
   Pin,
-  Settings,
   Wrench,
   Terminal,
   ShieldCheck,
-  Smartphone,
+  Settings,
   Workflow,
   X,
 } from "lucide-react";
@@ -55,7 +54,7 @@ import { SettingsDialog } from "./SettingsDialog";
 export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListTodo }> = [
   { view: "home", label: "新工作任务", icon: ListTodo },
   { view: "scheduled", label: "定时任务", icon: Clock },
-  { view: "phone", label: "手机遥控电脑", icon: Smartphone },
+  /* C-01：「手机遥控电脑」移入设置 —— 本机不可用，不该占主导航。 */
   /* V6-2c/2d：用量与请求追踪（原来只有单会话弹层，没有跨会话的页） */
   { view: "usage", label: "用量与追踪", icon: Activity },
   /* V6-2i/4d：两轴权限矩阵（内核早就有判定，缺的是能看的那张表） */

@@ -672,6 +672,8 @@ export function Composer({
   return (
     <div
       className="wb-composer"
+      /* C-01：首页首屏只留输入框/推荐卡/模型/档位；其余 chip 在任务页全有。 */
+      data-compact-home={view === "home" ? "true" : undefined}
       data-testid="wb-composer"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {

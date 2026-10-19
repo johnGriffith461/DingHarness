@@ -10,7 +10,10 @@ import { Check, Clock, Monitor, Smartphone } from "lucide-react";
 import { NavCollapseButton } from "./NavCollapseButton";
 import { LocalOnlyNote } from "./LocalOnlyNote";
 
-export function PhonePage() {
+/**
+ * @param embedded C-01：嵌在设置子页里时不再重复画页面头（左栏展开按钮属于整页外壳）
+ */
+export function PhonePage({ embedded = false }: { embedded?: boolean } = {}) {
   const bridge = (window as unknown as { shell?: ShellBridge }).shell;
   /*
    * 两个开关都是**真状态**，不是 useState：
@@ -66,20 +69,28 @@ export function PhonePage() {
   };
 
   return (
-    <section className="wb-page" data-testid="wb-page-phone">
-      <header className="wb-page-head">
-<NavCollapseButton />
-        <span className="wb-spacer" />
-        {!loaded ? <em className="wb-phone-loading">读取本机状态…</em> : null}
-        {/* 读完了却还是未知（没有桥或读失败）——如实说，不把它显示成「允许连接」 */}
-        {loaded && allowConnect === null ? (
+    <section className={embedded ? "wb-setpage-body wb-phone-embedded" : "wb-page"} data-testid="wb-page-phone">
+      {embedded ? null : (
+        <header className="wb-page-head">
+          <NavCollapseButton />
+          <span className="wb-spacer" />
+          {!loaded ? <em className="wb-phone-loading">读取本机状态…</em> : null}
+          {/* 读完了却还是未知（没有桥或读失败）——如实说，不把它显示成「允许连接」 */}
+          {loaded && allowConnect === null ? (
+            <em className="wb-phone-loading" data-testid="wb-phone-unknown">
+              读不到本机状态，开关保持未知（不猜一个值）
+            </em>
+          ) : null}
+        </header>
+      )}
+
+      <div className="wb-page-body wb-phone-body">
+        {/* 嵌在设置里时页面头不画了，但"状态未知"这句事实不能丢 */}
+        {embedded && loaded && allowConnect === null ? (
           <em className="wb-phone-loading" data-testid="wb-phone-unknown">
             读不到本机状态，开关保持未知（不猜一个值）
           </em>
         ) : null}
-      </header>
-
-      <div className="wb-page-body wb-phone-body">
         <div className="wb-phone-left">
           <div className="wb-mini-label">远程控制</div>
           <h2 className="wb-page-h2">出门也能操作电脑</h2>
