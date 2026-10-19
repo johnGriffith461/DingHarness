@@ -60,6 +60,20 @@ export class RunningLsp {
     this.child.stderr.on("data", (chunk: Buffer) => {
       this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-2000);
     });
+    /*
+     * ⚠️ Linux/macOS 上 spawn 找不到命令时**不会触发 exit**，而是发 `error` 事件；
+     * 没有监听器就是 unhandled exception —— 实测在 CI 的 gates-linux 上把整轮测试打红
+     * （Windows 上走 shell 时表现为退出码 1，所以本机没暴露）。
+     */
+    this.child.on("error", (error) => {
+      this.state = "error";
+      this.lastError = `语言服务器启动失败：${error.message}`;
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error(this.lastError));
+      }
+      this.pending.clear();
+    });
     this.child.on("exit", (code) => {
       this.state = "error";
       this.lastError = `语言服务器退出了（code ${code ?? "?"}）${this.stderrTail ? `：${this.stderrTail.trim().split("\n").slice(-2).join("；")}` : ""}`;
