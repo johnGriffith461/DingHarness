@@ -919,5 +919,17 @@ export async function runMain(): Promise<void> {
     const { recordJobExit } = await import("./cmdJobs");
     recordJobExit(dataDir(), code);
   }
-  process.exit(code);
+  /*
+   * A-02：**正常收尾不用 `process.exit()`**。
+   *
+   * 实测（Node 24.18 / Windows）：一轮里发了两次 SSE 请求、然后 `process.exit(0)`，
+   * 会在 C++ 层触发 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` 并以
+   * 127 / 0xC0000409 退出 —— 两个 keep-alive 连接还在关闭途中就被硬切了。
+   * 一次请求不触发，所以这类缺陷只有"两步以上"的任务才露头。
+   *
+   * 改成设 `exitCode` 让事件循环自然收尾：连接按自己的节奏关，stdout 也能冲刷完。
+   * 上面那些**早退**（参数错误 / --version / --help）仍用 `process.exit()`：
+   * 它们没有网络句柄，而且不能被还没关掉的 stdin/REPL 拖住。
+   */
+  process.exitCode = code;
 }
