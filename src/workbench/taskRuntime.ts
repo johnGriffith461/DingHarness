@@ -52,6 +52,7 @@ import {
   truncatePlan,
 } from "@engine/runtime/planMode";
 import { shouldSuggestReset, shouldVerify, summarizeVerify } from "@engine/runtime/verifyLoop";
+import { describeFinish, finishedFromTraces } from "@engine/runtime/finishContract";
 
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
@@ -382,6 +383,19 @@ export async function compactNow(
   return { ok: true, older: older.length };
 }
 
+/**
+ * P0-02：这一步的完成声明（界面可见）。
+ *
+ * - 通过证据校验 → "完成（…）"；
+ * - 改了文件却没有有效 finish → 如实写"未声明完成"，不许把"模型不说话了"当完成。
+ */
+export function finishNoteOf(tools: readonly ToolTrace[], wroteFiles?: boolean): string {
+  const finished = finishedFromTraces(tools);
+  if (finished) return describeFinish(finished);
+  if (wroteFiles) return "未声明完成（改了文件，但没有通过证据校验的 finish）";
+  return "";
+}
+
 /** 还没回答的澄清问题（ICM 的"未完成"信号之一）。 */
 function unansweredQuestions(task: WorkTask): string[] {
   return task.questions.slice(task.questionIndex).map((q) => q.text);
@@ -583,7 +597,8 @@ export async function answerTurn(
    */
   const contextNote = contextIndex ? indexedNote(olderCount) : olderCount ? compactedNote(olderCount) : "";
   const verifyNote = reply.wroteFiles ? await runVerificationNote(taskId) : "";
-  const notes = [extraNote, reply.note, contextNote, verifyNote].filter(Boolean);
+  const finishNote = finishNoteOf(reply.tools, reply.wroteFiles);
+  const notes = [extraNote, reply.note, contextNote, finishNote, verifyNote].filter(Boolean);
   nextStep(
     port,
     taskId,

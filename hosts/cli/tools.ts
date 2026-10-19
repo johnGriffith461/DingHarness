@@ -24,6 +24,8 @@ import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
 import { createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
+import { describeFinish, validateFinish } from "../../engine/runtime/finishContract";
+import { FINISH_TOOL } from "../../shared/agentTools";
 
 /**
  * CLI 宿主的**执行体**：把内核给的工具名落到真实文件系统上。
@@ -284,6 +286,13 @@ export function createCliExecutor(opts: {
           ok: true,
           output: { ok: true, line: describeTodoResult(got.todos), todos: got.todos, count: got.todos.length },
         };
+      }
+
+      /* P0-02：完成契约（账本由主循环维护，CLI 执行体只读）。 */
+      case FINISH_TOOL: {
+        const got = validateFinish(input, ctx.turnEvidence);
+        if (!got.ok) return { ok: false, output: { ok: false, line: got.error, error: got.error }, error: got.error };
+        return { ok: true, output: { ok: true, line: describeFinish(got.finish), finished: got.finish } };
       }
 
       /*

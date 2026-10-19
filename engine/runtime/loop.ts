@@ -5,6 +5,13 @@ import { createModelOptionMapFetch, optionValuesOf } from "./modelOptionMapFetch
 import { assertModalities, type ContentPart } from "./messageTransform";
 import { nativeSearchToolFor, type RuntimeModelConfig } from "./modelRuntime";
 import { reasoningProviderOptions } from "./protocols/reasoning";
+import {
+  FINISH_TOOL,
+  createTurnEvidence,
+  validateFinish,
+  type FinishRecord,
+  type TurnEvidence,
+} from "./finishContract";
 
 import type { StepUsage } from "../../shared/cost";
 import type { HealthStore } from "../ports/health";
@@ -196,6 +203,13 @@ export type TurnRequestInput = {
    * 并上屏一条 `steer` 事件。**只在步骤边界**投递 —— 不打断正在生成的那一步。
    */
   nextSteer?: () => string[];
+  /**
+   * P0-02：本轮真实执行账本（宿主建、finish 执行体共享）。
+   *
+   * 省略 = 内核自建一份（子智能体/测试直接调 runTurn 的那些路）：
+   * finish 执行体看不到它，证据校验由主循环在收尾时兜底。
+   */
+  turnEvidence?: TurnEvidence;
 };
 
 /** 一次调用的结果（两条路都能用：IPC 那条主要靠 `onEvent`，子智能体主要靠它）。 */
@@ -210,6 +224,8 @@ export type TurnOutcome = {
   model: string;
   /** D1：这一轮有没有成功写过文件（`write_file`/`edit_file`/`apply_patch`）。 */
   wroteFiles?: boolean;
+  /** P0-02：通过证据校验的完成声明（没调用 finish 或校验失败时没有）。 */
+  finished?: FinishRecord;
 };
 
 /**
@@ -423,7 +439,10 @@ export async function runTurn(
    */
   const startedAt = Date.now();
   const toolSpans: ToolSpanInput[] = [];
-  const toolStarts = new Map<string, { name: string; at: number }>();
+  const toolStarts = new Map<string, { name: string; at: number; input?: unknown }>();
+  /** P0-02：这一轮的真实证据账本（与 finish 执行体共享同一份对象）。 */
+  const evidence = input.turnEvidence ?? createTurnEvidence();
+  let finished: FinishRecord | undefined;
   const emitSpan = (ok: boolean, usage?: TurnUsage, error?: string) => {
     void exportTurnTrace({
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -566,7 +585,8 @@ export async function runTurn(
         continue;
       }
       if (part.type === "tool-call") {
-        toolStarts.set(part.toolCallId, { name: part.toolName, at: Date.now() });
+        /* 参数也要留下：finish 的证据校验与 run_command 的命令行都从这里取 */
+        toolStarts.set(part.toolCallId, { name: part.toolName, at: Date.now(), input: part.input });
         onEvent({ type: "tool-call", toolCallId: part.toolCallId, toolName: part.toolName, input: part.input });
         continue;
       }
@@ -577,8 +597,36 @@ export async function runTurn(
          * ⚠️ 子智能体那条原来**没有这一支** —— 于是它的工具报错会被整轮吞掉。
          */
         const failed = part.type === "tool-error";
-        if (!failed && ["write_file", "edit_file", "apply_patch"].includes(part.toolName)) wroteFiles = true;
         const startedTool = toolStarts.get(part.toolCallId);
+        if (!failed) {
+          if (["write_file", "edit_file", "apply_patch"].includes(part.toolName)) {
+            wroteFiles = true;
+            evidence.wroteFiles = true;
+          }
+          /*
+           * P0-02：把这一轮**真的执行过**的命令记进账本。
+           * 退出码从执行体返回的 output 里取（`describeRunResult` 用的同一字段）。
+           */
+          if (part.toolName === "run_command") {
+            const out = part.output as { exitCode?: unknown } | undefined;
+            const command = (startedTool?.input as { command?: unknown } | undefined)?.command;
+            if (typeof command === "string" && command.trim()) {
+              evidence.executed.push({
+                command,
+                exitCode: typeof out?.exitCode === "number" ? out.exitCode : null,
+              });
+            }
+          }
+          /*
+           * P0-02：finish 的最终判定在这里再做一次（同一份 `validateFinish`）。
+           * 宿主执行体通常已经用共享账本判过、失败会变成 tool-error；
+           * 这里兜住"宿主没接账本"的路（子智能体/直接调用 runTurn 的测试）。
+           */
+          if (part.toolName === FINISH_TOOL) {
+            const verdict = validateFinish(startedTool?.input, evidence);
+            if (verdict.ok) finished = verdict.finish;
+          }
+        }
         if (startedTool) {
           toolSpans.push({
             name: part.toolName || startedTool.name,
@@ -682,7 +730,14 @@ export async function runTurn(
     emitSpan(true, usage);
     // 真的跑通了 —— 把这家 provider 标成"已验证"（界面上才敢说可用）
     health.markOk(provider.id);
-    return { ok: true, aborted: false, provider: provider.id, model, ...(wroteFiles ? { wroteFiles: true } : {}) };
+    return {
+      ok: true,
+      aborted: false,
+      provider: provider.id,
+      model,
+      ...(wroteFiles ? { wroteFiles: true } : {}),
+      ...(finished ? { finished } : {}),
+    };
   } catch (error) {
     /*
      * 看门狗触发时 SDK 抛的是 AbortError（是我们自己 abort 的）——

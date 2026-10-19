@@ -410,6 +410,33 @@ export const TODO_WRITE_INPUT = z.object({
     .describe("完整的待办清单（每次调用传全量，不是增量）"),
 });
 
+/* ── P0-02：finish 完成契约 ───────────────────────────────────────
+ *
+ * 完成不是"模型不说话"，而是一次**带证据的声明**：改过文件就要给出
+ * 本轮真的跑过的验证命令与退出码。用户最恨的"假完成"就是在这里被拦住的。
+ */
+export const FINISH_TOOL = "finish";
+
+export const FINISH_DESC = [
+  "声明这一轮做完了（或卡住了）。完成任务后必须调用它。",
+  "status=done 时必须带 summary；如果本轮改过文件，evidence.commands 要写你**实际跑过**的验证命令（例如 pnpm test），且退出码必须是 0。",
+  "没跑验证就不要写 done —— 改用 status=blocked，并在 reason 里说明卡在哪、试过什么。",
+  "evidence.files 写本轮改过的文件路径，便于用户核对。",
+].join("");
+
+export const FINISH_INPUT = z.object({
+  status: z.enum(["done", "blocked"]).describe("done 已完成 / blocked 卡住了"),
+  summary: z.string().trim().min(1).max(1000).describe("一句话说清这一轮做成了什么（或为什么没做成）"),
+  evidence: z
+    .object({
+      commands: z.array(z.string().trim().min(1)).max(50).optional().describe("本轮实际跑过的验证命令（原样抄写）"),
+      files: z.array(z.string().trim().min(1)).max(100).optional().describe("本轮改过的文件路径"),
+    })
+    .optional()
+    .describe("完成证据；status=done 且改过文件时必须给 commands"),
+  reason: z.string().trim().max(1000).optional().describe("status=blocked 时必填：卡在哪、试过什么"),
+});
+
 export const SPAWN_AGENT_TOOL = "spawn_agent";
 
 /**
@@ -664,6 +691,7 @@ const TOOL_META: Record<string, AgentToolMeta> = {
   [APPLY_PATCH_TOOL]: { destructive: true, concurrency: "exclusive" },
   [RUN_COMMAND_TOOL]: { destructive: true, concurrency: "exclusive", timeoutMs: 120_000, resultPolicy: "tail" },
   [TODO_WRITE_TOOL]: { concurrency: "exclusive" },
+  [FINISH_TOOL]: { concurrency: "exclusive" },
 };
 
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
@@ -683,6 +711,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: APPLY_PATCH_TOOL, description: APPLY_PATCH_DESC, schema: APPLY_PATCH_INPUT },
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
   { name: TODO_WRITE_TOOL, description: TODO_WRITE_DESC, schema: TODO_WRITE_INPUT },
+  { name: FINISH_TOOL, description: FINISH_DESC, schema: FINISH_INPUT },
   ...COMPUTER_TOOL_SPECS,
   ...BROWSER_TOOL_SPECS,
   ...UIA_TOOL_SPECS,
@@ -709,6 +738,7 @@ export function toolLabel(name: string): string {
   if (name === SPAWN_AGENT_TOOL) return "子智能体";
   if (name === READ_FILE_TOOL) return "读文件";
   if (name === TODO_WRITE_TOOL) return "待办";
+  if (name === FINISH_TOOL) return "完成";
   if (name === LIST_FILES_TOOL) return "列文件";
   if (name === SPAWN_AGENTS_TOOL) return "派小队";
   if (name.startsWith("computer_")) return "电脑操作";

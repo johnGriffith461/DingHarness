@@ -36,6 +36,7 @@ import {
   refineTitle,
   runStream,
   runVerificationNote,
+  finishNoteOf,
 } from "./taskRuntime";
 import {
   answerQuestion,
@@ -1014,7 +1015,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     );
 
     const verifyNote = reply.wroteFiles && mode === "coding" ? await runVerificationNote(task.id) : "";
-    nextStep(port, task.id, reply.text, false, user, reply.tools, verifyNote || undefined, reply.usage);
+    const finishNote = finishNoteOf(reply.tools, reply.wroteFiles);
+    const note = [finishNote, verifyNote].filter(Boolean).join("；");
+    nextStep(port, task.id, reply.text, false, user, reply.tools, note || undefined, reply.usage);
     /*
      * G1：计划阶段收尾。若这一轮又问了澄清问题（`stage === "awaiting"`），
      * 计划还没成形 —— 保持在 planning，等用户答完的 do 阶段再收。

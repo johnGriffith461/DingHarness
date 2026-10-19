@@ -36,6 +36,7 @@ import {
 } from "./runtime/registry";
 import { envSecret, type SecretPort } from "./ports/secret";
 import { runTurn, type TurnEvent } from "./runtime/loop";
+import { createTurnEvidence } from "./runtime/finishContract";
 
 /**
  * 内核的公开 API（Phase 1 D1 冻结）。
@@ -473,6 +474,11 @@ export function createEngine(ports: EnginePorts): Engine {
        * "发生了什么"只有一个记录点。不然就会出现"界面上看到三个专家在跑、
        * 日志里一个都没有"这种事后查不出原因的分叉。
        */
+      /*
+       * P0-02：**每轮一份**执行账本。主循环往里记真实命令与退出码，
+       * finish 执行体读它做证据校验 —— 两个消费者看的是同一份事实。
+       */
+      const turnEvidence = createTurnEvidence();
       const ctx: ExecutorContext = {
         mode: request.mode,
         provider: request.provider,
@@ -482,6 +488,7 @@ export function createEngine(ports: EnginePorts): Engine {
         ...(request.sessionId ? { sessionId: request.sessionId } : {}),
         /* C3：拦住一次调用时的默认"待谁批" = 这段会话归谁（缺省仍是本机单用户） */
         ...(request.ownerActor ? { owner: request.ownerActor.id } : {}),
+        turnEvidence,
         onDelegation: (event) => {
           const turnEvent: TurnEvent = { type: "delegation", ...event };
           events.push(turnEvent);
@@ -505,6 +512,7 @@ export function createEngine(ports: EnginePorts): Engine {
           ...(request.onRawError ? { onRawError: request.onRawError } : {}),
           ...(request.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: request.stallTimeoutMs }),
           ...(request.nextSteer ? { nextSteer: request.nextSteer } : {}),
+          turnEvidence,
           ...(request.useTools
             ? {
                 tools: buildToolSet({

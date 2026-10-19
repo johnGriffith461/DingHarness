@@ -1,4 +1,5 @@
 import type { ConfirmMode } from "../../shared/ipc";
+import type { TurnEvidence } from "../runtime/finishContract";
 
 /**
  * 工具执行的端口（Phase 1 D1 冻结）。
@@ -70,6 +71,13 @@ export type ExecutorContext = {
     steps?: number;
     error?: string;
   }) => void;
+  /**
+   * P0-02：这一轮的**真实执行账本**（主循环维护、finish 执行体读取）。
+   *
+   * 省略 = 这个宿主没接账本（例如子智能体的工具集）：finish 执行体只做结构校验，
+   * 证据校验由主循环用自己那份账本兜底。
+   */
+  turnEvidence?: TurnEvidence;
 };
 
 /**

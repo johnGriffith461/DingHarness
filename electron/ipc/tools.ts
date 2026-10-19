@@ -44,6 +44,8 @@ import { statFingerprint } from "../../engine/runtime/tools/editTool";
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
+import { describeFinish, validateFinish, type TurnEvidence } from "../../engine/runtime/finishContract";
+import { FINISH_TOOL } from "../../shared/agentTools";
 import { nothingFoundNote } from "../../engine/runtime/tools/searchTool";
 import { createSerialQueue, createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { callMcpTool, mcpToolBindings } from "./mcpStore";
@@ -604,6 +606,17 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     return { ok: true, line: describeTodoResult(got.todos), todos: got.todos, count: got.todos.length };
   },
 
+  /*
+   * P0-02：完成契约。校验用的是**本轮真实执行账本**（主循环维护的那一份）。
+   * 失败时返回 ok:false —— registry 会把它抛成 tool-error，模型当场看到原因，
+   * 循环继续（不是"模型说完成就完成"）。
+   */
+  [FINISH_TOOL]: async (input, env) => {
+    const got = validateFinish(input, env.turnEvidence);
+    if (!got.ok) return { ok: false, line: got.error, error: got.error };
+    return { ok: true, line: describeFinish(got.finish), finished: got.finish };
+  },
+
   [RUN_COMMAND_TOOL]: async (input, env) => {
     const { command, workdir, timeout } = input as { command: string; workdir?: string; timeout?: number };
     /*
@@ -829,6 +842,8 @@ export type ToolEnv = {
   signal?: AbortSignal;
   /** D3：这段会话的 id（读后写校验按会话隔离）。 */
   sessionId?: string;
+  /** P0-02：这一轮的真实执行账本（finish 证据校验用）。 */
+  turnEvidence?: TurnEvidence;
 };
 
 /**
@@ -847,6 +862,7 @@ export const hostExecutor: ToolExecutor = {
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       ...(ctx.onDelegation ? { onDelegation: ctx.onDelegation } : {}),
       ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+      ...(ctx.turnEvidence ? { turnEvidence: ctx.turnEvidence } : {}),
     }),
 };
 

@@ -117,6 +117,11 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
    */
   todo_write: { kind: "read" },
   /*
+   * P0-02：finish 不改用户资源，只声明"这一轮的结果"——不该被审批打断。
+   * 它的约束来自完成契约（证据校验），不是权限闸门。
+   */
+  finish: { kind: "read" },
+  /*
    * Computer Use（V6-2n）：四个都按**写** —— 它们能移动真实鼠标、敲真实键盘、
    * 截取屏幕。按需确认档下必须问；「全部允许」下也仍受 `computer-use.json`
    * 的授权开关约束（默认关）。
