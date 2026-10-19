@@ -48,6 +48,8 @@ export type ProjectBridge = {
   readFile: (path: string) => Promise<
     { ok: true; text: string; path: string } | { ok: false; error: string }
   >;
+  /** 写 `AGENTS.md`（`/init` 用；内容由调用方预览确认后给）。 */
+  writeAgents: (content: string) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
 };
 
 /** 与 `shared/mentions.ts` 的 `MentionCandidate` 同形（shared 不 import engine）。 */

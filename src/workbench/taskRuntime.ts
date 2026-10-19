@@ -307,6 +307,36 @@ async function summaryFor(taskId: string, older: ChatMessage[]): Promise<string>
   }
 }
 
+/**
+ * 手动压缩（B2 的 `/compact`）。
+ *
+ * 复用与自动压缩**同一条**路径（`buildHistory` + `summaryFor`），不另写一套摘要。
+ * 没有更早的对话、或摘要失败时如实返回错误，不假装压过了。
+ */
+export async function compactNow(
+  port: StorePort,
+  taskId: string,
+): Promise<{ ok: boolean; older?: number; error?: string }> {
+  const task = current(port.getState().tasks, taskId);
+  if (!task) return { ok: false, error: "没有找到这段任务" };
+  const built = buildHistory(task.steps, { factor: calibrationFactor, keepTokens: compactKeepTokens() });
+  const older = built.older;
+  if (!older.length) return { ok: false, error: "没有更早的对话可压缩" };
+  const summary = await summaryFor(taskId, older);
+  if (!summary) return { ok: false, error: "压缩失败（上游没有返回摘要）" };
+  port.setState((s) => {
+    const t = current(s.tasks, taskId);
+    return {
+      tasks: upsertTask(s.tasks, {
+        ...t,
+        contextCompactions: (t.contextCompactions ?? 0) + 1,
+        contextIndex: undefined,
+      }),
+    };
+  });
+  return { ok: true, older: older.length };
+}
+
 /** 还没回答的澄清问题（ICM 的"未完成"信号之一）。 */
 function unansweredQuestions(task: WorkTask): string[] {
   return task.questions.slice(task.questionIndex).map((q) => q.text);

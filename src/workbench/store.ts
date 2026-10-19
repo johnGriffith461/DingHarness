@@ -27,6 +27,7 @@ import {
 import {
   abortRunning,
   answerTurn,
+  compactNow,
   isSessionRunning,
   nextStep,
   persistArtifacts,
@@ -202,6 +203,11 @@ export type WorkbenchState = {
   createTask: (message: string, options?: { background?: boolean; material?: string }) => Promise<string | undefined>;
   /** 在已有对话里继续说一句（§147）—— 与 `createTask` 的区别是带上历史。 */
   sendInTask: (taskId: string, message: string, options?: { material?: string }) => Promise<void>;
+  /**
+   * 手动压缩当前对话（B2 的 `/compact`）。
+   * 与自动压缩同一条路径；没有更早内容/摘要失败时返回可读错误。
+   */
+  compactActive: () => Promise<{ ok: boolean; older?: number; error?: string }>;
   /**
    * 回到某一步并从那里重来（§151）。
    *
@@ -640,6 +646,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
    * ① 把**之前那几轮**作为 `messages` 历史一起发（`buildHistory`）；
    * ② 提示词换成"接着上文回应"（不把任务复述一遍，避免模型以为用户又提了一次）。
    */
+  compactActive: async () => {
+    const id = get().activeTaskId;
+    if (!id) return { ok: false, error: "没有打开的对话" };
+    if (isSessionRunning(id)) return { ok: false, error: "这一轮还在跑：等它说完再压缩" };
+    return await compactNow(port, id);
+  },
+
   sendInTask: async (taskId, message, options) => {
     const text = String(message ?? "").trim();
     if (!text) return;

@@ -1,4 +1,5 @@
 import { ipcMain } from "electron";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -36,6 +37,7 @@ export const PROJECT_CHANNEL = {
   mentions: "project:mentions",
   listDir: "project:listDir",
   readFile: "project:readFile",
+  writeAgents: "project:writeAgents",
 } as const;
 
 /** 全局规则目录：用户把跨项目约定放这里（`~/.ding/AGENTS.md`）。 */
@@ -70,5 +72,16 @@ export function registerProjectIpc(ipc: Pick<typeof ipcMain, "handle">): void {
   ipc.handle(PROJECT_CHANNEL.readFile, async (_event, file: unknown) => {
     if (typeof file !== "string" || !file.trim()) return { ok: false as const, error: "没有给路径" };
     return await readWorkspaceFile(projectRoot(), file);
+  });
+  ipc.handle(PROJECT_CHANNEL.writeAgents, async (_event, content: unknown) => {
+    if (typeof content !== "string" || !content.trim()) return { ok: false as const, error: "内容为空" };
+    const file = path.join(projectRoot(), "AGENTS.md");
+    try {
+      await fs.writeFile(file, content, "utf8");
+      clearProjectContextCache();
+      return { ok: true as const, path: file };
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 }

@@ -19,6 +19,15 @@ import {
   type Mention,
 } from "@shared/mentions";
 import type { MentionCandidateWire } from "@shared/projectWire";
+import {
+  detectSlashTrigger,
+  filterSlashCommands,
+  renderSlashHelp,
+  resolveSlashCommand,
+  type SlashCommand,
+  type SlashTrigger,
+} from "@shared/slashCommands";
+import { SlashMenu } from "./SlashMenu";
 import { COMPOSER_PLACEHOLDER } from "./copy";
 import { resolveImportedMaterials } from "./materialImport";
 import { UPLOAD_REASON_LABEL } from "@shared/upload";
@@ -265,6 +274,18 @@ export function Composer({
       showMaterialNote(P46_BUSY_NOTE);
       return;
     }
+    /*
+     * B2：整行是斜杠命令时**不发给模型**。未知命令提示 `/help` 并保留原文。
+     */
+    if (detectSlashTrigger(value, value.length)) {
+      const command = resolveSlashCommand(value);
+      if (!command) {
+        showMaterialNote("没有这个命令，试试 /help");
+        return;
+      }
+      await runSlash(command);
+      return;
+    }
     setText("");
     /*
      * 资料在**发送这一刻**读成文本（不是附着那一刻）：
@@ -323,6 +344,9 @@ export function Composer({
    * 这条最容易写错，单独测了。
    */
   const [atTrigger, setAtTrigger] = useState<AtTrigger | null>(null);
+  /** B2：`/` 命令触发（与 `@` 互斥：一行开头是 `/` 就不再当引用词）。 */
+  const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   /**
    * B1：`@` 菜单的五类候选。文件/目录由主进程读盘（只在工作区内），
@@ -378,13 +402,22 @@ export function Composer({
 
   /** 光标一动就重算（输入、点、方向键都算）。 */
   const syncTrigger = (el: HTMLTextAreaElement): void => {
-    const next = detectAtTrigger(el.value, el.selectionStart ?? el.value.length);
+    const caret = el.selectionStart ?? el.value.length;
+    const slash = detectSlashTrigger(el.value, caret);
+    setSlashTrigger(slash);
+    if (slash) {
+      setAtTrigger(null);
+      setSlashIndex(0);
+      return;
+    }
+    const next = detectAtTrigger(el.value, caret);
     setAtTrigger(next);
     /* 第一次唤起选单时把云盘清单读进来（点选即附着，不用再点一次"添加资料"）。 */
     if (next && driveFiles.length === 0) void loadDriveFiles();
   };
 
   const matched = atTrigger ? filterPhrases(atTrigger.query) : [];
+  const slashMatches = slashTrigger ? filterSlashCommands(slashTrigger.query) : [];
   const mentionFiles = fileHits.filter((f) => f.kind === "file");
   const mentionDirs = fileHits.filter((f) => f.kind === "dir");
 
@@ -417,6 +450,120 @@ export function Composer({
     });
   };
 
+  /**
+   * `/init`：按探测到的环境生成 `AGENTS.md` 草稿，**先预览再写**。
+   * 取消预览就一个字节都不写。
+   */
+  const initAgents = async (): Promise<void> => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    const got = await Promise.resolve(shell?.project?.context?.()).catch(() => null);
+    if (!got) {
+      showMaterialNote("读不到项目上下文，先检查工作区是否已授权");
+      return;
+    }
+    const listed = await Promise.resolve(shell?.project?.listDir?.(".")).catch(() => null);
+    const dirs = (Array.isArray(listed) ? listed : [])
+      .filter((e) => e.kind === "dir")
+      .map((e) => e.label)
+      .slice(0, 20);
+    const draft = [
+      "# AGENTS.md",
+      "",
+      "## 项目概览",
+      "",
+      `- 工作目录：${got.context.cwd}`,
+      `- 包管理器：${got.context.packageManager ?? "未探测到"}`,
+      `- 测试命令：${got.context.testCommand ?? "未探测到"}`,
+      "",
+      "## 目录结构（顶层）",
+      "",
+      ...(dirs.length ? dirs.map((d) => `- ${d}/`) : ["- （未读到顶层目录）"]),
+      "",
+      "## 工作约定",
+      "",
+      "- 改代码前先读相关文件与测试；改完跑测试或构建，拿 pass/fail 说话。",
+      "- 不要注释掉失败测试、不要吞异常、不要伪造命令输出。",
+      "",
+    ].join("\n");
+    const ok = typeof window !== "undefined" && typeof window.confirm === "function"
+      ? window.confirm(`将写入 AGENTS.md，预览如下：\n\n${draft}`)
+      : false;
+    if (!ok) {
+      showMaterialNote("已取消，没有写文件");
+      return;
+    }
+    const wrote = await Promise.resolve(shell?.project?.writeAgents?.(draft)).catch(() => null);
+    showMaterialNote(wrote?.ok ? `已写入 ${wrote.path}` : `写入失败：${wrote?.error ?? "未知原因"}`);
+  };
+
+  /** `/export`：把当前对话导出成 Markdown（纯前端，不新增后端）。 */
+  const exportSession = (): void => {
+    const task = useWorkbenchStore.getState().tasks.find((t) => t.id === useWorkbenchStore.getState().activeTaskId);
+    if (!task) {
+      showMaterialNote("没有打开的对话");
+      return;
+    }
+    const md = [
+      `# ${task.title}`,
+      "",
+      ...task.steps.map((s) => `## ${s.role === "user" ? "用户" : "助手"}\n\n${s.text}\n`),
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([md], { type: "text/markdown;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${task.title || "session"}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showMaterialNote(`已导出 ${a.download}`);
+  };
+
+  /** 执行一条斜杠命令（映射已有动作，不新增后端）。 */
+  const runSlash = async (command: SlashCommand): Promise<void> => {
+    setSlashTrigger(null);
+    const store = useWorkbenchStore.getState();
+    switch (command.name) {
+      case "new":
+        setText("");
+        store.setView("home");
+        showMaterialNote("已开启新会话");
+        return;
+      case "model":
+        setText("");
+        setOpenPop("model");
+        return;
+      case "plan":
+        /* C1 会把这里升级成真正的只读工具体；现在先把"只要计划、别改文件"落到下一轮提示里。 */
+        setText("先只做调研并给出计划：目标、范围、步骤、验证方式、风险。不要改任何文件，等我确认后再执行。\n\n");
+        return;
+      case "compact": {
+        const result = await store.compactActive();
+        showMaterialNote(result.ok ? `已压缩 ${result.older} 条更早的对话` : (result.error ?? "压缩失败"));
+        return;
+      }
+      case "context":
+      case "cost":
+        setText("");
+        store.setView("usage");
+        return;
+      case "init":
+        setText("");
+        await initAgents();
+        return;
+      case "export":
+        setText("");
+        exportSession();
+        return;
+      case "permissions":
+        setText("");
+        store.setView("permissions");
+        return;
+      case "help":
+        setText("");
+        showMaterialNote(renderSlashHelp().replace(/\n+/g, "  "));
+        return;
+    }
+  };
+
   /** 选中一条常用语（动作分组）：插入它的话术正文，不产生引用附件。 */
   const pickPhrase = (phrase: Phrase): void => {
     if (!atTrigger) return;
@@ -435,6 +582,9 @@ export function Composer({
 
   return (
     <div className="wb-composer" data-testid="wb-composer">
+      {slashTrigger ? (
+        <SlashMenu commands={slashMatches} selected={slashIndex} onPick={(command) => void runSlash(command)} />
+      ) : null}
       {atTrigger ? (
         /*
          * ⚠️ `onMouseDown` 里 `preventDefault()` 是必须的：
@@ -635,9 +785,34 @@ export function Composer({
           syncTrigger(e.currentTarget);
         }}
         onClick={(e) => syncTrigger(e.currentTarget)}
-        onBlur={() => setAtTrigger(null)}
+        onBlur={() => {
+          setAtTrigger(null);
+          setSlashTrigger(null);
+        }}
         onKeyDown={(e) => {
-          // 选单开着时：Esc 收起、Enter 选第一条（别让它顺手把消息发出去）
+          // 命令菜单：Esc 收起、↑↓ 选择、Enter 执行（别顺手发出去）
+          if (slashTrigger) {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setSlashTrigger(null);
+              return;
+            }
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              const delta = e.key === "ArrowDown" ? 1 : -1;
+              const total = slashMatches.length;
+              if (total) setSlashIndex((cur) => (cur + delta + total) % total);
+              return;
+            }
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              const pick = slashMatches[slashIndex] ?? slashMatches[0];
+              if (pick) void runSlash(pick);
+              else showMaterialNote("没有这个命令，试试 /help");
+              return;
+            }
+          }
+          // 引用菜单：Esc 收起、Enter 选第一条
           if (atTrigger) {
             if (e.key === "Escape") {
               e.preventDefault();

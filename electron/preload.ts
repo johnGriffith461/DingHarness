@@ -345,6 +345,8 @@ const api = {
       ipcRenderer.invoke(PROJECT_CHANNEL.listDir, dir) as ReturnType<ShellBridge["project"]["listDir"]>,
     readFile: (path: string) =>
       ipcRenderer.invoke(PROJECT_CHANNEL.readFile, path) as ReturnType<ShellBridge["project"]["readFile"]>,
+    writeAgents: (content: string) =>
+      ipcRenderer.invoke(PROJECT_CHANNEL.writeAgents, content) as ReturnType<ShellBridge["project"]["writeAgents"]>,
   },
   review: {
     list: (sessionId: string) => ipcRenderer.invoke(REVIEW_CHANNEL.list, sessionId) as ReturnType<
