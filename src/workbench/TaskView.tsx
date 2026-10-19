@@ -35,6 +35,9 @@ export function TaskView() {
   const resolveTool = useWorkbenchStore((s) => s.resolveTool);
   /** 在这段对话里接着说一句（§147）。 */
   const sendInTask = useWorkbenchStore((s) => s.sendInTask);
+  /** P0-04：待验证计划的执行与跳过。 */
+  const runVerification = useWorkbenchStore((s) => s.runVerification);
+  const skipVerification = useWorkbenchStore((s) => s.skipVerification);
   /** 被中断的那一轮该继续什么（见 `task.ts` 的 `continueTargetOf`）。 */
   const interruptedTarget = task ? continueTargetOf(task) : null;
   /** 标题改名：点标题进入，回车/失焦提交。 */
@@ -189,6 +192,35 @@ export function TaskView() {
             </div>
           ),
         )}
+
+        {/*
+          P0-04：改完文件但当前档位不自动跑命令时，这里出一张卡片。
+          「运行验证」走的仍是 run_command 的同一条执行通道（不是第二条路径）。
+        */}
+        {task.stage === "verify_ready" && task.verifyPlan ? (
+          <div className="wb-verify-card" data-testid="wb-verify-card">
+            <div className="wb-verify-text">
+              <strong>已改文件，等待验证</strong>
+              <code data-testid="wb-verify-command">{task.verifyPlan.command}</code>
+              <span>
+                {task.verifyPlan.reason}
+                {task.verifyPlan.rounds > 0 ? `（已运行 ${task.verifyPlan.rounds}/2 次）` : ""}
+              </span>
+            </div>
+            <div className="wb-verify-actions">
+              <button
+                className="wb-tool-btn is-primary"
+                data-testid="wb-verify-run"
+                onClick={() => void runVerification(task.id)}
+              >
+                运行验证
+              </button>
+              <button className="wb-tool-btn" data-testid="wb-verify-skip" onClick={() => skipVerification(task.id)}>
+                跳过
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {progress ? (
           /*

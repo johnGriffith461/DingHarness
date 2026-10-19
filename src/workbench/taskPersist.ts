@@ -109,6 +109,26 @@ export function normalizeTask(raw: unknown): WorkTask | null {
       ? t.planState
       : undefined;
   const planText = typeof t.planText === "string" ? truncatePlan(t.planText).text : undefined;
+  /*
+   * P0-04：待验证计划也按不可信数据处理 —— 命令必须是字符串、轮次是 0–2 的整数。
+   * 旧盘没有该字段就不带（不是"补一个空的"）。
+   */
+  const rawVerify = t.verifyPlan as Record<string, unknown> | undefined;
+  const verifyPlan =
+    rawVerify && typeof rawVerify.command === "string" && rawVerify.command.trim()
+      ? {
+          command: rawVerify.command.trim().slice(0, 500),
+          cwd: typeof rawVerify.cwd === "string" ? rawVerify.cwd : "",
+          reason: typeof rawVerify.reason === "string" ? rawVerify.reason.slice(0, 200) : "",
+          rounds:
+            typeof rawVerify.rounds === "number" && rawVerify.rounds >= 0 && rawVerify.rounds <= 2
+              ? Math.floor(rawVerify.rounds)
+              : 0,
+          ...(typeof rawVerify.lastExitCode === "number" || rawVerify.lastExitCode === null
+            ? { lastExitCode: rawVerify.lastExitCode as number | null }
+            : {}),
+        }
+      : undefined;
   return {
     id: t.id,
     /* A3：只认这两个值；旧盘没有该字段就不带（`taskMode` 会按 office 读） */
@@ -147,6 +167,7 @@ export function normalizeTask(raw: unknown): WorkTask | null {
     ...(planText ? { planText } : {}),
     ...(typeof t.planPath === "string" && t.planPath ? { planPath: t.planPath } : {}),
     ...(typeof t.planWriteError === "string" && t.planWriteError ? { planWriteError: t.planWriteError } : {}),
+    ...(verifyPlan ? { verifyPlan } : {}),
   };
 }
 

@@ -637,6 +637,7 @@ export function normalizeToolTraces(raw: unknown): ToolTrace[] {
         ok: x.ok !== false,
         line: typeof x.line === "string" ? x.line : toolLabel(name),
         ...(x.pending === true ? { pending: true } : {}),
+        ...(x.rejected === true ? { rejected: true } : {}),
       };
       if ("input" in x) trace.input = x.input;
       if ("output" in x) trace.output = x.output;
@@ -1008,6 +1009,8 @@ export type ToolTrace = {
   line: string;
   /** 被审批闸门拦下、在等用户确认（此时**没有执行**）。 */
   pending?: boolean;
+  /** P0-05：这一条是**用户拒绝**的（没执行），续跑消息要据此写"不要重复这个调用"。 */
+  rejected?: true;
   /** 模型给的参数（原样保留：放行时要原样执行，也方便排错看出它传了什么）。 */
   input?: unknown;
   output?: unknown;

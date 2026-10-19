@@ -596,3 +596,26 @@
 .wb-todo-item.is-in_progress .wb-todo-text { color: var(--fg); }
 .wb-todo-item.is-completed .wb-todo-text { color: var(--fg-3); text-decoration: line-through; }
 .wb-todo-item.is-blocked .wb-todo-mark { color: var(--danger); }
+
+/* ============================================================
+ * P0-04：待验证卡片（改完文件、当前档位不自动跑命令时出现）
+ * ============================================================ */
+.wb-verify-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.wb-verify-text { display: grid; gap: 3px; color: var(--fg-2); font-size: 12.5px; }
+.wb-verify-text strong { color: var(--fg); font-size: 13px; font-weight: 600; }
+.wb-verify-text code {
+  font-family: var(--dh-font-mono);
+  font-size: 11.5px;
+  color: var(--accent);
+}
+.wb-verify-actions { display: inline-flex; gap: 6px; flex: none; }

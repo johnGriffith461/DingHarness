@@ -18,6 +18,14 @@ import { taskSessionId } from "@engine/core/events";
 import { fabricatedCost } from "@shared/cost";
 import { branchFrom, editedBranchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";
+import { verificationMessage } from "./verifyContinue";
+import {
+  buildApprovalResultMessage,
+  hasPendingApproval,
+  markResumeFired,
+  takeResumeBudget,
+  type ApprovalOutcome,
+} from "./approvalResume";
 import { readPlanMode, savePlanMode } from "./planMode";
 import { isPlanTransitionAllowed, planApprovalError, truncatePlan } from "@engine/runtime/planMode";
 import { pickSuggestions, HOME_MODE_KEY, parseHomeMode, suggestionsFor, type HomeMode } from "./copy";
@@ -35,7 +43,9 @@ import {
   persistArtifacts,
   refineTitle,
   runStream,
-  runVerificationNote,
+  verifyAfterTurn,
+  continueWithUserMessage,
+  appendStepNote,
   finishNoteOf,
 } from "./taskRuntime";
 import {
@@ -323,6 +333,20 @@ export type WorkbenchState = {
     /** `remember=true` = 同时记一条「总是允许」规则（U03 的按钮走这条）。 */
     opts?: { remember?: boolean },
   ) => Promise<void>;
+  /**
+   * P0-04：执行任务上那份待验证计划（用户在卡片上点「运行验证」）。
+   *
+   * 点击本身就是批准 —— 走的仍是 `run_command` 那条通道，不另开一条执行路径。
+   */
+  runVerification: (taskId: string) => Promise<void>;
+  /** P0-04：用户跳过验证（任务收尾，并如实留一句"用户跳过验证"）。 */
+  skipVerification: (taskId: string) => void;
+  /**
+   * P0-05：一次批准/拒绝这一 step 里**所有**待批项，并且只续跑一次。
+   *
+   * 顺序执行（同一个 turn 里的多个写动作不能并发落盘），全部完成后才回注。
+   */
+  resolveAllTools: (taskId: string, stepId: string, approve: boolean) => Promise<number>;
   /** 生成整段对话的 Markdown（分享/导出用）。 */
   transcript: () => string;
   /**
@@ -379,6 +403,44 @@ function readHomeMode(): HomeMode {
     return parseHomeMode(localStorage.getItem(HOME_MODE_KEY));
   } catch {
     return "office";
+  }
+}
+
+/**
+ * P0-05：这一 step 的待批项全部处置完之后，把结果送回模型并继续。
+ *
+ * 三道闸：
+ * 1. **还有 pending** → 不续（用户在批量处理中间）；
+ * 2. 同一批**只续一次**（并发点第二下不会再发一轮）；
+ * 3. 同一 step **最多续 3 次**（模型反复要审批时停下来说明）。
+ */
+async function maybeResumeAfterApproval(port: StorePort, taskId: string, stepId: string): Promise<void> {
+  const snapshot = useWorkbenchStore.getState();
+  const step = snapshot.tasks.find((t) => t.id === taskId)?.steps.find((x) => x.id === stepId);
+  if (!step) return;
+  const traces = step.tools ?? [];
+  if (hasPendingApproval(traces)) return;
+  if (!markResumeFired(taskId, stepId)) return;
+  if (!takeResumeBudget(taskId, stepId)) {
+    appendStepNote(port, taskId, "同一待批步骤已续跑 3 次，已停止（请检查是否卡在同一个动作上）");
+    return;
+  }
+  const outcomes: ApprovalOutcome[] = traces
+    .filter((t) => t.pending !== true)
+    .map((t) => ({
+      ...(t.toolCallId ? { toolCallId: t.toolCallId } : {}),
+      name: t.name,
+      ...(t.rejected ? { rejected: true as const } : {}),
+      ok: t.ok,
+      ...(t.output !== undefined ? { output: t.output } : {}),
+      ...(t.error ? { error: t.error } : {}),
+    }));
+  if (!outcomes.length) return;
+  try {
+    /* ⚠️ 续跑失败（例如没有桥/网络）不能把审批结果本身判成失败：只留一句话 */
+    await continueWithUserMessage(port, taskId, buildApprovalResultMessage(outcomes));
+  } catch (error) {
+    appendStepNote(port, taskId, `续跑失败：${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -577,6 +639,67 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     })),
 
   /*
+   * P0-04：一键验证。
+   *
+   * 上限两次（与自动档同一条口径）：到上限仍失败就停在"验证未通过"，
+   * 不让模型无限打补丁。执行走 `runToolOnce` 的 `run_command` 通道，
+   * 与模型自己跑命令是同一套权限与同一条执行体。
+   */
+  runVerification: async (taskId) => {
+    const task = get().tasks.find((t) => t.id === taskId);
+    if (!task || task.stage !== "verify_ready" || !task.verifyPlan) return;
+    if (isSessionRunning(taskId)) return;
+    const plan = task.verifyPlan;
+    if (plan.rounds >= 2) {
+      set((s) => ({
+        tasks: s.tasks.map((t) =>
+          t.id === taskId
+            ? { ...t, stage: "done", finishedAt: Date.now(), activity: "验证未通过", verifyPlan: undefined }
+            : t,
+        ),
+      }));
+      return;
+    }
+    const result = await runToolOnce({
+      name: "run_command",
+      input: { command: plan.command, ...(plan.cwd ? { workdir: plan.cwd } : {}) },
+      toolPolicy: readConfirmMode(),
+    });
+    const out = result.output as { exitCode?: unknown; output?: unknown; timedOut?: unknown } | undefined;
+    const exitCode = typeof out?.exitCode === "number" ? out.exitCode : result.ok ? 0 : 1;
+    const rounds = plan.rounds + 1;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId && t.verifyPlan
+          ? { ...t, verifyPlan: { ...t.verifyPlan, rounds, lastExitCode: exitCode } }
+          : t,
+      ),
+    }));
+    const message = verificationMessage({
+      command: plan.command,
+      exitCode,
+      stdout: typeof out?.output === "string" ? out.output : "",
+      stderr: result.ok ? "" : (result.error ?? ""),
+      timedOut: out?.timedOut === true,
+    });
+    /* 失败到上限：模型可以继续改，但不再出第三张验证卡（上限在 runVerification 开头判） */
+    await continueWithUserMessage(port, taskId, message, { skipVerify: false });
+  },
+
+  skipVerification: (taskId) => {
+    const task = get().tasks.find((t) => t.id === taskId);
+    if (!task || task.stage !== "verify_ready") return;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, stage: "done", finishedAt: Date.now(), activity: "已完成（用户跳过验证）", verifyPlan: undefined }
+          : t,
+      ),
+    }));
+    appendStepNote(port, taskId, "用户跳过验证（本轮没有跑测试）");
+  },
+
+  /*
    * 放行 / 拒绝（§144）。
    *
    * ⚠️ 结果**落回那一条 trace 上**（改它的文案与状态），不是"在旁边飘一个提示" ——
@@ -641,7 +764,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           toolCallId,
           ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
         });
-        patchTrace({ pending: false, ok: true, line: rejected.line || rejectedLine(before.name) });
+        patchTrace({ pending: false, ok: true, rejected: true, line: rejected.line || rejectedLine(before.name) });
+        /* P0-05：让模型知道"用户拒绝了"，并继续（不是停在"已拒绝"） */
+        await maybeResumeAfterApproval(port, taskId, stepId);
         return;
       }
 
@@ -676,9 +801,22 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         /* 设置那一侧的事交给 `taskRuntime`（store 不许自己读写 appSettings，见那条守卫） */
         await rememberAlwaysAllow(before.name, before.input);
       }
+      /* P0-05：批准/失败都把结果送回模型，让它继续原任务 */
+      await maybeResumeAfterApproval(port, taskId, stepId);
     } finally {
       resolvingTools.delete(guardKey);
     }
+  },
+
+  resolveAllTools: async (taskId, stepId, approve) => {
+    const step = get()
+      .tasks.find((t) => t.id === taskId)
+      ?.steps.find((x) => x.id === stepId);
+    const pending = (step?.tools ?? []).filter((t) => t.pending).map((t) => t.toolCallId);
+    for (const toolCallId of pending) {
+      await get().resolveTool(taskId, stepId, toolCallId, approve);
+    }
+    return pending.length;
   },
 
   transcript: () => {
@@ -1014,10 +1152,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       mode === "coding",
     );
 
-    const verifyNote = reply.wroteFiles && mode === "coding" ? await runVerificationNote(task.id) : "";
     const finishNote = finishNoteOf(reply.tools, reply.wroteFiles);
-    const note = [finishNote, verifyNote].filter(Boolean).join("；");
-    nextStep(port, task.id, reply.text, false, user, reply.tools, note || undefined, reply.usage);
+    nextStep(port, task.id, reply.text, false, user, reply.tools, finishNote || undefined, reply.usage);
+    /* P0-04：决策与执行都收在 taskRuntime 里（自动跑 / 出卡片 / 写"未验证"） */
+    if (reply.wroteFiles) await verifyAfterTurn(port, task.id, mode);
     /*
      * G1：计划阶段收尾。若这一轮又问了澄清问题（`stage === "awaiting"`），
      * 计划还没成形 —— 保持在 planning，等用户答完的 do 阶段再收。

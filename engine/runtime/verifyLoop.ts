@@ -75,3 +75,49 @@ export function shouldSuggestReset(recentFailures: readonly boolean[]): boolean 
   if (recentFailures.length < 2) return false;
   return recentFailures.slice(-2).every((ok) => ok === false);
 }
+
+/** 验证档位（与 `ConfirmMode` 同一词表；这里只引用不复制定义）。 */
+export type VerifyConfirmMode = "全部允许" | "按需确认" | "每步确认";
+
+export type VerifyDecision = {
+  action: "auto" | "offer" | "skip";
+  command?: string;
+  cwd?: string;
+  /** 给人看的一句话（skip 时就是"未验证"的原因）。 */
+  reason: string;
+};
+
+/**
+ * P0-04：这一轮结束后**怎么验证**。
+ *
+ * - `全部允许` → `auto`（保持既有行为）；
+ * - `按需确认` / `每步确认` → `offer`（界面出一张"运行验证"卡片，用户点一下才跑）；
+ * - 没改文件 / 办公模式 / 没有测试命令 → `skip`，并且最终答复必须写明"未验证"。
+ *
+ * 这是"该不该验证、跑什么"的**唯一实现**（宿主两处都调它）。
+ */
+export function planVerification(input: {
+  confirmMode: VerifyConfirmMode;
+  wroteFiles: boolean;
+  taskMode: "coding" | "office";
+  project: ProjectContextForVerify;
+}): VerifyDecision {
+  const plan = shouldVerify({ wroteFiles: input.wroteFiles, mode: input.taskMode, project: input.project });
+  if (!plan) {
+    return {
+      action: "skip",
+      reason: input.wroteFiles
+        ? "未验证（没有探测到可运行的测试命令）"
+        : "未验证（这一轮没有改文件）",
+    };
+  }
+  if (input.confirmMode === "全部允许") {
+    return { action: "auto", command: plan.command, cwd: plan.cwd, reason: "全部允许档下自动验证" };
+  }
+  return {
+    action: "offer",
+    command: plan.command,
+    cwd: plan.cwd,
+    reason: `当前档位「${input.confirmMode}」：等你点「运行验证」`,
+  };
+}

@@ -10,8 +10,24 @@
  *   3. **澄清提问卡的推进** —— 同一张卡逐题走，最多 3 题，走完才继续干活
  */
 
-/** 任务在生命周期里的位置。 */
-export type TaskStage = "running" | "awaiting" | "done" | "failed";
+/**
+ * 任务在生命周期里的位置。
+ *
+ * P0-04 加了 `verify_ready`：模型改完文件、但当前档位不自动跑命令时，
+ * 任务停在这里等用户点「运行验证」—— 它不是"完成"，也不是"失败"。
+ */
+export type TaskStage = "running" | "awaiting" | "verify_ready" | "done" | "failed";
+
+/** 待运行的验证（P0-04）：由 `planVerification` 产出，存在任务上供一键执行。 */
+export type VerifyPlanOnTask = {
+  command: string;
+  cwd: string;
+  reason: string;
+  /** 已经执行过几次（上限 2；到上限仍失败就停在"验证未通过"）。 */
+  rounds: number;
+  /** 最近一次的退出码（拿不到就是 null）。 */
+  lastExitCode?: number | null;
+};
 
 import type { ContextIndex } from "@engine/core/contextManager";
 import type { PlanState } from "@engine/runtime/planMode";
@@ -218,6 +234,13 @@ export type WorkTask = {
   planWriteError?: string;
 
   /**
+   * P0-04：等待用户点「运行验证」的那份计划。
+   *
+   * 只在 `stage === "verify_ready"` 时有意义；旧盘没有该字段 = 没有待验证的事。
+   */
+  verifyPlan?: VerifyPlanOnTask;
+
+  /**
    * 这段会话已经做过几次**摘要式压缩**（V6-1c ICM 的计数）。
    *
    * 用途只有一个：`decideContext` 判断"再压就是摘要的摘要"。
@@ -371,7 +394,8 @@ export function progressLabel(task: WorkTask, now: number): string {
   if (task.finishedAt !== null) {
     return `共用时 ${formatDuration(task.finishedAt - task.startedAt)}`;
   }
-  if (task.stage === "awaiting") return ""; // 在等用户回答，不计时（原版此时不显示进度行）
+  /* 在等用户回答 / 等着点「运行验证」，都不计时（那段时间是用户在思考/操作） */
+  if (task.stage === "awaiting" || task.stage === "verify_ready") return "";
   return `已处理 ${formatDuration(now - task.startedAt)}`;
 }
 

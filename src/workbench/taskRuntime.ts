@@ -51,8 +51,9 @@ import {
   renderPlanPrompt,
   truncatePlan,
 } from "@engine/runtime/planMode";
-import { shouldSuggestReset, shouldVerify, summarizeVerify } from "@engine/runtime/verifyLoop";
+import { planVerification, type VerifyDecision } from "@engine/runtime/verifyLoop";
 import { describeFinish, finishedFromTraces } from "@engine/runtime/finishContract";
+import { verificationMessage } from "./verifyContinue";
 
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
@@ -462,6 +463,13 @@ export async function answerTurn(
   material?: string,
   /** B3：这一轮的多模态片段（图片 / PDF）。 */
   parts?: ChatPart[],
+  /**
+   * P0-04：这一轮结束后**不要**再自动验证。
+   *
+   * 验证续跑本身会再调 `answerTurn` —— 不加这个开关就会验证套验证，
+   * 一个失败测试能把预算烧穿。只有验证续跑那条路传 `true`。
+   */
+  opts?: { skipVerify?: boolean },
 ): Promise<void> {
   /*
    * ⚠️ 与下面 `compactKeepTokens()` 用**同一把尺**（审计 P156：两把尺会让"该压就压"失真）。
@@ -596,9 +604,8 @@ export async function answerTurn(
    * 合成一行而不是两条：界面上那一行本来就只放一句。
    */
   const contextNote = contextIndex ? indexedNote(olderCount) : olderCount ? compactedNote(olderCount) : "";
-  const verifyNote = reply.wroteFiles ? await runVerificationNote(taskId) : "";
   const finishNote = finishNoteOf(reply.tools, reply.wroteFiles);
-  const notes = [extraNote, reply.note, contextNote, finishNote, verifyNote].filter(Boolean);
+  const notes = [extraNote, reply.note, contextNote, finishNote].filter(Boolean);
   nextStep(
     port,
     taskId,
@@ -609,6 +616,152 @@ export async function answerTurn(
     notes.length ? notes.join("；") : undefined,
     reply.usage,
   );
+
+  /*
+   * P0-04：验证闭环。
+   *
+   * - `auto`：直接跑，把结果作为一条 user 消息回注，让模型继续（失败最多两轮）；
+   * - `offer`：任务停在 `verify_ready`，界面上出现「运行验证 / 跳过」卡片；
+   * - `skip`：在最终答复上如实写"未验证"，不许把"没验证"说成"已完成"。
+   *
+   * ⚠️ 验证续跑自己调 `answerTurn(..., { skipVerify: true })` —— 否则会验证套验证。
+   */
+  if (!opts?.skipVerify && reply.wroteFiles) {
+    const decision = await verifyDecisionNow(taskMode(task));
+    await applyVerifyDecision(port, taskId, decision);
+  }
+}
+
+/**
+ * 当前这一轮该怎么验证（唯一实现是 `planVerification`；这里只负责取项目事实）。
+ */
+async function verifyDecisionNow(mode: "coding" | "office"): Promise<VerifyDecision> {
+  try {
+    if (localStorage.getItem("ding.verify") === "off") {
+      return { action: "skip", reason: "未验证（验证闭环已被用户关闭）" };
+    }
+  } catch {
+    /* 无 localStorage → 按开启处理 */
+  }
+  const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+  const got = await Promise.resolve(bridge?.project?.context?.()).catch(() => null);
+  const project = got?.context;
+  return planVerification({
+    confirmMode: readConfirmMode(),
+    wroteFiles: true,
+    taskMode: mode,
+    project: { cwd: project?.cwd ?? "", ...(project?.testCommand ? { testCommand: project.testCommand } : {}) },
+  });
+}
+
+/** 跑一次验证命令（走 `run_command` 的同一套权限通道；用户点击或自动档都从这里过）。 */
+async function runVerifyCommand(command: string, cwd: string): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+  const result = await runToolOnce({
+    name: "run_command",
+    input: { command, ...(cwd ? { workdir: cwd } : {}) },
+    toolPolicy: "全部允许",
+  });
+  const out = result.output as { exitCode?: unknown; output?: unknown; timedOut?: unknown } | undefined;
+  return {
+    exitCode: typeof out?.exitCode === "number" ? out.exitCode : result.ok ? 0 : 1,
+    stdout: typeof out?.output === "string" ? out.output : "",
+    stderr: result.ok ? "" : (result.error ?? ""),
+    timedOut: out?.timedOut === true,
+  };
+}
+
+/**
+ * 把验证结果作为一条用户消息追加进对话，并让模型继续。
+ *
+ * 这条消息**同时**是给用户看的（界面上是一条"【验证结果】…"），
+ * 也是给模型看的 —— 两处读同一份文本，不会出现"界面说失败、模型以为成功"。
+ */
+export async function continueWithUserMessage(
+  port: StorePort,
+  taskId: string,
+  text: string,
+  opts?: { skipVerify?: boolean },
+): Promise<void> {
+  if (isSessionRunning(taskId)) return;
+  const state = port.getState();
+  const task = state.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+  const history = task.steps;
+  const now = Date.now();
+  const withNew: WorkTask = {
+    ...task,
+    steps: [...task.steps, { id: makeStepId(task.steps.length + 1), role: "user", text, at: now }],
+    stage: "running",
+    finishedAt: null,
+    activity: "正在思考",
+    verifyPlan: undefined,
+  };
+  port.setState((s) => ({ tasks: upsertTask(s.tasks, withNew) }));
+  await answerTurn(port, taskId, history, text, undefined, task.material, undefined, opts);
+}
+
+/** 在最后一条助手步骤上追加一句说明（不新增步骤）。 */
+export function appendStepNote(port: StorePort, taskId: string, note: string): void {
+  port.setState((s) => ({
+    tasks: s.tasks.map((t) => {
+      if (t.id !== taskId) return t;
+      const steps = [...t.steps];
+      for (let i = steps.length - 1; i >= 0; i -= 1) {
+        if (steps[i].role !== "assistant") continue;
+        const prev = steps[i].note ? `${steps[i].note}；` : "";
+        steps[i] = { ...steps[i], note: `${prev}${note}`.slice(0, 400) };
+        break;
+      }
+      return { ...t, steps };
+    }),
+  }));
+}
+
+/** 按决策执行（auto / offer / skip）。 */
+async function applyVerifyDecision(port: StorePort, taskId: string, decision: VerifyDecision): Promise<void> {
+  if (decision.action === "skip") {
+    appendStepNote(port, taskId, decision.reason);
+    return;
+  }
+  if (!decision.command) {
+    appendStepNote(port, taskId, "未验证（没有可执行的验证命令）");
+    return;
+  }
+  if (decision.action === "offer") {
+    port.setState((s) => {
+      const t = current(s.tasks, taskId);
+      /* 同一条命令的多次「出卡片」共用一份轮次预算（上限 2），不因为重开卡片清零 */
+      const prev = t.verifyPlan;
+      const rounds = prev && prev.command === decision.command ? prev.rounds : 0;
+      return {
+        tasks: upsertTask(s.tasks, {
+          ...t,
+          stage: "verify_ready",
+          activity: "等你确认是否运行验证",
+          verifyPlan: { command: decision.command!, cwd: decision.cwd ?? "", reason: decision.reason, rounds },
+        }),
+      };
+    });
+    return;
+  }
+  /* auto：跑 → 回注 → 模型继续；最多两轮，第三轮不再自动跑 */
+  for (let round = 1; round <= 2; round += 1) {
+    const result = await runVerifyCommand(decision.command, decision.cwd ?? "");
+    const ok = result.exitCode === 0;
+    await continueWithUserMessage(
+      port,
+      taskId,
+      verificationMessage({ command: decision.command, ...result }),
+      { skipVerify: true },
+    );
+    if (ok) return;
+    if (round === 2) {
+      appendStepNote(port, taskId, "验证未通过（已自动重试两次，停止继续打补丁）");
+      port.setState((s) => ({
+        tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, stage: "done", activity: "验证未通过" } : t)),
+      }));
+    }
+  }
 }
 
 /**
@@ -938,46 +1091,14 @@ ${map.text}
 }
 
 /**
- * D1：一轮写完之后跑验证（用探测到的 `testCommand`）。
+ * P0-04：一轮写完之后按决策验证（`auto` / `offer` / `skip`）。
  *
- * ⚠️ **只在「全部允许」档自动跑**：其它档位下自动执行命令等于绕过审批。
- * 那种情况给一句话让用户自己决定，不假装验证过。
- * `ding.verify=off` 可整体关掉。
+ * 这是 `createTask`（首轮）与 `answerTurn`（追问）共用的入口 ——
+ * 决策只有 `planVerification` 一份，执行只有 `applyVerifyDecision` 一份。
  */
-const verifyFailures = new Map<string, boolean[]>();
-
-export async function runVerificationNote(taskId: string): Promise<string> {
-  try {
-    if (localStorage.getItem("ding.verify") === "off") return "";
-  } catch {
-    /* 无 localStorage → 按开启处理 */
-  }
-  const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
-  const got = await Promise.resolve(bridge?.project?.context?.()).catch(() => null);
-  const project = got?.context;
-  if (!project?.testCommand) return "";
-  const plan = shouldVerify({
-    wroteFiles: true,
-    mode: "coding",
-    project: { testCommand: project.testCommand, cwd: project.cwd },
-  });
-  if (!plan) return "";
-  if (readConfirmMode() !== "全部允许") {
-    return `已改文件，未自动验证（当前档位「${readConfirmMode()}」）：建议运行 ${plan.command}`;
-  }
-  const result = await runToolOnce({
-    name: "run_command",
-    input: { command: plan.command, workdir: plan.cwd },
-    toolPolicy: "全部允许",
-  });
-  const out = result.output as { exitCode?: number | null; output?: string } | undefined;
-  const exitCode = typeof out?.exitCode === "number" ? out.exitCode : result.ok ? 0 : 1;
-  const summary = summarizeVerify({ exitCode, stdout: out?.output ?? "", stderr: result.ok ? "" : (result.error ?? "") });
-  const recent = [...(verifyFailures.get(taskId) ?? []), summary.ok].slice(-3);
-  verifyFailures.set(taskId, recent);
-  if (summary.ok) return `验证通过（${plan.command}）`;
-  const head = summary.excerpt.split(/\r?\n/).slice(0, 2).join(" ").slice(0, 160);
-  return `验证失败（${plan.command}，退出码 ${exitCode}）：${head}${shouldSuggestReset(recent) ? " —— 连续两次失败，建议重置对话" : ""}`;
+export async function verifyAfterTurn(port: StorePort, taskId: string, mode: "coding" | "office"): Promise<void> {
+  const decision = await verifyDecisionNow(mode);
+  await applyVerifyDecision(port, taskId, decision);
 }
 
 /**

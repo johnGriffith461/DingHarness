@@ -78,7 +78,7 @@ export function canPin(
 
 /** 一段对话"还在进行中"吗（`中进行中的任务` 那一块收的就是这些）。 */
 export function isOngoing(task: Pick<WorkTask, "stage">): boolean {
-  return task.stage === "running" || task.stage === "awaiting";
+  return task.stage === "running" || task.stage === "awaiting" || task.stage === "verify_ready";
 }
 
 /**

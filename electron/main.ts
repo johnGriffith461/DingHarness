@@ -108,10 +108,19 @@ function bootMark(stage: string): void {
 }
 function bootLog(message: string): void {
   const line = `[${new Date().toISOString()} pid=${process.pid}] ${message}\n`;
-  const targets = [
-    path.join(app.getPath("userData"), "boot.log"),
-    path.join(os.tmpdir(), "ding-harness-boot.log"),
-  ];
+  /*
+   * ⚠️ `app.getPath("userData")` 本身会抛（appData 不可解析的环境里实测抛
+   * "Failed to get 'userData' path"）。它原来在 try 外面 —— 于是"写启动日志"
+   * 这件事反而让主进程**在启动阶段直接崩掉**，界面上是一个 JS 错误框。
+   * 打点必须是零风险动作：拿不到就往临时目录写，绝不让它中断启动。
+   */
+  const targets: string[] = [];
+  try {
+    targets.push(path.join(app.getPath("userData"), "boot.log"));
+  } catch {
+    /* userData 还没就绪：只写临时目录 */
+  }
+  targets.push(path.join(os.tmpdir(), "ding-harness-boot.log"));
   for (const file of targets) {
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
