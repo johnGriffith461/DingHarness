@@ -221,6 +221,32 @@ describe("ding space（本机入口）", () => {
     expect(errors.join("")).toContain("不认识的子命令");
   });
 
+  /*
+   * 2026-10-20：`ding space roles` 无参时原来会拿**空成员名**去改名，
+   * 报一句「名册里没有 」（末尾一个空格）—— 既没说用法，也没告诉你能改谁。
+   * 判据：无参 → 退出码 2 + 用法 + 列出可选成员；只缺角色也按用法处理。
+   */
+  it("⭐ roles 无参：给用法与可选成员，不是「名册里没有 」", async () => {
+    const dir = tmpDir();
+    const code = codeOf((await run(dir, ["invite", "--roles", "viewer"])).out);
+    await run(dir, ["join", code], { as: "carol" });
+
+    const bare = await run(dir, ["roles"]);
+    expect(bare.code, "缺参数应当是用法错误（2），不是业务失败（1）").toBe(2);
+    expect(bare.out).toContain("用法");
+    expect(bare.out).toContain("ding space roles");
+    expect(bare.out, "要把可选成员列出来").toContain("carol");
+
+    /* 只给成员、不给角色：同样按用法处理 */
+    const noRoles = await run(dir, ["roles", "carol"]);
+    expect(noRoles.code).toBe(2);
+
+    /* 正常用法仍然生效（不能被守卫误伤） */
+    const ok = await run(dir, ["roles", "carol", "admin"]);
+    expect(ok.code).toBe(0);
+    expect(rolesIn(spaceNow(dir).roster, "carol")).toEqual(["admin"]);
+  });
+
   it("--json：给脚本用（结构化，不是人话）", async () => {
     const dir = tmpDir();
     const got = await run(dir, ["invite"], { json: "1" });

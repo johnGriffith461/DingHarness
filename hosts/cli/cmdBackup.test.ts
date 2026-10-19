@@ -7,6 +7,7 @@ import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { openSqlite } from "../../engine/adapters/sqliteDriver";
 import { closeKv } from "../../engine/adapters/kvStore";
 import type { LogInput } from "../../engine/core/events";
+import { credentialsPath } from "../../engine/runtime/credentials";
 import { parseArgv } from "./args";
 import { readConfig } from "./config";
 import {
@@ -14,6 +15,7 @@ import {
   cmdRestore,
   desktopDataDir,
   emptyBackupWarning,
+  credentialLocationNote,
   resolveBackupDataDir,
   resolveJsonOutputPath,
   restoreIntent,
@@ -193,6 +195,27 @@ describe("P129 —— 一次只动一个数据根，空备份不再静默", () =
       if (prev === undefined) delete process.env.DSH_CANVAS_DATA_DIR;
       else process.env.DSH_CANVAS_DATA_DIR = prev;
     }
+  });
+});
+
+/*
+ * 2026-10-20：备份输出也要说清"凭据不跟数据根走"。
+ *
+ * 用户拿 `--data-dir` 备份一份隔离数据时，很容易顺带以为 key 也在里面
+ * （或者反过来以为备份带走了 key）。两件事都必须写明白：
+ * 备份**不含**凭据，而凭据**固定读** `~/.ding/.credentials.yaml`（不看这个根）。
+ */
+describe("凭据位置说明（备份输出）", () => {
+  it("数据根不是凭据所在目录时，明确写出「凭据不跟数据根走」", () => {
+    const note = credentialLocationNote(path.resolve("C:/cli-root"));
+    expect(note).toContain("凭据");
+    expect(note).toContain("不跟");
+    expect(note).toMatch(/credentials.yaml|DING_CREDENTIALS_FILE/);
+  });
+
+  it("数据根正好是凭据所在目录时，说「同一处」（不制造噪音）", () => {
+    const same = path.dirname(credentialsPath());
+    expect(credentialLocationNote(same)).toContain("同一处");
   });
 });
 

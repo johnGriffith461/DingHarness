@@ -438,6 +438,30 @@ export function runDoctor(input: DoctorInput): Check[] {
     });
   }
 
+  /*
+   * ⑪ 凭据位置（2026-10-20）：**凭据不跟数据目录走**。
+   *
+   * `credentials.ts` 固定读 `os.homedir()/.ding/.credentials.yaml`（旧的 `~/.dsh/` 兜底），
+   * 不看 `DH_DATA_DIR` / `--data-dir`。设计如此（凭据不属于某一份数据），
+   * 但用户拿隔离数据目录跑测试时**会以为也隔离了 key** —— 必须主动说清。
+   * 只有真的不一致时才单列一格；一致时说"同一处"，不制造噪音。
+   */
+  {
+    const credFile = credentialsPath();
+    const sameDir = path.resolve(path.dirname(credFile)) === path.resolve(input.dataDir);
+    out.push({
+      name: "凭据位置",
+      ok: true,
+      detail: sameDir
+        ? `凭据与数据目录是同一处：${credFile}`
+        : `凭据**不跟**数据目录走：数据目录是 ${input.dataDir}，凭据固定读 ${credFile}` +
+          `（想换位置用 DING_CREDENTIALS_FILE 指过去）`,
+      next: sameDir
+        ? "无需处理"
+        : "若想完全隔离（例如评测/测试用一份专用 key）：设 DING_CREDENTIALS_FILE 指向另一份凭据文件",
+    });
+  }
+
   /* 宿主不适用的检查按名字剔掉（见 `DoctorInput.skip`）——**剔掉不是改成绿** */
   const skip = new Set(input.skip ?? []);
   return skip.size ? out.filter((c) => !skip.has(c.name)) : out;

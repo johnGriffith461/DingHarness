@@ -12,6 +12,7 @@ import {
   validateBackup,
   type BackupPayload,
 } from "../../engine/core/backup";
+import { credentialsPath } from "../../engine/runtime/credentials";
 import { flag, type Parsed } from "./args";
 import { configPaths, normalizeConfig, readConfig, writeConfig } from "./config";
 
@@ -165,6 +166,24 @@ export function desktopDataDir(): string | null {
   if (!appData) return null;
   const guess = path.join(appData, "Ding Harness");
   return fs.existsSync(guess) ? guess : null;
+}
+
+/**
+ * 2026-10-20：**凭据不跟数据根走**的那一行（备份输出用）。
+ *
+ * 用户拿 `--data-dir` 备份一份隔离数据时，很容易顺带以为 key 也在里面
+ * （或反过来以为备份带走了 key）。两个事实要一起写清：
+ * 备份**不含**凭据；凭据**固定读** `~/.ding/.credentials.yaml`（可用 `DING_CREDENTIALS_FILE` 改）。
+ *
+ * @param dataRoot 这一次备份的数据根
+ * @returns 一句话（数据根恰好就是凭据目录时，说"同一处"）
+ */
+export function credentialLocationNote(dataRoot: string): string {
+  const file = credentialsPath();
+  const same = path.resolve(path.dirname(file)) === path.resolve(dataRoot);
+  return same
+    ? `  凭据与数据根是同一处：${file}（备份仍然**不含**它）`
+    : `  凭据不跟数据根走：备份不含密钥，凭据固定读 ${file}（要换位置用 DING_CREDENTIALS_FILE）`;
 }
 
 /**
@@ -360,7 +379,8 @@ export async function cmdBackup(p: Parsed, dataDir: string): Promise<number> {
       `  内容：会话 ${payload.summary.sessions} 段 / 记录 ${payload.summary.records} 条 / 配置型 store ${payload.summary.stores} 项`,
       "",
       "  它是一个**能打开的 JSON 文件** —— 你可以自己看里面有什么，也可以拷到别的机器上恢复。",
-      "  不含密钥（凭据在 ~/.ding/.credentials.yaml，不跟着备份走）。",
+      /* 2026-10-20：数据根与凭据位置分开说清（--data-dir 备份时最容易误解） */
+      credentialLocationNote(root),
       "",
     ].join("\n"),
   );

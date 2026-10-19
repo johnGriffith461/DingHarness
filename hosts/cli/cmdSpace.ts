@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { normalizeRoles, type MemberRole } from "../../engine/core/members";
+import { MEMBER_ROLES, normalizeRoles, type MemberRole } from "../../engine/core/members";
 import {
   memberView,
   newPairingCode,
@@ -165,8 +165,31 @@ export async function cmdSpace(parsed: Parsed, dataDir: string): Promise<number>
 
   /* ── 改角色 / 移除 ────────────────────────────────────── */
   if (sub === "roles") {
-    const memberId = parsed.args[1] ?? "";
-    const roles = normalizeRoles((parsed.args[2] ?? "").split(","));
+    /*
+     * 2026-10-20：**先验参数**，再动账本。
+     *
+     * 原来缺参时 `memberId` 是空串，直接进 `setMemberRoles` —— 报的是
+     * 「名册里没有 」（末尾一个空格），退出码 1（看起来像业务失败）。
+     * 用户既不知道用法、也不知道能改谁。用法错误就该是 2，并列出可选成员。
+     */
+    const memberId = (parsed.args[1] ?? "").trim();
+    const rolesArg = (parsed.args[2] ?? "").trim();
+    if (!memberId || !rolesArg) {
+      const candidates = memberView(space.roster)
+        .filter((m) => m.id !== space.roster.owner)
+        .map((m) => `${m.id}（${m.roles.join("/") || "无"}）`);
+      emit(
+        { ok: false, error: "usage", candidates },
+        [
+          "用法：ding space roles <成员 id> <角色>[,<角色>…]",
+          `角色可选：${MEMBER_ROLES.join(" / ")}`,
+          candidates.length ? `可以改的成员：${candidates.join("、")}` : "名册里还没有别的成员（先 ding space invite）",
+          "例：ding space roles alice viewer,specialist",
+        ],
+      );
+      return 2;
+    }
+    const roles = normalizeRoles(rolesArg.split(","));
     const got = setMemberRoles(space.roster, { by: space.roster.owner, memberId, roles });
     if (!got.ok) {
       process.stderr.write(`改角色被拒（${got.reason}）：${got.message}\n`);

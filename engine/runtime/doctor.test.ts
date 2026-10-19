@@ -144,3 +144,28 @@ describe("doctor --fix（V6-2h）：只做两类安全修复", () => {
     expect(typeof search!.detail).toBe("string");
   });
 });
+
+/*
+ * 2026-10-20：**凭据不跟数据目录走**这件事必须被主动说出来。
+ *
+ * 事实：`engine/runtime/credentials.ts` 固定读 `os.homedir()/.ding/.credentials.yaml`
+ * （旧的 `~/.dsh/` 兜底），不看 `DH_DATA_DIR` / `--data-dir`。
+ * 于是"用一个隔离数据目录跑评测/测试"的人，仍然会读到**真实的 key** ——
+ * 这既不危险（只读）也不意外（设计如此），但**不写清楚就是坑**：
+ * 用户以为隔离了，其实没有。
+ *
+ * 判据：只要数据目录不是凭据所在目录，doctor 就要有一格明确说出来。
+ */
+describe("凭据位置（不跟数据目录走）", () => {
+  it("⭐ 数据目录与凭据目录不同时，doctor 主动说明「凭据不从数据目录读」", () => {
+    const dataDir = freshDir();
+    const checks = cleanEnv(() =>
+      runDoctor({ dataDir, configPath: "x", rawConfig: {}, runtime: "test", bunBinary: false }),
+    );
+    const check = checks.find((c) => c.name.includes("凭据位置"));
+    expect(check, "缺一格「凭据位置」—— 用户看不出自己的数据目录没有隔离凭据").toBeTruthy();
+    expect(check!.detail).toContain("不跟");
+    expect(check!.detail).toContain("数据目录");
+    expect(check!.next).toMatch(/DING_CREDENTIALS_FILE|凭据/);
+  });
+});
