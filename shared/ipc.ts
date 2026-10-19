@@ -187,14 +187,18 @@ export type ChatRequest = {
 };
 
 /**
- * 输入区那个 chip 的三个档位（**词表属于契约，判定属于内核**）。
+ * 输入区那个 chip 的档位（**词表属于契约，判定属于内核**）。
  *
  * 定义放在契约里而不是 `engine/core/policy.ts`：它出现在 `ChatRequest.toolPolicy`
  * 这类跨进程字段上，而"有哪些档位"是界面与内核都要认的**同一个词表** ——
  * 让契约去引内核会把依赖方向倒过来（shared ← engine ← hosts/src）。
  * 至于"这个档位下某个工具该 run / ask / hide"，那是策略，在 `engine/core/policy.ts`。
+ *
+ * B-01 新增「接受编辑」（对标 Claude Code `acceptEdits` / ZCode `edit`）：
+ * 工作区内的**文件编辑**自动放行；命令、连接器与保护路径仍然问。
+ * ⚠️ **默认档不变**（仍是「按需确认」）—— 见下面 `normalizeConfirmMode`。
  */
-export const CONFIRM_MODES = ["全部允许", "按需确认", "每步确认"] as const;
+export const CONFIRM_MODES = ["全部允许", "接受编辑", "按需确认", "每步确认"] as const;
 export type ConfirmMode = (typeof CONFIRM_MODES)[number];
 
 /** 档位是否合法（从磁盘/本地存储读回来的东西一律不可信）。 */

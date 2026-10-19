@@ -116,8 +116,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  * 2026-10-19（P0-02/06）73 → 75：`engine/runtime/finishContract.ts`（完成契约：
  * 证据校验与 turn 账本）与 `engine/runtime/stall.ts`（重复调用检测）由主循环直接
  * import —— 它们是"一轮怎么收尾"的规则，必须和循环住一起；两者都不碰 IO。
+ *
+ * 2026-10-20（B-01）75 → 76：`engine/core/editGuard.ts`（接受编辑档的路径守卫）。
+ * 它由 `policy.ts` import —— "哪些路径永远要问"必须在判定层里，不能放给宿主；
+ * 纯字符串实现，**没有 `node:path`**（这条闭包禁 `node:*`，见那个文件头）。
  */
-const CLOSURE_BUDGET = 75;
+const CLOSURE_BUDGET = 76;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

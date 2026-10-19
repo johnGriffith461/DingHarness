@@ -1,4 +1,5 @@
 import type { ConfirmMode } from "../../shared/ipc";
+import { modeRank } from "../core/policy";
 
 /**
  * **agent 定义数据化**（Phase 7.1）。
@@ -47,15 +48,9 @@ export type AgentSpec = {
 };
 
 /**
- * 闸门档位按"严格程度"排序（越小越松）。
- *
- * ⚠️ 这是**唯一**一处把三个中文档位排出顺序的地方 —— 别在别处再写一遍比较。
+ * 闸门档位按"严格程度"排序 —— 见 `engine/core/policy.ts` 的 `modeRank`
+ * （唯一一份；这里不再保留第三份拷贝）。
  */
-const STRICTNESS: Record<ConfirmMode, number> = {
-  全部允许: 0,
-  按需确认: 1,
-  每步确认: 2,
-};
 
 /**
  * 取这个 agent **实际生效**的档位。
@@ -74,7 +69,7 @@ const STRICTNESS: Record<ConfirmMode, number> = {
  */
 export function resolveAgentMode(caller: ConfirmMode, agent?: ConfirmMode): ConfirmMode {
   if (!agent) return caller;
-  return STRICTNESS[agent] >= STRICTNESS[caller] ? agent : caller;
+  return modeRank(agent) >= modeRank(caller) ? agent : caller;
 }
 
 /**

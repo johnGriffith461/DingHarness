@@ -509,6 +509,8 @@ export function createEngine(ports: EnginePorts): Engine {
         ...(request.ownerActor ? { owner: request.ownerActor.id } : {}),
         /* A-03：CLI 注入的就地审批；桌面不注入 → 仍是 pending 载荷 */
         ...(ports.approve ? { approve: ports.approve } : {}),
+        /* B-01：「接受编辑」判断工作区要用（CLI 与桌面都从自己那份授权目录来） */
+        ...(request.workdirs?.length ? { workdirs: [...request.workdirs] } : {}),
         turnEvidence,
         onDelegation: (event) => {
           const turnEvent: TurnEvent = { type: "delegation", ...event };

@@ -93,6 +93,12 @@ export type ExecutorContext = {
     why?: string;
     commandRisk?: unknown;
   }) => Promise<"allow" | "allow-always" | "deny">;
+  /**
+   * B-01：这一轮授权的目录（「接受编辑」档判断"是不是工作区内"要用）。
+   *
+   * 省略 = 不知道工作区 → 接受编辑档下所有编辑仍然确认（安全的一侧）。
+   */
+  workdirs?: readonly string[];
 };
 
 /**

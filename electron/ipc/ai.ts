@@ -14,6 +14,7 @@ import { readModelConfig } from "../../engine/adapters/modelConfigStore";
 import { resolveFor } from "../../engine/runtime/modelConfigResolver";
 import { pluginHooks } from "../../engine/runtime/pluginHost";
 import { currentPermissionRules } from "./appSettings";
+import { ownedDirs } from "./driveStore";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
 
 /**
@@ -429,6 +430,11 @@ export function registerAiIpc(): void {
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           mode: request.toolPolicy ?? "按需确认",
+          /*
+           * B-01：「接受编辑」档要知道工作区是哪几个目录。
+           * 与工具执行体用的是同一份 `ownedDirs()` —— 判定与执行不能各拿一套目录。
+           */
+          ...(ownedDirs().length ? { workdirs: ownedDirs() } : {}),
           ...(request.plan ? { planMode: true } : {}),
           ...(request.useTools ? { useTools: true } : {}),
           /*

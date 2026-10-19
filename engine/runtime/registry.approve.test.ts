@@ -65,3 +65,67 @@ describe("A-03 · 引擎的批准端口", () => {
     expect(got.notice).toContain("还没有执行");
   });
 });
+
+/**
+ * B-01：「接受编辑」档的**接线**（判定在 policy，这里只验它真的被用上）。
+ */
+describe("B-01 · 接受编辑档接在执行点上", () => {
+  const WORK = ["C:/work/repo"];
+
+  function acceptTools(opts: { approve?: ExecutorContext["approve"]; onRun?: () => void } = {}) {
+    return buildToolSet({
+      registry: createToolRegistry(),
+      mode: "接受编辑",
+      executor: {
+        run: async () => {
+          opts.onRun?.();
+          return { ok: true, output: { line: "已写入" } };
+        },
+      },
+      ctx: { mode: "接受编辑", provider: "strata", workdirs: WORK, ...(opts.approve ? { approve: opts.approve } : {}) },
+    });
+  }
+
+  it("工作区内写文件：不问、直接执行", async () => {
+    let ran = 0;
+    const tools = acceptTools({ onRun: () => (ran += 1) });
+    const got = (await (tools.write_file!.execute as (v: unknown) => Promise<unknown>)({ path: "src/a.ts", content: "x" })) as {
+      line?: string;
+    };
+    expect(ran).toBe(1);
+    expect(got.line).toBe("已写入");
+  });
+
+  it("保护路径（.env）：仍然问 —— 有 approver 时它会收到询问", async () => {
+    let ran = 0;
+    const asked: string[] = [];
+    const tools = acceptTools({
+      onRun: () => (ran += 1),
+      approve: async (req) => {
+        asked.push(req.name);
+        return "deny";
+      },
+    });
+    await expect(
+      (tools.write_file!.execute as (v: unknown) => Promise<unknown>)({ path: ".env", content: "x" }),
+    ).rejects.toThrow(/用户拒绝/);
+    expect(asked).toEqual(["write_file"]);
+    expect(ran).toBe(0);
+  });
+
+  it("跑命令：仍然问（不因为没有 approver 就变成放行）", async () => {
+    const tools = acceptTools();
+    const got = (await (tools.run_command!.execute as (v: unknown) => Promise<unknown>)({ command: "npm test" })) as {
+      pending?: boolean;
+    };
+    expect(got.pending).toBe(true);
+  });
+
+  it("工作区外路径：仍然问", async () => {
+    const tools = acceptTools();
+    const got = (await (tools.write_file!.execute as (v: unknown) => Promise<unknown>)({ path: "C:/Windows/x.dll", content: "x" })) as {
+      pending?: boolean;
+    };
+    expect(got.pending).toBe(true);
+  });
+});

@@ -9,7 +9,7 @@ import {
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
 import { pendingApprovalNotice, toolFailedNotice } from "../core/notices";
-import { decideForMember, injectableTools, policyOf } from "../core/policy";
+import { decideForMember, applyEditMode, injectableTools, policyOf } from "../core/policy";
 import { decideCall, type PermissionRule } from "../core/permissionRules";
 import { DEFAULT_APPROVER } from "../core/gates";
 import type { MemberRole } from "../core/members";
@@ -364,7 +364,21 @@ export function buildToolSet(input: {
           input: value,
           ...(input.rules?.length ? { rules: input.rules } : {}),
         });
-        if (call.verdict === "ask") {
+        /*
+         * B-01：「接受编辑」在**调用级**放宽（要看路径）。只在没有显式规则命中时
+         * 叠加 —— 用户写下来的 allow/ask/deny 永远压过档位的默认语义。
+         */
+        const verdict =
+          call.rule === "none"
+            ? applyEditMode({
+                mode,
+                base: call.verdict,
+                action: entry.name,
+                input: value,
+                ...(ctx.workdirs?.length ? { workdirs: ctx.workdirs } : {}),
+              })
+            : call.verdict;
+        if (verdict === "ask") {
           /*
            * A-03：宿主给了 `approve` 就**当场问**（CLI 的就地审批）。
            *

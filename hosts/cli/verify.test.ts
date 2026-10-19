@@ -49,6 +49,12 @@ describe("A-04 · CLI 验证决策", () => {
     expect(got.action).toBe("offer");
   });
 
+  it("接受编辑 → offer（编辑不问，但验证命令仍要用户点）", () => {
+    const cwd = freshCwd(true);
+    const got = cliVerifyPlan({ outcome: { wroteFiles: true }, mode: "接受编辑", cwd });
+    expect(got.action).toBe("offer");
+  });
+
   it("三个档位 × 没有测试命令 → 全部 skip，并说清原因", () => {
     const cwd = freshCwd(false);
     for (const mode of ["全部允许", "按需确认", "每步确认"] as const) {

@@ -25,6 +25,7 @@
 
 import { AGENT_TOOLS, SPAWN_AGENTS_TOOL, SPAWN_AGENT_TOOL } from "../../shared/agentTools";
 import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
+import { modeRank } from "./policy";
 
 /** 一份 Recipe。 */
 export type Recipe = {
@@ -152,8 +153,7 @@ export function validateRecipe(raw: unknown): { ok: true; recipe: Recipe } | { o
  */
 export function resolveRecipeMode(current: ConfirmMode, recipe: Recipe): ConfirmMode {
   if (!recipe.mode) return current;
-  const rank: Record<ConfirmMode, number> = { 全部允许: 0, 按需确认: 1, 每步确认: 2 };
-  return rank[recipe.mode] >= rank[current] ? recipe.mode : current;
+  return modeRank(recipe.mode) >= modeRank(current) ? recipe.mode : current;
 }
 
 /** 内置 + 导入的合起来（导入的与内置同名时**导入的覆盖**——用户自己改过的那份说了算）。 */

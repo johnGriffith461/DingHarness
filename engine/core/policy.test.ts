@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CONFIRM_MODES, normalizeConfirmMode } from "@shared/ipc";
 import {
   TOOL_POLICY,
+  applyEditMode,
   decide,
   decideForMember,
   injectableTools,
@@ -19,8 +20,8 @@ import { AGENT_TOOLS } from "@shared/agentTools";
  * 都必须有明确判定，而且"关掉"与"要确认"必须是**两种不同的结果**。
  */
 describe("策略表", () => {
-  it("三个档位的文案与实机一致（改一个都会让 chip 与本体对不上）", () => {
-    expect(CONFIRM_MODES).toEqual(["全部允许", "按需确认", "每步确认"]);
+  it("四个档位的文案与实机一致（改一个都会让 chip 与本体对不上）", () => {
+    expect(CONFIRM_MODES).toEqual(["全部允许", "接受编辑", "按需确认", "每步确认"]);
   });
 
   it("⭐ 未声明的工具默认按**只读**放行（Cline 口径：需要复核的必须显式声明）", () => {
@@ -235,5 +236,79 @@ describe("两轴矩阵：工具档位 × 成员角色（ADR-007）", () => {
     expect(asked.verdict).toBe("ask");
     expect(denied.verdict).toBe("deny");
     if (denied.verdict === "deny") expect(denied.notice).not.toContain("交给用户确认");
+  });
+});
+
+/**
+ * B-01：「接受编辑」档。
+ *
+ * 规则一句话：**工作区内的文件编辑自动放行；命令、MCP/插件、保护路径仍然问**。
+ *
+ * 这里钉 4 档 × 4 类 = 16 格。重点不是"接受编辑更快"，而是
+ * **它没有把命令与 `.env` 一起放开** —— 那才是这一档能不能给的判据。
+ */
+describe("B-01 · 接受编辑档：4 档 × 4 类", () => {
+  const WORK = ["C:/work/repo"];
+  const cases = [
+    { name: "读文件", action: "read_file", input: { path: "src/a.ts" } },
+    { name: "写文件（工作区内）", action: "write_file", input: { path: "src/a.ts", content: "x" } },
+    { name: "跑命令", action: "run_command", input: { command: "rm -rf /" } },
+    { name: "MCP 工具", action: "mcp__server__drop", input: {} },
+  ] as const;
+
+  it("全部允许：四类都 run（老行为）", () => {
+    for (const c of cases) {
+      expect(
+        applyEditMode({ mode: "全部允许", base: decide("全部允许", c.action), action: c.action, input: c.input, workdirs: WORK }),
+        c.name,
+      ).toBe("run");
+    }
+  });
+
+  it("按需确认：读 run，写/命令/MCP ask（老行为）", () => {
+    expect(applyEditMode({ mode: "按需确认", base: decide("按需确认", "read_file"), action: "read_file", input: { path: "src/a.ts" }, workdirs: WORK })).toBe("run");
+    for (const c of cases.slice(1)) {
+      expect(
+        applyEditMode({ mode: "按需确认", base: decide("按需确认", c.action), action: c.action, input: c.input, workdirs: WORK }),
+        c.name,
+      ).toBe("ask");
+    }
+  });
+
+  it("每步确认：四类都 ask（老行为）", () => {
+    for (const c of cases) {
+      expect(
+        applyEditMode({ mode: "每步确认", base: decide("每步确认", c.action), action: c.action, input: c.input, workdirs: WORK }),
+        c.name,
+      ).toBe("ask");
+    }
+  });
+
+  it("⭐ 接受编辑：工作区内写文件 run；命令与 MCP 仍然 ask", () => {
+    expect(
+      applyEditMode({ mode: "接受编辑", base: "ask", action: "write_file", input: { path: "src/a.ts", content: "x" }, workdirs: WORK }),
+    ).toBe("run");
+    expect(applyEditMode({ mode: "接受编辑", base: "ask", action: "run_command", input: { command: "npm test" }, workdirs: WORK })).toBe("ask");
+    expect(applyEditMode({ mode: "接受编辑", base: "ask", action: "mcp__server__drop", input: {}, workdirs: WORK })).toBe("ask");
+  });
+
+  it("⭐ 接受编辑：保护路径仍然 ask（.env / .git / node_modules / 工作区外 / ..）", () => {
+    for (const p of [".env", ".git/config", "node_modules/x/index.js", "C:/Windows/System32/x.dll", "../outside.txt"]) {
+      expect(
+        applyEditMode({ mode: "接受编辑", base: "ask", action: "write_file", input: { path: p, content: "x" }, workdirs: WORK }),
+        p,
+      ).toBe("ask");
+    }
+  });
+
+  it("接受编辑：apply_patch 的每个文件都要在工作区内且不保护，才放行", () => {
+    const ok = ["*** Begin Patch", "*** Update File: src/a.ts", "@@", "*** End Patch"].join("\n");
+    const bad = ["*** Begin Patch", "*** Update File: .env", "@@", "*** End Patch"].join("\n");
+    expect(applyEditMode({ mode: "接受编辑", base: "ask", action: "apply_patch", input: { patchText: ok }, workdirs: WORK })).toBe("run");
+    expect(applyEditMode({ mode: "接受编辑", base: "ask", action: "apply_patch", input: { patchText: bad }, workdirs: WORK })).toBe("ask");
+  });
+
+  it("没有授权目录时写文件仍然 ask（说不清就不放）", () => {
+    expect(applyEditMode({ mode: "接受编辑", base: "ask", action: "write_file", input: { path: "src/a.ts" }, workdirs: [] })).toBe("ask");
   });
 });

@@ -1,4 +1,5 @@
 import type { ConfirmMode } from "@shared/ipc";
+import { modeRank } from "@engine/core/policy";
 
 /**
  * 一轮请求的**附加输入**（L05/L06 收口，2026-10-18）。
@@ -10,7 +11,7 @@ import type { ConfirmMode } from "@shared/ipc";
 /**
  * 取两个档位里**更严**的那个。
  *
- * 严格度：每步确认 > 按需确认 > 全部允许。
+ * 严格度：每步确认 > 按需确认 > 接受编辑 > 全部允许。
  *
  * 为什么：档位是用户选的旋钮，智能体是角色 —— 角色只能让门更紧，
  * 不能替用户把门放开（与工作流步骤"只能更严"同一条口径）。
@@ -19,9 +20,8 @@ import type { ConfirmMode } from "@shared/ipc";
  * @param agent 智能体声明的档位（可能没有）
  */
 export function stricterMode(user: ConfirmMode, agent?: ConfirmMode): ConfirmMode {
-  const rank: Record<ConfirmMode, number> = { 全部允许: 0, 按需确认: 1, 每步确认: 2 };
   if (!agent) return user;
-  return rank[agent] > rank[user] ? agent : user;
+  return modeRank(agent) > modeRank(user) ? agent : user;
 }
 
 /**

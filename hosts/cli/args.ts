@@ -344,11 +344,15 @@ export function parseConfirmModeArg(raw: string | undefined): { ok: true; mode: 
     each: "每步确认",
     step: "每步确认",
     every: "每步确认",
+    /* B-01：接受编辑档（对标 Claude Code acceptEdits / ZCode edit） */
+    edits: "接受编辑",
+    accept: "接受编辑",
+    edit: "接受编辑",
   };
   const mapped = alias[value.toLowerCase()];
   if (mapped) return { ok: true, mode: mapped };
   return {
     ok: false,
-    error: `不认识的档位：${value}（可用：${CONFIRM_MODES.join(" / ")}；英文别名 allow / ask / each）`,
+    error: `不认识的档位：${value}（可用：${CONFIRM_MODES.join(" / ")}；英文别名 allow / ask / each / edits）`,
   };
 }

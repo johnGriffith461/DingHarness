@@ -77,7 +77,7 @@ export function shouldSuggestReset(recentFailures: readonly boolean[]): boolean 
 }
 
 /** 验证档位（与 `ConfirmMode` 同一词表；这里只引用不复制定义）。 */
-export type VerifyConfirmMode = "全部允许" | "按需确认" | "每步确认";
+export type VerifyConfirmMode = "全部允许" | "接受编辑" | "按需确认" | "每步确认";
 
 export type VerifyDecision = {
   action: "auto" | "offer" | "skip";

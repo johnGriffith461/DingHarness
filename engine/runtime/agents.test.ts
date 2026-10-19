@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { AGENT_SPECS, agentNames, agentRoster, findAgent, resolveAgentMode } from "./agents";
 import { AGENT_TOOLS } from "../../shared/agentTools";
-import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
+import { CONFIRM_MODES } from "../../shared/ipc";
+import { modeRank } from "../core/policy";
 
 /**
  * agent 定义数据化（Phase 7.1）。
@@ -71,11 +72,12 @@ describe("档位只能更严，不能更松", () => {
     expect(resolveAgentMode("按需确认", "每步确认")).toBe("每步确认");
   });
 
-  it("三档之间两两都成立（不是只对某两个组合对）", () => {
-    const rank: Record<ConfirmMode, number> = { 全部允许: 0, 按需确认: 1, 每步确认: 2 };
+  it("四档之间两两都成立（不是只对某两个组合对）", () => {
     for (const caller of CONFIRM_MODES) {
       for (const agent of CONFIRM_MODES) {
-        expect(rank[resolveAgentMode(caller, agent)], `${caller} + ${agent}`).toBe(Math.max(rank[caller], rank[agent]));
+        expect(modeRank(resolveAgentMode(caller, agent)), `${caller} + ${agent}`).toBe(
+          Math.max(modeRank(caller), modeRank(agent)),
+        );
       }
     }
   });

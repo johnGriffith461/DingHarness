@@ -30,6 +30,7 @@ import { MCP_TOOL_PREFIX } from "../../shared/mcp";
 import { isPluginTool } from "../runtime/plugins";
 import type { ConfirmMode } from "../../shared/ipc";
 import { rolesOf, type MemberRole } from "./members";
+import { isEditToolName, isInsideWorkspace, isProtectedPath, pathsOfEdit } from "./editGuard";
 
 /** 工具的读写性质 —— 决定"按需确认"档要不要拦它。 */
 export type ToolKind = "read" | "write";
@@ -188,6 +189,29 @@ export function policyOf(name: string): ToolPolicy {
 export type Verdict = "run" | "ask" | "hide";
 
 /**
+ * 档位的**严格程度**（越小越松）—— 唯一一份。
+ *
+ * 子智能体、工作流步骤、任务模板都遵守"只能更严，不能更松"；它们要比较档位。
+ * 这张表原来在 `agents.ts` / `recipes.ts` / `workbench/runInputs.ts` 各有一份 ——
+ * 加第四档时三处同时缺一项（TS 当场报出来，但"三处都要记得改"本身就是缺陷）。
+ *
+ * 顺序：「接受编辑」比「按需确认」松一档（工作区内编辑不问），比「全部允许」严
+ * （命令与保护路径仍然问）。
+ */
+export function modeRank(mode: ConfirmMode): number {
+  switch (mode) {
+    case "全部允许":
+      return 0;
+    case "接受编辑":
+      return 1;
+    case "按需确认":
+      return 2;
+    case "每步确认":
+      return 3;
+  }
+}
+
+/**
  * 判定一次工具调用。
  *
  * @param mode 用户选的档位
@@ -201,8 +225,47 @@ export function decide(mode: ConfirmMode, name: string): Verdict {
   if (mode === "全部允许") return "run";
   // 每步确认：无论读写都要问
   if (mode === "每步确认") return "ask";
-  // 按需确认：只拦会改东西的
+  /*
+   * 按需确认与接受编辑在**工具级**是同一口径：读放行、写/执行要问。
+   * 接受编辑比它细的那一档（按**路径**放行工作区内的编辑）需要 `input`，
+   * 所以在 `applyEditMode` 里叠加 —— 本函数拿不到参数。
+   */
   return policy.kind === "write" ? "ask" : "run";
+}
+
+/**
+ * B-01：「接受编辑」档在**调用级**叠加的那一层。
+ *
+ * 为什么不在 `decide` 里做：它拿不到 `input`（也就拿不到"要写哪个路径"）。
+ * 判定仍然只有这一份 —— 宿主的闸门调它，别处不许再写一遍"哪些路径可以自动放行"。
+ *
+ * 规则：
+ * - 只有基础判定是 `ask` 时才可能放宽（`run` 保持、`hide` 保持）；
+ * - 只放宽**文件编辑**（`write_file` / `edit_file` / `apply_patch`）；
+ * - 每个目标路径都必须在授权目录里、且不是保护路径（`.env` / `.git` / `.ssh` /
+ *   `node_modules` / `..` 逃逸）；解析不出路径 → 仍然 `ask`；
+ * - `run_command`、MCP、插件、电脑类**一律不放宽**（那些不是"编辑一个文件"）。
+ *
+ * @param input.base `decide()` 或规则层给出的基础判定
+ * @param input.workdirs 这一轮授权的目录（相对路径按第一个解析；空 = 一律问）
+ */
+export function applyEditMode(input: {
+  mode: ConfirmMode;
+  base: Verdict;
+  action: string;
+  input?: unknown;
+  workdirs?: readonly string[];
+}): Verdict {
+  if (input.mode !== "接受编辑") return input.base;
+  if (input.base !== "ask") return input.base;
+  if (!isEditToolName(input.action)) return "ask";
+  const paths = pathsOfEdit(input.action, input.input);
+  if (!paths.length) return "ask";
+  for (const target of paths) {
+    if (isProtectedPath(target)) return "ask";
+    if (!isInsideWorkspace(target, input.workdirs ?? [])) return "ask";
+  }
+  return "run";
 }
 
 /**
