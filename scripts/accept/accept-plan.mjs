@@ -84,6 +84,20 @@ await step("C2：上下文压力条在输入区右侧（未登记模型标窗口
   return text.split("\n").join(" ");
 });
 
+await step("C3：模型菜单带搜索框", async () => {
+  await input.click();
+  await input.press("Control+l");
+  await sleep(350);
+  const search = page.locator('[data-testid="wb-model-search"]');
+  if (!(await search.count())) throw new Error("没有 wb-model-search");
+  await search.fill("co");
+  await sleep(200);
+  if ((await search.inputValue()) !== "co") throw new Error("搜索框不接受输入");
+  await input.press("Control+l");
+  await sleep(200);
+  return "搜索框可用";
+});
+
 await step("/plan 命令也切同一个开关", async () => {
   await input.fill("/plan");
   await sleep(300);

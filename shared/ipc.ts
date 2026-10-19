@@ -31,6 +31,8 @@ export type PersonaWire = PersonaPref;
 /** 应用设置落盘形状（read/write 共用，避免手抄）。 */
 export type AppSettingsWire = {
   pinnedModel: string;
+  /** C3：轻量模型（`provider/model`）；空串 = 跟随主模型。用于起标题/压缩。 */
+  liteModel?: string;
   navCollapsed?: boolean;
   rules?: PermissionRuleWire[];
   keymap?: KeymapWire;

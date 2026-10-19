@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Lock, Sparkles } from "lucide-react";
 
+import { budgetOf } from "@engine/runtime/budget";
 import { findModel } from "@engine/runtime/models";
 import { listProviders } from "@/ai/aiClient";
 import { readSavedRoute } from "@/ai/route";
@@ -45,6 +46,8 @@ export function ModelChip({
     Array<{ id: string; label: string; models: string[]; available: boolean; note?: string }>
   >([]);
   const [branch, setBranch] = useState("");
+  /* C3：搜索（模型 id / provider 名，不区分大小写） */
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -81,24 +84,38 @@ export function ModelChip({
     onClose();
   };
 
-  /** 一条模型项：radio 语义 + 视觉徽标 + 锁（跑着的时候不许换）。 */
-  const modelItem = (providerId: string, m: string) => {
+  /** 一条模型项：radio 语义 + 窗口/视觉徽标 + 无密钥置灰 + 锁（跑着的时候不许换）。 */
+  const modelItem = (providerId: string, m: string, available = true) => {
     const on = route.provider === providerId && route.model === m;
     /* 目录表里声明的多模态输入（）—— 只描述登记的能力 */
     const vision = findModel(m)?.capabilities?.attachment === true;
+    /* C3：窗口徽标（登记过才写；未登记不编数字） */
+    const budget = budgetOf(m);
+    const windowLabel = budget.registered
+      ? budget.contextWindow >= 1_000_000
+        ? `${Math.round(budget.contextWindow / 1_000_000)}M`
+        : `${Math.round(budget.contextWindow / 1000)}k`
+      : "";
     return (
       <button
         key={`${providerId}/${m}`}
         role="menuitemradio"
         aria-checked={on}
-        aria-disabled={busy || undefined}
-        disabled={busy}
+        aria-disabled={busy || !available || undefined}
+        disabled={busy || !available}
         className={`wb-chip-option${on ? " is-on" : ""}`}
         data-testid={`wb-model-option-${providerId}-${m}`}
-        title={busy ? "这一轮正在跑 —— 等它结束再换模型" : m}
+        title={
+          busy
+            ? "这一轮正在跑 —— 等它结束再换模型"
+            : available
+              ? m
+              : `${providerId} 没有可用密钥 —— 去设置配置`
+        }
         onClick={() => pick(providerId, m)}
       >
         <span className="wb-model-modelname">{m}</span>
+        {windowLabel ? <em className="wb-model-flag" data-testid={`wb-model-window-${providerId}-${m}`}>{windowLabel}</em> : null}
         {/* 「视觉」= 目录表里声明的多模态输入（只描述 provider 登记的能力，不承诺适配器一定发得出附件） */}
         {vision ? (
           <em className="wb-model-flag" data-testid={`wb-model-vision-${providerId}-${m}`}>
@@ -131,14 +148,51 @@ export function ModelChip({
               <Lock size={11} /> 这一轮正在跑 —— 跑完才能换模型
             </div>
           ) : null}
+          {/* C3：搜索（20 个模型时敲 3 个字符就能命中） */}
+          <input
+            className="wb-model-search"
+            data-testid="wb-model-search"
+            placeholder="搜索模型（id 或 provider）…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
           {providers.length === 0 ? (
             <div className="wb-chip-empty" data-testid="wb-model-empty">
               还没有可用的 provider。去设置里配一条（地址 + 密钥，能把模型清单拉回来）。
             </div>
+          ) : query.trim() ? (
+            <div data-testid="wb-model-results">
+              {(() => {
+                const q = query.trim().toLowerCase();
+                const hits = providers.flatMap((p) =>
+                  p.models
+                    .filter(
+                      (m) =>
+                        m.toLowerCase().includes(q) ||
+                        p.label.toLowerCase().includes(q) ||
+                        p.id.toLowerCase().includes(q),
+                    )
+                    .map((m) => ({ p, m })),
+                );
+                if (!hits.length) {
+                  return (
+                    <div className="wb-chip-empty" data-testid="wb-model-no-match">
+                      没有匹配的模型
+                    </div>
+                  );
+                }
+                return hits.slice(0, 20).map(({ p, m }) => (
+                  <div key={`${p.id}/${m}`}>
+                    <div className="wb-model-match-provider">{p.label}</div>
+                    {modelItem(p.id, m, p.available)}
+                  </div>
+                ));
+              })()}
+            </div>
           ) : single ? (
             <>
               <div className="wb-chip-title">{single.label}</div>
-              {single.models.slice(0, 12).map((m) => modelItem(single.id, m))}
+              {single.models.slice(0, 12).map((m) => modelItem(single.id, m, single.available))}
             </>
           ) : (
             <>
@@ -166,7 +220,12 @@ export function ModelChip({
                 </div>
                 {branch ? (
                   <div className="wb-model-leaf" data-testid="wb-model-leaf">
-                    {(providers.find((p) => p.id === branch)?.models ?? []).slice(0, 12).map((m) => modelItem(branch, m))}
+                    {(() => {
+                      const provider = providers.find((p) => p.id === branch);
+                      return (provider?.models ?? [])
+                        .slice(0, 12)
+                        .map((m) => modelItem(branch, m, provider?.available ?? true));
+                    })()}
                   </div>
                 ) : null}
               </div>

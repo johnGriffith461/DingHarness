@@ -29,6 +29,8 @@ const bridge = (): ShellBridge | undefined => (globalThis as unknown as { shell?
 type State = {
   /** 钉住的默认通道（`provider/model`）；空串 = 记忆上次。 */
   pinnedModel: string;
+  /** C3：轻量模型（`provider/model`）；空串 = 跟随主模型。 */
+  liteModel: string;
   /** 左侧导航栏收起来了没有。 */
   navCollapsed: boolean;
   /** **权限规则**（U03）：「总是允许」攒出来的那些。 */
@@ -42,6 +44,8 @@ type State = {
   note: string;
   load: () => Promise<void>;
   setPinned: (value: string) => Promise<void>;
+  /** C3：设置轻量模型（起标题 / 压缩用）。 */
+  setLiteModel: (value: string) => Promise<void>;
   /** 收起 / 展开左栏（持久化：重启之后还是收起的样子）。 */
   setNavCollapsed: (value: boolean) => Promise<void>;
   /** 追加一条「总是允许」规则（与已有规则一模一样就不重复加）。 */
@@ -58,9 +62,10 @@ type State = {
 
 /** 磁盘上那份（不可信）→ 干净的设置对象。 */
 function readSettings(
-  raw: { pinnedModel?: unknown; navCollapsed?: unknown; rules?: unknown; keymap?: unknown; persona?: unknown } | undefined,
+  raw: { pinnedModel?: unknown; liteModel?: unknown; navCollapsed?: unknown; rules?: unknown; keymap?: unknown; persona?: unknown } | undefined,
 ): {
   pinnedModel: string;
+  liteModel: string;
   navCollapsed: boolean;
   rules: PermissionRuleWire[];
   keymap: Keymap;
@@ -68,6 +73,7 @@ function readSettings(
 } {
   return {
     pinnedModel: typeof raw?.pinnedModel === "string" ? raw.pinnedModel : "",
+    liteModel: typeof raw?.liteModel === "string" ? raw.liteModel : "",
     /*
      * 只认布尔：缺字段（这次修复之前的 `settings.json`）与坏值（写着 `"yes"`）
      * 一律回落到"展开"—— 左栏莫名其妙收起来，用户找不到导航。
@@ -101,6 +107,7 @@ function readSettings(
 
 export const useAppSettings = create<State>()((set, get) => ({
   pinnedModel: "",
+  liteModel: "",
   navCollapsed: false,
   rules: [],
   keymap: { ...DEFAULT_KEYMAP },
@@ -119,6 +126,7 @@ export const useAppSettings = create<State>()((set, get) => ({
       const clean = readSettings(got);
       set({
         pinnedModel: clean.pinnedModel,
+        liteModel: clean.liteModel,
         navCollapsed: clean.navCollapsed,
         rules: clean.rules,
         keymap: clean.keymap,
@@ -148,6 +156,19 @@ export const useAppSettings = create<State>()((set, get) => ({
       set({
         pinnedModel: before,
         note: `没能存下这个默认模型：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  },
+
+  setLiteModel: async (value) => {
+    const before = get().liteModel;
+    set({ liteModel: value, note: "" });
+    try {
+      await persist(get());
+    } catch (error) {
+      set({
+        liteModel: before,
+        note: `没能存下轻量模型：${error instanceof Error ? error.message : String(error)}`,
       });
     }
   },
@@ -233,14 +254,22 @@ export const useAppSettings = create<State>()((set, get) => ({
  * 加字段时只改这里与 `readSettings`，不会出现"某个写入口漏带了新字段、
  * 把它从盘上抹掉"—— 那正是这个文件头警告过的缺陷形状。
  */
-async function persist(state: Pick<State, "pinnedModel" | "navCollapsed" | "rules" | "keymap" | "persona">): Promise<void> {
+async function persist(
+  state: Pick<State, "pinnedModel" | "liteModel" | "navCollapsed" | "rules" | "keymap" | "persona">,
+): Promise<void> {
   await bridge()?.appSettings?.write({
     pinnedModel: state.pinnedModel,
+    liteModel: state.liteModel,
     navCollapsed: state.navCollapsed,
     rules: state.rules,
     keymap: state.keymap,
     persona: state.persona,
   });
+}
+
+/** C3：同步读一眼轻量模型（`provider/model`；空串 = 未设置）。 */
+export function liteModelNow(): string {
+  return useAppSettings.getState().liteModel;
 }
 
 /** 同步读一眼（给 `resolveChatRoute` 用）。 */

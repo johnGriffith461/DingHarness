@@ -54,6 +54,8 @@ export function appSettingsPath(): string {
  */
 export type AppSettings = {
   pinnedModel: string;
+  /** C3：轻量模型（`provider/model`）；空串 = 跟随主模型。 */
+  liteModel?: string;
   navCollapsed?: boolean;
   /**
    * **权限规则**（U03 桌面那一半，2026-10-18）。
@@ -79,7 +81,7 @@ export type AppSettings = {
  * 手写进去的坏键会被 `normalizeAppSettings` 静默丢掉，而"我明明设了啊"就是从这里来的
  * （与 CLI 那边 `CONFIG_KEYS` 同一个理由，审计 P202）。
  */
-export const APP_SETTINGS_KEYS = ["pinnedModel", "navCollapsed", "rules", "keymap", "persona"] as const;
+export const APP_SETTINGS_KEYS = ["pinnedModel", "liteModel", "navCollapsed", "rules", "keymap", "persona"] as const;
 
 /**
  * 把落盘的（不可信）值收窄。
@@ -95,6 +97,10 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
     /* 只认真正的 `true`（落盘的不可信：字符串 "false" 之类一律当"没收起"） */
     navCollapsed: s.navCollapsed === true,
   };
+  /* C3：轻量模型只收 `provider/model` 形状；空串/坏值 = 跟随主模型 */
+  if (typeof s.liteModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(s.liteModel.trim())) {
+    out.liteModel = s.liteModel.trim();
+  }
   /*
    * 规则走**引擎那一份** `normalizeRules`（不是在这里另写一遍）：
    * 它是"哪些规则算数"的唯一口径，CLI 与桌面必须同一份 ——

@@ -468,6 +468,26 @@
 .wb-context-meter.is-full { color: #c0392b; }
 .wb-context-meter.is-full em { background: rgba(192, 57, 43, 0.12); color: #c0392b; }
 
+/* C3：模型选择器的搜索框与「命中里属于哪个 provider」 */
+.wb-model-search {
+  width: calc(100% - 16px);
+  margin: 8px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-hover);
+  color: var(--fg-2);
+  font-size: 12px;
+  outline: none;
+}
+.wb-model-search:focus { border-color: var(--border-strong); }
+.wb-model-match-provider {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  color: var(--fg-4);
+}
+
 .wb-env { position: relative; }
 
 .wb-env-pop {

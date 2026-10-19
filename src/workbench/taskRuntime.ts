@@ -49,7 +49,7 @@ import { renderPlanPrompt } from "@engine/runtime/planMode";
 
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
-import { personaNow } from "./appSettings";
+import { liteModelNow, personaNow } from "./appSettings";
 import { personaPromptBlock } from "@shared/persona";
 import { skillsBlockFor, stricterMode } from "./runInputs";
 import { withSubagentApprovals } from "./subagentBubbles";
@@ -161,8 +161,15 @@ let lastRequestEstimate = 0;
  * @param brief 用户原话
  */
 export async function refineTitle(port: StorePort, taskId: string, brief: string): Promise<void> {
-  const route = await resolveRoute();
-  if (!route.provider) return;
+  const baseRoute = await resolveRoute();
+  if (!baseRoute.provider) return;
+  /* C3：起标题是附属请求，优先用轻量模型；没设置就跟随主模型 */
+  const lite = liteModelNow();
+  const [liteProvider, liteModel] = lite.split("/");
+  const route =
+    liteProvider && liteModel
+      ? { ...baseRoute, provider: liteProvider, model: liteModel }
+      : baseRoute;
 
   let acc = "";
   try {
@@ -286,7 +293,12 @@ async function summaryFor(taskId: string, older: ChatMessage[]): Promise<string>
   if (cached && cached.sig === sig) return cached.summary;
 
   try {
-    const route = await resolveRoute();
+    const baseRoute = await resolveRoute();
+    /* C3：压缩同样是附属请求，优先轻量模型 */
+    const lite = liteModelNow();
+    const [liteProvider, liteModel] = lite.split("/");
+    const route =
+      liteProvider && liteModel ? { ...baseRoute, provider: liteProvider, model: liteModel } : baseRoute;
     const { system, user } = compactPrompt(older);
     const { text, error } = await completeOnce({
       provider: route.provider,

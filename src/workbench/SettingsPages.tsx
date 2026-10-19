@@ -78,6 +78,8 @@ export default function SettingsPages({
   const meta = META[page];
   /** 记忆开关当前状态（从库里读真实值，不是本地 state）。 */
   const memoryOn = useMemoryStore((s) => s.lib.enabled !== false);
+  /** C3：轻量模型（起标题 / 压缩用）。 */
+  const liteModel = useAppSettings((s) => s.liteModel);
 
   /* 模型子页是独立一块（见 ModelSettingsPage 的说明）：整页交给它 */
   /* 插件·技能·伙伴：**整页搬进来**（内容仍是原来那个 PluginsPage，功能零改动） */
@@ -177,6 +179,24 @@ export default function SettingsPages({
               <option value="">{SETTINGS_LABELS.useLast}</option>
               {choices.map((c) => (
                 <option key={`${c.provider}/${c.model}`} value={`${c.provider}/${c.model}`}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* C3：轻量模型（附属请求用；空 = 跟随主模型） */}
+          <div className="wb-setpage-row">
+            <span className="wb-setpage-label">轻量模型</span>
+            <select
+              className="wb-setpage-select"
+              data-testid="wb-setpage-lite"
+              value={liteModel}
+              onChange={(e) => void useAppSettings.getState().setLiteModel(e.target.value)}
+            >
+              <option value="">跟随主模型</option>
+              {choices.map((c) => (
+                <option key={`lite-${c.provider}/${c.model}`} value={`${c.provider}/${c.model}`}>
                   {c.label}
                 </option>
               ))}
