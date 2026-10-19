@@ -58,9 +58,12 @@ pnpm build                     # 全链（typecheck/lint/test/打包/验收）
 
 | 要加的 | 放哪 | 别忘了 |
 |---|---|---|
-| 一个新的工具（模型可调） | `engine/runtime/registry.ts` + 执行体（`hosts/cli/tools.ts` 或 `electron/ipc/tools.ts`） | 权限分类（`policy.ts`）、测试、`SAFETY.md` |
+| 一个新的工具（模型可调） | `engine/runtime/registry.ts` + 执行体（`hosts/cli/tools.ts` 或 `electron/ipc/tools.ts`） | 权限分类（`policy.ts`）、测试、`SAFETY.md`；`shared/agentTools.tools.test.ts` 会查它是否进了 `CLI_TOOLS` 与 `ALWAYS_TOOLS`（上一轮漏过） |
+| 一个后台/长任务类工具 | `engine/runtime/tools/jobs.ts` + 两个宿主的执行体 | 进程退出必须清理（`shutdownJobs`）；输出留尾部并标 `truncated` |
+| 一个联网工具 | `engine/runtime/tools/webFetchTool.ts` 的安全边界（禁私网、DNS 先判、1 MiB、`[untrusted]` 包裹） | 别绕开 `isBlockedUrl`/`blockedIp`；`SAFETY.md` 要如实写 |
 | 一种新事件 | `engine/core/events.ts` 的 `LoggedEvent` + `applyEvent` | 投影、契约冻结测试、旧日志兼容（可选字段 + 默认值） |
 | 一条 CLI 命令 | `hosts/cli/cmdXxx.ts` + `ding.ts` 分派 + `help.ts` + `args.ts` 旗标表 | `args.test.ts` 会扫旗标，漏登记就红 |
+| 一个 CLI 旗标 | `hosts/cli/args.ts` 的 `BOOLEAN_FLAGS`/`VALUE_FLAGS` + `help.ts` 两处用法（总帮助与 `COMMAND_USAGE`） | 退出码若有新语义，同时改 `hosts/cli/exitCode.ts` 与 README 退出码表 |
 | 一个基准任务 | `bench/tasks/<id>/` + `bench/suites/harness.json` | 写清"挡的是哪一种坏"；红的时候要红得对 |
 | 一条 ADR | `docs/ADR/NNNN-标题.md`（本地，不入库） | 只增不改；状态写"已决定/已落地/被取代" |
 

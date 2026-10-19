@@ -21,7 +21,7 @@ Ding Harness 是一个 Electron 桌面应用，把「对话式 Agent」和「无
 - **连接器（MCP）**：stdio 子进程或 streamable HTTP 接入 MCP server（最多 8 个），工具以 `mcp__<server>__<tool>` 暴露给模型；HTTP 连接器支持 OAuth（授权码 + PKCE，token 加密存本机）。
 - **计划模式**：只读探索 → 五段计划 → 右侧面板可编辑 → 批准后写入 `.ding/plans/` 并开始执行；计划阶段不下发写/命令工具。
 - **LSP 诊断**：配置语言服务器后，编辑成功只报**新引入的** error（warning 不报）；没配置时完全跳过。
-- **审批闸门**：三档模式（全部允许 / 按需确认 / 每步确认）；每个工具按读/写分级，MCP 工具默认按写对待；被拦下的调用可就地允许或拒绝，决策写入会话日志。
+- **审批闸门**：四档模式（全部允许 / 接受编辑 / 按需确认 / 每步确认）；每个工具按读/写分级，MCP 工具默认按写对待；被拦下的调用可就地允许或拒绝，决策写入会话日志。「接受编辑」只自动放行**工作区内的文件编辑**，命令、连接器与 `.env` / `.git` / `node_modules` / 工作区外路径仍然要问。
 - **子智能体**：独立上下文、只回要点报告、token 成本上卷父级；共用同一张闸门表，不穿透审批。
 - **上下文管理**：唯一的切分点，只在消息边界切、保留段以 user 开头、最后一条必留；用 provider 返回的真实 `usage` 校准估算系数。
 - **会话日志**：界面状态由事件投影（`applyEvent`）生成，与日志同源——历史从日志恢复。
@@ -168,6 +168,9 @@ src/           渲染进程（React 19 + zustand + Vite）
 ```bash
 pnpm ding                                      # 不给参数 = 进交互模式（上下文接着上一句）
 pnpm ding run "把 demo 里的 md 整理成一份纪要" --dir ./demo
+pnpm ding run "先给这个仓库出一份改造计划，不要动手" --dir . --plan
+pnpm ding run "跑一遍完整测试，失败就修" --dir . --mode allow
+pnpm ding run "跑整套集成测试" --dir . --background   # 放后台，ding jobs show <id> 看进度
 pnpm ding sessions [--json|--export <id>]      # 列会话 / 导出 JSONL
 pnpm ding sessions --cost [--by session|day|model]   # 成本账本（数字只来自 provider 上报）
 pnpm ding models [--json]                      # provider 与模型（逐条标出数据来源与是否过期）
@@ -226,6 +229,16 @@ pnpm ding config [show|set <键> <值>|unset <键>] # 默认 provider / 模型 /
 
 按需确认档下，终端里会就地询问：`y` 允许一次 / `a` 本次会话总是允许 / `n` 拒绝；
 非 TTY（管道、CI）**不会读 stdin**，直接以退出码 6 停下并提示下一步。
+自动化验收可以用 `DING_CLI_INTERACTIVE=1` 让管道输入按交互处理（同一条审批代码路径）。
+
+**改完文件会验证**：`全部允许` 档自动跑 `package.json` 里的测试命令并把退出码与尾部输出回注；
+其它档位只给一句"建议运行 `npm test`"，不擅自执行。
+
+**命令能拿输入、能放后台**：`run_command` 支持 `stdin`（≤64 KiB）与 `background=true`；
+后台任务用 `job_output` 轮询、`job_kill` 停止，进程退出时会统一清理，不留孤儿。
+
+**能读文档**：`web_fetch` 抓公开网页（只允许 http/https，禁私网/回环，响应体上限 1 MiB，
+超时 15 秒），内容按不可信数据包裹（`[untrusted: …]`），模型不能把网页当指令执行。
 
 ## 当 SDK 用（把引擎嵌进你自己的程序）
 

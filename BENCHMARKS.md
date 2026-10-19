@@ -250,3 +250,34 @@ pnpm bench:hillclimb --label "一句话说清这一轮只改了什么" --repeat 
 2. 审批场景批准后执行失败："这个路径不在可改范围内"。
    根因是 `resolveWriteTarget` 只认绝对路径与裸文件名，模型给的是 `src/a.txt`。
    已把相对路径按第一个授权目录解析（仍过白名单，`..` 逃逸照样拒绝）。
+
+## 9. 过程验收（2026-10-20，真 provider，CLI 能力补齐）
+
+口径同第 8 节：`tokenrhythm/deepseek-v4.1-flash-1017`、窗口按 1M 声明、Windows 11、
+Node v24.18.0。只记 token 与墙钟（这个模型没有可核实的单价，**不写"约 ¥x"**）。
+
+| # | 场景 | 命令要点 | 结果 | 墙钟 | token（入+出） |
+|---|---|---|---|---|---|
+| 1 | 修失败测试（回归） | `ding run "跑 npm test，把失败的那条修好" --mode 全部允许 --json` | 退出 0；测试 1/1；`verification.action=auto`、exit 0；finish 经一次证据修正后 ok | 31s | 77,844 |
+| 2 | 多步任务（回归） | 同上，要求 todo + 两个新文件 + 测试 + finish | 退出 0；3 次 `todo_write`、2 个文件、finish ok；测试 2/2 | 15s | 47,412 |
+| 3 | CLI 批准 | 按需确认 + 交互输入 `y` | 退出 0；`notes.md` 内容 `hello`；2 次询问（写文件 / 验证命令）各批准 | 17s | 53,070 |
+| 4 | CLI 拒绝 | 按需确认 + 交互输入 `n` | 退出 0；文件**未创建**；模型说明卡点，1 次询问 | 8s | 24,134 |
+| 5 | 非 TTY → 6 | 管道 stdin，按需确认 | 退出 **6**；`awaitingApproval.name=write_file`；文件未创建；stderr 给出下一步 | 6s | 11,238 |
+| 6 | 接受编辑档 | `--mode 接受编辑` + 3 个文件 + 1 条命令 | 退出 0；**3 次写文件 0 次确认**，命令**恰好 1 次确认**；finish ok | 7s | 24,537 |
+| 7a | stdin | `run_command` 跑 `node -e "process.stdin.pipe(process.stdout)"`，stdin=hello | 退出 0；输出 `hello`；模型自己说明"喂完 EOF 不会挂住" | 10s | 17,649 |
+| 7b | 后台任务 | `background=true` + `job_output` 轮询 | 退出 0；两次轮询后 `exitCode=0`、输出 `bg-done`；pid 已退出、日志落在 `<数据目录>/jobs/` | 12s | 35,977 |
+| 7c | web_fetch | 读 `https://nodejs.org/api/fs.html`，只依据网页总结 `writeFile` | 首次（默认档）退出 6：模型额外想跑 `run_command`，正确停在待确认；改 `--mode 全部允许` 后退出 0；轨迹 `web_fetch:ok` → `finish:ok`，答案是网页里的真实参数表（Node v26.12.0） | 11s / 14s | 73,854 / 143,094 |
+
+合计约 **50.9 万 token**（含一次因档位正确拦截而重跑的场景 7c）。
+
+**关于"TTY"的如实说明**：这次执行环境没有可用的伪终端（`winpty` 在没有控制台的会话里
+直接断言失败），所以场景 3/4/6 用 `DING_CLI_INTERACTIVE=1` 把"stdin 是管道"显式声明为交互，
+走的是**同一条审批代码**（`hosts/cli/approval.ts`），不是第二条实现；
+`isTTY` 自动判定分支另有单测（`hosts/cli/approval.test.ts`）。
+
+**本轮失败过、并已修的**：
+
+1. 场景 3 第一跑：第二个审批询问时 stdin 已 EOF，审批件没有收到 `end` 回调，
+   挂到 120s 看门狗 → 已改成"挂监听时若流已结束，直接按拒绝处理"。
+2. 场景 5 第一跑：`--json` 的 stdout 被人类可读表头污染（`JSON.parse` 失败）→
+   已把表头与会话提示改走 stderr（`hosts/cli/main.ts`）。

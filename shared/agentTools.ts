@@ -939,7 +939,9 @@ export function toolArgsSummary(name: string, input: unknown): string {
      */
     const cmd = cut(obj.command, 80);
     const dir = typeof obj.workdir === "string" && obj.workdir.trim() ? ` @${cut(obj.workdir, 40)}` : "";
-    return cmd ? `${cmd}${dir}` : "";
+    /* B-02：喂了输入就说出来（审批卡片与留痕都要能看出"这条命令不是裸跑的"） */
+    const fed = typeof obj.stdin === "string" && obj.stdin ? ` +stdin ${obj.stdin.length} 字` : "";
+    return cmd ? `${cmd}${dir}${fed}` : "";
   }
   if (name === JOB_OUTPUT_TOOL || name === JOB_KILL_TOOL) {
     const id = cut(obj.jobId, 40);
