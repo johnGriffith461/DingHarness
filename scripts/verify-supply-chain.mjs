@@ -58,6 +58,15 @@ else if (!/minimumReleaseAge:\s*\d+/.test(readFileSync(ws, "utf8"))) {
 }
 
 /* ⑤ CLI 发布包的依赖必须与主仓同一批（不能少、不能多出桌面依赖） */
+/*
+ * ⚠️ **渲染层专用依赖**不算"CLI 少装"（2026-10-19）。
+ *
+ * `react-markdown` / `remark-gfm` 只被 `src/`（Electron 渲染进程）用；
+ * CLI 是纯 Node 无头宿主，把它们塞进发布包只会让用户多装 100 多个传递依赖。
+ * 所以这里显式列白名单 —— 以后 UI 再加依赖仍会红，只是红的信息变成
+ * "要不要把它算进 CLI 发布包"，而不是被当成漏装。
+ */
+const RENDERER_ONLY_DEPS = new Set(["react-markdown", "remark-gfm"]);
 const cliPkgFile = path.join(ROOT, "packages", "cli", "package.json");
 if (existsSync(cliPkgFile)) {
   const cli = readJson("packages/cli/package.json");
@@ -66,7 +75,8 @@ if (existsSync(cliPkgFile)) {
     if (!(name in (pkg.dependencies ?? {}))) problems.push(`CLI 包有主仓没有的依赖：${name}`);
   }
   for (const name of Object.keys(pkg.dependencies ?? {})) {
-    if (!(name in cliDeps)) problems.push(`CLI 包缺主仓的运行依赖：${name}`);
+    if (name in cliDeps || RENDERER_ONLY_DEPS.has(name)) continue;
+    problems.push(`CLI 包缺主仓的运行依赖：${name}`);
   }
   if (cli.private === true) problems.push("packages/cli 是 private —— 发不出去");
 }
