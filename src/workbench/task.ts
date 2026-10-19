@@ -89,9 +89,31 @@ export type TaskQuestion = {
 /** 一个问题连同它的选项；对齐原版"最多 3 题、逐题推进"。 */
 export const MAX_QUESTIONS = 3;
 
+/** 任务的两套身份（A3）：编码 agent 与办公任务助手的提示词不同。 */
+export type TaskMode = "coding" | "office";
+
+/**
+ * 读一个任务的模式。
+ *
+ * 旧任务没有 `mode` 字段（这一版之前写下的 `tasks.json`）——按 `office` 走，
+ * 与它们当初创建时的行为一致。**不按首页当前模式猜**：那会让旧对话突然换了身份。
+ */
+export function taskMode(task: Pick<WorkTask, "mode"> | undefined | null): TaskMode {
+  return task?.mode === "coding" ? "coding" : "office";
+}
+
 /** 一个任务。 */
 export type WorkTask = {
   id: string;
+  /**
+   * 这段任务是**编码**还是**办公**（A3）。
+   *
+   * 创建时从首页模式写入并随任务落盘：提示词按它选，所以它必须是任务的事实，
+   * 不能读"现在的首页开关"—— 否则用户切一下首页，同一段对话的身份就漂了。
+   *
+   * 可选：这一版之前写下的 `tasks.json` 没有它，读到时按 `office`（`taskMode`）。
+   */
+  mode?: TaskMode;
   /** 自动归纳出来的标题（不是用户原文）。 */
   title: string;
   /** 用户发的第一句，留作副信息。 */

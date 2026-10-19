@@ -3,6 +3,9 @@ import {
   ASK_CLOSE,
   ASK_OPEN,
   buildAskPrompt,
+  buildCodingAskPrompt,
+  buildCodingDoPrompt,
+  buildCodingFollowUpPrompt,
   buildDoPrompt,
   buildFollowUpPrompt,
   describeAnswer,
@@ -101,6 +104,42 @@ describe("buildFollowUpPrompt（接着聊，§147）", () => {
   it("历史被截断时把「你看不到全部」告诉模型", () => {
     expect(buildFollowUpPrompt("x", true).system).toContain("更早的对话已省略");
     expect(buildFollowUpPrompt("x", false).system).not.toContain("更早的对话已省略");
+  });
+});
+
+describe("A3 编码提示词（与办公分离）", () => {
+  it("⭐ 编码干活的提示词含三条纪律，且不再把「直接给成品」当首要指令", () => {
+    const { system } = buildCodingDoPrompt("修一下这个失败测试", ["范围 → 只改 src/a.ts"]);
+
+    expect(system).toContain("先调查再动手");
+    expect(system).toContain("改完必须验证");
+    expect(system).toContain("不要伪造输出");
+    expect(system).not.toContain("直接给成品");
+    expect(system).toContain("编码 agent");
+  });
+
+  it("办公模式仍走产物规则（一个字不动）", () => {
+    const { system } = buildDoPrompt("做周报", []);
+    expect(system).toContain("产物要怎么给");
+    expect(system).toContain("直接给成品");
+  });
+
+  it("编码提问那轮也带编码纪律与同一套提问块格式", () => {
+    const { system, user } = buildCodingAskPrompt("把登录改成 OAuth", [], "资料正文");
+
+    expect(system).toContain("先调查再动手");
+    expect(system).toContain(ASK_OPEN);
+    expect(user).toContain("把登录改成 OAuth");
+    expect(user).toContain("资料正文");
+  });
+
+  it("编码接着聊那轮不回退成办公助手", () => {
+    const { system, user } = buildCodingFollowUpPrompt("再跑一次测试", true);
+
+    expect(user).toBe("再跑一次测试");
+    expect(system).toContain("改完必须验证");
+    expect(system).toContain("更早的对话已省略");
+    expect(system).not.toContain("产物要怎么给");
   });
 });
 

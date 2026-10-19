@@ -1,7 +1,14 @@
 import { create, type StoreApi } from "zustand";
 import type { ShellBridge } from "@shared/ipc";
 import { runToolOnce } from "../ai/aiClient";
-import { buildAskPrompt, buildDoPrompt, describeAnswer, parseAskReply } from "./agent";
+import {
+  buildAskPrompt,
+  buildCodingAskPrompt,
+  buildCodingDoPrompt,
+  buildDoPrompt,
+  describeAnswer,
+  parseAskReply,
+} from "./agent";
 import { extractArtifacts } from "./artifact";
 import {
   rejectedLine,
@@ -31,6 +38,7 @@ import {
   autoTaskTitle,
   current,
   makeStepId,
+  taskMode,
   upsertTask,
   type TaskOption,
   type TaskStep,
@@ -445,7 +453,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
      * 这样"重新生成"才是同一次提问的重跑，而不是"用现在的上下文又问一遍"。
      */
     const background = task.steps.filter((s) => s.role === "user" && s.text.includes(" → ")).map((s) => s.text);
-    const { system } = buildDoPrompt(task.brief, background, task.material);
+    const { system } = taskMode(task) === "coding"
+      ? buildCodingDoPrompt(task.brief, background, task.material)
+      : buildDoPrompt(task.brief, background, task.material);
     const raw = await runStream(port, user, system, patch, [], task.id);
     const ask = parseAskReply(raw.text);
     const { text, artifacts } = extractArtifacts(
@@ -743,8 +753,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const background = options?.background ?? false;
     const material = options?.material;
     const now = Date.now();
+    /*
+     * A3：首页选的是「编码」还是「办公」，**创建时写进任务并随它落盘**。
+     * 之后提示词按任务上的 mode 选，不读"现在的首页开关"——
+     * 切一下首页不该让一段已有对话换身份。
+     */
+    const mode: HomeMode = get().homeMode;
     const task: WorkTask = {
       id: nextId("t"),
+      mode,
       /*
        * 先用本地启发式给一个**即时**标题。
        *
@@ -784,7 +801,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     // 起标题与回答问题并行：标题回来了就替换，失败就留着启发式那份
     void refineTitle(port, task.id, text);
 
-    const { system, user } = buildAskPrompt(text, [], material);
+    const { system, user } = mode === "coding"
+      ? buildCodingAskPrompt(text, [], material)
+      : buildAskPrompt(text, [], material);
     const reply = await runStream(
       port,
       user,
@@ -817,7 +836,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const background = advanced.steps
       .filter((s) => s.role === "user" && s.text.includes(" → "))
       .map((s) => s.text);
-    const { system, user } = buildDoPrompt(advanced.brief, background, advanced.material);
+    const { system, user } = taskMode(advanced) === "coding"
+      ? buildCodingDoPrompt(advanced.brief, background, advanced.material)
+      : buildDoPrompt(advanced.brief, background, advanced.material);
     const reply = await runStream(
       port,
       user,

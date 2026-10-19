@@ -16,6 +16,7 @@ import {
   progressLabel,
   questionProgress,
   TASK_TITLE_LIMIT,
+  taskMode,
   toRecentRow,
   type WorkTask,
 } from "./task";
@@ -43,6 +44,26 @@ function makeTask(patch: Partial<WorkTask> = {}): WorkTask {
 const NOW = 1_700_000_000_000;
 
 import { ARTIFACT_FORMATS } from "./artifact";
+
+describe("A3 任务模式", () => {
+  it("旧盘没有 mode 字段 → 按 office 读（不跟着首页开关漂）", () => {
+    expect(taskMode(makeTask())).toBe("office");
+    expect(taskMode(undefined)).toBe("office");
+    expect(taskMode(null)).toBe("office");
+  });
+
+  it("coding 原样返回；其它值一律回落 office", () => {
+    expect(taskMode(makeTask({ mode: "coding" }))).toBe("coding");
+    expect(taskMode(makeTask({ mode: "office" }))).toBe("office");
+    expect(taskMode({ mode: "乱写" } as never)).toBe("office");
+  });
+
+  it("恢复时保留合法 mode，非法值不落盘", () => {
+    expect(normalizeTask(makeTask({ mode: "coding" }))?.mode).toBe("coding");
+    expect(normalizeTask(makeTask())?.mode).toBeUndefined();
+    expect(normalizeTask({ ...makeTask(), mode: "乱写" })?.mode).toBeUndefined();
+  });
+});
 
 describe("autoTaskTitle —— 对标原版「产品周报撰写」", () => {
   it("实测原例：从长句归纳出短标题并补动词后缀", () => {

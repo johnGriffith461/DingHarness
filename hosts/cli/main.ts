@@ -36,6 +36,7 @@ import { replPrecondition, runRepl } from "./repl";
 import { flag, flagAll, KNOWN_FLAGS, parseArgv, parseIntFlagValue, type Parsed } from "./args";
 import { AGENT_SPECS } from "../../engine/runtime/agents";
 import { loadProjectContext, renderProjectContext } from "../../engine/runtime/projectContext";
+import { CODING_MODE_RULES } from "../../shared/codingPrompt";
 
 /**
  * `ding` —— **CLI 宿主**（Phase 2）。
@@ -480,7 +481,8 @@ function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
   }
   return [
     ...(projectBlock ? [projectBlock] : []),
-    "你是 Ding Harness 无头命令行宿主里的一个 agent。",
+    CODING_MODE_RULES,
+    "你是 Ding Harness 无头命令行宿主里的一个 agent（CLI 恒为编码场景）。",
     `你能操作的目录（白名单）：${dirs.join("、")}。白名单之外的路径一律碰不到，不要试。`,
     "工具有：list_files / list_dir / read_file / write_file / edit_file / search_files / run_command / spawn_agent。",
     mode === "全部允许"

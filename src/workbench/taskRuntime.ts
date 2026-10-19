@@ -25,7 +25,7 @@
 import type { ChatMessage, ShellBridge } from "@shared/ipc";
 import type { ProjectContextResult } from "@shared/projectWire";
 import { streamChat, completeOnce } from "../ai/aiClient";
-import { buildFollowUpPrompt, parseAskReply } from "./agent";
+import { buildCodingFollowUpPrompt, buildFollowUpPrompt, parseAskReply } from "./agent";
 import { artifactFileName, extractArtifacts, type Artifact } from "./artifact";
 import { enabledPromptBlock } from "@shared/library";
 import { fallbackNote } from "@shared/settings";
@@ -70,6 +70,7 @@ import {
   cleanTitle,
   current,
   makeStepId,
+  taskMode,
   upsertTask,
   type TaskStep,
   type WorkTask,
@@ -432,7 +433,8 @@ export async function answerTurn(
     }
   }
 
-  const { system: baseSystem, user } = buildFollowUpPrompt(text, truncated, material);
+  const followUp = taskMode(task) === "coding" ? buildCodingFollowUpPrompt : buildFollowUpPrompt;
+  const { system: baseSystem, user } = followUp(text, truncated, material);
   const system = contextIndex
     ? withContextIndex(baseSystem, renderContextIndex(contextIndex))
     : withSummary(baseSystem, summary);

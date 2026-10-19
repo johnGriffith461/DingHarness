@@ -101,6 +101,8 @@ export function normalizeTask(raw: unknown): WorkTask | null {
   const contextIndex = normalizeContextIndex(t.contextIndex);
   return {
     id: t.id,
+    /* A3：只认这两个值；旧盘没有该字段就不带（`taskMode` 会按 office 读） */
+    ...(t.mode === "coding" || t.mode === "office" ? { mode: t.mode } : {}),
     title: typeof t.title === "string" && t.title ? t.title : "未命名任务",
     brief: typeof t.brief === "string" ? t.brief : "",
     createdAt: typeof t.createdAt === "number" ? t.createdAt : 0,

@@ -1,6 +1,7 @@
 import { acceptQuestions, type TaskOption, type TaskQuestion } from "./task";
 import { ARTIFACT_CLOSE, ARTIFACT_OPEN } from "./artifact";
 import { truncatedNote } from "./history";
+import { CODING_MODE_RULES } from "@shared/codingPrompt";
 
 /**
  * 任务智能体的两段式流程（阶段 10）。
@@ -45,18 +46,9 @@ export function withMaterial(user: string, material?: string): string {
 export const ASK_OPEN = "<ask>";
 export const ASK_CLOSE = "</ask>";
 
-/** 第 1 段：判断要不要提问。 */
-export function buildAskPrompt(
-  userMessage: string,
-  background: string[] = [],
-  material?: string,
-): { system: string; user: string } {
-  const system = [
-    "你是一个任务助手。用户给你一句话，你要判断：**只凭这句话，能不能直接把活干好**。",
-    "",
-    "如果能（例如用户已经把关键信息都给全了），就直接干活，正常输出结果。",
-    "如果不能（缺少对象、范围、格式、目标等关键信息），就在给用户的说明之后，",
-    `追加一段提问块，格式严格要求如下：`,
+/** 提问块本身（格式 + 五条规矩）——两套身份共用，避免两处漂移。 */
+function askBlock(): string[] {
+  return [
     "",
     `${ASK_OPEN}`,
     "问题一？",
@@ -73,6 +65,21 @@ export function buildAskPrompt(
     "3. 选项的补充说明写清「选了之后你会怎么做」，一行以内。",
     "4. 给用户的说明要自然、简短，说清你为什么要问。",
     "5. 不要把提问块放进代码块里，也不要加别的前后缀。",
+  ];
+}
+
+/** 第 1 段：判断要不要提问。 */
+export function buildAskPrompt(
+  userMessage: string,
+  background: string[] = [],
+  material?: string,
+): { system: string; user: string } {
+  const system = [
+    "你是一个任务助手。用户给你一句话，你要判断：**只凭这句话，能不能直接把活干好**。",
+    "",
+    "如果能（例如用户已经把关键信息都给全了），就直接干活，正常输出结果。",
+    "如果不能（缺少对象、范围、格式、目标等关键信息），就在给用户的说明之后，追加一段提问块，格式严格要求如下：",
+    ...askBlock(),
   ].join("\n");
 
   const backgroundBlock = background.length
@@ -145,6 +152,76 @@ export function buildFollowUpPrompt(
     "前面已经问过、答过、给过的内容不要重复问；不确定的事直接说不确定，不要猜。",
     "",
     ARTIFACT_RULES,
+    ...(truncated ? ["", truncatedNote()] : []),
+  ].join("\n");
+  return { system, user: withMaterial(userMessage, material) };
+}
+
+/* ------------------------------------------------------------------ *
+ * 编码模式（A3，2026-10-19）
+ *
+ * 为什么另起一套：上面三句的身份是"任务助手 + 产物块"，那是做周报/PPT 的
+ * 心智。用户在编码任务里说"修一下这个失败测试"，模型却交一份《修复说明》，
+ * 根因不是模型笨，是系统提示词告诉它"直接给成品"。
+ *
+ * 这一套只在 `TaskMode = "coding"` 时使用；办公那套一个字不动。
+ * ------------------------------------------------------------------ */
+
+/** 任务的两套身份（`TaskMode` 住 `task.ts`；旧任务没有该字段时按 `office` 读）。 */
+
+/**
+ * 编码 agent 的工作方式。文本住 `shared/codingPrompt.ts` —— CLI 宿主用的是同一份，
+ * 两处各写一份会漂成"桌面跑测试、CLI 不跑"。
+ */
+const CODING_RULES = CODING_MODE_RULES;
+
+/** 产物规则在编码模式里**降级**：只有用户明确要成品时才用。 */
+const CODING_ARTIFACT_NOTE = [
+  "产物说明（仅当用户明确要文档 / PPT / 表格时）：",
+  "把成品放进产物块，格式与办公模式一致；不要在编码任务里默认输出说明文档。",
+].join("\n");
+
+/** 编码第一段：信息不够才问；够就直接动手（读文件、改代码）。 */
+export function buildCodingAskPrompt(
+  userMessage: string,
+  background: string[] = [],
+  material?: string,
+): { system: string; user: string } {
+  const system = [
+    CODING_RULES,
+    "",
+    "用户给你一个任务。先判断：只凭这句话，能不能直接在仓库里动手。",
+    "能（关键信息够了）就直接干；不能（缺对象、路径、目标或验收标准）才问。",
+    ...askBlock(),
+  ].join("\n");
+  const backgroundBlock = background.length
+    ? `\n\n【已经问过并得到回答的背景】\n${background.map((b, i) => `${i + 1}. ${b}`).join("\n")}`
+    : "";
+  return { system, user: withMaterial(`${userMessage}${backgroundBlock}`, material) };
+}
+
+/** 编码第二段：拿着回答干活。 */
+export function buildCodingDoPrompt(
+  userMessage: string,
+  answers: string[],
+  material?: string,
+): { system: string; user: string } {
+  const system = [CODING_RULES, "", CODING_ARTIFACT_NOTE].join("\n");
+  const answerBlock = answers.map((a, i) => `${i + 1}. ${a}`).join("\n");
+  return { system, user: withMaterial(`任务：${userMessage}\n\n我提供的关键信息：\n${answerBlock}`, material) };
+}
+
+/** 编码第三段：同一段对话里接着干。 */
+export function buildCodingFollowUpPrompt(
+  userMessage: string,
+  truncated = false,
+  material?: string,
+): { system: string; user: string } {
+  const system = [
+    CODING_RULES,
+    "",
+    "用户在与你的**同一段对话**里继续说了一句，请接着上文干活。",
+    "前面已经做过的事不要重复；不确定的事直接说不确定，不要猜。",
     ...(truncated ? ["", truncatedNote()] : []),
   ].join("\n");
   return { system, user: withMaterial(userMessage, material) };
