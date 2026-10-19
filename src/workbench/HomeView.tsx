@@ -10,6 +10,7 @@ import { HOME_MODES, HOME_TITLE, splitSuggestion } from "./copy";
 import { suggestionIcon } from "./suggestionIcon";
 
 import { Composer } from "./Composer";
+import { NavCollapseButton } from "./NavCollapseButton";
 
 export function HomeView() {
   const suggestions = useWorkbenchStore((s) => s.suggestions);
@@ -19,6 +20,15 @@ export function HomeView() {
 
   return (
     <section className="wb-home" data-testid="wb-home">
+      {/*
+        ⚠️ 2026-10-19（主人实测撞到的死路）：左栏收起后，首页**没有**展开入口。
+        别的页面都把 `NavCollapseButton` 挂在页头，唯独首页没有 —— 而收起状态是
+        持久化的，于是"在任务页点了收起 → 回到首页"就再也打不开左栏（只剩命令面板里那条）。
+        这里补上同一个组件（一处实现，文案与图标不另写一份）。
+      */}
+      <div className="wb-home-tools">
+        <NavCollapseButton />
+      </div>
       <div className="wb-home-scroll">
         <div className="wb-blob" aria-hidden />
         {/*

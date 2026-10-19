@@ -185,6 +185,7 @@ describe("P192：左栏那颗开关必须带字，且与右栏同一形态", () 
 describe("P193：那颗按钮的页面清单要与实际引用点一致", () => {
   /** 渲染这颗按钮的页面 → 它在注释里的中文名（新页面接上来时必须一起补，见下面那条断言）。 */
   const PAGE_OF: Record<string, string> = {
+    "HomeView.tsx": "首页",
     "PhonePage.tsx": "手机遥控电脑",
     "PluginsPage.tsx": "插件",
     "ScheduledPage.tsx": "定时任务",

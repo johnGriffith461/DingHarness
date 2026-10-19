@@ -46,9 +46,27 @@ const clickToggle = async () => {
   await sleep(350);
 };
 
+/*
+ * 起始状态可能是**收起**（这个数据目录跨轮复用，收起状态会持久化）。
+ * 用首页那颗按钮展开 —— 这本身也顺带验了"收起态进入首页仍有回程"。
+ */
+{
+  const initial = await state();
+  if (initial.collapsedClass) {
+    if (!initial.btnFound || !initial.btnVisible) {
+      bad.push("启动时左栏是收起的，而首页没有展开入口 —— 用户一进来就是死路");
+    } else {
+      await clickToggle();
+      const opened = await state();
+      if (opened.collapsedClass) bad.push("启动时左栏是收起的，点「展开」没打开");
+      note(`启动态为收起：首页「展开」有效（宽 ${opened.navWidth}）`);
+    }
+  }
+}
+
 /* ---------- 1) 各页面的那颗按钮都真的能用 ---------- */
 
-// 几个页面（首页的头部没有这颗；插件/定时任务/手机遥控/任务视图 + 任务中心）
+// 几个页面（插件/定时任务/手机遥控/任务视图 + 任务中心；首页左上角那颗也挂上了，见第 3 段）
 // ⚠️ 2026-10-16：「云盘」整页拆掉了，所以这一格少一个页面。
 const pages = [
   ["scheduled", "定时任务"],
@@ -107,7 +125,35 @@ if ((await threadsEntry.count()) > 0) {
   note("（没找到任务中心入口，这一条跳过 —— 它用的是同一个组件）");
 }
 
-/* ---------- 3) 反复开合 10 次 ---------- */
+/* ---------- 3) ⭐ 首页：收起状态持久化之后仍然能展开（2026-10-19 主人实测的死路） ---------- */
+/*
+ * 缺陷形状：收起状态写进设置、下次启动仍是收起；而首页原来**没有**那颗按钮 ——
+ * 用户在任务页点了「收起」，回到首页就再也打不开左栏（截图实测：整条左栏消失）。
+ * 判据：收起状态下停在首页，必须看得到「展开左侧栏」并且点一下真的把左栏叫回来。
+ */
+/* 先确保在首页、且左栏是展开的（上一段结束时状态可能不是首页） */
+{
+  const now = await state();
+  if (now.collapsedClass) await clickToggle();
+  await page.locator('[data-testid="wb-nav-home"]').click();
+  await sleep(600);
+}
+await clickToggle(); // 在首页点「收起」
+await sleep(300);
+const homeCollapsed = await state();
+if (!homeCollapsed.btnFound || !homeCollapsed.btnVisible) {
+  bad.push("首页在左栏收起时没有展开入口 —— 左栏再也打不开（死路）");
+} else {
+  if (homeCollapsed.btnLabel !== "展开左侧栏") bad.push(`首页那颗按钮名没跟着状态变：${homeCollapsed.btnLabel}`);
+  await clickToggle();
+  const homeOpen = await state();
+  if (homeOpen.collapsedClass || homeOpen.navWidth === 0) {
+    bad.push(`首页点「展开」之后左栏没回来（宽 ${homeOpen.navWidth}）`);
+  }
+  note(`首页（收起态进入）：按钮仍在（${homeCollapsed.btnLabel}）→ 展开 → 宽 ${homeOpen.navWidth}`);
+}
+
+/* ---------- 4) 反复开合 10 次 ---------- */
 
 await page.locator('[data-testid="wb-nav-scheduled"]').click();
 await sleep(600);
@@ -128,7 +174,7 @@ if (bad.length) {
   console.error("✗ " + bad.join("；"));
   process.exitCode = 1;
 } else {
-  console.log("✓ 左栏折叠：四个页面 + 任务中心都能收能开 / 收起后按钮仍在（标题跟着变）/ 往返 10 次一致");
+  console.log("✓ 左栏折叠：各页面 + 任务中心 + **首页（收起态）** 都能收能开 / 收起后按钮仍在（标题跟着变）/ 往返 10 次一致");
 }
 
 await browser.close();
