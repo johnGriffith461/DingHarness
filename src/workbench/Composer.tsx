@@ -185,12 +185,14 @@ export function Composer({
    */
   const popToken = useRef(0);
   /*
-   * Ctrl+M：**只唤起模型菜单**（ZCode 的规矩：不按顺序循环切换 —— 换模型必须由用户在菜单里明确选）。
+   * Ctrl+M / Ctrl+L：**只唤起模型菜单**（ZCode 的规矩：不按顺序循环切换 —— 换模型必须由用户在菜单里明确选）。
    * 焦点在输入框里也照样唤起（这条快捷键本来就是给键盘用户用的）。
+   * Ctrl+L 是 B4 补的别名（多数编辑器/终端里它也是"找东西"的习惯键位）。
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || e.key.toLowerCase() !== "m") return;
+      const key = e.key.toLowerCase();
+      if (!e.ctrlKey || (key !== "m" && key !== "l")) return;
       e.preventDefault();
       popToken.current += 1;
       setOpenPop((cur) => (cur === "model" ? null : "model"));
@@ -864,6 +866,9 @@ export function Composer({
         </div>
       ) : null}
       <textarea
+        ref={inputRef}
+        className="wb-composer-input"
+        data-testid="wb-composer-input"
         rows={2}
         placeholder={placeholder}
         value={text}
@@ -897,6 +902,14 @@ export function Composer({
           setSlashTrigger(null);
         }}
         onKeyDown={(e) => {
+          /* B4：Shift+Tab 插入"先给计划、别改文件"的开场（与 /plan 同一句话） */
+          if (e.key === "Tab" && e.shiftKey) {
+            e.preventDefault();
+            const planPreamble =
+              "先只做调研并给出计划：目标、范围、步骤、验证方式、风险。不要改任何文件，等我确认后再执行。\n\n";
+            if (!text.startsWith(planPreamble)) setText(planPreamble + text);
+            return;
+          }
           // 命令菜单：Esc 收起、↑↓ 选择、Enter 执行（别顺手发出去）
           if (slashTrigger) {
             if (e.key === "Escape") {

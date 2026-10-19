@@ -62,6 +62,8 @@ describe("其它实测文案", () => {
   it("首页问候与输入区占位符", () => {
     expect(HOME_GREETING).toBe("今天有什么工作要处理?");
     expect(COMPOSER_PLACEHOLDER).toContain("发消息或创建任务");
+    expect(COMPOSER_PLACEHOLDER).toContain("@ 引用");
+    expect(COMPOSER_PLACEHOLDER).toContain("/ 命令");
     expect(SCHEDULE_COMPOSER_PLACEHOLDER).toBe("给 Ding Harness 安排任务");
   });
 

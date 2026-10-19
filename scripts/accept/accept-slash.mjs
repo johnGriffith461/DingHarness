@@ -89,6 +89,27 @@ await step("/help 执行后输入框清空", async () => {
   return "已执行";
 });
 
+await step("B4：Ctrl+L 打开模型菜单", async () => {
+  await input.click();
+  await input.press("Control+l");
+  await sleep(350);
+  if (!(await page.locator('[data-testid="wb-model-pop"]').count())) throw new Error("模型菜单没打开");
+  await input.press("Control+l");
+  await sleep(250);
+  if (await page.locator('[data-testid="wb-model-pop"]').count()) throw new Error("再按一次没关掉");
+  return "开/关都生效";
+});
+
+await step("B4：Shift+Tab 插入计划开场", async () => {
+  await input.fill("");
+  await input.click();
+  await input.press("Shift+Tab");
+  await sleep(250);
+  const value = await input.inputValue();
+  if (!value.startsWith("先只做调研并给出计划")) throw new Error(`正文是 ${JSON.stringify(value)}`);
+  return "已插入";
+});
+
 if (bad.length) {
   console.log(`\nB2 验收失败 ${bad.length}/${count}：`);
   for (const item of bad) console.log(`  - ${item}`);
