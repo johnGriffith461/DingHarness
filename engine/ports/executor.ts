@@ -78,6 +78,21 @@ export type ExecutorContext = {
    * 证据校验由主循环用自己那份账本兜底。
    */
   turnEvidence?: TurnEvidence;
+  /**
+   * A-03：**就地审批**（宿主的出口）。
+   *
+   * `decideCall` 判出 `ask` 之后，内核不知道"人怎么回答" —— 桌面把调用挂起、
+   * 等界面点批准；CLI 没有界面，只能当场问终端。判定仍然只有一份（policy），
+   * 这里给的是"拿到人话之后怎么继续"的那一小段。
+   *
+   * 省略 = 保持老行为（返回 `{ pending: true }`，桌面路径一字不变）。
+   */
+  approve?: (req: {
+    name: string;
+    input: unknown;
+    why?: string;
+    commandRisk?: unknown;
+  }) => Promise<"allow" | "allow-always" | "deny">;
 };
 
 /**

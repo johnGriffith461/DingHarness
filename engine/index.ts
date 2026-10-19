@@ -105,6 +105,12 @@ export type EnginePorts = {
   rules?: readonly PermissionRule[];
   /** 只要内置里的这些（宿主能力不同：CLI 登记不了落到桌面界面 store 上的工具）。省略 = 全部。 */
   include?: readonly string[];
+  /**
+   * A-03：**就地审批**（CLI 宿主注入；桌面不注入）。
+   *
+   * 省略 = 保持老行为：`ask` 返回 `{ pending: true }`，等界面点批准。
+   */
+  approve?: ExecutorContext["approve"];
 };
 
 /** 跑一轮的请求。 */
@@ -272,6 +278,15 @@ export type EngineRunResult = {
    * （记录写不进去是"记录"的事，不是这一轮的事）。
    */
   recordErrors?: string[];
+  /**
+   * A-03：这一轮停在**待审批**上（谁、哪一个调用）。
+   *
+   * 与 `state === "waiting_for_confirmation"` 是同一条事实的两种说法：状态是给日志/恢复用的，
+   * 这个字段是给**宿主的出口决定**用的（CLI 据此退出码 6）。
+   */
+  awaitingApproval?: { toolCallId: string; name: string };
+  /** D1：这一轮有没有成功写过文件（CLI 的验证闭环用它决定要不要跑）。 */
+  wroteFiles?: boolean;
 };
 
 export type Engine = {
@@ -492,6 +507,8 @@ export function createEngine(ports: EnginePorts): Engine {
         ...(request.sessionId ? { sessionId: request.sessionId } : {}),
         /* C3：拦住一次调用时的默认"待谁批" = 这段会话归谁（缺省仍是本机单用户） */
         ...(request.ownerActor ? { owner: request.ownerActor.id } : {}),
+        /* A-03：CLI 注入的就地审批；桌面不注入 → 仍是 pending 载荷 */
+        ...(ports.approve ? { approve: ports.approve } : {}),
         turnEvidence,
         onDelegation: (event) => {
           const turnEvent: TurnEvent = { type: "delegation", ...event };
@@ -646,6 +663,8 @@ export function createEngine(ports: EnginePorts): Engine {
         events,
         records,
         requestId,
+        ...(outcome.awaitingApproval ? { awaitingApproval: outcome.awaitingApproval } : {}),
+        ...(outcome.wroteFiles ? { wroteFiles: true } : {}),
         ...(recordErrors.length ? { recordErrors } : {}),
       };
     },

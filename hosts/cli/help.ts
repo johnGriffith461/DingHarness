@@ -87,6 +87,12 @@ export function renderHelp(devMode: boolean, dataDir: string): string {
        */
       `数据目录：${dataDir}（DH_DATA_DIR 可覆盖；桌面的 DSH_CANVAS_DATA_DIR 也认）`,
       "",
+      /*
+       * A-03：退出码表。脚本靠它分支，所以要写在**用户能看见的那一屏**上，
+       * 不能只活在源码里。
+       */
+      "退出码：0 成功 / 1 失败 / 2 用法错误 / 3 没有可用 provider / 4 预算暂停 / 6 等待人工确认",
+      "",
   ].join("\n");
 }
 

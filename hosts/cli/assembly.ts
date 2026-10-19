@@ -1,6 +1,6 @@
 import { createEngine, type Engine } from "../../engine/index";
 import { createSqliteSessionStore, type OpenOptions } from "../../engine/adapters/sqliteStore";
-import type { ToolExecutor } from "../../engine/ports/executor";
+import type { ExecutorContext, ToolExecutor } from "../../engine/ports/executor";
 import type { SessionStore } from "../../engine/ports/store";
 import { buildToolSet, createToolRegistry, type ToolRegistry } from "../../engine/runtime/registry";
 import type { MakeTools } from "../../engine/runtime/team";
@@ -97,6 +97,11 @@ export async function buildEngine(
   dirs: readonly string[],
   dataDir: string,
   open: OpenOptions = {},
+  /**
+   * A-03：宿主额外能力。目前只有**就地审批**（CLI 在终端里问人）。
+   * 桌面不经过这里，也就拿不到它 —— pending 那条路不会回归。
+   */
+  extras: { approve?: ExecutorContext["approve"] } = {},
 ): Promise<BuiltEngine> {
   const store = createSqliteSessionStore(dataDir, "sessions.db", {}, open);
   /*
@@ -149,7 +154,14 @@ export async function buildEngine(
       registry,
       mode,
       executor,
-      ctx: { mode, provider, depth, ...(signal ? { signal } : {}) },
+      ctx: {
+        mode,
+        provider,
+        depth,
+        ...(signal ? { signal } : {}),
+        /* A-03：子智能体里的 `ask` 也走同一份就地审批（否则它同样只会挂起） */
+        ...(extras.approve ? { approve: extras.approve } : {}),
+      },
       ...(only ? { only } : {}),
       spill,
       ...(rules.length ? { rules } : {}),
@@ -168,6 +180,7 @@ export async function buildEngine(
     hooks: pluginHooks,
     spill,
     ...(rules.length ? { rules } : {}),
+    ...(extras.approve ? { approve: extras.approve } : {}),
   });
   return { engine, close: () => store.close(), plugins, executor, store, makeTools };
 }

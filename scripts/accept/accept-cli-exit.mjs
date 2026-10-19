@@ -136,8 +136,8 @@ const baseArgs = [
 const cases = [
   { name: "成功（全部允许）", behaviour: "write", extra: ["--mode", "全部允许"], expect: [0] },
   { name: "失败（provider 500）", behaviour: "fail", extra: ["--mode", "全部允许"], expect: [1] },
-  /* A-03 之后这里是 6；这一阶段先只要求"不崩"（退出码 0 或 6 都收） */
-  { name: "待确认（按需确认）", behaviour: "write", extra: [], expect: [0, 6] },
+  /* A-03 之后待确认 = 6（脚本能把它与"做完了"区分开） */
+  { name: "待确认（按需确认）", behaviour: "write", extra: [], expect: [6] },
 ];
 
 const failures = [];

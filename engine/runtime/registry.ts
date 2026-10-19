@@ -366,19 +366,40 @@ export function buildToolSet(input: {
         });
         if (call.verdict === "ask") {
           /*
-           * 「待谁批」（C3，V5-1 3.7a）：**拦下那一刻**就写在载荷里 ——
-           * 默认 = 这一段会话的 owner（本机单用户 = local；执行上下文里带着它）。
-           * 读的时候不现编（见 `engine/core/gates.ts` 的 `approversOf`）。
+           * A-03：宿主给了 `approve` 就**当场问**（CLI 的就地审批）。
+           *
+           * 判定仍然是这一处（policy/规则层）；这里只是决定"人工答案从哪来"。
+           * deny 必须走**抛错**那条路（与 `decideForMember` 的 deny 同一条）：
+           * 投影会算成 `ok=false`、留痕写"失败"、模型拿到人话。
+           * 返回一个正常载荷会被当成"工具跑成功了"——那是最坏的一种谎。
+           *
+           * `allow-always` 的记账在宿主（引擎不碰存储）；对内核来说它与 `allow`
+           * 只差"下一次还会不会问"，而那是宿主下一个请求才需要知道的事。
            */
-          return {
-            pending: true,
-            notice: pendingApprovalNotice(entry.name, mode, call.why),
-            approvers: [ctx.owner?.trim() || DEFAULT_APPROVER],
-            /* 风险与规则命中一起回注：审批卡片与日志都要能说出"为什么问这一次" */
-            ...(call.command ? { commandRisk: call.command } : {}),
-            ...(call.rule !== "none" ? { rule: call.rule } : {}),
-            ...(call.why ? { why: call.why } : {}),
-          };
+          if (ctx.approve) {
+            const verdict = await ctx.approve({
+              name: entry.name,
+              input: value,
+              ...(call.why ? { why: call.why } : {}),
+              ...(call.command ? { commandRisk: call.command } : {}),
+            });
+            if (verdict === "deny") throw new Error(`用户拒绝了这次调用：${entry.name}`);
+          } else {
+            /*
+             * 「待谁批」（C3，V5-1 3.7a）：**拦下那一刻**就写在载荷里 ——
+             * 默认 = 这一段会话的 owner（本机单用户 = local；执行上下文里带着它）。
+             * 读的时候不现编（见 `engine/core/gates.ts` 的 `approversOf`）。
+             */
+            return {
+              pending: true,
+              notice: pendingApprovalNotice(entry.name, mode, call.why),
+              approvers: [ctx.owner?.trim() || DEFAULT_APPROVER],
+              /* 风险与规则命中一起回注：审批卡片与日志都要能说出"为什么问这一次" */
+              ...(call.command ? { commandRisk: call.command } : {}),
+              ...(call.rule !== "none" ? { rule: call.rule } : {}),
+              ...(call.why ? { why: call.why } : {}),
+            };
+          }
         }
         /*
          * 钩子（Phase 8.3）：`tool:before` / `tool:after`。

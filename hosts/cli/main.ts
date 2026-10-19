@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { createEngine, type Engine, type EngineRunRequest } from "../../engine/index";
+import type { ExecutorContext } from "../../engine/ports/executor";
 import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
@@ -29,6 +30,8 @@ import { drainSteer } from "../../engine/runtime/inbox";
 /* 只借两个纯路径助手（warnDesktopRoot 是同步判定，不能懒加载） */
 import { desktopDataDir, resolveBackupDataDir } from "./cmdBackup";
 import { buildEngine as buildEngineIn } from "./assembly";
+import { createCliApprover } from "./approval";
+import { exitCodeOf, EXIT_AWAITING_APPROVAL } from "./exitCode";
 import { renderRecords } from "./renderRecords";
 import { KNOWN_COMMANDS, cmdCommandHelp, cmdHelp } from "./help";
 import { ensureConfigured } from "./wizard";
@@ -163,12 +166,15 @@ function catalogRows(providerId?: string): ModelCapability[] {
  * 所以先给执行体一个**取值函数**，等注册表建好再把它填上 —— 环在装配期解开，
  * 运行期没有 null 检查。
  */
-async function buildEngine(dirs: readonly string[]): Promise<{ engine: Engine; close: () => void; plugins: string[] }> {
+async function buildEngine(
+  dirs: readonly string[],
+  approve?: ExecutorContext["approve"],
+): Promise<{ engine: Engine; close: () => void; plugins: string[] }> {
   /*
    * 装配在 `./assembly.ts`（Phase 10 拆出来的）—— 评测器要**用同一份装配**跑，
    * 自己拼一套端口就等于绕开产品那条路。这里只负责把本宿主的数据目录传进去。
    */
-  return buildEngineIn(dirs, dataDir());
+  return buildEngineIn(dirs, dataDir(), {}, approve ? { approve } : {});
 }
 
 /**
@@ -272,7 +278,18 @@ async function cmdRun(p: Parsed): Promise<number> {
     return 0;
   }
 
-  const { engine, close, plugins } = await buildEngine(dirs);
+  /*
+   * A-03：CLI 的就地审批。
+   *
+   * 问题写 **stderr**（stdout 是结果，`--json` 时必须保持可解析）。
+   *
+   * 只有真终端才注入：无头环境（管道 / CI）没有"人"可问，这时**不注入**，
+   * 让内核照常返回 `{pending:true}` → 宿主的 `awaitingApproval` 分支以退出码 6
+   * 收尾并打印下一步。把无头当成"用户拒绝"会把它伪装成一次正常结束。
+   */
+  const interactive = Boolean(process.stdin.isTTY);
+  const approve = interactive ? createCliApprover({ input: process.stdin, output: process.stderr, mode }) : undefined;
+  const { engine, close, plugins } = await buildEngine(dirs, approve);
   for (const problem of plugins) process.stderr.write(`[plugin] ${problem}\n`);
 
   /* T0 模型能力表单：声明过就按声明来（解析与请求组装在 ./runInputs.ts） */
@@ -348,6 +365,9 @@ async function cmdRun(p: Parsed): Promise<number> {
           text: view?.text ?? "",
           traces: (view?.traces ?? []).map((t) => ({ name: t.name, ok: t.ok, pending: t.pending === true, line: t.line })),
           ...(view?.usage ? { usage: view.usage } : {}),
+          /* A-03：脚本要能看见"停在谁身上"和"有没有改过文件"（旧字段一个不动） */
+          awaitingApproval: outcome.awaitingApproval ?? null,
+          wroteFiles: outcome.wroteFiles === true,
         },
         null,
         2,
@@ -358,6 +378,19 @@ async function cmdRun(p: Parsed): Promise<number> {
   }
   close();
 
+  /*
+   * A-03：停在待确认上既不是成功也不是失败 —— 退出码单独给 6，
+   * 让脚本能把"它做完了"与"它停下来等人"分开（原来两者都是 0）。
+   */
+  if (outcome.awaitingApproval) {
+    process.stderr.write(
+      `\n这一轮停在待确认上（没有执行）：${outcome.awaitingApproval.name}\n` +
+        (interactive
+          ? `在终端里重跑同一条命令即可当场批准；或加 --mode allow 直接执行。\n`
+          : `无头环境无法确认。要么加 --mode allow（会直接执行），要么在终端里跑同一条命令。\n`),
+    );
+    return EXIT_AWAITING_APPROVAL;
+  }
   if (!outcome.ok && !outcome.aborted) {
     /*
      * 预算暂停（U01）不是"失败"：它是用户设的上限到了，加预算就能继续。
@@ -365,13 +398,13 @@ async function cmdRun(p: Parsed): Promise<number> {
      */
     if (outcome.state === "paused") {
       process.stderr.write(`\n\x1b[33m已暂停：${outcome.error ?? "达到预算上限"}\x1b[0m\n`);
-      return 4;
+      return exitCodeOf(outcome);
     }
     process.stderr.write(`\n\x1b[31m没跑完：${outcome.error ?? "未知原因"}\x1b[0m\n`);
-    return 1;
+    return exitCodeOf(outcome);
   }
   process.stdout.write(`\n\x1b[2m会话已存：${sessionId}（ding sessions 可列出，ding record ${sessionId} 可录快照）\x1b[0m\n`);
-  return 0;
+  return exitCodeOf(outcome);
 }
 
 /**
