@@ -129,6 +129,8 @@ const RECORDS_DIR = ".verify";
  *   · `fossil`        化石：早就与产品脱节（打 dev server / 硬编码本机路径），要么重写、要么删
  */
 const NOT_IN_BATCH = {
+  "accept-harness.mjs": { kind: "needs-model", why: "真 harness 端到端：陌生仓库修失败测试，判据是文件 diff + 测试退出码。假通道只能证明脚本会照做，正是这条要排除的。手动跑：node scripts/accept/accept-harness.mjs --yes-spend" },
+  "accept-harness-multistep.mjs": { kind: "needs-model", why: "真 harness 多步：要求 todo_write / 新文件 / 测试 / finish 都有真实证据。手动跑：node scripts/accept/accept-harness-multistep.mjs --yes-spend" },
   /*
    * ⚠️ 2026-10-16（A20 收尾）：图像那四条（`accept-imagegen` / `accept-image-actions` /
    * `accept-imageedit` / `accept-size-spec`）**已从这张名单里划掉、收进 CASES**。

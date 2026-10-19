@@ -27,6 +27,8 @@
     "typecheck": "tsc --noEmit",
     "vendor:models": "node scripts/vendor-models.mjs",
     "verify:accept": "node scripts/verify-acceptances.mjs",
+    "accept:harness": "node scripts/accept/accept-harness.mjs",
+    "accept:harness:multi": "node scripts/accept/accept-harness-multistep.mjs",
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
     "verify:packaged": "node scripts/verify-packaged.mjs",
     "perf:budget": "tsx scripts/perf-budget.ts",
