@@ -33,10 +33,20 @@ export function contextMeterOf(input: {
   /** 没有 usage 时的估算量（通常来自历史消息字数）。 */
   estimatedTokens: number;
   now?: number;
+  /**
+   * **用户声明模型的保留额度**（`models.json` 里那条 exact 规则的 `keepTokens`）。
+   *
+   * T-07：目录表里没有的模型（用户自己声明的，例如 1M 窗口的中转模型）
+   * 原来会被当成"未登记 → 20k"，界面显示成 221% 的红条。
+   * 声明过就用声明值 —— 用户声明的就是事实。
+   */
+  declaredKeepTokens?: number;
 }): ContextMeter {
-  const limit = keepTokensFor(input.modelId, input.now, input.mode);
+  const declared = input.declaredKeepTokens;
+  const limit =
+    typeof declared === "number" && declared > 0 ? declared : keepTokensFor(input.modelId, input.now, input.mode);
   const budget = budgetOf(input.modelId, input.now);
-  const unknownWindow = !budget.registered;
+  const unknownWindow = typeof declared === "number" && declared > 0 ? false : !budget.registered;
   const providerUsed =
     input.usage &&
     [input.usage.inputTokens, input.usage.cacheReadTokens, input.usage.cacheWriteTokens].some(
@@ -67,4 +77,17 @@ export function formatMeter(meter: ContextMeter): string {
   };
   const head = `${format(meter.used)} / ${format(meter.limit)}（${Math.round(meter.percent)}%）`;
   return meter.unknownWindow ? `窗口未知 · ${head}` : head;
+}
+
+/**
+ * 窗口额度的人话（T-07 首页用）。
+ *
+ * 只写一个数，**不写分母/百分比** —— 首页说"模型窗口 966k 可用"，
+ * 而不是"966k / 966k（100%）"（后者读起来像已经用满了）。
+ */
+export function formatWindowLimit(limit: number): string {
+  const n = Math.max(0, Math.round(limit));
+  if (n < 1000) return String(n);
+  const k = n / 1000;
+  return `${n >= 100_000 || Number.isInteger(k) ? Math.round(k) : k.toFixed(1)}k`;
 }

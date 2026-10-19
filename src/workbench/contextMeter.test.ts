@@ -82,3 +82,25 @@ describe("formatMeter", () => {
     );
   });
 });
+
+/*
+ * T-07：首页计量**不回显上一会话**，且用户声明的模型按声明窗口算。
+ */
+describe("T-07 首页口径与声明窗口", () => {
+  it("首页：不看上一段任务的用量（estimatedTokens=0 时 used=0）", () => {
+    const meter = contextMeterOf({ modelId: "deepseek-flash", estimatedTokens: 0 });
+    expect(meter.used).toBe(0);
+    expect(meter.source).toBe("estimate");
+  });
+
+  it("声明过保留额度的模型：分母用声明值，且不再标「窗口未知」", () => {
+    const meter = contextMeterOf({ modelId: "user-declared-1m", estimatedTokens: 1000, declaredKeepTokens: 966_000 });
+    expect(meter.limit).toBe(966_000);
+    expect(meter.unknownWindow).toBe(false);
+  });
+
+  it("没声明时行为不变（未登记 → 20k + 未知窗口）", () => {
+    const meter = contextMeterOf({ modelId: "user-declared-1m", estimatedTokens: 1000 });
+    expect(meter.unknownWindow).toBe(true);
+  });
+});

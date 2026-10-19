@@ -101,8 +101,8 @@ try {
   /* 上下文表：按窗口推导的预算（不是"未记录"） */
   const meter = page.locator('[data-testid="wb-context-meter"]');
   out.meterText = (await meter.count()) ? (await meter.innerText()).trim() : "";
-  /* 分子可能不到 1k（新会话 0），所以只要求分母带 k/M：`0 / 966k（0%）` */
-  out.meterHasBudget = /\d+\s*\/\s*\d+(k|M)/.test(out.meterText);
+  /* T-07：首页只说窗口额度（`模型窗口 966k token 可用`），不再显示上一段会话的用量 */
+  out.meterHasBudget = /模型窗口\s*\d+(\.\d+)?(k|M)\s*token\s*可用/.test(out.meterText);
   out.meterNotUnknown = !out.meterText.includes("未记录");
 
   /* 首屏默认身份：编码 */

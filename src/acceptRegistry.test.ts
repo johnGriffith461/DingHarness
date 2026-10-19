@@ -101,6 +101,9 @@ const BARE_FIXTURES = [
    * settings.json 用的是标准信封（`{__schema:1,data}`）。
    */
   "accept-approvals-audit-real.mjs",
+  /* 同上：这两条也要预置 models.json（自带 {version,rules} 格式） */
+  "accept-markdown-real.mjs",
+  "accept-trust-ui.mjs",
   "accept-approve.mjs",
   "accept-artifacts.mjs",
   "accept-createdoc.mjs",
