@@ -10,6 +10,7 @@ import {
   LIST_FILES_TOOL,
   JOB_KILL_TOOL,
   JOB_OUTPUT_TOOL,
+  WEB_FETCH_TOOL,
   MEMORY_LIST_TOOL,
   MEMORY_SAVE_TOOL,
   READ_FILE_TOOL,
@@ -30,6 +31,7 @@ import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
 import { parseSandboxMode, writeEffectAllowed } from "../../engine/adapters/sandbox";
 import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/fileState";
 import { killJob, readJob, startJob } from "../../engine/runtime/tools/jobs";
+import { fetchForModel } from "../../engine/runtime/tools/webFetchTool";
 import type { ToolInfoWire } from "../../shared/ipc";
 /* 插件工具从 pluginHost 直接来（registry 不再转手 re-export —— V5-4 4.1 把 IO 移出最小面） */
 import { pluginToolEntries } from "../../engine/runtime/pluginHost";
@@ -702,6 +704,23 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     return { ok: true, line: `已停止后台任务 ${jobId}`, killed: true, jobId };
   },
 
+  /* B-04：读网页（安全边界在 webFetchTool 里） */
+  [WEB_FETCH_TOOL]: async (input) => {
+    const { url, maxChars } = input as { url: string; maxChars?: number };
+    const got = await fetchForModel({ url, ...(maxChars === undefined ? {} : { maxChars }) });
+    if (!got.ok) return { ok: false, line: got.error, error: got.error };
+    const head = got.title ? `「${got.title}」` : "";
+    return {
+      ok: true,
+      line: `读了网页${head}（${got.text.length} 字${got.truncated ? "，已截断" : ""}）`,
+      url: got.url,
+      finalUrl: got.finalUrl,
+      ...(got.title ? { title: got.title } : {}),
+      text: got.text,
+      truncated: got.truncated,
+    };
+  },
+
   /**
    * 本地知识库检索（G15）。
    *
@@ -1049,4 +1068,5 @@ export const TOOL_NAMES = [
   RUN_COMMAND_TOOL,
   JOB_OUTPUT_TOOL,
   JOB_KILL_TOOL,
+  WEB_FETCH_TOOL,
 ] as const;

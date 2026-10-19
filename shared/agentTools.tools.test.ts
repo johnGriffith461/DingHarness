@@ -12,7 +12,7 @@ import { ALWAYS_TOOLS } from "../engine/runtime/toolSearch";
  * "我这边实际可用的工具里没有 todo_write 和 finish"。
  * 手工清单会漏，所以让机器对账。
  */
-const NEW_TOOLS = ["job_output", "job_kill"] as const;
+const NEW_TOOLS = ["job_output", "job_kill", "web_fetch"] as const;
 
 describe("新工具的三处清单", () => {
   for (const name of NEW_TOOLS) {

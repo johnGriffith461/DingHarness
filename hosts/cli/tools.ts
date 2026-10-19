@@ -25,9 +25,10 @@ import { createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { insideDirs } from "../../engine/runtime/tools/drivePaths";
 import { killJob, readJob, startJob } from "../../engine/runtime/tools/jobs";
+import { fetchForModel } from "../../engine/runtime/tools/webFetchTool";
 import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
 import { describeFinish, validateFinish } from "../../engine/runtime/finishContract";
-import { ASK_USER_TOOL, FINISH_TOOL, JOB_KILL_TOOL, JOB_OUTPUT_TOOL } from "../../shared/agentTools";
+import { ASK_USER_TOOL, FINISH_TOOL, JOB_KILL_TOOL, JOB_OUTPUT_TOOL, WEB_FETCH_TOOL } from "../../shared/agentTools";
 import { describeAskResult, normalizeAsk } from "../../engine/runtime/tools/askUserTool";
 
 /**
@@ -332,6 +333,26 @@ export function createCliExecutor(opts: {
         const got = killJob(jobId);
         if (!got.ok) return { ok: false, output: { ok: false, line: got.error, error: got.error }, error: got.error };
         return { ok: true, output: { ok: true, line: `已停止后台任务 ${jobId}`, killed: true, jobId } };
+      }
+
+      /* B-04：读网页（安全边界在 webFetchTool 里，这里只做形状转换） */
+      case WEB_FETCH_TOOL: {
+        const { url, maxChars } = input as { url: string; maxChars?: number };
+        const got = await fetchForModel({ url, ...(maxChars === undefined ? {} : { maxChars }) });
+        if (!got.ok) return { ok: false, output: { ok: false, line: got.error, error: got.error }, error: got.error };
+        const head = got.title ? `「${got.title}」` : "";
+        return {
+          ok: true,
+          output: {
+            ok: true,
+            line: `读了网页${head}（${got.text.length} 字${got.truncated ? "，已截断" : ""}）`,
+            url: got.url,
+            finalUrl: got.finalUrl,
+            ...(got.title ? { title: got.title } : {}),
+            text: got.text,
+            truncated: got.truncated,
+          },
+        };
       }
 
       /*

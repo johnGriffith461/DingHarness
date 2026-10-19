@@ -47,6 +47,8 @@ export const CLI_TOOLS = [
   /* B-03：后台任务的读取与停止 */
   "job_output",
   "job_kill",
+  /* B-04：抓网页 */
+  "web_fetch",
   "spawn_agent",
   "spawn_agents",
   "knowledge_search",

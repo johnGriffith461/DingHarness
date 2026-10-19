@@ -113,6 +113,8 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   /* B-03：读后台输出是只读；杀后台进程是写（它结束别人起的进程）。 */
   job_output: { kind: "read" },
   job_kill: { kind: "write" },
+  /* B-04：抓网页是只读（它不改本机任何东西；私网在工具内部拦） */
+  web_fetch: { kind: "read" },
   /*
    * P0-01：todo_write 只改**本产品自己的待办清单**（任务内的进度投影），
    * 不碰用户文件、不执行命令 —— 与 `memory_save` / `canvas_add_node` 那种
