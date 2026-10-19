@@ -45,8 +45,8 @@
       "adr": "0010-契约冻结收口.md"
     },
     "policy.confirmModes": {
-      "value": "全部允许,按需确认,每步确认",
-      "adr": "0007-两轴权限矩阵.md"
+      "value": "全部允许,接受编辑,按需确认,每步确认",
+      "adr": "0021-接受编辑档.md"
     },
     "policy.memberRoles": {
       "value": "owner,admin,specialist,viewer",

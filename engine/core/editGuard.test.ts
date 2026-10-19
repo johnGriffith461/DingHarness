@@ -39,7 +39,7 @@ describe("B-01 · isProtectedPath", () => {
   });
 
   it("普通源码路径不算保护", () => {
-    for (const p of ["src/a.ts", "README.md", "docs/x/y.md", "a.b.md"]) {
+    for (const p of ["src/a.ts", "README.md", "documentation/x/y.md", "a.b.md"]) {
       expect(isProtectedPath(p), p).toBe(false);
     }
   });
