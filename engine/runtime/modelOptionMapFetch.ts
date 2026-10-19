@@ -7,6 +7,17 @@ import {
 } from "./modelOptionMap";
 
 /**
+ * fetch 的入参与 init。
+ *
+ * 用 fetch 自身的参数类型而不是 `RequestInfo` / `RequestInit`：
+ * Electron 那份 tsconfig **没有 DOM lib**，直接命名那两个类型会编译不过
+ * （而这条代码要同时被 CLI 与桌面引用）。
+ */
+type FetchInput = Parameters<typeof globalThis.fetch>[0];
+type FetchInit = Parameters<typeof globalThis.fetch>[1];
+
+
+/**
  * **请求体改写**（T0）：把参数映射真的落到 HTTP body 上。
  *
  * ## 为什么改 body 而不是 `providerOptions`
@@ -34,10 +45,10 @@ export function createModelOptionMapFetch(options: {
   const compiled = compileSpecs(options.specs);
   if (!compiled.length) return options.fetch;
 
-  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  return async (input: FetchInput, init?: FetchInit): Promise<Response> => {
     const text = await readBodyText(input, init);
     /* 非 JSON 请求（FormData/Blob/流）本来就不该映射：直接放过 */
-    if (text === null) return options.fetch(input as RequestInfo, init);
+    if (text === null) return options.fetch(input, init);
 
     let parsed: unknown;
     try {
@@ -59,7 +70,7 @@ export function createModelOptionMapFetch(options: {
       changed.push(...result.changed);
     }
     options.capture?.(body, changed);
-    return options.fetch(input as RequestInfo, { ...(init ?? {}), body: JSON.stringify(body) });
+    return options.fetch(input, { ...(init ?? {}), body: JSON.stringify(body) });
   };
 }
 
@@ -79,8 +90,8 @@ function compileSpecs(specs: { reasoningLevel?: string; maxOutputTokens?: string
  * @returns 文本；**不是 JSON 请求**时返回 `null`（调用方据此跳过改写）
  */
 async function readBodyText(
-  input: RequestInfo | URL,
-  init: RequestInit | undefined,
+  input: FetchInput,
+  init: FetchInit | undefined,
 ): Promise<string | null> {
   const body = init?.body;
   if (typeof body === "string") return body;

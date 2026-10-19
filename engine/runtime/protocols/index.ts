@@ -2,6 +2,7 @@ import type { Protocol } from "../models";
 import { anthropic } from "./anthropic";
 import { google } from "./google";
 import { openaiCompatible } from "./openaiCompatible";
+import { openaiResponses } from "./openaiResponses";
 import type { ProtocolAdapter, ModelHandleInput } from "./types";
 
 /**
@@ -14,6 +15,7 @@ import type { ProtocolAdapter, ModelHandleInput } from "./types";
  */
 export const PROTOCOLS: Record<Protocol, ProtocolAdapter> = {
   "openai-compatible": openaiCompatible,
+  "openai-responses": openaiResponses,
   anthropic,
   google,
 };

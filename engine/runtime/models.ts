@@ -40,7 +40,11 @@ import type { ModelInfo } from "../core/ledger";
  * ⚠️ 它是**线路格式**（请求怎么发、流怎么读），不是"哪家公司的模型"。
  * 中转站（relay）把 claude 用 OpenAI 格式转出来，那它的协议就是 `openai-compatible`。
  */
-export type Protocol = "openai-compatible" | "anthropic" | "google";
+/**
+ * 线路格式。第四种 `openai-responses` 是 OpenAI 的 **Responses API**（/responses）——
+ * 与 Chat Completions 是两条不同的接口（路径、消息形状都不同），不能混成一个兼容。
+ */
+export type Protocol = "openai-compatible" | "openai-responses" | "anthropic" | "google";
 
 /** 一个模型的能力（给"要不要给工具/要不要读图"这类判断用）。 */
 export type ModelCapabilities = {

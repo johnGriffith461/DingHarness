@@ -352,6 +352,8 @@ export type { PermissionRuleWire, ReviewChangeWire, ReviewListResult, ReviewReve
 export type ShellBridge = {
   skills: import("./skillsWire").SkillsBridge;
   knowledge: import("./knowledgeWire").KnowledgeBridge;
+  modelConfig: import("./modelConfigWire").ModelConfigBridge;
+  providers: import("./providerWire").ProviderBridge;
   review: {
     list: (sessionId: string) => Promise<ReviewListResult>;
     revert: (sessionId: string, path: string) => Promise<ReviewRevertResult>;

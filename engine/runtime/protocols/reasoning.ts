@@ -87,9 +87,17 @@ export function reasoningProviderOptions(
     return { google: { thinkingConfig: { thinkingBudget: BUDGETS[effort] } } };
   }
   /*
-   * ⚠️ key 是 ****（驼峰）——不是协议名 、也不是 provider id。
+   * Responses API（`/responses`）用的是 `openai` 这个 key，而不是 `openaiCompatible`：
+   * 两个包是分开的（`@ai-sdk/openai` vs `@ai-sdk/openai-compatible`），
+   * key 写混了字段会被**静默丢掉** —— 请求照发、推理档位不生效。
+   */
+  if (protocol === "openai-responses") {
+    return { openai: { reasoningEffort: effort } };
+  }
+  /*
+   * ⚠️ key 是 `openaiCompatible`（驼峰）——不是协议名、也不是 provider id。
    * 2026-10-16 真跑时 SDK 报了弃用警告才确定的：
-   *      * 写错名字的后果是它**静默丢掉**（请求里根本没有那个字段）——所以这条别凭直觉改。
+   * 写错名字的后果是它**静默丢掉**（请求里根本没有那个字段）——所以这条别凭直觉改。
    */
   return { openaiCompatible: { reasoningEffort: effort } };
 }

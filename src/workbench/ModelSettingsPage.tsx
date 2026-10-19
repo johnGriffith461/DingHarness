@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Check, RefreshCw } from "lucide-react";
 
 import { listProviders } from "@/ai/aiClient";
+import { ModelConfigDialog } from "./ModelConfigDialog";
+import { NewProviderDialog } from "./NewProviderDialog";
 import { readSavedRoute } from "@/ai/route";
 import { capabilityOf, formatPrice, formatTokens, groupsOf } from "@engine/runtime/modelCatalog";
 import { keepTokensFor } from "@engine/runtime/budget";
@@ -89,6 +91,30 @@ export function ModelSettingsPage() {
   const [keyDraft, setKeyDraft] = useState("");
   /** 保存结果（成功 / 失败原因，原样来自主进程）。 */
   const [keyNote, setKeyNote] = useState<{ ok: boolean; text: string } | null>(null);
+  /** T0：正在编辑/新增的模型（null = 关着） */
+  const [editing, setEditing] = useState<null | { modelId?: string }>(null);
+  /** 每条声明的连通测试结果（key = `${providerId}/${modelId}`） */
+  const [probeResults, setProbeResults] = useState<Record<string, { ok: boolean; text: string; busy?: boolean }>>({});
+  /** T0：开着「新供应商」表单（null / true） */
+  const [newProvider, setNewProvider] = useState<boolean | null>(null);
+  /** 已声明的模型（来自主进程读的 models.json，与 CLI 同一份） */
+  const [declared, setDeclared] = useState<import("@shared/modelConfigWire").DeclaredModelWire[]>([]);
+
+  const reloadDeclared = (): void => {
+    const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    if (!shell) return;
+    let budget = "long";
+    try {
+      budget = localStorage.getItem("dsh-canvas.context-budget") ?? "long";
+    } catch {
+      /* 读不到就用默认档位 */
+    }
+    void shell.modelConfig.list(budget).then((res) => setDeclared(res.models)).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    reloadDeclared();
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -199,6 +225,12 @@ export function ModelSettingsPage() {
       {/* 卡 ①：provider 列表 */}
       <div className="wb-modelset-list wb-card" data-testid="wb-modelset-list">
         <div className="wb-card-head">provider</div>
+        <div className="wb-card-row">
+          <span className="wb-card-desc">接一个我们没内置的端点（地址 + 格式 + 密钥 → 拉模型）</span>
+          <button className="wb-page-btn" data-testid="wb-modelset-new-provider" onClick={() => setNewProvider(true)}>
+            + 新供应商
+          </button>
+        </div>
         {providers.map((p) => (
           <button
             key={p.id}
@@ -234,6 +266,13 @@ export function ModelSettingsPage() {
                 </span>
                 <button className="wb-page-btn" data-testid="wb-modelset-pull" onClick={pull}>
                   <RefreshCw size={13} /> 拉取模型
+                </button>
+                <button
+                  className="wb-page-btn"
+                  data-testid="wb-modelset-add"
+                  onClick={() => setEditing({})}
+                >
+                  + 添加模型
                 </button>
               </div>
               {pulling?.id === active ? (
@@ -278,6 +317,73 @@ export function ModelSettingsPage() {
               </div>
             </div>
 
+            {/* 卡 ②b：用户声明的模型能力（T0）—— 与 CLI 的 ding models add 同一份 models.json */}
+            <div className="wb-card" data-testid="wb-modelconfig-declared">
+              <div className="wb-card-head">已声明的模型能力</div>
+              <div className="wb-card-note">
+                这里填的窗口/输出上限会真的用到请求与历史保留上（CLI 的 <code>ding models show</code> 读到的是同一份）
+              </div>
+              {declared.filter((item) => item.providerId === active).length === 0 ? (
+                <div className="wb-card-note">还没有声明过 —— 点上面「添加模型」。</div>
+              ) : (
+                declared
+                  .filter((item) => item.providerId === active)
+                  .map((item) => (
+                    <div className="wb-modelset-model" key={item.modelId}>
+                      <span className="wb-modelset-modelname">{item.modelId}</span>
+                      <em className="wb-modelset-meta">历史保留 {formatTokens(item.keepTokens)} · {item.source}</em>
+                      {probeResults[`${item.providerId}/${item.modelId}`] && !probeResults[`${item.providerId}/${item.modelId}`]?.busy ? (
+                        <em
+                          className={`wb-modelset-meta${probeResults[`${item.providerId}/${item.modelId}`]?.ok ? "" : " wb-note-bad"}`}
+                          data-testid={`wb-modelconfig-probe-result-${item.modelId}`}
+                        >
+                          {probeResults[`${item.providerId}/${item.modelId}`]?.text}
+                        </em>
+                      ) : null}
+                      <button
+                        className="wb-page-btn"
+                        data-testid={`wb-modelconfig-test-${item.modelId}`}
+                        disabled={probeResults[`${item.providerId}/${item.modelId}`]?.busy}
+                        onClick={() => {
+                          const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                          if (!shell) return;
+                          const key = `${item.providerId}/${item.modelId}`;
+                          setProbeResults((prev) => ({ ...prev, [key]: { ok: false, text: "测试中…", busy: true } }));
+                          void shell.modelConfig.probe(item.providerId, item.modelId).then((res) => {
+                            setProbeResults((prev) => ({
+                              ...prev,
+                              [key]: res.ok
+                                ? { ok: true, text: `连通 ${res.elapsedMs}ms：${res.reply}` }
+                                : { ok: false, text: `不通：${res.error}` },
+                            }));
+                          });
+                        }}
+                      >
+                        {probeResults[`${item.providerId}/${item.modelId}`]?.busy ? "测试中…" : "测试连通"}
+                      </button>
+                      <button
+                        className="wb-page-btn"
+                        data-testid={`wb-modelconfig-edit-${item.modelId}`}
+                        onClick={() => setEditing({ modelId: item.modelId })}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className="wb-page-btn"
+                        data-testid={`wb-modelconfig-remove-${item.modelId}`}
+                        onClick={() => {
+                          const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+                          if (!shell) return;
+                          void shell.modelConfig.remove(item.providerId, item.modelId).then(() => reloadDeclared());
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))
+              )}
+            </div>
+
             {/* 卡 ③：密钥 */}
             <div className="wb-card">
               <div className="wb-card-row">
@@ -309,6 +415,53 @@ export function ModelSettingsPage() {
           </>
         )}
       </div>
+
+      {newProvider ? (
+        <NewProviderDialog
+          bridge={(globalThis as unknown as { shell?: ShellBridge }).shell?.providers as ShellBridge["providers"]}
+          onDone={(added) => {
+            setNewProvider(null);
+            if (added) {
+              /* 新供应商加完，重新拉一次 provider 列表（它会出现在卡片里） */
+              void listProviders().then((list) => setProviders(list.map((p) => ({ ...p }))));
+            }
+          }}
+        />
+      ) : null}
+
+      {editing ? (
+        <ModelConfigDialog
+          bridge={(globalThis as unknown as { shell?: ShellBridge }).shell?.modelConfig as ShellBridge["modelConfig"]}
+          providerId={active}
+          providerLabel={current?.label ?? active}
+          protocol={(current as { protocol?: string } | undefined)?.protocol ?? "openai-compatible"}
+          editing={
+            editing.modelId
+              ? (() => {
+                  const found = declared.find((item) => item.modelId === editing.modelId);
+                  if (!found) return undefined;
+                  return {
+                    modelId: found.modelId,
+                    contextWindow: found.config.properties.contextWindow,
+                    maxOutputTokens: found.config.optionSpecs.maxOutputTokens.max,
+                    inputFormat: found.config.properties.inputFormat,
+                    supportsToolCall: found.config.properties.supportsToolCall,
+                    supportsJsonSchemaOutput: found.config.properties.supportsJsonSchemaOutput,
+                    supportsNativeWebSearch: found.config.properties.supportsNativeWebSearch,
+                    supportsMidConversationSystem: found.config.properties.supportsMidConversationSystem,
+                    reasoningLevels: found.config.optionSpecs.reasoningLevel.values,
+                    reasoningMap: found.config.optionSpecs.reasoningLevel.map,
+                    maxOutputMap: found.config.optionSpecs.maxOutputTokens.map,
+                  };
+                })()
+              : undefined
+          }
+          onClose={(saved) => {
+            setEditing(null);
+            if (saved) reloadDeclared();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

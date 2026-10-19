@@ -144,6 +144,8 @@ export type EngineRunRequest = {
   modelConfig?: import("./runtime/modelRuntime").RuntimeModelConfig;
   /** 结构化输出要求的 JSON Schema（配合模型声明的能力）。 */
   responseJsonSchema?: Record<string, unknown>;
+  /** 允许 provider 清单之外的模型名（用户自己声明的模型）。 */
+  allowUndeclaredModel?: boolean;
   /** 闸门档位。 */
   mode: ConfirmMode;
   /** 给不给工具（起标题、翻译这类附带请求不给 —— 它们拿到工具会真的动手）。 */
@@ -465,6 +467,7 @@ export function createEngine(ports: EnginePorts): Engine {
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           ...(request.modelConfig === undefined ? {} : { modelConfig: request.modelConfig }),
           ...(request.responseJsonSchema === undefined ? {} : { responseJsonSchema: request.responseJsonSchema }),
+          ...(request.allowUndeclaredModel === true ? { allowUndeclaredModel: true } : {}),
           ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
           ...(request.onRawError ? { onRawError: request.onRawError } : {}),
           ...(request.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: request.stallTimeoutMs }),

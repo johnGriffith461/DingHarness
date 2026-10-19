@@ -151,6 +151,14 @@ export type TurnRequestInput = {
   /** 要求结构化输出的 JSON Schema（配合 `modelConfig.supportsJsonSchemaOutput`）。 */
   responseJsonSchema?: Record<string, unknown>;
   /**
+   * **允许 provider 清单之外的模型名**（T0）。
+   *
+   * 只在调用方确认过这个模型是用户自己声明的时才传 。
+   * 不传 = 清单外仍回落默认（老行为）。
+   * 详见 `resolveTurnTarget` 的 opts 说明：静默回落会让添加模型形同虚设。
+   */
+  allowUndeclaredModel?: boolean;
+  /**
    * 中止信号。
    *
    * ⚠️ 子智能体**必须**拿到父级的那个：用户点停时，子智能体还在跑就是"停不下来"。
@@ -265,6 +273,18 @@ export function resolveTurnTarget(
    * 凭据库与桌面加密库也一并生效（注入点见 `EnginePorts.secret`）。
    */
   secret: SecretPort = envSecret,
+  /**
+   * **允许 provider 清单之外的模型名**（T0，2026-10-19）。
+   *
+   * 原来这里是无条件回落：`provider.models.includes(model) ? model : provider.models[0]`。
+   * 对"手滑打错模型名"是对的，但**毁掉了「添加模型」这个功能的全部意义** ——
+   * 用户来声明一个新模型，正是因为它在我们的清单里没有；一回落，
+   * 他以为在用 A，实际跑的是 B，而且**没有任何报错**。
+   *
+   * 所以：调用方**确认过这个模型是用户自己声明的**时传 `true`。
+   * 不传 = 老行为一字不变（清单外仍回落默认）。
+   */
+  opts?: { allowUndeclared?: boolean },
 ): { ok: true; provider: NonNullable<ReturnType<typeof getProvider>>; model: string } | { ok: false; error: string } {
   const provider = getProvider(providerId);
   if (!provider) return { ok: false, error: `未知 provider：${providerId}` };
@@ -274,7 +294,9 @@ export function resolveTurnTarget(
   if (!secret(provider.keyRef)) {
     return { ok: false, error: `${provider.label} 没有可用密钥（需要 ${provider.keyRef}）` };
   }
-  const picked = model && provider.models.includes(model) ? model : (provider.models[0] ?? "");
+  const listed = Boolean(model && provider.models.includes(model));
+  const declared = opts?.allowUndeclared === true && typeof model === "string" && model.trim() !== "";
+  const picked = listed || declared ? model! : (provider.models[0] ?? "");
   return { ok: true, provider, model: picked };
 }
 
@@ -345,7 +367,9 @@ export async function runTurn(
    *
    * 被复制一份的判定，就是会被绕过的那一份。
    */
-  const target = resolveTurnTarget(input.provider, input.model, secret);
+  const target = resolveTurnTarget(input.provider, input.model, secret, {
+    allowUndeclared: input.allowUndeclaredModel === true,
+  });
   if (!target.ok) {
     onEvent({ type: "error", message: target.error });
     return { ok: false, error: target.error, aborted: false, provider: input.provider, model: "" };

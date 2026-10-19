@@ -7,6 +7,8 @@ import { APP_SETTINGS_CHANNEL } from "./ipc/appSettings";
 import { REVIEW_CHANNEL } from "./ipc/review";
 import { SKILLS_CHANNEL } from "./ipc/skills";
 import { KNOWLEDGE_CHANNEL } from "./ipc/knowledge";
+import { MODEL_CONFIG_CHANNEL } from "./ipc/modelConfig";
+import { PROVIDER_CHANNEL } from "./ipc/providerConfig";
 import { APP_CHANNEL } from "./ipc/appChannel";
 import { SESSION_CHANNEL } from "./ipc/sessionStore";
 import { STATS_CHANNEL } from "./ipc/stats";
@@ -311,6 +313,26 @@ const api = {
       ipcRenderer.invoke(KNOWLEDGE_CHANNEL.search, query) as ReturnType<ShellBridge["knowledge"]["search"]>,
     remove: (idOrPath: string) =>
       ipcRenderer.invoke(KNOWLEDGE_CHANNEL.remove, idOrPath) as ReturnType<ShellBridge["knowledge"]["remove"]>,
+  },
+  /** 模型能力表单（T0）：桌面「添加模型」与 CLI 共用同一份 models.json */
+  modelConfig: {
+    list: (contextBudget?: string) =>
+      ipcRenderer.invoke(MODEL_CONFIG_CHANNEL.list, contextBudget) as ReturnType<ShellBridge["modelConfig"]["list"]>,
+    save: (input) => ipcRenderer.invoke(MODEL_CONFIG_CHANNEL.save, input) as ReturnType<ShellBridge["modelConfig"]["save"]>,
+    remove: (providerId: string, modelId: string) =>
+      ipcRenderer.invoke(MODEL_CONFIG_CHANNEL.remove, providerId, modelId) as ReturnType<ShellBridge["modelConfig"]["remove"]>,
+    validateMap: (text: string) =>
+      ipcRenderer.invoke(MODEL_CONFIG_CHANNEL.validateMap, text) as ReturnType<ShellBridge["modelConfig"]["validateMap"]>,
+    probe: (providerId: string, modelId: string) =>
+      ipcRenderer.invoke(MODEL_CONFIG_CHANNEL.probe, providerId, modelId) as ReturnType<ShellBridge["modelConfig"]["probe"]>,
+  },
+  /** 自定义供应商（T0「新供应商」）：填地址/格式/密钥 → 拉模型 → 保存 */
+  providers: {
+    listCustom: () => ipcRenderer.invoke(PROVIDER_CHANNEL.listCustom) as ReturnType<ShellBridge["providers"]["listCustom"]>,
+    fetchModels: (input: { baseURL: string; apiKey: string }) =>
+      ipcRenderer.invoke(PROVIDER_CHANNEL.fetchModels, input) as ReturnType<ShellBridge["providers"]["fetchModels"]>,
+    add: (input) => ipcRenderer.invoke(PROVIDER_CHANNEL.add, input) as ReturnType<ShellBridge["providers"]["add"]>,
+    remove: (id: string) => ipcRenderer.invoke(PROVIDER_CHANNEL.remove, id) as ReturnType<ShellBridge["providers"]["remove"]>,
   },
   /** 逐文件改动审阅（U08）：读改动清单 / 回滚某个文件 */
   review: {

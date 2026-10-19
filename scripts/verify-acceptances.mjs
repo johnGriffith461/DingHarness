@@ -149,6 +149,20 @@ const NOT_IN_BATCH = {
    * 不是"要产物"这么简单，见 why。
    */
   "accept-packaged-run.mjs": { kind: "needs-model", why: "打包版端到端。它**不能**进批跑，两处硬依赖：① 第 4 项要求打包版**真的生成一张图**（`img[src^=dshasset://]` + naturalWidth）—— 图像通道的 baseURL 覆盖口 2026-10-16 已补（见 A20），所以这一处不再是拦路的了；② 但整条**没有任何判定**（只有 console.log(report)）—— 收进批跑只会多一条 no-judge（= 没测）。要收得先补判定（它验的是打包产物，本身也该进 needs-package 那一类）" },
+  /*
+   * ⚠️ 2026-10-19（T0）：`accept-model-config` **故意不进批跑** —— 它打真 provider。
+   *
+   * 批跑的口径是「零出网 + 自带假通道」，而这一条的**全部价值**就是验证
+   * 「声明的字段真的发到了真上游并被接受」。用假服务器跑它等于把它变成
+   * 一个自己骗自己的绿勾（实测过：fetch 包装被适配器静默丢掉时，
+   * 假服务器全绿，真 provider 一跑 reasoning 字段就没了）。
+   *
+   * 它有自己的花钱闸（--yes-spend）与零出网闸（DING_NO_REAL_MODEL），
+   * 由 T0/T1 阶段门手动跑，报告里写清模型与 token。
+   */
+  "accept-newprovider.mjs": { kind: "needs-model", why: "从零接一个新供应商：真要 GET /models 拉清单、真要发一轮验连通。假服务器会让这两个按钮恒绿，而用户按它们就是为了排掉地址/格式/密钥错。手动跑：node scripts/accept/accept-newprovider.mjs --yes-spend" },
+  "accept-modelconfig-probe.mjs": { kind: "needs-model", why: "「测试连通」按钮要真打 provider 才有意义 —— 假服务器会让它恒绿，而那正是用户按它的原因（排掉密钥错/通道拒绝/模型名拼错）。手动跑：node scripts/accept/accept-modelconfig-probe.mjs --yes-spend" },
+  "accept-model-config.mjs": { kind: "needs-model", why: "打真 provider 验参数映射是否真的进了出站请求体。批跑用假通道会让这条变成假绿（实测过：fetch 包装被适配器静默丢掉时假通道全绿、真 provider 一跑 reasoning 就没了）。手动跑：node scripts/accept/accept-model-config.mjs --yes-spend" },
 };
 
 const CASES = [
@@ -277,6 +291,11 @@ const CASES = [
    * 实跑过一次绿的；它与 `accept-retry`（旧的聊天侧栏那条，已随界面改版退役）覆盖同一件事。
    */
   ["accept-actions.mjs", "消息操作栏六个动作（复制 / 重新生成是同一次提问的重跑 / 幂等）"],
+  /*
+   * T0「添加模型」表单（2026-10-19）：像真人一样点进去填完保存、重启还在、删除生效。
+   * 这条**可以**进批跑 —— 它不调模型、不发网络请求，只验表单与主进程落盘。
+   */
+  ["accept-modelconfig-form.mjs", "添加模型表单：可点 / 校验会拦 / 落盘 / 重启还在 / 删除生效"],
   /*
    * 「一个人都没来过」的几处空态（§208 那类"没人点过的界面"）。
    * 2026-10-16：从 `NOT_IN_BATCH` 的明账里收进来（它不调模型、用 bootApp + 自隔离数据目录，

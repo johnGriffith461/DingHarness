@@ -90,8 +90,25 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  *
  * ⚠️ 2026-10-18（G15）62 → 63：`shared/knowledgeWire.ts`（知识库的 IPC 形状）。
  * 纯类型 + 常量（允许的扩展名/大小上限），被 preload 与契约带进来。
+ *
+ * ⚠️ 2026-10-19（T0）63 → 69：模型能力表单的 6 个模块，**全部零 IO 的纯逻辑**：
+ *   · `shared/modelConfigWire.ts` —— IPC 形状（纯类型，被 ipc.ts 带进来）；
+ *   · `engine/runtime/modelConfig.ts` —— 稀疏覆盖 + 规则解析（无 IO）；
+ *   · `engine/runtime/modelOptionMap.ts` —— 声明式映射 + RFC 7396（纯函数）；
+ *   · `engine/runtime/modelRuntime.ts` —— 按协议造 provider 工具（只 import SDK）；
+ *   · `engine/runtime/messageTransform.ts` —— 消息形态转换（纯函数）；
+ *   · `engine/runtime/modelOptionMapFetch.ts` —— fetch 包装（只有类型级 fetch，不读环境）。
+ * 它们必须在内核里：窗口预算、请求组装、参数映射都要和渲染层用同一份判定，
+ * 抄第二份就会分叉（界面上填 1M、请求里还是 20k）。
+ *
+ * ⚠️ 2026-10-19（T0 第二轮）69 → 71：「新供应商」要支持第三种 API 格式
+ * （OpenAI Responses，`/responses`）——它与 Chat Completions 是两条不同接口，
+ * 不能当成同一个兼容。新增两个：
+ *   · `engine/runtime/protocols/openaiResponses.ts` —— 适配器（只 import SDK）；
+ *   · `shared/providerWire.ts` —— 供应商表单的 IPC 形状（纯类型）。
+ * 前者必须在内核里（协议只许有一个装配点），后者被 ipc.ts 带进来。
  */
-const CLOSURE_BUDGET = 63;
+const CLOSURE_BUDGET = 71;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =

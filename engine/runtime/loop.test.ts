@@ -497,3 +497,34 @@ describe("工具声明与执行的连线", () => {
     expect((spec?.inputSchema as unknown as z.ZodTypeAny).safeParse({ path: 1 }).success).toBe(false);
   });
 });
+
+describe("用户声明的表外模型（T0）", () => {
+  /**
+   * 真缺陷复现（2026-10-19，真 provider 抓到的）：
+   *
+   * 用户在「添加模型」里填了一个 provider 清单里没有的模型名
+   * （这正是这个功能的主要用途 —— 接新模型），`resolveTurnTarget` 会把它
+   * **静默替换成 provider 的第一个模型**。后果：
+   *   · 用户以为在用他声明的模型，实际跑的是另一个；
+   *   · 「测试连通」永远绿（测的是默认模型）；
+   *   · 花的是默认模型的钱，拿的是默认模型的结果。
+   *
+   * 静默替换是最坏的一种：没有任何报错，界面全正常。
+   */
+  it("声明过的模型不被回落（用户填的就是要用的）", () => {
+    const target = resolveTurnTarget("strata", "my-custom-model", undefined, { allowUndeclared: true });
+    expect(target).toMatchObject({ ok: true, model: "my-custom-model" });
+  });
+
+  it("没声明时仍然回落默认（老行为零漂移，不让手滑的模型名打上游）", () => {
+    const target = resolveTurnTarget("strata", "typo-model");
+    expect(target).toMatchObject({ ok: true, model: "deepseek-flash" });
+  });
+
+  it("清单里本来就有的模型：两种模式下都用它", () => {
+    expect(resolveTurnTarget("strata", "deepseek-flash")).toMatchObject({ model: "deepseek-flash" });
+    expect(resolveTurnTarget("strata", "deepseek-flash", undefined, { allowUndeclared: true })).toMatchObject({
+      model: "deepseek-flash",
+    });
+  });
+});

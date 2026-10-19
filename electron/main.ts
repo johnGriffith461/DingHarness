@@ -18,6 +18,8 @@ import { registerWorkflowIpc } from "./ipc/workflowStore";
 import { registerReviewIpc } from "./ipc/review";
 import { registerSkillsIpc } from "./ipc/skills";
 import { registerKnowledgeIpc } from "./ipc/knowledge";
+import { registerModelConfigIpc } from "./ipc/modelConfig";
+import { loadCustomProvidersIntoMemory, registerProviderIpc } from "./ipc/providerConfig";
 import { registerPreviewIpc } from "./ipc/preview";
 import { registerComputerIpc } from "./ipc/computer";
 import { registerCanvasIpc } from "./ipc/canvas";
@@ -470,6 +472,21 @@ safeRegister("review", () => registerReviewIpc(ipcMain), logRegisterFailure);
 safeRegister("skills", () => registerSkillsIpc(ipcMain), logRegisterFailure);
 /* 本地知识库（G15）：桌面面板 + knowledge_search 工具 */
 safeRegister("knowledge", () => registerKnowledgeIpc(ipcMain, () => win), logRegisterFailure);
+  safeRegister("providers", () => registerProviderIpc(() => app.getPath("userData")), logRegisterFailure);
+  /* 启动时把磁盘里的自定义供应商装进内核（与 CLI 同一条） */
+  safeRegister(
+    "providers:load",
+    () => {
+      const { rejected } = loadCustomProvidersIntoMemory(app.getPath("userData"));
+      for (const item of rejected) bootLog("[provider] " + item.id + " 未生效：" + item.why);
+    },
+    logRegisterFailure,
+  );
+  safeRegister(
+    "modelConfig",
+    () => registerModelConfigIpc(() => app.getPath("userData")),
+    logRegisterFailure,
+  );
 /* 内置浏览器预览（V6-2m）：只允许本机地址、独立持久分区 */
 safeRegister("preview", () => registerPreviewIpc(), logRegisterFailure);
 /* Computer Use（V6-2n）：默认关；每个动作原生确认 + 留痕（不记输入内容） */
