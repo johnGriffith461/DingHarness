@@ -226,6 +226,8 @@ export type TurnOutcome = {
   wroteFiles?: boolean;
   /** P0-02：通过证据校验的完成声明（没调用 finish 或校验失败时没有）。 */
   finished?: FinishRecord;
+  /** P0-03：完成提醒拉过一轮之后仍没有有效 finish。 */
+  unfinished?: boolean;
 };
 
 /**
@@ -367,7 +369,7 @@ export function effectiveMaxSteps(raw: number | undefined): number {
  * @param deps 见 `TurnDeps`（宿主注入的外部能力）
  * @returns 结局（成败 / 中止 / 真正用的模型）
  */
-export async function runTurn(
+async function runTurnOnce(
   input: TurnRequestInput,
   onEvent: (event: TurnEvent) => void,
   deps: TurnDeps = {},
@@ -764,4 +766,101 @@ export async function runTurn(
     stopStall();
     input.abortSignal?.removeEventListener("abort", onUserAbort);
   }
+}
+
+/**
+ * P0-03：完成提醒。
+ *
+ * ## 为什么要有这一层
+ *
+ * 模型很常见的收尾方式是"改完文件、回一段说明、停下"——它没调用 `finish`，
+ * 也没跑验证。外层如果就此结束，用户看到的是一句没有证据的"已完成"。
+ * Cline 在缺 completion tool 时注入 reminder、Goose 在缺 final output 时注入
+ * `FINAL_OUTPUT_CONTINUATION_MESSAGE`，都是同一个形状。
+ *
+ * ## 边界（硬编码，防止死循环）
+ *
+ * - **只提醒一次**：第二轮仍未 `finish` 就收尾，`unfinished: true`；
+ * - 被 abort / 出错 / 没写文件 / 已有有效 finish → 不提醒；
+ * - 第一轮的 `done` 事件会**暂扣**：提醒时整轮的终态由第二轮给出，
+ *   日志与界面不会在一次调用里看到两个"结束"。
+ */
+export const COMPLETION_REMINDER = [
+  "<completion_reminder>",
+  "你这一轮改了文件，但还没有完成收尾。",
+  '如果已经做完：先跑测试或构建验证，然后调用 finish（status="done"），并在 evidence.commands 里原样写你实际跑过的命令。',
+  '如果没做完或被卡住：调用 finish（status="blocked"），在 reason 里说明卡在哪、试过什么。',
+  "不要只回一句话就停下。",
+  "</completion_reminder>",
+].join("\n");
+
+/**
+ * 跑一轮（**对外入口**）：先跑一次，必要时补一次完成提醒。
+ *
+ * 两轮共享同一个 `onEvent` 与同一份证据账本；`prepareStep` 由各轮内部重建。
+ */
+export async function runTurn(
+  input: TurnRequestInput,
+  onEvent: (event: TurnEvent) => void,
+  deps: TurnDeps = {},
+): Promise<TurnOutcome> {
+  const evidence = input.turnEvidence ?? createTurnEvidence();
+  let firstDone: TurnEvent | undefined;
+  let firstText = "";
+  const first = await runTurnOnce(
+    { ...input, turnEvidence: evidence },
+    (event) => {
+      /* 第一轮的 done 先扣着：决定要不要提醒之后，再决定发不发 */
+      if (event.type === "done") {
+        firstDone = event;
+        return;
+      }
+      if (event.type === "text") firstText += event.text;
+      onEvent(event);
+    },
+    deps,
+  );
+
+  const needsReminder = first.ok && !first.aborted && first.wroteFiles === true && !first.finished;
+  if (!needsReminder) {
+    if (firstDone) onEvent(firstDone);
+    return first;
+  }
+
+  onEvent({ type: "steer", text: COMPLETION_REMINDER });
+  const second = await runTurnOnce(
+    {
+      ...input,
+      turnEvidence: evidence,
+      /*
+       * 第二轮是**新的一次请求**：模型需要知道上一轮自己说了什么。
+       * 工具调用不在这里重放（它们的结果已经落盘/落轨迹），
+       * 提醒里会写清"改过文件但没 finish"，模型可以重新读文件、重新跑测试。
+       */
+      messages: [
+        ...input.messages,
+        ...(firstText.trim() ? [{ role: "assistant" as const, content: firstText }] : []),
+        { role: "user" as const, content: COMPLETION_REMINDER },
+      ],
+    },
+    (event) => {
+      /*
+       * 第一轮写了文件、第二轮没写：done 事件仍要带上 wroteFiles。
+       * 否则宿主（验证闭环/完成回显）会以为这一轮没动过文件。
+       */
+      if (event.type === "done" && first.wroteFiles && !event.wroteFiles) {
+        onEvent({ ...event, wroteFiles: true });
+        return;
+      }
+      onEvent(event);
+    },
+    deps,
+  );
+
+  const wroteFiles = first.wroteFiles === true || second.wroteFiles === true;
+  return {
+    ...second,
+    ...(wroteFiles ? { wroteFiles: true } : {}),
+    ...(second.ok && !second.aborted && !second.finished ? { unfinished: true } : {}),
+  };
 }
