@@ -36,6 +36,14 @@ export const CLI_TOOLS = [
   "edit_file",
   "apply_patch",
   "run_command",
+  /*
+   * P0-01/02/07：协议层工具必须在 CLI 的暴露面里。
+   * 漏了它们的后果实测过：模型在回复里写"我这边实际可用的工具里没有 todo_write 和 finish"，
+   * 于是多步任务没有计划、收尾没有证据。
+   */
+  "todo_write",
+  "finish",
+  "ask_user",
   "spawn_agent",
   "spawn_agents",
   "knowledge_search",

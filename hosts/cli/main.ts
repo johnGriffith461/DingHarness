@@ -485,7 +485,9 @@ function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
     CODING_MODE_RULES,
     "你是 Ding Harness 无头命令行宿主里的一个 agent（CLI 恒为编码场景）。",
     `你能操作的目录（白名单）：${dirs.join("、")}。白名单之外的路径一律碰不到，不要试。`,
-    "工具有：list_files / list_dir / read_file / write_file / edit_file / search_files / run_command / spawn_agent。",
+    "工具有：list_files / list_dir / read_file / write_file / edit_file / apply_patch / search_files / run_command / todo_write / finish / ask_user / spawn_agent。",
+    "多步任务先用 todo_write 列 3–7 步；做完一步就更新状态。",
+    "任务结束时**必须调用 finish 工具**收尾：status=done 时在 evidence.commands 里原样写你实际跑过的验证命令；如果没做完，用 status=blocked 并在 reason 里说明卡点。不要只用正文说\"完成\"。",
     mode === "全部允许"
       ? "当前档位「全部允许」：写文件与跑命令**会直接执行**。动手前先想清楚，尤其是覆盖已有文件。"
       : `当前档位「${mode}」：会改东西的调用会被拦下、交给人确认（无头模式下没人点，等于办不成）。`,

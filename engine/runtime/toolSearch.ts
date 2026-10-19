@@ -19,7 +19,16 @@
 
 import type { ToolEntryInput } from "./registry";
 
-/** 不参与裁剪的核心工具（无论查询是什么都在场）。 */
+/**
+ * 不参与裁剪的核心工具（无论查询是什么都在场）。
+ *
+ * ⚠️ P0-01/02/07：`todo_write` / `finish` / `ask_user` 也必须在场。
+ *
+ * 它们不是"按需检索的业务工具"，而是**协议层**：没有 `finish` 就没有完成契约，
+ * 没有 `todo_write` 就没有抗压缩的进度，没有 `ask_user` 模型只能把问卷塞回正文。
+ * 实测踩过：CLI 的注册表超过阈值（用户装了插件/MCP）时，这三个被 BM25 裁掉，
+ * 模型在回复里写"我这边实际可用的工具里没有 todo_write 和 finish"。
+ */
 export const ALWAYS_TOOLS: readonly string[] = [
   "read_file",
   "write_file",
@@ -28,6 +37,9 @@ export const ALWAYS_TOOLS: readonly string[] = [
   "list_dir",
   "search_files",
   "run_command",
+  "todo_write",
+  "finish",
+  "ask_user",
 ];
 
 /** 默认阈值：工具数 ≤ 这个值就全量下发。 */

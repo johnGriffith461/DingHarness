@@ -92,10 +92,14 @@ function extOf(name: string): string {
 export function resolveWriteTarget(rawPath: string, dirs: readonly string[]): string | null {
   const raw = String(rawPath ?? "").trim();
   if (!raw) return null;
-  const bare = !raw.includes("/") && !raw.includes("\\");
-  if (!bare) return insideDirs(raw, dirs);
   if (!dirs.length) return null;
-  return insideDirs(path.join(dirs[0], raw), dirs);
+  /*
+   * 相对路径（`src/a.txt`）按**第一个授权目录**解析 —— 这是模型最常给的写法
+   * （它从项目结构里看到的就是相对路径）。仍然走 `insideDirs`：
+   * `path.join` 会把 `..` 解掉，逃逸照样被白名单拦住。
+   */
+  const target = path.isAbsolute(raw) ? raw : path.join(dirs[0], raw);
+  return insideDirs(target, dirs);
 }
 
 /**

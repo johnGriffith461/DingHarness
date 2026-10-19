@@ -2,6 +2,7 @@ import { useWorkbenchStore } from "./store";
 import { parseBudgetMode } from "@engine/runtime/budget";
 import { totalTokens } from "@engine/core/context";
 import { contextMeterOf, formatMeter } from "./contextMeter";
+import { pinnedModelNow, useAppSettings } from "./appSettings";
 
 /**
  * 输入区右侧的上下文压力（C2）。
@@ -25,7 +26,13 @@ export function ContextMeterBar() {
    * 没有记录时不再拿 localStorage 里那个可能过期的 route 假装成模型上限 ——
    * 直接说"自动选择（未记录）"，而不是显示一个 20k 的假分母。
    */
-  const modelId = task?.lastRoute?.model;
+  const pinned = useAppSettings((s) => s.pinnedModel) || pinnedModelNow();
+  const pinnedModel = pinned.includes("/") ? pinned.slice(pinned.indexOf("/") + 1) : "";
+  /*
+   * 优先这一段任务**实际用过**的模型；还没跑过时用用户钉住的那个
+   * （首跑向导选完模型后，首页就该显示按窗口推导的预算，而不是"未记录"）。
+   */
+  const modelId = (task?.lastRoute?.model ?? pinnedModel) || undefined;
 
   /* 最近一次 provider 用量（往前找第一条带 usage 的助手步骤） */
   const usage = [...(task?.steps ?? [])]

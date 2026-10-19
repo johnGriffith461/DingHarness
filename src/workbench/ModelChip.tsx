@@ -7,6 +7,7 @@ import { listProviders } from "@/ai/aiClient";
 import { readSavedRoute, resolveChatRoute } from "@/ai/route";
 
 import { modelsForProvider } from "./ModelSettingsPage";
+import { pinnedModelNow, useAppSettings } from "./appSettings";
 
 /**
  * 主页输入区的**模型选择器**（2026-10-16 第五版 —— ZCode 细则补齐）。
@@ -76,7 +77,13 @@ export function ModelChip({
    * 不再把 localStorage 里残留的旧选择冒充成当前模型。
    * hover 里异步给出真正会被用的路由（拿不到就仍是"自动选择"）。
    */
-  const label = route.provider && route.model ? `${route.provider}/${route.model}` : "自动选择";
+  /*
+   * P0-08：没有在对话里手动选过时，显示**用户钉住的默认模型**（首跑向导/设置里那个），
+   * 而不是一律"自动选择" —— 用户刚选完模型，首页就该看到它。
+   */
+  /* 订阅 pinnedModel：向导刚写进去时这一层要立刻重渲染，不能读一次快照 */
+  const pinned = useAppSettings((s) => s.pinnedModel) || pinnedModelNow();
+  const label = route.provider && route.model ? `${route.provider}/${route.model}` : pinned || "自动选择";
   const [resolved, setResolved] = useState("");
   useEffect(() => {
     if (route.provider && route.model) return;

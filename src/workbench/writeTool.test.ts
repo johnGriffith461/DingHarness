@@ -182,6 +182,14 @@ describe("resolveWriteTarget：只给文件名也能落对地方", () => {
     expect(resolveWriteTarget(path.join(ROOT, "artifacts", "x.md"), dirs())).toBe(path.join(ROOT, "artifacts", "x.md"));
   });
 
+  it("⭐ 相对路径（src/a.txt）→ 按第一个授权目录解析（模型最常给这种写法）", () => {
+    expect(resolveWriteTarget("src/a.txt", dirs())).toBe(path.join(ROOT, "drive", "src", "a.txt"));
+  });
+
+  it("相对路径里的 `..` 同样跑不出去", () => {
+    expect(resolveWriteTarget("../穿越.md", dirs())).toBeNull();
+  });
+
   it("⭐ 裸名字里塞 `..` 也跑不出去（拼完照样过白名单）", () => {
     expect(resolveWriteTarget("../../穿越.md", dirs())).toBeNull();
     expect(resolveWriteTarget("..\..\穿越.md", dirs())).toBeNull();

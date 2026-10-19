@@ -129,6 +129,7 @@ const RECORDS_DIR = ".verify";
  *   · `fossil`        化石：早就与产品脱节（打 dev server / 硬编码本机路径），要么重写、要么删
  */
 const NOT_IN_BATCH = {
+  "accept-approval-real.mjs": { kind: "needs-model", why: "§7 场景 3/4：真 provider 验审批后继续与拒绝后不重复（假通道只能证明脚本自己构造的对象）。手动跑：node --import tsx scripts/accept/accept-approval-real.mjs --yes-spend" },
   "accept-harness.mjs": { kind: "needs-model", why: "真 harness 端到端：陌生仓库修失败测试，判据是文件 diff + 测试退出码。假通道只能证明脚本会照做，正是这条要排除的。手动跑：node scripts/accept/accept-harness.mjs --yes-spend" },
   "accept-harness-multistep.mjs": { kind: "needs-model", why: "真 harness 多步：要求 todo_write / 新文件 / 测试 / finish 都有真实证据。手动跑：node scripts/accept/accept-harness-multistep.mjs --yes-spend" },
   /*
@@ -311,6 +312,8 @@ const CASES = [
    * 它们必须存在（那是这些能力的**唯一硬证据**），但不属于"不依赖模型"这一类。
    * 判据与 §109 一致：**读脚本里有没有真调模型的调用**，不是"看起来像不像功能测试"。
    */
+  /* P0-08 / §7 场景 5：首跑落点、模型显示、预算、默认身份（不调模型） */
+  ["accept-firstrun.mjs", "首跑默认态（有 key 没模型仍落选模型 / chip 显示真实模型 / 预算按窗口 / 默认编码）"],
   ["accept-versions.mjs", "版本清单与对比（不调模型）"],
   /*
    * 消息操作栏的六个动作（11.19）—— 含「重新生成必须是同一次提问的重跑」。
