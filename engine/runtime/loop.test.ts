@@ -314,7 +314,11 @@ describe("主循环 · 步数上限是参数（Phase 3.2）", () => {
      */
     // 假 provider 每次都给一个工具调用（无状态）→ 唯一的刹车就是步数上限
     let n = 0;
-    script = () => [toolChunk(`call_${(n += 1)}`, "read_file", '{"path":"a.md"}'), finish("tool_calls")];
+    /*
+     * ⚠️ 参数要**每次都不同**：P0-06 之后同一签名在最近窗口里出现 5 次会判"没有进展"并停止，
+     * 那会让这条"数步数"的用例提前收尾。这里换成变化的 path，测的仍是步数上限。
+     */
+    script = () => [toolChunk(`call_${(n += 1)}`, "read_file", `{"path":"a${n}.md"}`), finish("tool_calls")];
     const tools = buildToolSet({
       registry: createToolRegistry(),
       mode: "全部允许",
@@ -341,7 +345,11 @@ describe("主循环 · 步数上限是参数（Phase 3.2）", () => {
      * 这一条会**跑到超时变红** —— 那正是缺陷的形状。
      */
     let n = 0;
-    script = () => [toolChunk(`call_${(n += 1)}`, "read_file", '{"path":"a.md"}'), finish("tool_calls")];
+    /*
+     * ⚠️ 参数要**每次都不同**：P0-06 之后同一签名在最近窗口里出现 5 次会判"没有进展"并停止，
+     * 那会让这条"数步数"的用例提前收尾。这里换成变化的 path，测的仍是步数上限。
+     */
+    script = () => [toolChunk(`call_${(n += 1)}`, "read_file", `{"path":"a${n}.md"}`), finish("tool_calls")];
     const tools = buildToolSet({
       registry: createToolRegistry(),
       mode: "全部允许",

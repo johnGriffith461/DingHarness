@@ -12,6 +12,7 @@ import {
   type FinishRecord,
   type TurnEvidence,
 } from "./finishContract";
+import { STALL_NUDGE, STALL_STOPPED, createStallDetector, emptyResponseOutcome, signatureOf } from "./stall";
 
 import type { StepUsage } from "../../shared/cost";
 import type { HealthStore } from "../ports/health";
@@ -445,6 +446,13 @@ async function runTurnOnce(
   /** P0-02：这一轮的真实证据账本（与 finish 执行体共享同一份对象）。 */
   const evidence = input.turnEvidence ?? createTurnEvidence();
   let finished: FinishRecord | undefined;
+  /* P0-06：重复调用检测（每轮一份） */
+  const stallDetector = createStallDetector();
+  let repetitionStopped = false;
+  let pendingNudge: string[] = [];
+  let consecutiveToolFailures = 0;
+  let sawText = false;
+  let sawToolCall = false;
   const emitSpan = (ok: boolean, usage?: TurnUsage, error?: string) => {
     void exportTurnTrace({
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -557,18 +565,22 @@ async function runTurnOnce(
        * 插话（G06）：`prepareStep` 在**每一步之前**跑，正好是"不打断当前生成、
        * 又能让下一步看见新要求"的那个时机。返回的 messages 会带到后续步骤。
        */
-      ...(input.nextSteer
-        ? {
-            prepareStep: ({ messages }: { messages: unknown[] }) => {
-              const added = input.nextSteer?.() ?? [];
-              if (!added.length) return {};
-              for (const text of added) onEvent({ type: "steer", text });
-              return {
-                messages: [...messages, ...added.map((text) => ({ role: "user" as const, content: text }))],
-              } as never;
-            },
-          }
-        : {}),
+      /*
+       * P0-06：插话与"卡住提示"共用一个入口。
+       * 即使没配 nextSteer 也要挂 prepareStep —— 否则检测到重复时那句提示送不进去。
+       */
+      prepareStep: ({ messages }: { messages: unknown[] }) => {
+        const added = [...(input.nextSteer?.() ?? [])];
+        if (pendingNudge.length) {
+          added.push(...pendingNudge);
+          pendingNudge = [];
+        }
+        if (!added.length) return {};
+        for (const text of added) onEvent({ type: "steer", text });
+        return {
+          messages: [...messages, ...added.map((text) => ({ role: "user" as const, content: text }))],
+        } as never;
+      },
     });
 
     /** 到这一步为止发过几次"一步结束"（Phase 13.3：进度叙述要用步号）。 */
@@ -583,13 +595,27 @@ async function runTurnOnce(
       armStall(); // 每一块都把看门狗往后推（"卡住"= 两块之间太久，不是总时长）
       if (input.abortSignal?.aborted) break;
       if (part.type === "text-delta") {
+        if (part.text) sawText = true;
         onEvent({ type: "text", text: part.text });
         continue;
       }
       if (part.type === "tool-call") {
+        sawToolCall = true;
         /* 参数也要留下：finish 的证据校验与 run_command 的命令行都从这里取 */
         toolStarts.set(part.toolCallId, { name: part.toolName, at: Date.now(), input: part.input });
         onEvent({ type: "tool-call", toolCallId: part.toolCallId, toolName: part.toolName, input: part.input });
+        /*
+         * P0-06：同一签名在最近窗口里第 3 次 → 提示；第 5 次 → 停止。
+         * 停止用 abort 打断当前流，但**不**算用户中止（下面按 repetitionStopped 报错）。
+         */
+        const verdict = stallDetector.push(signatureOf(part.toolName, part.input));
+        if (verdict === "nudge") {
+          pendingNudge.push(STALL_NUDGE);
+          onEvent({ type: "steer", text: STALL_NUDGE });
+        } else if (verdict === "stop") {
+          repetitionStopped = true;
+          watchdog.abort();
+        }
         continue;
       }
       if (part.type === "tool-result" || part.type === "tool-error") {
@@ -600,6 +626,17 @@ async function runTurnOnce(
          */
         const failed = part.type === "tool-error";
         const startedTool = toolStarts.get(part.toolCallId);
+        /* P0-06：工具连续失败 3 次也提示一次（同一个错误反复撞） */
+        if (failed) {
+          consecutiveToolFailures += 1;
+          if (consecutiveToolFailures === 3 && pendingNudge.length === 0) {
+            const text = "工具已经连续失败 3 次。换一种方法，或者把报错原文贴出来并说明卡在哪。";
+            pendingNudge.push(text);
+            onEvent({ type: "steer", text });
+          }
+        } else {
+          consecutiveToolFailures = 0;
+        }
         if (!failed) {
           if (["write_file", "edit_file", "apply_patch"].includes(part.toolName)) {
             wroteFiles = true;
@@ -689,6 +726,18 @@ async function runTurnOnce(
     }
 
     /*
+     * P0-06：重复调用触发的停止 —— 与"用户中止"区分开，也与"连接卡住"区分开。
+     * 它是一次**失败**：模型没有进展，继续跑只会烧钱。
+     */
+    if (repetitionStopped) {
+      input.onRawError?.(STALL_STOPPED);
+      health.markFailed(provider.id, STALL_STOPPED);
+      onEvent({ type: "error", message: STALL_STOPPED });
+      emitSpan(false, undefined, STALL_STOPPED);
+      return { ok: false, error: STALL_STOPPED, aborted: false, provider: provider.id, model };
+    }
+
+    /*
      * ⭐ 看门狗响了（审计 P37）：**这是失败，不是用户中止** ——
      * provider 那边的连接卡住了，要 markFailed 并在界面说清"没有数据进来"。
      */
@@ -704,6 +753,17 @@ async function runTurnOnce(
     if (input.abortSignal?.aborted) {
       // 中止是用户意图：**不判 provider 失败**，也不当作错误结局
       return { ok: true, aborted: true, provider: provider.id, model };
+    }
+
+    /*
+     * P0-06：空响应不是成功。模型什么都没说、也没调工具时，
+     * 原来的实现会带着一段空文本结束 —— 界面上看起来"完成了"。
+     */
+    if (!sawText && !sawToolCall) {
+      const empty = emptyResponseOutcome();
+      onEvent({ type: "error", message: empty.error });
+      emitSpan(false, undefined, empty.error);
+      return { ok: false, error: empty.error, aborted: false, provider: provider.id, model };
     }
 
     let usage: TurnUsage | undefined;
@@ -745,6 +805,13 @@ async function runTurnOnce(
      * 看门狗触发时 SDK 抛的是 AbortError（是我们自己 abort 的）——
      * 同样要按"provider 卡住"报，不能落进下面那句"已中止"（那会让用户以为是自己点了停止）。
      */
+    if (repetitionStopped) {
+      input.onRawError?.(STALL_STOPPED);
+      health.markFailed(provider.id, STALL_STOPPED);
+      onEvent({ type: "error", message: STALL_STOPPED });
+      emitSpan(false, undefined, STALL_STOPPED);
+      return { ok: false, error: STALL_STOPPED, aborted: false, provider: provider.id, model };
+    }
     if (stalled) {
       const message = stallMessage(stallMs);
       input.onRawError?.(`no stream data for ${stallMs}ms`);
