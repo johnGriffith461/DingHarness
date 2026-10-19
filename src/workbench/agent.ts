@@ -190,9 +190,9 @@ export function buildCodingAskPrompt(
   const system = [
     CODING_RULES,
     "",
-    "用户给你一个任务。先判断：只凭这句话，能不能直接在仓库里动手。",
-    "能（关键信息够了）就直接干；不能（缺对象、路径、目标或验收标准）才问。",
-    ...askBlock(),
+    "用户给你一个任务。先自己调查：只凭已有的信息，能不能直接在仓库里动手。",
+    "能（关键信息够了）就直接干，不要反问；不能（缺对象、路径、目标或验收标准）才调用 `ask_user` 工具提问。",
+    "不要在正文里写问卷模板 —— 需要用户拍板时用 `ask_user`。",
   ].join("\n");
   const backgroundBlock = background.length
     ? `\n\n【已经问过并得到回答的背景】\n${background.map((b, i) => `${i + 1}. ${b}`).join("\n")}`
@@ -206,7 +206,13 @@ export function buildCodingDoPrompt(
   answers: string[],
   material?: string,
 ): { system: string; user: string } {
-  const system = [CODING_RULES, "", CODING_ARTIFACT_NOTE].join("\n");
+  const system = [
+    CODING_RULES,
+    "",
+    "需要用户拍板（两个方案各有取舍、缺关键信息）时调用 `ask_user` 工具，不要在正文里写问卷。",
+    "",
+    CODING_ARTIFACT_NOTE,
+  ].join("\n");
   const answerBlock = answers.map((a, i) => `${i + 1}. ${a}`).join("\n");
   return { system, user: withMaterial(`任务：${userMessage}\n\n我提供的关键信息：\n${answerBlock}`, material) };
 }
@@ -222,6 +228,7 @@ export function buildCodingFollowUpPrompt(
     "",
     "用户在与你的**同一段对话**里继续说了一句，请接着上文干活。",
     "前面已经做过的事不要重复；不确定的事直接说不确定，不要猜。",
+    "需要用户拍板时调用 `ask_user` 工具，不要在正文里写问卷。",
     ...(truncated ? ["", truncatedNote()] : []),
   ].join("\n");
   return { system, user: withMaterial(userMessage, material) };

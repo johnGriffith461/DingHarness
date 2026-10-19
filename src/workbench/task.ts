@@ -109,6 +109,13 @@ export type TaskQuestion = {
   /** 问句本身。 */
   text: string;
   options: TaskOption[];
+  /**
+   * P0-07：这张卡是从哪来的。
+   *
+   * - `ask_user`：模型调了工具，回答后按"工具结果"续跑；
+   * - 缺省：正文里的 `<ask>` 块（办公模式仍在用）。
+   */
+  source?: "ask_user";
 };
 
 /** 一个问题连同它的选项；对齐原版"最多 3 题、逐题推进"。 */
@@ -719,7 +726,12 @@ export function normalizeQuestions(raw: unknown): TaskQuestion[] {
       }))
       .filter((o) => o.label.trim().length > 0);
     if (options.length === 0) continue;
-    out.push({ id, text: typeof q.text === "string" ? q.text : "", options });
+    out.push({
+      id,
+      text: typeof q.text === "string" ? q.text : "",
+      options,
+      ...(q.source === "ask_user" ? { source: "ask_user" as const } : {}),
+    });
   }
   return out;
 }

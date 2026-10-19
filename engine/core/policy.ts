@@ -121,6 +121,8 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
    * 它的约束来自完成契约（证据校验），不是权限闸门。
    */
   finish: { kind: "read" },
+  /* P0-07：提问不改任何资源（问题卡由界面接管），不该被审批打断 */
+  ask_user: { kind: "read" },
   /*
    * Computer Use（V6-2n）：四个都按**写** —— 它们能移动真实鼠标、敲真实键盘、
    * 截取屏幕。按需确认档下必须问；「全部允许」下也仍受 `computer-use.json`

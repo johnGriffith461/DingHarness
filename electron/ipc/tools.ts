@@ -45,7 +45,8 @@ import { describeEditResult, editFileForModel } from "../../engine/runtime/tools
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
 import { describeFinish, validateFinish, type TurnEvidence } from "../../engine/runtime/finishContract";
-import { FINISH_TOOL } from "../../shared/agentTools";
+import { ASK_USER_TOOL, FINISH_TOOL } from "../../shared/agentTools";
+import { describeAskResult, normalizeAsk } from "../../engine/runtime/tools/askUserTool";
 import { nothingFoundNote } from "../../engine/runtime/tools/searchTool";
 import { createSerialQueue, createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { callMcpTool, mcpToolBindings } from "./mcpStore";
@@ -615,6 +616,13 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const got = validateFinish(input, env.turnEvidence);
     if (!got.ok) return { ok: false, line: got.error, error: got.error };
     return { ok: true, line: describeFinish(got.finish), finished: got.finish };
+  },
+
+  /* P0-07：只做校验与回显；问题卡由渲染层从这条结果映射出来。 */
+  [ASK_USER_TOOL]: async (input) => {
+    const got = normalizeAsk(input);
+    if (!got.ok) return { ok: false, line: `提问未发出：${got.error}`, error: got.error };
+    return { ok: true, line: describeAskResult(), ask: got.ask };
   },
 
   [RUN_COMMAND_TOOL]: async (input, env) => {

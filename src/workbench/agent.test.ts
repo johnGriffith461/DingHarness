@@ -124,13 +124,26 @@ describe("A3 编码提示词（与办公分离）", () => {
     expect(system).toContain("直接给成品");
   });
 
-  it("编码提问那轮也带编码纪律与同一套提问块格式", () => {
+  it("编码提问那轮也带编码纪律，并且**不再**带正文问卷模板（P0-07）", () => {
     const { system, user } = buildCodingAskPrompt("把登录改成 OAuth", [], "资料正文");
 
     expect(system).toContain("先调查再动手");
-    expect(system).toContain(ASK_OPEN);
+    /* P0-07：编码三个提示词统一走 ask_user 工具，不再往正文里塞 <ask> 模板 */
+    expect(system).not.toContain(ASK_OPEN);
+    expect(system).toContain("ask_user");
     expect(user).toContain("把登录改成 OAuth");
     expect(user).toContain("资料正文");
+  });
+
+  it("编码三段提示词都提到 ask_user，且都不含 <ask>（P0-07）", () => {
+    for (const prompt of [
+      buildCodingAskPrompt("x").system,
+      buildCodingDoPrompt("x", []).system,
+      buildCodingFollowUpPrompt("x").system,
+    ]) {
+      expect(prompt).toContain("ask_user");
+      expect(prompt).not.toContain(ASK_OPEN);
+    }
   });
 
   it("编码接着聊那轮不回退成办公助手", () => {

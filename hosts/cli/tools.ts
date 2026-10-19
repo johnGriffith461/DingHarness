@@ -25,7 +25,8 @@ import { createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
 import { describeFinish, validateFinish } from "../../engine/runtime/finishContract";
-import { FINISH_TOOL } from "../../shared/agentTools";
+import { ASK_USER_TOOL, FINISH_TOOL } from "../../shared/agentTools";
+import { describeAskResult, normalizeAsk } from "../../engine/runtime/tools/askUserTool";
 
 /**
  * CLI 宿主的**执行体**：把内核给的工具名落到真实文件系统上。
@@ -259,6 +260,13 @@ export function createCliExecutor(opts: {
         } finally {
           store.close();
         }
+      }
+
+      /* P0-07：CLI 没有问题卡，把问题原样回给模型（宿主侧会打印到终端由用户回答） */
+      case ASK_USER_TOOL: {
+        const got = normalizeAsk(input);
+        if (!got.ok) return { ok: false, output: { ok: false, line: got.error, error: got.error }, error: got.error };
+        return { ok: true, output: { ok: true, line: describeAskResult(), ask: got.ask } };
       }
 
       case "run_command": {

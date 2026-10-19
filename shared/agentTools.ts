@@ -424,6 +424,35 @@ export const FINISH_DESC = [
   "evidence.files 写本轮改过的文件路径，便于用户核对。",
 ].join("");
 
+/* ── P0-07：ask_user ─────────────────────────────────────────────
+ *
+ * 需要用户拍板时**调用工具**，不要往正文里塞问卷模板 —— 工具结果能直接落成问题卡。
+ */
+export const ASK_USER_TOOL = "ask_user";
+export const ASK_USER_MAX_OPTIONS = 5;
+
+export const ASK_USER_DESC = [
+  "当你确实需要用户拍板（缺关键信息、两个方案各有取舍）时，向用户提一个问题。",
+  "先自己调查；能靠读文件/搜索解决的问题不要问。",
+  "问题要具体，选项要贴着当前场景（最多 5 个）；用户也可以自己写答案。",
+  "调用后停下来等回答 —— 不要在正文里再写一遍问卷。",
+].join("");
+
+export const ASK_USER_INPUT = z.object({
+  question: z.string().trim().min(1).max(500).describe("要问用户的那个问题（一句话）"),
+  options: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(60).describe("选项主文案"),
+        description: z.string().trim().max(200).optional().describe("一行补充说明（选了会怎么做）"),
+      }),
+    )
+    .max(ASK_USER_MAX_OPTIONS)
+    .optional()
+    .describe("可选项（最多 5 个）；不传就是纯自由文本提问"),
+  allow_free_text: z.boolean().optional().describe("是否允许用户自己写答案（默认允许）"),
+});
+
 export const FINISH_INPUT = z.object({
   status: z.enum(["done", "blocked"]).describe("done 已完成 / blocked 卡住了"),
   summary: z.string().trim().min(1).max(1000).describe("一句话说清这一轮做成了什么（或为什么没做成）"),
@@ -693,6 +722,7 @@ const TOOL_META: Record<string, AgentToolMeta> = {
   [RUN_COMMAND_TOOL]: { destructive: true, concurrency: "exclusive", timeoutMs: 120_000, resultPolicy: "tail" },
   [TODO_WRITE_TOOL]: { concurrency: "exclusive" },
   [FINISH_TOOL]: { concurrency: "exclusive" },
+  [ASK_USER_TOOL]: { concurrency: "exclusive" },
 };
 
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
@@ -713,6 +743,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
   { name: TODO_WRITE_TOOL, description: TODO_WRITE_DESC, schema: TODO_WRITE_INPUT },
   { name: FINISH_TOOL, description: FINISH_DESC, schema: FINISH_INPUT },
+  { name: ASK_USER_TOOL, description: ASK_USER_DESC, schema: ASK_USER_INPUT },
   ...COMPUTER_TOOL_SPECS,
   ...BROWSER_TOOL_SPECS,
   ...UIA_TOOL_SPECS,
@@ -740,6 +771,7 @@ export function toolLabel(name: string): string {
   if (name === READ_FILE_TOOL) return "读文件";
   if (name === TODO_WRITE_TOOL) return "待办";
   if (name === FINISH_TOOL) return "完成";
+  if (name === ASK_USER_TOOL) return "提问";
   if (name === LIST_FILES_TOOL) return "列文件";
   if (name === SPAWN_AGENTS_TOOL) return "派小队";
   if (name.startsWith("computer_")) return "电脑操作";
