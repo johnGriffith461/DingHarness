@@ -336,7 +336,8 @@ jobs:
         accept-chips.mjs,accept-panels.mjs,accept-windowctl.mjs,accept-memory.mjs,
         accept-shortcuts.mjs,accept-suggestions.mjs,accept-taskcenter.mjs,
         accept-searchhistory.mjs,accept-material.mjs,accept-sessionlog.mjs,
-        accept-abort.mjs,accept-kvstore.mjs
+        accept-abort.mjs,accept-kvstore.mjs,
+        accept-cli-exit.mjs
     steps:
       - name: 检出
         uses: actions/checkout@v7
@@ -361,6 +362,9 @@ jobs:
         run: |
           pnpm build:web
           pnpm electron:build
+
+      - name: 构建 CLI 产物（accept-cli-exit 要跑 dist-cli）
+        run: pnpm cli:build
 
       - name: 验收子集（自带假通道 + 零出网闸）
         run: node scripts/verify-acceptances.mjs

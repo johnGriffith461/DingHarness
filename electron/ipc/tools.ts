@@ -1,6 +1,5 @@
 import { jsonSchema, type ToolSet } from "ai";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { isMcpTool, parseMcpToolName } from "../../shared/mcp";
 import {
   CANVAS_ADD_NODE_TOOL,
@@ -30,6 +29,7 @@ import { buildToolSet, createToolRegistry, type ToolEntryInput } from "../../eng
 import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
 import { parseSandboxMode, writeEffectAllowed } from "../../engine/adapters/sandbox";
 import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/fileState";
+import { insideDirs } from "../../engine/runtime/tools/drivePaths";
 import { killJob, readJob, startJob } from "../../engine/runtime/tools/jobs";
 import { fetchForModel } from "../../engine/runtime/tools/webFetchTool";
 import type { ToolInfoWire } from "../../shared/ipc";
@@ -660,7 +660,8 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
      */
     if (background === true) {
       const wanted = String(workdir ?? "").trim() || ownedDirs()[0] || "";
-      const cwd = wanted ? ownedDirs().find((dir) => path.resolve(dir) === path.resolve(wanted)) : null;
+      /* 与 CLI 同一口径：子目录也算在授权范围内（`insideDirs` 会解掉 `..`） */
+      const cwd = wanted ? insideDirs(wanted, ownedDirs()) : null;
       if (!cwd) {
         const error = "这个工作目录不在授权范围内（只能在你授权的目录里跑命令）";
         return { ok: false, line: error, error };
