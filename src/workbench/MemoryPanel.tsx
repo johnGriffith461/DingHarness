@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { useMemoryStore } from "./memoryStore";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { clearConfirmRequest } from "./memoryClear";
 
 /**
  * 「记忆」面板。
@@ -25,6 +27,8 @@ export default function MemoryPanel() {
    */
   const { lib, loaded, load, add, drop, clear, note } = useMemoryStore();
   const [draft, setDraft] = useState("");
+  /** T-04：清空不可逆，必须先确认（`true` = 确认框打开） */
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     void load();
@@ -97,12 +101,26 @@ export default function MemoryPanel() {
           </ul>
           <div className="wb-memory-foot">
             <span>{lib.entries.length} 条</span>
-            <button className="wb-page-btn" data-testid="wb-memory-clear" onClick={() => void clear()}>
+            <button
+              className="wb-page-btn"
+              data-testid="wb-memory-clear"
+              /* T-04：只进入确认态，**不清空**；确认之后才调 clear() */
+              onClick={() => setConfirming(true)}
+            >
               全部清除
             </button>
           </div>
         </>
       )}
+      {confirming ? (
+        <ConfirmDialog
+          request={clearConfirmRequest(lib.entries.length)}
+          onAnswer={(ok) => {
+            setConfirming(false);
+            if (ok) void clear();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
