@@ -129,6 +129,7 @@ const RECORDS_DIR = ".verify";
  *   · `fossil`        化石：早就与产品脱节（打 dev server / 硬编码本机路径），要么重写、要么删
  */
 const NOT_IN_BATCH = {
+  "accept-approvals-audit-real.mjs": { kind: "needs-model", why: "T-01 的端到端证据：真 provider 跑「写文件 → 审批 → approvals 表 approved → 审阅列出 diff」。这条要证的是模型真的调工具、闸门真的拦、批准后真的落盘；假通道测不出。手动跑：node --import tsx scripts/accept/accept-approvals-audit-real.mjs --yes-spend" },
   "accept-approval-real.mjs": { kind: "needs-model", why: "§7 场景 3/4：真 provider 验审批后继续与拒绝后不重复（假通道只能证明脚本自己构造的对象）。手动跑：node --import tsx scripts/accept/accept-approval-real.mjs --yes-spend" },
   "accept-harness.mjs": { kind: "needs-model", why: "真 harness 端到端：陌生仓库修失败测试，判据是文件 diff + 测试退出码。假通道只能证明脚本会照做，正是这条要排除的。手动跑：node scripts/accept/accept-harness.mjs --yes-spend" },
   "accept-harness-multistep.mjs": { kind: "needs-model", why: "真 harness 多步：要求 todo_write / 新文件 / 测试 / finish 都有真实证据。手动跑：node scripts/accept/accept-harness-multistep.mjs --yes-spend" },
@@ -901,6 +902,16 @@ function startLocalFakeModel() {
         if (name === "canvas_add_node") {
           const text = /内容写「([^」]+)」/.exec(userText)?.[1] ?? cut(200);
           return JSON.stringify({ kind: "markdown", text: text.slice(0, 2000) });
+        }
+        /*
+         * T-01（2026-10-19）：`write_file` 要能真的落到文件上 ——
+         * 「改文件 → 审批 → approvals 表 → 审阅面板」这条链只能靠真写盘验。
+         * 路径与内容都从用户那句话里取（脚本埋的绝对是新路径，不会覆盖到别处）。
+         */
+        if (name === "write_file") {
+          const target = /写入「([^」]+)」/.exec(userText)?.[1] ?? "";
+          const content = /内容「([^」]+)」/.exec(userText)?.[1] ?? "accept-marker";
+          return target ? JSON.stringify({ path: target, content }) : JSON.stringify({ text: cut(120) });
         }
         /*
          * `spawn_agent` 的参数只有 `task`（+可选 `context`）—— 派谁由 coordinator 按 task 挑。

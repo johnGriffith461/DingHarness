@@ -6,7 +6,7 @@ import { groupThreads, summaryOf } from "./threadGroups";
 import { useLibraryStore } from "./libraryStore";
 import { useWorkbenchStore } from "./store";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
-import { taskSessionId } from "@engine/core/events";
+import { normalizeTaskSessionId } from "./sessionId";
 
 /**
  * 「管理历史对话」页 —— 对应本体路由 `chat/thread/list`。
@@ -159,7 +159,7 @@ export default function ThreadListPage() {
                 const session = (globalThis as unknown as {
                   shell?: { session?: { fork: (id: string) => Promise<{ ok: boolean; sessionId?: string; note?: string; error?: string }> } };
                 }).shell?.session;
-                const sourceId = taskSessionId(menu.task.id);
+                const sourceId = normalizeTaskSessionId(menu.task.id);
                 setMenu(null);
                 void session
                   ?.fork(sourceId)

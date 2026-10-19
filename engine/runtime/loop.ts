@@ -229,6 +229,11 @@ export type TurnOutcome = {
   finished?: FinishRecord;
   /** P0-03：完成提醒拉过一轮之后仍没有有效 finish。 */
   unfinished?: boolean;
+  /**
+   * T-02：这一轮停在**待审批**上（闸门拦下了某次调用，等用户决定）。
+   * 它既不是"完成"也不是"失败" —— 用户决定后由宿主续跑。
+   */
+  awaitingApproval?: { toolCallId: string; name: string };
 };
 
 /**
@@ -453,6 +458,8 @@ async function runTurnOnce(
   let consecutiveToolFailures = 0;
   let sawText = false;
   let sawToolCall = false;
+  /* T-02：这一轮是不是停在待审批上（谁、哪一个） */
+  let awaitingApproval: { toolCallId: string; name: string } | undefined;
   const emitSpan = (ok: boolean, usage?: TurnUsage, error?: string) => {
     void exportTurnTrace({
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -559,7 +566,28 @@ async function runTurnOnce(
         : { providerOptions: reasoningProviderOptions(protocol, input.reasoningEffort) }),
       ...(input.abortSignal || watchdog ? { abortSignal: watchdog.signal } : {}),
       ...(mergedTools
-        ? { tools: mergedTools, stopWhen: stepCountIs(effectiveMaxSteps(input.maxSteps)) }
+        ? {
+            tools: mergedTools,
+            /*
+             * T-02：**待审批就停**。闸门把"等你确认"当成一条普通工具结果返回，
+             * 模型会拿着"还没执行"继续编，甚至直接 finish(blocked) 收尾 ——
+             * 用户点了允许之后工具确实执行了，但那一轮已经结束（WorkBuddy 实测）。
+             *
+             * 这里加一条停止条件：这一步的结果里有 pending，就不再往下一步走。
+             */
+            stopWhen: [
+              stepCountIs(effectiveMaxSteps(input.maxSteps)),
+              ({ steps }: { steps: Array<{ toolResults?: Array<{ output?: unknown }> }> }) => {
+                const last = steps[steps.length - 1];
+                return (last?.toolResults ?? []).some(
+                  (r) =>
+                    r.output &&
+                    typeof r.output === "object" &&
+                    (r.output as { pending?: unknown }).pending === true,
+                );
+              },
+            ],
+          }
         : {}),
       /*
        * 插话（G06）：`prepareStep` 在**每一步之前**跑，正好是"不打断当前生成、
@@ -638,7 +666,17 @@ async function runTurnOnce(
           consecutiveToolFailures = 0;
         }
         if (!failed) {
-          if (["write_file", "edit_file", "apply_patch"].includes(part.toolName)) {
+          /*
+           * T-02：**待审批不等于写过文件**。闸门拦下时返回的是
+           * `{ pending: true }`（没有失败、也没有执行），
+           * 原来这里会把 wroteFiles 置真 —— 于是"还没批准"的任务被当成
+           * "改过文件"，触发完成提醒与验证闭环，用户看到一堆凭空的动作。
+           */
+          const wasPending =
+            part.output &&
+            typeof part.output === "object" &&
+            (part.output as { pending?: unknown }).pending === true;
+          if (!wasPending && ["write_file", "edit_file", "apply_patch"].includes(part.toolName)) {
             wroteFiles = true;
             evidence.wroteFiles = true;
           }
@@ -664,6 +702,14 @@ async function runTurnOnce(
           if (part.toolName === FINISH_TOOL) {
             const verdict = validateFinish(startedTool?.input, evidence);
             if (verdict.ok) finished = verdict.finish;
+          }
+          /* T-02：记下"停在谁身上"（最后一条 pending 为准） */
+          if (
+            part.output &&
+            typeof part.output === "object" &&
+            (part.output as { pending?: unknown }).pending === true
+          ) {
+            awaitingApproval = { toolCallId: part.toolCallId, name: part.toolName };
           }
         }
         if (startedTool) {
@@ -759,7 +805,7 @@ async function runTurnOnce(
      * P0-06：空响应不是成功。模型什么都没说、也没调工具时，
      * 原来的实现会带着一段空文本结束 —— 界面上看起来"完成了"。
      */
-    if (!sawText && !sawToolCall) {
+    if (!sawText && !sawToolCall && !awaitingApproval) {
       const empty = emptyResponseOutcome();
       onEvent({ type: "error", message: empty.error });
       emitSpan(false, undefined, empty.error);
@@ -799,6 +845,7 @@ async function runTurnOnce(
       model,
       ...(wroteFiles ? { wroteFiles: true } : {}),
       ...(finished ? { finished } : {}),
+      ...(awaitingApproval ? { awaitingApproval } : {}),
     };
   } catch (error) {
     /*
@@ -888,7 +935,9 @@ export async function runTurn(
     deps,
   );
 
-  const needsReminder = first.ok && !first.aborted && first.wroteFiles === true && !first.finished;
+  /* T-02：等批时**不许**催 finish（那不是没做完，是在等人） */
+  const needsReminder =
+    first.ok && !first.aborted && first.wroteFiles === true && !first.finished && !first.awaitingApproval;
   if (!needsReminder) {
     if (firstDone) onEvent(firstDone);
     return first;

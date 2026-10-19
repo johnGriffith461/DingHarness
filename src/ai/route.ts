@@ -66,7 +66,18 @@ export async function resolveChatRoute(
     available,
   });
   if (picked.source === "pinned") return { provider: picked.provider, model: picked.model };
-  if (picked.source === "last") {
+  /*
+   * ⚠️ **只有 last 里真的有 provider 才返回它**（2026-10-19 真机实测）。
+   *
+   * 缺陷形状：用户钉了一个**自己声明**的模型（`models.json` 里有、但 provider 的
+   * `models` 清单里没有）→ `pickRoute` 判它"不在可用列表"，退回 `last`；
+   * 而新对话的 `last` 是空的 → 这里返回 `{provider:"", model:""}` 并**提前结束**，
+   * 下面"挑第一个可用通道"的兜底根本没执行。用户看到的是一句
+   * "未知 provider："（空值），完全不知道发生了什么。
+   *
+   * 修法：空的 last 不返回，继续往下走兜底。
+   */
+  if (picked.source === "last" && picked.provider) {
     return {
       provider: picked.provider,
       model: picked.model,
@@ -110,9 +121,27 @@ async function availableRoutes(): Promise<string[]> {
   try {
     const { listProviders } = await import("./aiClient");
     const providers = await listProviders();
-    return providers
+    const routes = providers
       .filter((p) => p.available)
       .flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m}`));
+    /*
+     * T-01 附带修正（2026-10-19 真机实测）：**用户声明的模型也要算"可用"**。
+     *
+     * 「添加模型」这个功能的全部意义就是把**不在 provider 清单里**的模型接进来；
+     * 而这里原来只看 `provider.models`，于是钉住的自声明模型被判成"失效"，
+     * 一路退回 `last`（新对话是空的）→ 空 provider → "未知 provider："。
+     * 声明的 provider 只要有密钥，这条路由就该算可用。
+     */
+    const available = new Set(providers.filter((p) => p.available).map((p) => p.id));
+    try {
+      const declared = await bridge()?.modelConfig?.list?.();
+      for (const m of declared?.models ?? []) {
+        if (available.has(m.providerId)) routes.push(`${m.providerId}/${m.modelId}`);
+      }
+    } catch {
+      /* 读不到 models.json 不影响"列出 provider 模型"这条主路 */
+    }
+    return routes;
   } catch {
     return [];
   }

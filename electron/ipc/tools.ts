@@ -807,7 +807,27 @@ export async function runToolOnce(
   // 未知工具：回一句"没有这个工具"，而不是抛异常（口径同 unknownToolNotice）
   if (!run) return { ok: false, error: unknownToolNotice(name) };
   try {
-    return { ok: true, output: await run(input, env) };
+    const output = await run(input, env);
+    /*
+     * ⚠️ **工具自己的成败要传出来**（2026-10-19 真机实测抓到的信任缺陷）。
+     *
+     * 执行体有两种失败方式：
+     *   · 抛异常 —— 下面 catch 住，ok:false；
+     *   · **返回 `{ ok: false, error }`** —— 例如 `write_file` 目标不在白名单时。
+     *
+     * 原来这里不看出参，一律 `{ ok: true, output }`。后果很具体：
+     * 审批记录写成 `ok: true`、留痕写"写文件：已完成"、改动审阅把**失败的写**当成
+     * 真改动列出来 —— 用户看到"已完成"，盘上什么都没有。这正是"假完成"的一种。
+     */
+    const body = output && typeof output === "object" ? (output as { ok?: unknown; error?: unknown }) : null;
+    if (body && body.ok === false) {
+      return {
+        ok: false,
+        output,
+        error: typeof body.error === "string" && body.error ? body.error : "执行失败（工具没有说明原因）",
+      };
+    }
+    return { ok: true, output };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

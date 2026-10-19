@@ -54,6 +54,8 @@ import {
 import { planVerification, type VerifyDecision } from "@engine/runtime/verifyLoop";
 import { describeFinish, finishedFromTraces } from "@engine/runtime/finishContract";
 import { verificationMessage } from "./verifyContinue";
+import { askQuestionsFromTraces } from "./askCard";
+import { normalizeTaskSessionId } from "./sessionId";
 
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
 import { liteModelNow, personaNow } from "./appSettings";
@@ -348,7 +350,7 @@ export async function recordCompaction(
 ): Promise<void> {
   try {
     const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
-    const got = await bridge?.session?.appendCompaction?.(sessionId, info);
+    const got = await bridge?.session?.appendCompaction?.(normalizeTaskSessionId(sessionId), info);
     if (got && !got.ok) console.warn("[session] 压缩事件没记上（压缩本身已完成）：", got.error);
   } catch (error) {
     console.warn("[session] 压缩事件没记上（压缩本身已完成）：", error);
@@ -628,7 +630,14 @@ export async function answerTurn(
   );
   /* P0-08：这一轮实际用的模型写回任务（模型 chip / 上下文表 / 下次压缩都读它） */
   port.setState((s) => ({
-    tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, lastRoute: reply.route } : t)),
+    tasks: s.tasks.map((t) => {
+      if (t.id !== taskId) return t;
+      /* T-02：待审批不是"完成" —— 阶段与文案都要改成"等你确认" */
+      if (reply.awaitingApproval) {
+        return { ...t, lastRoute: reply.route, stage: "awaiting", activity: "等你确认", finishedAt: null };
+      }
+      return { ...t, lastRoute: reply.route };
+    }),
   }));
 
   /*
@@ -856,6 +865,8 @@ export async function runStream(
   note?: string;
   wroteFiles?: boolean;
   route: { provider: string; model: string };
+  /** T-02：这一轮停在待审批上（界面要把状态写成"等你确认"，不是"已完成"）。 */
+  awaitingApproval?: { toolCallId: string; name: string };
 }> {
   const messages: ChatMessage[] = [
     ...history,
@@ -989,7 +1000,8 @@ ${map.text}
         // C1：计划模式 —— 主进程按它只下发只读工具
         ...(plan ? { plan: true } : {}),
         // 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）
-        ...(sessionId ? { sessionId } : {}),
+        /* T-01：**唯一**的一处归一化 —— 审批/审阅读的就是这个 id */
+        ...(sessionId ? { sessionId: normalizeTaskSessionId(sessionId) } : {}),
       },
       (event) => {
         /*
@@ -1115,7 +1127,31 @@ ${map.text}
     ...(fellBackNote ? { note: fellBackNote } : {}),
     ...(view.wroteFiles ? { wroteFiles: true } : {}),
     route: { provider: route.provider, model: route.model },
+    ...awaitingOfTraces(view.traces),
   };
+}
+
+/**
+ * T-02：这一轮结束后任务该在哪个阶段（**纯函数**，可单测）。
+ *
+ * - 有 pending → `awaiting`（等人批，界面文案"等你确认"）；
+ * - 否则 → `done`（正常收尾）。
+ */
+export function taskStageOfReply(input: { awaiting: boolean }): "awaiting" | "done" {
+  return input.awaiting ? "awaiting" : "done";
+}
+
+/**
+ * 从工具留痕里取"停在谁身上"（T-02）。
+ *
+ * 只取**最后一条** pending：同一轮里可能先后有多个（真模型一次会发好几个调用），
+ * 用户要先处理最新的那一个，界面也只需要一个"等你确认"的对象。
+ */
+export function awaitingOfTraces(
+  traces: readonly ToolTrace[],
+): { awaitingApproval?: { toolCallId: string; name: string } } {
+  const pending = [...traces].reverse().find((t) => t.pending);
+  return pending ? { awaitingApproval: { toolCallId: pending.toolCallId, name: pending.name } } : {};
 }
 
 /**
@@ -1175,7 +1211,14 @@ export function nextStep(
     (i) => `${taskId}-a${i + 1}`,
     stepId,
   );
-  const questions = ask.questions;
+  /*
+   * P0-07：正文里的 `<ask>` 块（办公模式）与 `ask_user` 工具（编码模式）都收。
+   * 工具优先：它是结构化的，解析不会失败。
+   * ⚠️ 上一轮只写了 `askCard.ts` 的单测，**没接在这里** —— 模型调了 ask_user
+   * 也只会显示成一行动力留痕，问题卡不出现。这次补上。
+   */
+  const toolQuestions = askQuestionsFromTraces(tools);
+  const questions = toolQuestions.length ? toolQuestions : ask.questions;
 
   const steps = [
     ...task.steps,

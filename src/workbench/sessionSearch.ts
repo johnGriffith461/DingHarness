@@ -1,4 +1,5 @@
 import type { SessionSearchHit, ShellBridge } from "@shared/ipc";
+import { bareTaskId } from "@engine/core/events";
 
 /**
  * 左栏搜索的**渲染侧逻辑**（2026-10-17，V5 开工前清尾 #3）。
@@ -38,13 +39,12 @@ export async function searchSessions(
 /**
  * 命中能不能打开成工作台任务。
  *
- * ⚠️ 两种会话 id 形态都要认（**这是一处已知的不一致**，2026-10-17 实测撞见）：
- *   · `task-<任务 id>` —— 审批留痕那条路用的是它（`store.ts` 经 `taskSessionId()`）；
- *   · **裸任务 id** —— 工作台一轮对话的记录用的是它（`taskRuntime` 的 `sessionId`
- *     就是任务 id，注释也这么写）。
- * 也就是说**同一个任务的两类记录会落在两个会话里**（任务有审批时可见两条命中）。
- * 这属于 V5-1 的会话身份题（C1：会话归属），该统一；在那之前这里两种都认，
- * 别让"搜得到却点不开"成为用户的困惑。
+ * ⚠️ 两种会话 id 形态都要认：
+ *   · `task-<任务 id>` —— **新数据统一用这个**（T-01，2026-10-19）；
+ *   · **裸任务 id** —— 只有旧数据（T-01 之前写下的）会是这个形状。
+ *
+ * T-01 之前这里写的是"已知的不一致"：对话写裸 id、审批写 `task-` 前缀，
+ * 同一个任务会落成两个会话。现在**写新只写 `task-`**，读时兼容旧的 —— 两种都认是为了老数据。
  *
  * @param hit 一条命中
  * @param hasTask 这个任务 id 现在还在不在工作台里
@@ -54,8 +54,7 @@ export function openableTaskId(
   hit: Pick<SessionSearchHit, "sessionId">,
   hasTask: (id: string) => boolean,
 ): string | null {
-  const sessionId = hit.sessionId;
-  const bare = sessionId.startsWith("task-") ? sessionId.slice("task-".length) : sessionId;
+  const bare = bareTaskId(hit.sessionId);
   return bare && hasTask(bare) ? bare : null;
 }
 

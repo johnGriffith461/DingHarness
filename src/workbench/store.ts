@@ -14,7 +14,7 @@ import {
   rejectedLine,
   type ToolTrace,
 } from "@shared/agentTools";
-import { taskSessionId } from "@engine/core/events";
+import { normalizeTaskSessionId } from "./sessionId";
 import { fabricatedCost } from "@shared/cost";
 import { branchFrom, editedBranchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";
@@ -763,7 +763,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           toolPolicy: readConfirmMode(),
           reject: true,
           toolCallId,
-          ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
+          ...(taskId ? { sessionId: normalizeTaskSessionId(taskId) } : {}),
         });
         patchTrace({ pending: false, ok: true, rejected: true, line: rejected.line || rejectedLine(before.name) });
         /* P0-05：让模型知道"用户拒绝了"，并继续（不是停在"已拒绝"） */
@@ -782,7 +782,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         toolPolicy: readConfirmMode(),
         // 决策要进日志（INV-3）：哪一次调用、哪段会话
         toolCallId,
-        ...(taskId ? { sessionId: taskSessionId(taskId) } : {}),
+        ...(taskId ? { sessionId: normalizeTaskSessionId(taskId) } : {}),
       });
       patchTrace({
         pending: false,
@@ -1155,9 +1155,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
     const finishNote = finishNoteOf(reply.tools, reply.wroteFiles);
     nextStep(port, task.id, reply.text, false, user, reply.tools, finishNote || undefined, reply.usage);
-    /* P0-08：这一轮实际用的模型写回任务 */
+    /* P0-08：这一轮实际用的模型写回任务；T-02：待审批时阶段改成"等你确认" */
     set((s) => ({
-      tasks: s.tasks.map((t) => (t.id === task.id ? { ...t, lastRoute: reply.route } : t)),
+      tasks: s.tasks.map((t) =>
+        t.id !== task.id
+          ? t
+          : reply.awaitingApproval
+            ? { ...t, lastRoute: reply.route, stage: "awaiting" as const, activity: "等你确认", finishedAt: null }
+            : { ...t, lastRoute: reply.route },
+      ),
     }));
     /* P0-04：决策与执行都收在 taskRuntime 里（自动跑 / 出卡片 / 写"未验证"） */
     if (reply.wroteFiles) await verifyAfterTurn(port, task.id, mode);
@@ -1194,6 +1200,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     // 还有下一题就停下等用户；答完了才继续干活
     if (advanced.stage !== "running") return;
 
+    /*
+     * P0-07：`ask_user` 的回答按**工具结果**续跑（带着全部历史）。
+     * 不再走"拿 brief 重新拼一段 DO 提示词"那条路 —— 那会丢掉前文做过的调查。
+     */
+    if (question.source === "ask_user") {
+      await answerTurn(port, advanced.id, advanced.steps.slice(0, -1), answerText, undefined, advanced.material);
+      return;
+    }
+
     const background = advanced.steps
       .filter((s) => s.role === "user" && s.text.includes(" → "))
       .map((s) => s.text);
@@ -1217,8 +1232,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
     // 第二段如果又吐了提问块，也照收（模型有时会追问，原版也允许）
     nextStep(port, advanced.id, reply.text, true, user, reply.tools, undefined, reply.usage);
+    /* T-02：这一支同样要区分"等你确认"与"已完成" */
     set((s) => ({
-      tasks: s.tasks.map((t) => (t.id === advanced.id ? { ...t, lastRoute: reply.route } : t)),
+      tasks: s.tasks.map((t) =>
+        t.id !== advanced.id
+          ? t
+          : reply.awaitingApproval
+            ? { ...t, lastRoute: reply.route, stage: "awaiting" as const, activity: "等你确认", finishedAt: null }
+            : { ...t, lastRoute: reply.route },
+      ),
     }));
     if (planRequested) {
       const after = current(get().tasks, advanced.id);

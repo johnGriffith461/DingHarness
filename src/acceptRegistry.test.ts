@@ -93,6 +93,14 @@ const MAX_RETIRED = 0;
  *      自己的格式版本（见 `harness.mjs` 的 `readStoreFile` 那段说明），不在这一条射程里。
  */
 const BARE_FIXTURES = [
+  /*
+   * T-01（2026-10-19）：这条真 provider 验收要预置 `models.json`（模型能力表）——
+   * 它的磁盘格式**本来就不是** C1 信封，而是 `{version, rules}`（见
+   * `engine/adapters/modelConfigStore.ts` 的 `writeModelConfig`）。所以扫到"裸写"是对的，
+   * 这里明确登记：不是漏了信封，是那个文件有自己的版本字段。
+   * settings.json 用的是标准信封（`{__schema:1,data}`）。
+   */
+  "accept-approvals-audit-real.mjs",
   "accept-approve.mjs",
   "accept-artifacts.mjs",
   "accept-createdoc.mjs",

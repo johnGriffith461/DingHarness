@@ -176,6 +176,32 @@ export function taskSessionId(taskId: string): string {
 }
 
 /**
+ * 把"任务 id"或"已经是会话 id"的字符串归一成**任务会话 id**（T-01）。
+ *
+ * ## 为什么必须有这一个函数
+ *
+ * 缺陷形状（WorkBuddy 实测，2026-10-19）：工作台对话的事件写在**裸任务 id** 下，
+ * 而审批决策与改动审阅写在 `task-<id>` 下。于是同一个任务的两类记录落在两个会话里：
+ * `approvals` 表的 UPDATE 匹配不到、审阅读到的会话里没有工具结果。
+ *
+ * 只要还有第二处自己拼前缀，就一定会有第三处漏掉 —— 所以生成与解析都从这里走。
+ *
+ * @param raw 任务 id 或会话 id（不可信）
+ * @returns 归一后的会话 id；空串原样（不造一个 `task-` 空会话）
+ */
+export function normalizeTaskSessionId(raw: string): string {
+  const id = String(raw ?? "").trim();
+  if (!id) return "";
+  return id.startsWith(SESSION_PREFIX.task) ? id : `${SESSION_PREFIX.task}${id}`;
+}
+
+/** 会话日志 id → 任务 id（搜索命中判断"这段任务还在不在"用）。 */
+export function bareTaskId(sessionId: string): string {
+  const id = String(sessionId ?? "").trim();
+  return id.startsWith(SESSION_PREFIX.task) ? id.slice(SESSION_PREFIX.task.length) : id;
+}
+
+/**
  * CLI 会话的日志 id（Phase 2）。
  *
  * 单独一类而不是蹭 `task-`：`ding run` 与工作台任务是**两件不同的事**，

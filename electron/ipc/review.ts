@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { fileChangesFrom, groupByPath, rollbackOf, summarizeChanges } from "../../engine/runtime/fileReview";
+import { loadReviewRecords } from "../../engine/runtime/reviewSessions";
 import { editFileForModel } from "../../engine/runtime/tools/editTool";
 import { insideDirs } from "../../engine/runtime/tools/drivePaths";
 import { ownedDirs } from "./driveStore";
@@ -37,9 +38,12 @@ export function registerReviewIpc(ipc: Pick<typeof ipcMain, "handle">): void {
     if (typeof sessionId !== "string" || !sessionId.trim()) {
       return { ok: false as const, error: "没有给会话 id" };
     }
-    const loaded = await desktopSessionStore().load(sessionId);
-    if (loaded.denied) return { ok: false as const, error: "没有可给你的内容（这段会话不属于当前身份）" };
-    const changes = fileChangesFrom(loaded.records);
+    /*
+     * T-01：先读 `task-<id>`，旧数据（裸 id）兜底。
+     * 只读一种的话，另一种形态的会话在审阅里就是"没有改过文件"。
+     */
+    const records = await loadReviewRecords(sessionId, (id) => desktopSessionStore().load(id));
+    const changes = fileChangesFrom(records);
     /*
      * 渲染层要的是"按文件分组 + 统计"，而 `before/after` 只用于画 diff ——
      * 这里原样带上（编辑段落本来就不长；真要很长时界面只画前 60 行）。
@@ -55,9 +59,9 @@ export function registerReviewIpc(ipc: Pick<typeof ipcMain, "handle">): void {
     if (typeof sessionId !== "string" || typeof target !== "string" || !target.trim()) {
       return { ok: false, error: "参数不完整（要会话 id 与文件路径）" };
     }
-    const loaded = await desktopSessionStore().load(sessionId);
-    if (loaded.denied) return { ok: false, error: "没有可给你的内容（这段会话不属于当前身份）" };
-    const groups = groupByPath(fileChangesFrom(loaded.records));
+    /* T-01：与 list 同一条读路径（新会话优先 + 旧数据兜底） */
+    const records = await loadReviewRecords(sessionId, (id) => desktopSessionStore().load(id));
+    const groups = groupByPath(fileChangesFrom(records));
     const group = groups.find((g) => g.path === target || path.basename(g.path) === target);
     if (!group) return { ok: false, error: `这段会话没有改过「${target}」` };
 

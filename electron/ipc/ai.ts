@@ -1,4 +1,4 @@
-import { ipcMain, type WebContents } from "electron";
+import { app, ipcMain, type WebContents } from "electron";
 import { fetchModelsFor, healthStore, listProvidersWithProbe, probeProviders } from "./aiProbe";
 import { desktopSessionStore } from "./sessionStore";
 import { hostExecutor, mcpToolEntries, pluginToolEntries, runToolOnce, type ToolEnv } from "./tools";
@@ -9,6 +9,9 @@ import type { ApprovalRecord } from "../../engine/core/events";
 import { canDecide, decidedByOf, DEFAULT_APPROVER, pendingFor, approvalRecord } from "../../engine/core/gates";
 import { humanError, resolveTurnTarget, type TurnEvent } from "../../engine/runtime/loop";
 import { resolveSecret } from "../../engine/runtime/credentials";
+import { getProvider } from "../../engine/runtime/providers";
+import { readModelConfig } from "../../engine/adapters/modelConfigStore";
+import { resolveFor } from "../../engine/runtime/modelConfigResolver";
 import { pluginHooks } from "../../engine/runtime/pluginHost";
 import { currentPermissionRules } from "./appSettings";
 import type { AiStreamEvent, ChatRequest, ToolRunRequest, ToolRunResult } from "../../shared/ipc";
@@ -293,7 +296,25 @@ export function registerAiIpc(): void {
      * 规则只有一份（`resolveTurnTarget`），引擎内部用的也是它。
      */
     /* 凭据解析显式给：桌面这一路要读凭据库与加密库（V5-4 4.1 的端口化） */
-    const target = resolveTurnTarget(request.provider, request.model, resolveSecret);
+    /*
+     * ⚠️ T0 的「添加模型」要真的生效（2026-10-19 真机实测抓到的漏接线）：
+     * 用户声明的模型通常**不在 provider 的 models 清单里**，而 `resolveTurnTarget`
+     * 对清单外的名字会**静默回落**到第一个模型 —— 用户以为在用 A，实际跑的是 B。
+     *
+     * 所以这里先查一次 models.json：有 exact 规则就是"用户声明过"，
+     * 于是传 `allowUndeclaredModel` + 解析出的运行时配置（窗口/思考/输出上限都按声明来）。
+     */
+    const declaredRules = readModelConfig(app.getPath("userData")).file.rules;
+    const declared = Boolean(
+      request.model &&
+        declaredRules.some(
+          (r) => r.type === "exact" && r.providerId === request.provider && r.modelId === request.model,
+        ),
+    );
+    const runtimeConfig = declared
+      ? resolveFor({ providerId: request.provider, modelId: request.model ?? "", baseUrl: getProvider(request.provider)?.baseURL }, declaredRules)
+      : undefined;
+    const target = resolveTurnTarget(request.provider, request.model, resolveSecret, { allowUndeclared: declared });
     if (!target.ok) {
       /*
        * 连 provider 都没解析出来 —— 这一轮**没跑**，引擎不会介入（它连注册表都没见过）。
@@ -395,6 +416,8 @@ export function registerAiIpc(): void {
           sessionId: request.sessionId,
           provider: request.provider,
           model: target.model,
+          ...(runtimeConfig ? { modelConfig: runtimeConfig } : {}),
+          ...(declared ? { allowUndeclaredModel: true } : {}),
           ...(request.system ? { system: request.system } : {}),
           /*
            * B3：有 `parts` 走多模态（引擎的 `toAiParts` 会在发请求前校验模型模态），
