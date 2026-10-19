@@ -66,7 +66,7 @@ describe("buildRepoMap", () => {
 
   it("不支持的文件跳过并计数", async () => {
     write("src/a.ts", "export const x = 1;");
-    write("docs/readme.md", "# hi");
+    write("notes/readme.md", "# hi");
     write("scripts/x.py", "print(1)");
 
     const got = await buildRepoMap(root);

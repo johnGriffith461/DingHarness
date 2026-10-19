@@ -31,14 +31,14 @@ describe("searchWorkspaceEntries", () => {
   it("按查询词命中文件与目录，目录排前面", async () => {
     write("src/app.ts");
     write("src/lib/helper.ts");
-    write("docs/readme.md");
+    write("notes/readme.md");
 
     const got = await searchWorkspaceEntries(root, "src");
 
     expect(got[0]?.kind).toBe("dir");
     expect(got.map((e) => e.label)).toContain("src/app.ts");
     expect(got.map((e) => e.label)).toContain("src/lib/helper.ts");
-    expect(got.map((e) => e.label)).not.toContain("docs/readme.md");
+    expect(got.map((e) => e.label)).not.toContain("notes/readme.md");
   });
 
   it("排除 node_modules / .git / dist", async () => {

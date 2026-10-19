@@ -5,7 +5,7 @@ import type { Symbol } from "./parse";
  *
  * 输出形如：
  * ```
- * src/app.ts
+ * app.ts
  *   app  function  L12
  * ```
  * 每行截 100 字符；token 估算用 `chars/4`（与仓库其它估算同一口径）。

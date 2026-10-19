@@ -6,7 +6,7 @@
  * 不能有空白，否则 `a@b.com` 这种输入也会弹菜单。
  *
  * 插入文本保持**人类可读、可继续编辑**：
- *   - 文件/目录：`@src/foo.ts`、`@src/lib/`
+ *   - 文件/目录：`@src-example.ts`、`@lib-example/`
  *   - 会话：`@session:<id>`
  *   - 技能：`@skill:<name>`
  *
@@ -105,7 +105,7 @@ export function parseMentionText(text: string): Mention[] {
       out.push({ kind: "skill", label: token.slice("skill:".length), skillName: token.slice("skill:".length), start, end });
       continue;
     }
-    /* 去掉句末标点（"看看 @src/a.ts，然后…"） */
+    /* 去掉句末标点（"看看 @app.ts，然后…"） */
     const clean = token.replace(/[，。；：、,.;:!?！？]+$/, "");
     if (!clean) continue;
     if (clean.endsWith("/")) out.push({ kind: "dir", label: clean.slice(0, -1), path: clean.slice(0, -1), start, end });

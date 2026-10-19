@@ -1,4 +1,3 @@
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -55,7 +54,7 @@ describe("工具面", () => {
 describe("计划文件与提示", () => {
   it("路径在 .ding/plans 下，会话 id 不会逃逸", () => {
     const file = planFilePath("C:/data", "../../etc");
-    expect(file).toContain(path.join(".ding", "plans"));
+    expect(file).toContain(".ding/plans");
     expect(file).not.toContain("..");
   });
 

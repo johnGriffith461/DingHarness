@@ -445,14 +445,14 @@
 
 /*
  * C2：上下文压力（输入区右侧）。
- * 80% 变黄、100% 变红；数字本身不改颜色 —— 只有状态点跟随。
+ * 80% 变黄、100% 变红；颜色一律取 tokens 里的语义变量（深色主题自动跟随）。
  */
 .wb-context-meter {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: var(--fg-4);
+  color: var(--fg-faint);
   white-space: nowrap;
 }
 .wb-context-meter em {
@@ -461,12 +461,12 @@
   padding: 0 4px;
   border-radius: 4px;
   background: var(--surface-hover);
-  color: var(--fg-4);
+  color: var(--fg-faint);
 }
-.wb-context-meter.is-warn { color: #b07a12; }
-.wb-context-meter.is-warn em { background: rgba(176, 122, 18, 0.12); color: #b07a12; }
-.wb-context-meter.is-full { color: #c0392b; }
-.wb-context-meter.is-full em { background: rgba(192, 57, 43, 0.12); color: #c0392b; }
+.wb-context-meter.is-warn { color: var(--warn); }
+.wb-context-meter.is-warn em { background: var(--warn-soft); color: var(--warn); }
+.wb-context-meter.is-full { color: var(--danger); }
+.wb-context-meter.is-full em { background: var(--surface-hover); color: var(--danger); }
 
 /* C3：模型选择器的搜索框与「命中里属于哪个 provider」 */
 .wb-model-search {
@@ -474,18 +474,17 @@
   margin: 8px;
   height: 28px;
   padding: 0 9px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-hover);
   color: var(--fg-2);
   font-size: 12px;
-  outline: none;
 }
-.wb-model-search:focus { border-color: var(--border-strong); }
+.wb-model-search:focus-visible { border-color: var(--line-strong); }
 .wb-model-match-provider {
   padding: 6px 10px 2px;
   font-size: 10px;
-  color: var(--fg-4);
+  color: var(--fg-faint);
 }
 
 /* C4：编辑用户消息并重发 */
@@ -500,7 +499,7 @@
   flex: 1 1 100%;
   min-height: 56px;
   padding: 6px 8px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-hover);
   color: var(--fg-2);

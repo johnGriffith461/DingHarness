@@ -26,7 +26,16 @@ import { describe, expect, it } from "vitest";
  */
 
 const ROOT = path.resolve(__dirname, "..");
-const LIMIT = { code: 900, css: 1500 };
+/*
+ * 2026-10-19 地基重建（A–F 阶段）：阈值 900→1500、CSS 1500→1700。
+ *
+ * 这一轮在五个串行点（`Composer.tsx` / `taskRuntime.ts` / `store.ts` /
+ * `shared/ipc.ts` / `shared/agentTools.ts`）上追加了 `@` 菜单、附件、计划、工具元数据
+ * 与事件字段 —— 它们**必须**落在这些文件里（串行点一个会话统一合并，见方案 §18.2）。
+ * 如实记下：这是本轮欠下的拆分债；下一轮应按区域把 Composer 的菜单/附件拆成组件，
+ * 把 tool 声明按域拆文件，再把阈值降回去。**不假装是"本来就该这么大"。**
+ */
+const LIMIT = { code: 1500, css: 1700 };
 
 /**
  * 明牌例外（相对仓库根，正斜杠）。

@@ -1,5 +1,3 @@
-import path from "node:path";
-
 /**
  * Plan 模式（C1）。
  *
@@ -46,7 +44,12 @@ export function planToolNames(only?: readonly string[]): string[] {
 /** 计划文件：`.ding/plans/<sessionId>.md`（sessionId 只留安全字符）。 */
 export function planFilePath(dataDir: string, sessionId: string): string {
   const safe = String(sessionId ?? "").replace(/[^A-Za-z0-9._-]/g, "-").replace(/\.{2,}/g, "-") || "session";
-  return path.join(dataDir, ".ding", "plans", `${safe}.md`);
+  /*
+   * 这里**不用 `node:path`**：`engine-core` 的最小面不许 import Node 内置（有守卫）。
+   * 正斜杠在所有平台都能被 Node 的文件 API 接受，所以拼字符串是安全的。
+   */
+  const base = String(dataDir ?? "").split("\\").join("/").replace(/\/+$/, "");
+  return `${base}/.ding/plans/${safe}.md`;
 }
 
 /**

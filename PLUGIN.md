@@ -111,18 +111,20 @@ export const hooks = {
 （那条分支由 `src/pluginSamples.test.ts` ② 钉着：示例的 `line` 必须真的出现在留痕里）。
 失败给 `{ ok: false, error: "人话" }`（原文会回注给模型）。
 
-## 四个钩子
+## 钩子
 
 | 钩子 | 什么时候 | 参数 |
 |---|---|---|
 | `session:start` | 一轮开始前 | `{ sessionId, provider, model }` |
+| `user:prompt` | 用户这一轮的话已就绪、模型调用前 | `{ sessionId, prompt }` |
 | `tool:before` | 某个工具**执行前** | `{ name, input }` |
 | `tool:after` | 某个工具**执行后** | `{ name, ok, error? }` |
-| `turn:end` | 一轮结束 | `{ sessionId, ok, aborted }` |
+| `turn:end` | 一轮结束（老名字，保留兼容） | `{ sessionId, ok, aborted }` |
+| `turn:stop` | 一轮结束（新名字，与 `turn:end` 同时触发） | `{ sessionId, ok, aborted }` |
 
-⚠️ **钩子的返回值被忽略**：v1 里钩子**不能**改参数、也不能拦调用。
-理由是可观测性 —— "模型说它调了 A、实际执行的是 B"这种事在留痕里看不出来。
-要"能改行为"的能力等 v2 的隔离方案。
+**`tool:before` 的返回值会被消费**（F5）：返回 `{ action: "deny", reason? }` 拦截这次调用并让模型看到原因；
+返回 `{ action: "modify", input }` 替换参数；返回其它（或不返回）按放行处理。
+钩子抛错或 **1 秒超时一律按 deny**（fail-closed）。其它钩子的返回值仍被忽略。
 
 **钩子抛异常不会影响那一轮**（我们吞掉并记日志）：插件坏了不该变成用户的故障。
 

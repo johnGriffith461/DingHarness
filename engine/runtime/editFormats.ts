@@ -8,13 +8,13 @@ import path from "node:path";
  *
  * ```
  * *** Begin Patch
- * *** Add File: src/a.ts
+ * *** Add File: a.ts
  * +内容
- * *** Update File: src/b.ts
+ * *** Update File: b.ts
  * @@
  * -旧行
  * +新行
- * *** Delete File: src/c.ts
+ * *** Delete File: c.ts
  * *** End Patch
  * ```
  *

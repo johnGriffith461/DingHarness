@@ -501,7 +501,7 @@ export function Composer({
   const pickMention = (mention: Omit<MentionChip, "token">, kind: Mention["kind"]): void => {
     if (!atTrigger) return;
     /*
-     * 正文里插**相对路径**（`@src/foo.ts`），chip 里留**绝对路径**（发送时读盘用）。
+     * 正文里插**相对路径**（`@foo.ts`），chip 里留**绝对路径**（发送时读盘用）。
      * 直接把绝对路径写进正文会让输入框一行被 `C:\...` 占满，而且换机器就失效。
      */
     const next = applyMention(text, atTrigger, {

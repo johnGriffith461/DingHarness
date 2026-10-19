@@ -68,7 +68,7 @@ export function ProjectRulesPanel() {
       {error ? (
         <div className="wb-setpage-row" data-testid="wb-project-error">
           <span className="wb-setpage-label">读取失败</span>
-          <em style={{ color: "var(--wb-danger, #d33)" }}>{error}</em>
+          <em style={{ color: "var(--danger)" }}>{error}</em>
         </div>
       ) : null}
 
@@ -115,7 +115,7 @@ export function ProjectRulesPanel() {
           ) : null}
 
           {(ctx.errors ?? []).map((item) => (
-            <div className="wb-setpage-row" key={item.path} style={{ color: "var(--wb-danger, #d33)" }}>
+            <div className="wb-setpage-row" key={item.path} style={{ color: "var(--danger)" }}>
               <span className="wb-setpage-label">读取失败</span>
               <em>
                 {item.path} — {item.error}

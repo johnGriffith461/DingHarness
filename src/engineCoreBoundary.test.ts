@@ -108,7 +108,12 @@ const ALLOWED_PREFIXES = ["packages/engine-core/src/", "engine/index.ts", "engin
  *   · `shared/providerWire.ts` —— 供应商表单的 IPC 形状（纯类型）。
  * 前者必须在内核里（协议只许有一个装配点），后者被 ipc.ts 带进来。
  */
-const CLOSURE_BUDGET = 71;
+/**
+ * 2026-10-19（C1/E1）71 → 73：`engine/runtime/planMode.ts`（计划模式的纯状态/工具表）
+ * 与 `engine/runtime/verifyLoop.ts` 之一由入口引入；两者都不碰 IO，
+ * 属于"内核自己要知道的规则"，留在最小面里是对的。
+ */
+const CLOSURE_BUDGET = 73;
 
 /** 一条 import 语句里的模块说明符（够这个代码库的写法用）。 */
 const SPEC =
