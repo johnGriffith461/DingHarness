@@ -47,3 +47,4 @@
  * 放在最后 = 与 craft.css 同层压轴生效。
  */
 @import "./styles/ding-harness-shell.css";
+@import "./styles/confirm-dialog.css";

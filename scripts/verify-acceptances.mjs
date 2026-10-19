@@ -160,6 +160,7 @@ const NOT_IN_BATCH = {
    * 它有自己的花钱闸（--yes-spend）与零出网闸（DING_NO_REAL_MODEL），
    * 由 T0/T1 阶段门手动跑，报告里写清模型与 token。
    */
+  "accept-startup.mjs": { kind: "needs-package", why: "启动计时：要连开 5 次真 Electron 进程取中位数。批跑本身就在起应用，跑它会把批跑时间翻几倍，且测出来的数字会被并行负载污染。手动跑：node scripts/accept/accept-startup.mjs" },
   "accept-ten-tasks.mjs": { kind: "needs-model", why: "十任务实测：真模型改真代码、真跑测试判产物。批跑是零出网的假通道，跑它等于把「能不能真干活」这件事换成「脚本会不会照做」——那正是这个基准要证的相反面。手动跑：node scripts/accept/accept-ten-tasks.mjs --yes-spend" },
   "accept-desktop-tasks.mjs": { kind: "needs-model", why: "十任务里的 6/7/8（预览 / 浏览器 agent / CUA）：浏览器 agent 那条要真模型看懂快照并挑对 ref 填表。手动跑：node scripts/accept/accept-desktop-tasks.mjs --yes-spend" },
   "accept-newprovider.mjs": { kind: "needs-model", why: "从零接一个新供应商：真要 GET /models 拉清单、真要发一轮验连通。假服务器会让这两个按钮恒绿，而用户按它们就是为了排掉地址/格式/密钥错。手动跑：node scripts/accept/accept-newprovider.mjs --yes-spend" },

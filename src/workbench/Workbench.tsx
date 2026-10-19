@@ -7,18 +7,28 @@
 
  */
 
+/*
+ * ⚠️ **非首屏页面一律懒加载**（T2 启动实测，2026-10-19）。
+ *
+ * 原来这里有 13 个页面是**同步 import** —— 用户打开应用时，
+ * 电话 / 插件 / 定时 / 观测 / 权限矩阵 / 工作流 / 文档 / 任务中心 / 阅读 /
+ * 智能体 / 创作广场 / 图 / 视频 这些页面的代码**全部被解析并执行**，
+ * 而首屏只用到 HomeView。实测：首帧之后还要 ~1.2s 才渲染出工作台（目标 1.5s 总时长）。
+ *
+ * 改成 lazy 之后，切到那一页时才拉它的 chunk；首屏只付首页的代价。
+ */
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useWorkbenchStore, restoreTasks, startTaskPersistence } from "./store";
 /*
  * ⚠️ C6-2：`pages.tsx` 已按组件拆成 `ScheduledPage.tsx` / `PluginsPage.tsx` / `PhonePage.tsx`
  * （原来那个 1669 行的文件不再存在，避免留一个只是转发的"桶文件"）。
  */
-import { PhonePage } from "./PhonePage";
-import { PluginsPage } from "./PluginsPage";
-import { ScheduledPage } from "./ScheduledPage";
-import { InsightsPage } from "./InsightsPage";
-import { PermissionMatrixPage } from "./PermissionMatrixPage";
-import { WorkflowPage } from "./WorkflowPage";
+const PhonePage = lazy(() => import("./PhonePage").then((m) => ({ default: m.PhonePage })));
+const PluginsPage = lazy(() => import("./PluginsPage").then((m) => ({ default: m.PluginsPage })));
+const ScheduledPage = lazy(() => import("./ScheduledPage").then((m) => ({ default: m.ScheduledPage })));
+const InsightsPage = lazy(() => import("./InsightsPage").then((m) => ({ default: m.InsightsPage })));
+const PermissionMatrixPage = lazy(() => import("./PermissionMatrixPage").then((m) => ({ default: m.PermissionMatrixPage })));
+const WorkflowPage = lazy(() => import("./WorkflowPage").then((m) => ({ default: m.WorkflowPage })));
 /*
  * D06（2026-10-18）：画布**懒加载**。
  *
@@ -33,13 +43,13 @@ import { matchShortcut } from "./shortcuts";
 import { escYieldsToOverlay } from "./escOverlays";
 import { keymapNow, useAppSettings } from "./appSettings";
 import { matchKeyAction } from "@shared/keymap";
-import { DocPanel } from "./DocPanel";
-import { TaskCenterPage } from "./TaskCenterPage";
-import { ReaderPanel } from "./ReaderPanel";
-import { AgentCreatePanel } from "./AgentCreatePanel";
-import { CodingPage } from "./CodingPage";
-import { ImageGenPage } from "./ImageGenPage";
-import { VideoGenPage } from "./VideoGenPage";
+const DocPanel = lazy(() => import("./DocPanel").then((m) => ({ default: m.DocPanel })));
+const TaskCenterPage = lazy(() => import("./TaskCenterPage").then((m) => ({ default: m.TaskCenterPage })));
+const ReaderPanel = lazy(() => import("./ReaderPanel").then((m) => ({ default: m.ReaderPanel })));
+const AgentCreatePanel = lazy(() => import("./AgentCreatePanel").then((m) => ({ default: m.AgentCreatePanel })));
+const CodingPage = lazy(() => import("./CodingPage").then((m) => ({ default: m.CodingPage })));
+const ImageGenPage = lazy(() => import("./ImageGenPage").then((m) => ({ default: m.ImageGenPage })));
+const VideoGenPage = lazy(() => import("./VideoGenPage").then((m) => ({ default: m.VideoGenPage })));
 import { useAgentStore } from "./agentStore";
 import { useSearchHistoryStore } from "./searchHistoryStore";
 import { useMemoryStore } from "./memoryStore";
@@ -286,7 +296,8 @@ export default function Workbench() {
       <TitleBar />
       <NavSidebar />
       <main className="wb-main">
-        {body}
+        {/* 懒加载的页面要一个 Suspense 边界：切页时先显示占位，不白屏 */}
+        <Suspense fallback={<div className="wb-canvas-loading">正在打开…</div>}>{body}</Suspense>
         {/*
           画布作为**产物面板**开在对话旁边（对标原版形态）。
           之前我们把画布当主界面，那是错的理解 —— 原版里它始终是"任务产物的展示处"。

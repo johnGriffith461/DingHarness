@@ -586,18 +586,13 @@ export async function runStream(
         system: fullSystem,
         // 审批档位随请求过界（§143）：模式选择在这侧，工具执行在那侧
         toolPolicy: mode,
-        /* L05：这个智能体只该用这些工具（省略 = 不限制） */
+        // L05：这个智能体只该用这些工具（省略 = 不限制）
         ...(agentOnly ? { only: agentOnly } : {}),
-        // 思考强度（2026-10-16）：没选过就是 undefined，一个字段都不多发
+        // 思考强度：没选过就是 undefined，一个字段都不多发
         ...(readReasoningEffort() === undefined ? {} : { reasoningEffort: readReasoningEffort() }),
 
-        // 只有"回答用户"这条路径才带工具；起标题等附带请求不带（§143）
         useTools: true,
-        /*
-         * 步数上限（T1 实测）：以前不给，引擎兜底 4 步 —— 填个表单要 5 步就断在最后一下。
-         * 24 是「一次真正的多步任务」的经验值：够 read→改→跑→看结果→再改，
-         * 又不至于让一次误触发烧掉几十步。
-         */
+        /* 24 步：够多步任务，又不至于一次误触发烧掉几十步。 */
         maxSteps: 24,
         // 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）
         ...(sessionId ? { sessionId } : {}),

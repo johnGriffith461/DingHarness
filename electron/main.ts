@@ -92,6 +92,16 @@ async function shouldUseDevServer(): Promise<boolean> {
  *   · 系统临时目录 —— 兜底：万一 userData 还没就绪，这里也能留下痕迹
  * 这个文件同时能证明"主进程到底有没有跑起来"。
  */
+/**
+ * **启动阶段打点**（T2，2026-10-19）。
+ *
+ * 为什么要有：目标是「可操作 < 1.5s」，而实测中位数 ~2.4s。
+ * 只说「慢了」没用 —— 需要知道慢在进程启动、主进程准备、还是首屏渲染。
+ * 每条都从**进程启动**算（`process.uptime()`，不依赖墙钟）。
+ */
+function bootMark(stage: string): void {
+  bootLog(`[boot +${Math.round(process.uptime() * 1000)}ms] ${stage}`);
+}
 function bootLog(message: string): void {
   const line = `[${new Date().toISOString()} pid=${process.pid}] ${message}\n`;
   const targets = [
@@ -192,7 +202,7 @@ function migrateLegacyUserData(): void {
 
 migrateLegacyUserData();
 
-bootLog(`main 入口 isPackaged=${app.isPackaged} __dirname=${__dirname}`);
+bootMark("main 入口");
 
 /**
  * 打包产物的调试端口开关。
@@ -422,6 +432,7 @@ async function createWindow(): Promise<void> {
     win.webContents.openDevTools({ mode: "detach" });
   } else {
     await win.loadFile(rendererIndex());
+    bootMark("renderer 已加载");
   }
 }
 
@@ -529,6 +540,7 @@ safeRegister(
 );
 
 app.whenReady().then(() => {
+  bootMark("app ready");
   /* 没抢到单实例锁的进程已经在退出路上，别再建窗口 / 注册（P39） */
   if (!isPrimaryInstance) return;
   /*
@@ -564,7 +576,9 @@ app.whenReady().then(() => {
    * 放在建窗口之前：不然第一批工具调用可能跑在"还没加载"的空白名单上 ——
    * 那会让 write_file 报"不在可写范围内"，而用户明明授权过。
    */
+  bootMark("开始读工作区授权");
   void loadWorkspaces().finally(() => {
+    bootMark("工作区授权读完");
     void createWindow();
   });
   /*

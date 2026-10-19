@@ -1,6 +1,7 @@
 import type { ChatMessage } from "@shared/ipc";
 import { KEEP_RECENT_TOKENS as KEEP_TOKENS, omittedNote, planContext } from "@engine/core/context";
 import { pruneMessages } from "@engine/core/pruner";
+import { microCompact } from "@engine/core/microCompact";
 import type { ToolTrace } from "@shared/agentTools";
 import type { TaskStep } from "./task";
 
@@ -144,7 +145,7 @@ export function buildHistory(
    * 判断要不要压用另一把尺"：上限大的模型永远压不动，上限小的模型第一轮就超。
    * 不传时保持原样（默认值），单测与旧调用零漂移。
    */
-  opts: { factor?: number; keepTokens?: number } = {},
+  opts: { factor?: number; keepTokens?: number; microCompact?: boolean } = {},
 ): {
   /** 这次要发的历史（切过之后 = recent；没超额度 = 全量）。 */
   messages: ChatMessage[];
@@ -168,7 +169,15 @@ export function buildHistory(
    * 原来这里还有一道"最多 20 条"的硬截断 —— 它把压缩阈值架空（见文件头）。
    * 现在条数不再是判据：同样 20 条，短消息与长消息能差几十倍。
    */
-  const { older, recent } = planContext(all, opts.keepTokens ?? KEEP_TOKENS, { factor: opts.factor ?? 1 });
+  /*
+   * **G01 microCompact（2026-10-19）**：先把旧的「可重取」工具结果换成占位，再算额度。
+   *
+   * 顺序不能反：先截断再清，等于先把旧对话扔掉、再去清已经不在的东西。
+   * 它只清读类工具（read/search/list/grep/web）；编辑与命令的结果永不清 ——
+   * 那些是发生过的事，清掉会让模型重复劳动甚至重复副作用。
+   */
+  const compacted = microCompact(all, { enabled: opts.microCompact !== false });
+  const { older, recent } = planContext(compacted.messages, opts.keepTokens ?? KEEP_TOKENS, { factor: opts.factor ?? 1 });
   /*
    * G01：**发送给模型的那一份**再裁一次超长单条（头 4k + 尾 1k）。
    *

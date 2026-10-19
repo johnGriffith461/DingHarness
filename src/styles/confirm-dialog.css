@@ -1,0 +1,26 @@
+/*
+ * 应用内确认框的内容样式（2026-10-19）。
+ *
+ * 外壳复用 `.wb-modal-mask` / `.wb-modal`（设置弹窗同款）；这里只补确认框
+ * 自己的内部排版：**左对齐、不居中** —— 安全说明长句居中排成几行很难读。
+ *
+ * 单开一个文件是因为 `workbench.css` 已经贴着 1500 行上限：
+ * 与其为了几行样式去动整份文件，不如让新东西有自己的家。
+ */
+.wb-modal-card {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wb-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.wb-modal-icon-warn { color: var(--accent-strong); }
+.wb-modal-message { margin: 0; font-size: 13px; line-height: 1.6; }
+.wb-modal-detail { margin: 0; font-size: 12px; line-height: 1.7; color: var(--fg-dim); }
+.wb-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

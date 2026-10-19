@@ -1491,25 +1491,3 @@
 .wb-continue:disabled { opacity: 0.45; cursor: default; }
 
 
-/* ── 应用内确认框的内容样式（2026-10-19） ────────────────────────────
- * 外壳复用上面那套 `.wb-modal-mask` / `.wb-modal`（设置弹窗同款），
- * 这里只补确认框自己的内部排版：**左对齐、不居中** ——
- * 安全说明长句居中排成几行很难读。
- */
-.wb-modal-card {
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.wb-modal-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-}
-.wb-modal-icon-warn { color: var(--warn, #c2761c); }
-.wb-modal-message { margin: 0; font-size: 13px; line-height: 1.6; }
-.wb-modal-detail { margin: 0; font-size: 12px; line-height: 1.7; color: var(--fg-dim); }
-.wb-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

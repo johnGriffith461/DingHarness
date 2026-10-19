@@ -66,8 +66,7 @@ export function ConfirmDialog({
         role="alertdialog"
         aria-modal="true"
         aria-label={request.title}
-        /* 点卡片本身不冒泡到遮罩（遮罩也不关，双保险） */
-        onClick={(event) => event.stopPropagation()}
+        /* 遮罩本来就不吃点击关闭，卡片不需要 stopPropagation —— 也就不该挂 onClick */
       >
         <div className="wb-modal-head">
           {request.danger ? <AlertTriangle size={16} className="wb-modal-icon-warn" /> : <ShieldCheck size={16} />}
