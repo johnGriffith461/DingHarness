@@ -149,7 +149,8 @@ const checks = [
   ["T-07 首页计量不显示上一段任务的用量", out.homeMeterHasOldUsage === false],
   ["T-07 首页计量说清「模型窗口」", out.homeMeterIsWindow === true],
   ["T-06 档位 chip 找得到", out.modeChipFound === true],
-  ["T-06 三个选项都有 radio 语义", out.radioOptions === 3],
+  /* 2026-10-20（B-01）：档位从三个变成四个（新增「接受编辑」） */
+  ["T-06 四个选项都有 radio 语义", out.radioOptions === 4],
   ["T-06 只有一个选项被标记为选中", out.checkedOptions === 1],
   ["T-06 弹层里只有一个勾图标", out.checkIcons === 1],
   ["T-05 设置里点「记忆」→ 右侧是记忆页", out.memoryPageVisible === true],

@@ -126,13 +126,26 @@ await shot(page, path.join(shots, "wb-04-skills-tab.png"));
 
 /* ⚠️ 2026-10-16：云盘整页拆了，这一格（访问 cloud 视图）删掉。 */
 
-await visit("phone", "wb-06-phone.png");
+/*
+ * C-01（2026-10-20）：「手机遥控电脑」从主导航移进了设置。
+ * 走真实路径：账号菜单 → 设置 → 手机遥控电脑。
+ */
+await page.locator('[data-testid="wb-account"]').click();
+await page.waitForTimeout(400);
+await page.locator('[data-testid="wb-acct-settings"]').click();
+await page.waitForSelector('[data-testid="wb-set-手机遥控电脑"]', { timeout: 8000 });
+await page.locator('[data-testid="wb-set-手机遥控电脑"]').click();
+await page.waitForTimeout(1800);
+await shot(page, path.join(shots, "wb-06-phone.png"));
 report.phone = {
   heading: await page.locator(".wb-page-h2").textContent(),
   switches: await page.$$eval(".wb-switch-text", (els) => els.map((e) => e.textContent.trim())),
   steps: await page.$$eval(".wb-step b", (els) => els.map((e) => e.textContent.trim())),
   qr: await page.locator(".wb-qr-box").count(),
 };
+/* 关掉设置，后面「设置弹窗」那一段要重新打开它 */
+await page.keyboard.press("Escape");
+await page.waitForTimeout(500);
 
 // 4) 设置弹窗
 /*
