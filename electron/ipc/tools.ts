@@ -20,7 +20,8 @@ import {
 import { COMPUTER_CLICK_TOOL, COMPUTER_KEY_TOOL, COMPUTER_SCREENSHOT_TOOL, COMPUTER_TYPE_TOOL } from "../../shared/computerTools";
 import type { ConfirmMode } from "../../shared/ipc";
 import { unknownToolNotice } from "../../engine/core/notices";
-import { buildToolSet, createToolRegistry, type ToolEntry } from "../../engine/runtime/registry";
+import { buildToolSet, createToolRegistry, type ToolEntryInput } from "../../engine/runtime/registry";
+import type { ToolInfoWire } from "../../shared/ipc";
 /* 插件工具从 pluginHost 直接来（registry 不再转手 re-export —— V5-4 4.1 把 IO 移出最小面） */
 import { pluginToolEntries } from "../../engine/runtime/pluginHost";
 
@@ -739,7 +740,32 @@ export const hostExecutor: ToolExecutor = {
  * schema 用服务端给的 JSON Schema **直接转**（`jsonSchema()`）—— 不重新描述一遍：
  * MCP 服务端本来就是按 JSON Schema 暴露参数的，再抄一份必然漂移。
  */
-export function mcpToolEntries(): ToolEntry[] {
+export const TOOLS_CHANNEL = { list: "tools:list" } as const;
+
+/**
+ * D2：工具面板的数据源 —— **当前注册表**，不是另一份手写清单。
+ * MCP 与插件工具也在里面（界面要能看到"模型到底够得着什么"）。
+ */
+export function toolInfoList(): ToolInfoWire[] {
+  return createToolRegistry({ extra: [...mcpToolEntries(), ...pluginToolEntries()] })
+    .list()
+    .map((entry) => ({
+      name: entry.name,
+      source: entry.source,
+      description: entry.description,
+      readOnly: entry.readOnly,
+      destructive: entry.destructive,
+      concurrency: entry.concurrency,
+      resultPolicy: entry.resultPolicy,
+      ...(entry.timeoutMs === undefined ? {} : { timeoutMs: entry.timeoutMs }),
+    }));
+}
+
+export function registerToolsIpc(ipc: Pick<typeof import("electron").ipcMain, "handle">): void {
+  ipc.handle(TOOLS_CHANNEL.list, () => toolInfoList());
+}
+
+export function mcpToolEntries(): ToolEntryInput[] {
   return mcpToolBindings().map((binding) => ({
     name: binding.localName,
     source: "mcp" as const,

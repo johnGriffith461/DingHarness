@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ToolEntry } from "./registry";
+import type { ToolEntryInput as ToolEntry } from "./registry";
 import { ALWAYS_TOOLS, DEFER_THRESHOLD, rankTools, selectToolNames, tokenizeToolText } from "./toolSearch";
 
 /**

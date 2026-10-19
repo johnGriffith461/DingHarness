@@ -9,7 +9,7 @@ import {
 } from "../../shared/agentTools";
 import type { ConfirmMode } from "../../shared/ipc";
 import { pendingApprovalNotice, toolFailedNotice } from "../core/notices";
-import { decideForMember, injectableTools } from "../core/policy";
+import { decideForMember, injectableTools, policyOf } from "../core/policy";
 import { decideCall, type PermissionRule } from "../core/permissionRules";
 import { DEFAULT_APPROVER } from "../core/gates";
 import type { MemberRole } from "../core/members";
@@ -51,7 +51,14 @@ import { selectToolNames } from "./toolSearch";
 /** 一条工具的来源。 */
 export type ToolSource = "builtin" | "mcp" | "plugin";
 
-/** 注册表里的一条。 */
+/**
+ * 注册表里的一条（D2：带元数据）。
+ *
+ * `readOnly` 不由各工具手写：它从**权限表**派生（`policyOf(name).kind === "read"`），
+ * 两处各写一份迟早出现"说明说只读、闸门按写拦"。
+ * 其余字段是调度/落盘策略，内置工具在 `shared/agentTools.ts` 的 `TOOL_META` 里声明，
+ * MCP/插件不声明就按保守默认（`add()` 统一补）。
+ */
 export type ToolEntry = {
   name: string;
   source: ToolSource;
@@ -59,7 +66,64 @@ export type ToolEntry = {
   description: string;
   /** 给模型的参数说明 + 执行前校验（zod 或 JSON Schema，`ai` 两种都收）。 */
   inputSchema: FlexibleSchema<unknown>;
+  /** 只读（从权限表派生；MCP 可用 `annotations.readOnlyHint` 覆盖为 true）。 */
+  readOnly: boolean;
+  /** 破坏性（会覆盖/删除/执行命令）。 */
+  destructive: boolean;
+  /** 调度：`safe` 可并行；`exclusive` 串行（同一工具名排队）。 */
+  concurrency: "safe" | "exclusive";
+  /** 建议超时（毫秒）；调度层目前只透传，不强制中断。 */
+  timeoutMs?: number;
+  /** 结果上限（字节）；`spill` 时由执行体落盘。 */
+  maxResultBytes?: number;
+  resultPolicy: "inline" | "spill" | "tail";
 };
+
+/** 一条工具元数据（`ToolEntry` 里除 name/source/description/inputSchema 之外的部分）。 */
+export type ToolMeta = Pick<ToolEntry, "destructive" | "concurrency" | "timeoutMs" | "maxResultBytes" | "resultPolicy">;
+
+/**
+ * 保守默认：不可并行、不破坏、结果内联。
+ * 外部来源（MCP/插件）没声明就是这一份 —— 与"宁可多问一次"同一条口径。
+ */
+export const DEFAULT_TOOL_META: ToolMeta = {
+  destructive: false,
+  concurrency: "exclusive",
+  resultPolicy: "inline",
+};
+
+/**
+ * 给一条工具补全元数据（**唯一的收口**）。
+ * `readOnly` 永远从权限表取；调用方传来的只作为"外部声明的只读"覆盖：
+ * 只有 `true` 能把它放宽到只读，`false` 不会把内置的只读工具变成写。
+ */
+export function completeToolEntry(
+  entry: Pick<ToolEntry, "name" | "source" | "description" | "inputSchema"> & Partial<ToolMeta> & {
+    /** MCP 的 `annotations.readOnlyHint`（只有 true 有效）。 */
+    readOnlyHint?: boolean;
+  },
+): ToolEntry {
+  const readOnly = policyOf(entry.name).kind === "read" || entry.readOnlyHint === true;
+  return {
+    name: entry.name,
+    source: entry.source,
+    description: entry.description,
+    inputSchema: entry.inputSchema,
+    readOnly,
+    destructive: entry.destructive ?? DEFAULT_TOOL_META.destructive,
+    concurrency: readOnly && (entry.concurrency ?? DEFAULT_TOOL_META.concurrency) === "safe" ? "safe" : (entry.concurrency ?? DEFAULT_TOOL_META.concurrency),
+    ...(entry.timeoutMs === undefined ? {} : { timeoutMs: entry.timeoutMs }),
+    ...(entry.maxResultBytes === undefined ? {} : { maxResultBytes: entry.maxResultBytes }),
+    resultPolicy: entry.resultPolicy ?? DEFAULT_TOOL_META.resultPolicy,
+  };
+}
+
+/**
+ * 登记时允许省略元数据（D2 的"统一收口"）：外部来源只给四字段也能登记，
+ * `add()` 会补 `readOnly`（从权限表）与保守默认。
+ */
+export type ToolEntryInput = Pick<ToolEntry, "name" | "source" | "description" | "inputSchema"> &
+  Partial<ToolMeta> & { readOnlyHint?: boolean };
 
 export type ToolRegistry = {
   /** 全部已注册的条目（顺序即注入顺序）。 */
@@ -67,7 +131,7 @@ export type ToolRegistry = {
   /** 按名取一条。 */
   get(name: string): ToolEntry | undefined;
   /** 登记一批（重复名字会**覆盖**并保留原位置 —— MCP 重连时工具清单会变）。 */
-  add(entries: readonly ToolEntry[]): void;
+  add(entries: readonly ToolEntryInput[]): void;
   /**
    * 被拒收的条目（U05）：外部来源想占用**内置工具名**时不予登记。
    *
@@ -85,12 +149,15 @@ export type ToolRegistry = {
  * 的错就是这么来的（模型照着说明写、被拒绝，然后开始瞎猜）。
  */
 export function builtinToolEntries(): ToolEntry[] {
-  return AGENT_TOOLS.map((spec) => ({
-    name: spec.name,
-    source: "builtin" as const,
-    description: spec.description,
-    inputSchema: spec.schema as FlexibleSchema<unknown>,
-  }));
+  return AGENT_TOOLS.map((spec) =>
+    completeToolEntry({
+      name: spec.name,
+      source: "builtin" as const,
+      description: spec.description,
+      inputSchema: spec.schema as FlexibleSchema<unknown>,
+      ...(spec.meta ?? {}),
+    }),
+  );
 }
 
 /**
@@ -102,7 +169,7 @@ export function builtinToolEntries(): ToolEntry[] {
  *   省略 = 全部内置。
  * @returns 注册表
  */
-export function createToolRegistry(opts: { extra?: readonly ToolEntry[]; include?: readonly string[] } = {}): ToolRegistry {
+export function createToolRegistry(opts: { extra?: readonly ToolEntryInput[]; include?: readonly string[] } = {}): ToolRegistry {
   const order: string[] = [];
   const byName = new Map<string, ToolEntry>();
   const refused: Array<{ name: string; source: ToolSource; why: string }> = [];
@@ -112,7 +179,9 @@ export function createToolRegistry(opts: { extra?: readonly ToolEntry[]; include
     get: (name) => byName.get(name),
     rejected: () => [...refused],
     add: (entries) => {
-      for (const entry of entries) {
+      for (const raw of entries) {
+        /* D2：外部来源不写元数据也能登记 —— 这里统一补默认值 */
+        const entry = completeToolEntry(raw);
         const existing = byName.get(entry.name);
         /*
          * ⭐ **内置名不许被外部来源占用**（U05，2026-10-18）。
@@ -160,6 +229,20 @@ export function createToolRegistry(opts: { extra?: readonly ToolEntry[]; include
  * @param input.ctx 执行上下文（provider/model/信号/深度）
  * @returns 该档位下的 ToolSet
  */
+/**
+ * 同一工具的串行队列（D2）：`concurrency: "exclusive"` 的调用排队，
+ * 避免一次回复里两个写动作同时落盘。`readOnly + safe` 不排队（可并行）。
+ */
+const exclusiveTails = new Map<string, Promise<unknown>>();
+
+function runSerialized<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const prev = exclusiveTails.get(key) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(run);
+  /* 链尾只留"完成与否"，不留值 —— 失败不会把后面的调用一起带崩 */
+  exclusiveTails.set(key, next.catch(() => undefined));
+  return next;
+}
+
 export function buildToolSet(input: {
   registry: ToolRegistry;
   mode: ConfirmMode;
@@ -307,7 +390,8 @@ export function buildToolSet(input: {
          * 钩子的异常由端口实现内部吞掉并打日志（插件坏了不该变成用户的故障）。
          */
         await hooks.run("tool:before", { name: entry.name, input: value });
-        const result = await executor.run(entry.name, value, ctx);
+        const invoke = (): ReturnType<ToolExecutor["run"]> => executor.run(entry.name, value, ctx);
+        const result = entry.concurrency === "exclusive" ? await runSerialized(entry.name, invoke) : await invoke();
         await hooks.run("tool:after", { name: entry.name, ok: result.ok, ...(result.error ? { error: result.error } : {}) });
         /*
          * ⭐ 成功时返回执行体的**原始载荷**，不要那层 `{ ok, output }` 信封。

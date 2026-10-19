@@ -24,12 +24,26 @@ import { READ_MAX_BYTES } from "./drive";
  *  - 工具名是**稳定的字符串**（决定权限策略表怎么挂，批次 2）。
  */
 
+/**
+ * 工具元数据（D2）：调度与结果策略。
+ * `readOnly` 不在这里 —— 它从权限表派生（`engine/core/policy.ts` 是唯一口径）。
+ */
+export type AgentToolMeta = {
+  destructive?: boolean;
+  concurrency?: "safe" | "exclusive";
+  timeoutMs?: number;
+  maxResultBytes?: number;
+  resultPolicy?: "inline" | "spill" | "tail";
+};
+
 /** 一条工具的声明。 */
 export type AgentToolSpec = {
   name: string;
   description: string;
   /** zod schema —— 既是给模型的参数说明，也是执行前的校验。 */
   schema: z.ZodTypeAny;
+  /** D2：调度与结果策略（缺省由注册表补保守默认）。 */
+  meta?: AgentToolMeta;
 };
 
 /**
@@ -577,6 +591,27 @@ export function mergeToolTraces(existing: readonly ToolTrace[], incoming: readon
 }
 
 /* ⚠️ `list_files` 曾漏登记过一次；`registry.test.ts` 盯着"表里的都在"。 */
+/**
+ * D2：内置工具的调度元数据（`readOnly` 不在这里 —— 从权限表派生）。
+ * 只写需要偏离默认的项：默认是"不可并行、不破坏、结果内联"。
+ */
+const TOOL_META: Record<string, AgentToolMeta> = {
+  [SPAWN_AGENTS_TOOL]: { concurrency: "exclusive" },
+  [MEMORY_SAVE_TOOL]: { concurrency: "exclusive" },
+  [MEMORY_LIST_TOOL]: { concurrency: "safe" },
+  [SCHEDULE_CREATE_TOOL]: { concurrency: "exclusive" },
+  [SCHEDULE_LIST_TOOL]: { concurrency: "safe" },
+  [CANVAS_ADD_NODE_TOOL]: { concurrency: "exclusive" },
+  [SPAWN_AGENT_TOOL]: { concurrency: "exclusive" },
+  [LIST_FILES_TOOL]: { concurrency: "safe" },
+  [LIST_DIR_TOOL]: { concurrency: "safe" },
+  [SEARCH_FILES_TOOL]: { concurrency: "safe" },
+  [READ_FILE_TOOL]: { concurrency: "safe" },
+  [WRITE_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
+  [EDIT_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
+  [RUN_COMMAND_TOOL]: { destructive: true, concurrency: "exclusive", timeoutMs: 120_000, resultPolicy: "tail" },
+};
+
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: SPAWN_AGENTS_TOOL, description: SPAWN_AGENTS_DESC, schema: SPAWN_AGENTS_INPUT },
   { name: MEMORY_SAVE_TOOL, description: MEMORY_SAVE_DESC, schema: MEMORY_SAVE_INPUT },
@@ -596,7 +631,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   ...BROWSER_TOOL_SPECS,
   ...UIA_TOOL_SPECS,
   ...KNOWLEDGE_TOOL_SPECS,
-];
+].map((spec): AgentToolSpec => (TOOL_META[spec.name] ? { ...spec, meta: TOOL_META[spec.name] } : spec));
 
 export function toolSpec(name: string): AgentToolSpec | undefined {
   return AGENT_TOOLS.find((t) => t.name === name);

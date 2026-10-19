@@ -28,6 +28,7 @@ const PluginsPage = lazy(() => import("./PluginsPage").then((m) => ({ default: m
 const ScheduledPage = lazy(() => import("./ScheduledPage").then((m) => ({ default: m.ScheduledPage })));
 const InsightsPage = lazy(() => import("./InsightsPage").then((m) => ({ default: m.InsightsPage })));
 const PermissionMatrixPage = lazy(() => import("./PermissionMatrixPage").then((m) => ({ default: m.PermissionMatrixPage })));
+const ToolsPage = lazy(() => import("./ToolsPage").then((m) => ({ default: m.ToolsPage })));
 const WorkflowPage = lazy(() => import("./WorkflowPage").then((m) => ({ default: m.WorkflowPage })));
 /*
  * D06（2026-10-18）：画布**懒加载**。
@@ -237,6 +238,8 @@ export default function Workbench() {
       /* V6-2i/4d：两轴权限矩阵（只读展示内核判定） */
       case "permissions":
         return <PermissionMatrixPage />;
+      case "tools":
+        return <ToolsPage />;
       /* V6-2l：工作流泳道与断点续跑（运行在 CLI） */
       case "workflow":
         return <WorkflowPage />;

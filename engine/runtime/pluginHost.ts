@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { jsonSchema } from "ai";
 
-import type { ToolEntry } from "./registry";
+import type { ToolEntryInput } from "./registry";
 import {
   grantedCapabilities,
   pluginToolName,
@@ -65,7 +65,7 @@ export type LoadedPlugin = {
   version: string;
   dir: string;
   /** 可以进注册表的条目（已带前缀）。 */
-  entries: ToolEntry[];
+  entries: ToolEntryInput[];
   /** 实际接上的钩子。 */
   hooks: Partial<Record<HookName, (payload: unknown) => unknown>>;
   /** 被扣下的能力（用户没批的注入类权限）—— 界面上要说出来。 */
@@ -112,7 +112,7 @@ export function loadedPlugins(): readonly LoadedPlugin[] {
 }
 
 /** 注册表条目：所有已装载插件的工具（与 `mcpToolEntries()` 对称）。 */
-export function pluginToolEntries(): ToolEntry[] {
+export function pluginToolEntries(): ToolEntryInput[] {
   return loaded.flatMap((p) => p.entries);
 }
 
@@ -246,7 +246,7 @@ export async function loadPlugin(plugin: InstalledPlugin): Promise<LoadedPlugin>
   workers.set(plugin.name, isolated);
 
   const problems: string[] = [];
-  const entries: ToolEntry[] = [];
+  const entries: ToolEntryInput[] = [];
 
   /*
    * ── 工具：声明与实现必须一致 ──

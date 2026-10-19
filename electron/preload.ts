@@ -32,6 +32,7 @@ import { WORKSPACE_CHANNEL } from "./ipc/workspaceStore";
 import { MCP_CHANNEL } from "./ipc/mcpStore";
 import { PROJECT_CHANNEL } from "./ipc/project";
 import { ATTACHMENT_CHANNEL } from "./ipc/attachments";
+import { TOOLS_CHANNEL } from "./ipc/tools";
 import { TASK_CHANNEL } from "./ipc/taskStore";
 import { VIDEO_CHANNEL } from "./ipc/videoGen";
 import { REMOTE_CHANNEL } from "./ipc/remote";
@@ -335,6 +336,10 @@ const api = {
       ipcRenderer.invoke(PROVIDER_CHANNEL.fetchModels, input) as ReturnType<ShellBridge["providers"]["fetchModels"]>,
     add: (input) => ipcRenderer.invoke(PROVIDER_CHANNEL.add, input) as ReturnType<ShellBridge["providers"]["add"]>,
     remove: (id: string) => ipcRenderer.invoke(PROVIDER_CHANNEL.remove, id) as ReturnType<ShellBridge["providers"]["remove"]>,
+  },
+  /** D2：工具面板 */
+  tools: {
+    list: () => ipcRenderer.invoke(TOOLS_CHANNEL.list) as ReturnType<ShellBridge["tools"]["list"]>,
   },
   /** 附件落盘（B3） */
   attachments: {

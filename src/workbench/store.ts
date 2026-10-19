@@ -79,7 +79,9 @@ export type WorkbenchView =
   /* V6-2i/4d：两轴权限矩阵（只读展示内核判定，见 PermissionMatrixPage） */
   | "permissions"
   /* V6-2l：多 agent 工作流（泳道与断点续跑；运行在 CLI，见 WorkflowPage） */
-  | "workflow";
+  | "workflow"
+  /* D2：工具面板（注册表里的工具与元数据） */
+  | "tools";
 
 export type WorkbenchState = {
   view: WorkbenchView;

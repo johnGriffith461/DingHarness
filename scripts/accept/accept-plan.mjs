@@ -98,7 +98,19 @@ await step("C3：模型菜单带搜索框", async () => {
   return "搜索框可用";
 });
 
+await step("D2：工具面板列出注册表里的工具与元数据", async () => {
+  await page.locator('[data-testid="wb-nav-tools"]').click();
+  await sleep(700);
+  const rows = await page.locator('[data-testid^="wb-tool-"]').count();
+  if (rows < 10) throw new Error(`只有 ${rows} 行`);
+  const text = await page.locator('[data-testid="wb-tools-list"]').innerText();
+  if (text.includes("未知")) throw new Error("有工具元数据是未知");
+  return `${rows} 行`;
+});
+
 await step("/plan 命令也切同一个开关", async () => {
+  await page.locator('[data-testid="wb-nav-home"]').click();
+  await sleep(600);
   await input.fill("/plan");
   await sleep(300);
   await input.press("Enter");

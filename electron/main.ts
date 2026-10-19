@@ -29,6 +29,7 @@ import { registerArtifactIpc } from "./ipc/artifactStore";
 import { registerDiagnosticsIpc } from "./ipc/diagnostics";
 import { registerProjectIpc } from "./ipc/project";
 import { registerAttachmentIpc } from "./ipc/attachments";
+import { registerToolsIpc } from "./ipc/tools";
 import { recordCrash } from "./ipc/crashLog";
 import { registerDriveIpc } from "./ipc/driveStore";
 import { registerScheduleIpc } from "./ipc/scheduleStore";
@@ -517,6 +518,7 @@ safeRegister("diagnostics", () => registerDiagnosticsIpc(ipcMain), logRegisterFa
 /* 项目规则与环境（A1/A2）：主进程读 AGENTS.md / package.json，渲染层只收结果 */
 safeRegister("project", () => registerProjectIpc(ipcMain), logRegisterFailure);
 safeRegister("attachments", () => registerAttachmentIpc(ipcMain), logRegisterFailure);
+safeRegister("tools", () => registerToolsIpc(ipcMain), logRegisterFailure);
 safeRegister("drive", () => registerDriveIpc(ipcMain, () => win), logRegisterFailure);
 safeRegister("memory", () => registerMemoryIpc(), logRegisterFailure);
 safeRegister("schedule", () => registerScheduleIpc(ipcMain), logRegisterFailure);

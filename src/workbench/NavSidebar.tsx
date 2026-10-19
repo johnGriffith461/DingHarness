@@ -18,6 +18,7 @@ import {
   Pencil,
   Pin,
   Settings,
+  Wrench,
   ShieldCheck,
   Smartphone,
   Workflow,
@@ -60,6 +61,8 @@ export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListT
   { view: "permissions", label: "权限矩阵", icon: ShieldCheck },
   /* V6-2l：多 agent 工作流（泳道 + 断点续跑命令） */
   { view: "workflow", label: "工作流", icon: Workflow },
+  /* D2：工具面板（模型够得着什么、怎么调度） */
+  { view: "tools", label: "工具", icon: Wrench },
 ];
 
 /** 每秒重算一次"已处理 N 秒"。 */

@@ -30,8 +30,8 @@ import type { ConfirmMode } from "../shared/ipc";
 import {
   buildToolSet,
   createToolRegistry,
+  type ToolEntryInput,
   offeredToolNames,
-  type ToolEntry,
   type ToolRegistry,
 } from "./runtime/registry";
 import { envSecret, type SecretPort } from "./ports/secret";
@@ -88,7 +88,7 @@ export type EnginePorts = {
    */
   hooks?: HooksPort;
   /** 额外的工具来源（MCP 工具 / Phase 8 的插件工具）。 */
-  tools?: readonly ToolEntry[];
+  tools?: readonly ToolEntryInput[];
   /**
    * **工具结果落盘**（U02，2026-10-18；加法）。
    *

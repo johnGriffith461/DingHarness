@@ -41,6 +41,18 @@ export type AppSettingsWire = {
 
 export type { CanvasDocument, CanvasLoadResult, CanvasSaveResult, CanvasSnapshotFile };
 
+/** D2：工具面板的一行（不含执行体）。 */
+export type ToolInfoWire = {
+  name: string;
+  source: "builtin" | "mcp" | "plugin";
+  description: string;
+  readOnly: boolean;
+  destructive: boolean;
+  concurrency: "safe" | "exclusive";
+  resultPolicy: "inline" | "spill" | "tail";
+  timeoutMs?: number;
+};
+
 export type ChatRole = "system" | "user" | "assistant";
 
 /**
@@ -392,6 +404,10 @@ export type ShellBridge = {
    * 渲染层把 `rendered` 拼到系统提示词前面；设置页「项目规则」用 `context`。
    */
   project: import("./projectWire").ProjectBridge;
+  /** D2：工具面板（只读：当前注册表里的工具与元数据）。 */
+  tools: {
+    list: () => Promise<ToolInfoWire[]>;
+  };
   /** 附件落盘（B3）：渲染层给 base64，主进程写进会话目录并回报 sha256。 */
   attachments: {
     save: (input: { sessionId: string; name: string; mediaType: string; data: string }) => Promise<AttachmentSaveResult>;

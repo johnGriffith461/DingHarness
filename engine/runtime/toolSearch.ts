@@ -17,7 +17,7 @@
  * - 搜索**一定**回退全量（匹配为空时）；宁可多给，也不能让模型找不到工具。
  */
 
-import type { ToolEntry } from "./registry";
+import type { ToolEntryInput } from "./registry";
 
 /** 不参与裁剪的核心工具（无论查询是什么都在场）。 */
 export const ALWAYS_TOOLS: readonly string[] = [
@@ -63,7 +63,7 @@ export function tokenizeToolText(text: string): string[] {
  * @param query 用户这一句（或最近一轮的文本）
  * @returns 每个工具名与分数（降序；分 0 的不返回）
  */
-export function rankTools(entries: readonly ToolEntry[], query: string): Array<{ name: string; score: number }> {
+export function rankTools(entries: readonly ToolEntryInput[], query: string): Array<{ name: string; score: number }> {
   const docs = entries.map((e) => ({ name: e.name, tokens: tokenizeToolText(`${e.name} ${e.description}`) }));
   const q = [...new Set(tokenizeToolText(query))];
   if (!q.length || !docs.length) return [];
@@ -98,7 +98,7 @@ export function rankTools(entries: readonly ToolEntry[], query: string): Array<{
  * @returns 要注入的工具名；**空查询 / 没命中 / 工具不多** 时返回全部
  */
 export function selectToolNames(
-  entries: readonly ToolEntry[],
+  entries: readonly ToolEntryInput[],
   query: string,
   opts: { threshold?: number; limit?: number; always?: readonly string[] } = {},
 ): string[] {

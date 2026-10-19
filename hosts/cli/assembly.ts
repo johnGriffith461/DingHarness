@@ -2,7 +2,7 @@ import { createEngine, type Engine } from "../../engine/index";
 import { createSqliteSessionStore, type OpenOptions } from "../../engine/adapters/sqliteStore";
 import type { ToolExecutor } from "../../engine/ports/executor";
 import type { SessionStore } from "../../engine/ports/store";
-import { buildToolSet, createToolRegistry, type ToolEntry, type ToolRegistry } from "../../engine/runtime/registry";
+import { buildToolSet, createToolRegistry, type ToolRegistry } from "../../engine/runtime/registry";
 import type { MakeTools } from "../../engine/runtime/team";
 import { loadEnabledPlugins, pluginHooks, pluginToolEntries } from "../../engine/runtime/pluginHost";
 import { resolveSecret } from "../../engine/runtime/credentials";
@@ -154,7 +154,7 @@ export async function buildEngine(
     store,
     executor,
     include: CLI_TOOLS,
-    tools: pluginEntries as readonly ToolEntry[],
+    tools: pluginEntries,
     secret: resolveSecret,
     hooks: pluginHooks,
     spill,
