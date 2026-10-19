@@ -28,6 +28,7 @@ import {
   type SlashTrigger,
 } from "@shared/slashCommands";
 import { SlashMenu } from "./SlashMenu";
+import { readPlanMode, savePlanMode } from "./planMode";
 import { COMPOSER_PLACEHOLDER } from "./copy";
 import { resolveImportedMaterials } from "./materialImport";
 import { UPLOAD_REASON_LABEL } from "@shared/upload";
@@ -370,6 +371,14 @@ export function Composer({
   /** B2：`/` 命令触发（与 `@` 互斥：一行开头是 `/` 就不再当引用词）。 */
   const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  /** C1：计划模式（只读工具；持久化在 localStorage）。 */
+  const [planOn, setPlanOn] = useState(readPlanMode());
+  const togglePlan = (): void => {
+    const next = !readPlanMode();
+    savePlanMode(next);
+    setPlanOn(next);
+    showMaterialNote(next ? "计划模式：只读工具，先给计划、确认后再执行" : "已退出计划模式");
+  };
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   /**
    * B1：`@` 菜单的五类候选。文件/目录由主进程读盘（只在工作区内），
@@ -598,8 +607,8 @@ export function Composer({
         setOpenPop("model");
         return;
       case "plan":
-        /* C1 会把这里升级成真正的只读工具体；现在先把"只要计划、别改文件"落到下一轮提示里。 */
-        setText("先只做调研并给出计划：目标、范围、步骤、验证方式、风险。不要改任何文件，等我确认后再执行。\n\n");
+        setText("");
+        togglePlan();
         return;
       case "compact": {
         const result = await store.compactActive();
@@ -848,6 +857,26 @@ export function Composer({
           ))}
         </div>
       ) : null}
+      {planOn ? (
+        <div className="wb-material-note" data-testid="wb-plan-banner" role="status">
+          计划模式：只读工具 · 先给计划，确认后再执行
+          {activeTask?.steps.some((s) => s.role === "assistant") ? (
+            <button
+              className="wb-setpage-btn"
+              data-testid="wb-plan-execute"
+              onClick={() => {
+                const id = useWorkbenchStore.getState().activeTaskId;
+                if (!id) return;
+                savePlanMode(false);
+                setPlanOn(false);
+                void useWorkbenchStore.getState().sendInTask(id, "按上面的计划开始执行");
+              }}
+            >
+              开始执行
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {attachments.length > 0 ? (
         <div className="wb-material-chips" data-testid="wb-attachment-chips">
           {attachments.map((a) => (
@@ -902,12 +931,10 @@ export function Composer({
           setSlashTrigger(null);
         }}
         onKeyDown={(e) => {
-          /* B4：Shift+Tab 插入"先给计划、别改文件"的开场（与 /plan 同一句话） */
+          /* C1：Shift+Tab 切换计划模式（只读工具面；不是插一段话） */
           if (e.key === "Tab" && e.shiftKey) {
             e.preventDefault();
-            const planPreamble =
-              "先只做调研并给出计划：目标、范围、步骤、验证方式、风险。不要改任何文件，等我确认后再执行。\n\n";
-            if (!text.startsWith(planPreamble)) setText(planPreamble + text);
+            togglePlan();
             return;
           }
           // 命令菜单：Esc 收起、↑↓ 选择、Enter 执行（别顺手发出去）
@@ -1325,6 +1352,16 @@ export function Composer({
         </div>
 
         <span className="wb-spacer" />
+        {/* C1：计划模式 chip（真开关：只读工具面 + 计划提示） */}
+        <button
+          className={`wb-chip${planOn ? " is-on" : ""}`}
+          data-testid="wb-plan-toggle"
+          aria-pressed={planOn}
+          title={planOn ? "计划模式：只读工具；再按一次退出" : "进入计划模式（Shift+Tab）"}
+          onClick={togglePlan}
+        >
+          <Blocks size={13} /> 计划
+        </button>
         {/* 模型 · 思考：真选择器（组件在 ModelChip.tsx） */}
         <ModelChip
           open={openPop === "model"}

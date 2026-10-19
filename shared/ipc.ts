@@ -121,6 +121,11 @@ export type ChatRequest = {
    * 见本文件 :115 的说明与 `engine/core/policy.ts`）。也就是说：漏传字段**不会**让工具全放开。
    */
   toolPolicy?: ConfirmMode;
+  /**
+   * Plan 模式（C1）：计划阶段只读 —— 引擎只下发 `PLAN_MODE_TOOLS`。
+   * 与 `toolPolicy` 是两回事：一个决定"能不能碰"，一个决定"看不看得到"。
+   */
+  plan?: boolean;
   /* 工具白名单（L05）：省略 = 不限制；给了就一路传到内核的 `only`。 */
   only?: string[];
   /**
@@ -285,6 +290,11 @@ export type ToolRunRequest = {
    * "用户已放行"的名义下拿到全部放行权。
    */
   toolPolicy?: ConfirmMode;
+  /**
+   * Plan 模式（C1）：计划阶段只读 —— 引擎只下发 `PLAN_MODE_TOOLS`。
+   * 与 `toolPolicy` 是两回事：一个决定"能不能碰"，一个决定"看不看得到"。
+   */
+  plan?: boolean;
   /**
    * 这是**拒绝**（C2/INV-3）：不执行，只把决定记进日志。
    *

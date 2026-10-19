@@ -235,6 +235,11 @@ const CASES = [
    */
   ["accept-attachments.mjs", "附件（文件选择进 chip / 拖拽 PDF 进 chip / × 只删点中的 / + 菜单有入口）"],
   /*
+   * C1（2026-10-19）：计划模式开关。
+   * 工具面（计划模式不下发写/命令工具）由 `planMode.test.ts` 的 `planToolNames` 断言。
+   */
+  ["accept-plan.mjs", "计划模式（chip 开/关 / 提示条 / Shift+Tab 同开关 / /plan 同开关）"],
+  /*
    * ⭐ 2026-10-16：**三条曾经因"要模型"被排除的脚本收回来了**（审计 G46/G47 的正面结果）。
    *
    * 它们要的是"发一轮、有回复"，而批跑现在自带**本地假通道** + `DSH_NO_REAL_MODEL=1`

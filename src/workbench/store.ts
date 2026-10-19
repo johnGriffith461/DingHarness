@@ -18,6 +18,7 @@ import { taskSessionId } from "@engine/core/events";
 import { fabricatedCost } from "@shared/cost";
 import { branchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";
+import { readPlanMode } from "./planMode";
 import { pickSuggestions, HOME_MODE_KEY, parseHomeMode, suggestionsFor, type HomeMode } from "./copy";
 import { rememberAlwaysAllow } from "./permissionRules";
 import {
@@ -827,6 +828,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       [],
       task.id,
       options?.parts,
+      mode === "coding" && readPlanMode(),
     );
 
     nextStep(port, task.id, reply.text, false, user, reply.tools, undefined, reply.usage);

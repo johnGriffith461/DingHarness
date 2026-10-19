@@ -406,6 +406,7 @@ export function registerAiIpc(): void {
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           mode: request.toolPolicy ?? "按需确认",
+          ...(request.plan ? { planMode: true } : {}),
           ...(request.useTools ? { useTools: true } : {}),
           /*
            * 步数上限（T1 实测抓到的真缺陷）：以前这里不传，于是引擎兜底的 ?? 4

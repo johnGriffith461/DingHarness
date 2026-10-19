@@ -1,0 +1,97 @@
+// C1 验收：计划模式的开关（本地 UI，不调模型）。
+//
+// 工具面本身（计划模式下 `write_file`/`run_command` 不下发）由
+// `engine/runtime/planMode.test.ts` 的 `planToolNames` 断言；
+// 这条验收问的是"用户点得到、状态看得见、进得去出得来"。
+import { chromium } from "playwright";
+import { openApp, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
+
+const bad = [];
+let count = 0;
+
+async function step(name, fn) {
+  count += 1;
+  try {
+    const detail = await fn();
+    console.log(`   ✓ ${name}${detail ? "  —— " + detail : ""}`);
+  } catch (error) {
+    const msg = String(error?.message ?? error)
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(" ⏐ ")
+      .slice(0, 240);
+    bad.push(`${name}（${msg}）`);
+    console.log(`   ✗ ${name}  —— ${msg}`);
+  }
+}
+
+await killLeftovers();
+await freshDir(".verify/accept-plan-data");
+const port = await pickPort([10031]);
+const { browser, page, getLog } = await openApp(chromium, {
+  port,
+  dataDir: ".verify/accept-plan-data",
+  cwd: ".",
+});
+await sleep(2200);
+const input = page.locator('[data-testid="wb-composer-input"]');
+const chip = page.locator('[data-testid="wb-plan-toggle"]');
+const banner = page.locator('[data-testid="wb-plan-banner"]');
+
+const pressed = async () => (await chip.getAttribute("aria-pressed")) === "true";
+
+await step("计划 chip 存在且初始关闭", async () => {
+  if (!(await chip.count())) throw new Error("没有 wb-plan-toggle");
+  if (await pressed()) throw new Error("初始就是开着的");
+  return "初始 idle";
+});
+
+await step("⭐ 点 chip → 计划模式打开，提示条出现", async () => {
+  await chip.click();
+  await sleep(300);
+  if (!(await pressed())) throw new Error("aria-pressed 还是 false");
+  if (!(await banner.count())) throw new Error("提示条没出现");
+  return "已进入计划模式";
+});
+
+await step("再点 chip → 退出，提示条消失", async () => {
+  await chip.click();
+  await sleep(300);
+  if (await pressed()) throw new Error("还是开着");
+  if (await banner.count()) throw new Error("提示条还在");
+  return "已退出";
+});
+
+await step("Shift+Tab 与 chip 是同一个开关", async () => {
+  await input.click();
+  await input.press("Shift+Tab");
+  await sleep(300);
+  if (!(await pressed())) throw new Error("Shift+Tab 没打开");
+  await input.press("Shift+Tab");
+  await sleep(300);
+  if (await pressed()) throw new Error("Shift+Tab 没关掉");
+  return "两种入口一致";
+});
+
+await step("/plan 命令也切同一个开关", async () => {
+  await input.fill("/plan");
+  await sleep(300);
+  await input.press("Enter");
+  await sleep(350);
+  if (!(await pressed())) throw new Error("/plan 没打开");
+  return "已打开";
+});
+
+if (bad.length) {
+  console.log(`\nC1 验收失败 ${bad.length}/${count}：`);
+  for (const item of bad) console.log(`  - ${item}`);
+  console.log("启动日志（尾部）：\n" + getLog().split("\n").slice(-20).join("\n"));
+} else {
+  console.log(`\nC1 验收通过（${count}/${count}）`);
+}
+
+await browser.close();
+await killLeftovers();
+process.exit(bad.length ? 1 : 0);

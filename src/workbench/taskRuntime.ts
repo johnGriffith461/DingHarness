@@ -45,6 +45,7 @@ import {
 } from "@engine/core/contextManager";
 import { buildHistory } from "./history";
 import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
+import { renderPlanPrompt } from "@engine/runtime/planMode";
 
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
@@ -65,6 +66,7 @@ import {
 } from "./compaction";
 import { readConfirmMode } from "./confirmMode";
 import { readReasoningEffort } from "./effortStore";
+import { readPlanMode } from "./planMode";
 import {
   acceptQuestions,
   cleanTitle,
@@ -480,6 +482,7 @@ export async function answerTurn(
     effective,
     taskId,
     parts,
+    taskMode(task) === "coding" && readPlanMode(),
   );
 
   /*
@@ -560,6 +563,8 @@ export async function runStream(
    * 有片段时最后那条 user 消息带 `parts`，引擎会在发请求前校验模型模态。
    */
   parts?: ChatPart[],
+  /** C1：计划模式（只读工具 + 计划提示）。由宿主按"任务模式 + 开关"决定。 */
+  plan = false,
 ): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string }> {
   const messages: ChatMessage[] = [
     ...history,
@@ -623,7 +628,8 @@ export async function runStream(
    * 模型先知道"这个仓库的规则与测试命令"，再谈能力。
    */
   const projectBlock = await projectContextBlock();
-  const fullSystem = assembleSystem({ base: system, persona, project: projectBlock, memory: remembered, skills: skillBlock, abilities: extra });
+  const planBlock = plan ? renderPlanPrompt(user) : "";
+  const fullSystem = assembleSystem({ base: system + planBlock, persona, project: projectBlock, memory: remembered, skills: skillBlock, abilities: extra });
   /**
    * 这一轮的**投影**（C2）：正文、工具留痕、用量只有一份算法。
    *
@@ -669,6 +675,8 @@ export async function runStream(
         useTools: true,
         /* 24 步：够多步任务，又不至于一次误触发烧掉几十步。 */
         maxSteps: 24,
+        // C1：计划模式 —— 主进程按它只下发只读工具
+        ...(plan ? { plan: true } : {}),
         // 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）
         ...(sessionId ? { sessionId } : {}),
       },

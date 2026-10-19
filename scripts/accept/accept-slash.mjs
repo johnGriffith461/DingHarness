@@ -100,14 +100,18 @@ await step("B4：Ctrl+L 打开模型菜单", async () => {
   return "开/关都生效";
 });
 
-await step("B4：Shift+Tab 插入计划开场", async () => {
+await step("C1：Shift+Tab 切换计划模式", async () => {
   await input.fill("");
   await input.click();
   await input.press("Shift+Tab");
+  await sleep(300);
+  if (!(await page.locator('[data-testid="wb-plan-banner"]').count())) throw new Error("计划提示条没出现");
+  const pressed = await page.locator('[data-testid="wb-plan-toggle"]').getAttribute("aria-pressed");
+  if (pressed !== "true") throw new Error(`chip aria-pressed=${pressed}`);
+  await input.press("Shift+Tab");
   await sleep(250);
-  const value = await input.inputValue();
-  if (!value.startsWith("先只做调研并给出计划")) throw new Error(`正文是 ${JSON.stringify(value)}`);
-  return "已插入";
+  if (await page.locator('[data-testid="wb-plan-banner"]').count()) throw new Error("再按一次没退出");
+  return "开/关都生效";
 });
 
 if (bad.length) {

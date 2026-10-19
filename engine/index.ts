@@ -16,6 +16,7 @@ import { diffSnapshot, snapshotOf, type Snapshot, type SnapshotDiff } from "./co
 import { ledgerOf, rollup } from "./core/ledger";
 import { modelInfoOf } from "./runtime/models";
 import type { ContentPart } from "./runtime/messageTransform";
+import { planToolNames } from "./runtime/planMode";
 import type { MemberRole } from "./core/members";
 import type { ExecutorContext, ToolExecutor } from "./ports/executor";
 import type { HealthStore } from "./ports/health";
@@ -120,6 +121,11 @@ export type EngineRunRequest = {
   system?: string;
   /** B3：`content` 可以是纯文本，也可以是图片/PDF 片段数组（多模态）。 */
   messages: { role: "system" | "user" | "assistant"; content: string | ContentPart[] }[];
+  /**
+   * Plan 模式（C1）：只下发只读工具，写/命令工具**不下发**。
+   * 与 `only` 取交集（角色白名单只会更窄，不会被 plan 放大）。
+   */
+  planMode?: boolean;
   /**
    * **这一轮之前的对话历史**（可选，2026-10-16，审计 P127）。
    *
@@ -409,8 +415,15 @@ export function createEngine(ports: EnginePorts): Engine {
           ? content
           : content.filter((p) => p.type === "text").map((p) => p.text).join("\n");
       const queryText = textOf([...messages].reverse().find((m) => m.role === "user")?.content ?? "");
+      /*
+       * C1：计划模式的工具面 = `only`（若有）× `PLAN_MODE_TOOLS` 的交集。
+       * 写成一次计算，日志与实际下发用同一份 —— 两处各算一次迟早漂。
+       */
+      const effectiveOnly: readonly string[] | undefined = request.planMode
+        ? planToolNames(request.only)
+        : request.only;
       const namesActuallyOffered = (): string[] => {
-        const base = offeredToolNames(registry, request.mode, 0, request.only);
+        const base = offeredToolNames(registry, request.mode, 0, effectiveOnly);
         if (!queryText.trim()) return base;
         const selected = new Set(selectToolNames(registry.list(), queryText));
         return base.filter((n) => selected.has(n));
@@ -486,7 +499,7 @@ export function createEngine(ports: EnginePorts): Engine {
                   mode: request.mode,
                   executor: ports.executor,
                   ctx,
-                  ...(request.only?.length ? { only: request.only } : {}),
+                  ...(effectiveOnly ? { only: effectiveOnly } : {}),
                   /* 人轴（C2）：没声明就不传 —— 判定层按 owner 兜底（老路径） */
                   ...(request.memberRoles?.length ? { memberRoles: request.memberRoles } : {}),
                   /* 钩子端口（V5-4 4.1）：最小面里它是 no-op */
