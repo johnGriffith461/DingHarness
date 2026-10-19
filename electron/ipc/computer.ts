@@ -1,4 +1,4 @@
-import { app, desktopCapturer, dialog, ipcMain, screen, type BrowserWindow } from "electron";
+import { app, desktopCapturer, ipcMain, screen, type BrowserWindow } from "electron";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -44,6 +44,10 @@ export const COMPUTER_CHANNEL = {
   type: "computer:type",
   key: "computer:key",
   log: "computer:log",
+  /** 渲染层的确认框答完之后，把答案送回这里（2026-10-19：不再用系统原生弹窗） */
+  confirmAnswer: "computer:confirmAnswer",
+  /** 主进程 → 渲染层：请画一个确认框（不再用系统原生弹窗） */
+  confirmRequest: "computer:confirmRequest",
 } as const;
 
 export type ComputerState = { enabled: boolean };
@@ -177,20 +181,51 @@ export async function runComputerAction(action: ComputerAction, opts: { requireE
   }
 }
 
-/** 界面发起的动作：先弹原生确认（默认"取消"）。 */
+/**
+ * 待确认的请求（2026-10-19 改：**不再用系统原生弹窗**）。
+ *
+ * 原来自带的同一族：原生弹窗样式与应用完全脱节（用户原话"太硬核了"）、
+ * 截图验收拿不到它（它是 OS 窗口，不在 DOM 里）、还会抢焦点打架。
+ * 现在改成：这里挂一个待答请求 → 渲染层画自己的确认框 → 答案经 IPC 回来。
+ *
+ * ⚠️ 安全语义一字未变：默认否、10 分钟不答当拒绝、同一时刻只有一个待答。
+ */
+type PendingConfirm = {
+  id: string;
+  action: ComputerAction;
+  resolve: (ok: boolean) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+let pendingConfirm: PendingConfirm | null = null;
+
+/** 界面发起的动作：先请渲染层确认（默认「取消」，超时当拒绝）。 */
 async function confirm(win: BrowserWindow | null, action: ComputerAction): Promise<boolean> {
-  const options = {
-    type: "warning" as const,
-    buttons: ["取消", "允许这一次"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
-    title: "允许一次电脑操作？",
-    message: describeComputerAction(action),
-    detail: "这会操作你的真实桌面（鼠标/键盘/屏幕）。内容不记录；每次都要重新批准。",
-  };
-  const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
-  return result.response === 1;
+  if (!win) return false;
+  /* 同一时刻只允许一个待答：前一个直接按拒绝收场（不留悬着的 Promise） */
+  if (pendingConfirm) {
+    clearTimeout(pendingConfirm.timer);
+    pendingConfirm.resolve(false);
+    pendingConfirm = null;
+  }
+  return new Promise<boolean>((resolve) => {
+    const id = `cua-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timer = setTimeout(() => {
+      if (pendingConfirm?.id !== id) return;
+      pendingConfirm = null;
+      resolve(false);
+    }, 10 * 60 * 1000);
+    pendingConfirm = { id, action, resolve, timer };
+    /* 把描述交给渲染层画 —— 主进程不再自己拼窗口 */
+    win.webContents.send(COMPUTER_CHANNEL.confirmRequest, {
+      id,
+      title: "允许一次电脑操作？",
+      message: describeComputerAction(action),
+      detail: "这会操作你的真实桌面（鼠标/键盘/屏幕）。内容不记录；每次都要重新批准。",
+      confirmLabel: "允许这一次",
+      danger: true,
+    });
+  });
 }
 
 export function registerComputerIpc(getWindow: () => BrowserWindow | null): void {
@@ -206,23 +241,41 @@ export function registerComputerIpc(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle(COMPUTER_CHANNEL.enable, async () => {
     const win = getWindow();
-    const options = {
-      type: "warning" as const,
-      buttons: ["取消", "我了解风险，授权"],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
-      title: "授权电脑操作？",
-      message: "允许 Ding 截屏、移动鼠标、点击与输入吗？",
-      detail:
-        "授权后，agent 在你批准每一次动作时可以操作真实桌面。默认关闭，随时可关。\n" +
-        "限制：坐标必须在屏幕内、按键白名单、单次输入 ≤4000 字符；每个动作都会留痕（不记录输入内容）。\n" +
-        "这不是操作系统级沙箱。",
-    };
-    const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
-    if (result.response !== 1) return { ok: false, error: "未授权" };
+    if (!win) return { ok: false, error: "没有窗口，无法确认授权" };
+    /* 同样走渲染层确认（同一个队列，同一套默认拒绝语义） */
+    const granted = await new Promise<boolean>((resolve) => {
+      const id = `cua-enable-${Date.now()}`;
+      const timer = setTimeout(() => {
+        if (pendingConfirm?.id !== id) return;
+        pendingConfirm = null;
+        resolve(false);
+      }, 10 * 60 * 1000);
+      pendingConfirm = { id, action: { kind: "screenshot" } as ComputerAction, resolve, timer };
+      win.webContents.send(COMPUTER_CHANNEL.confirmRequest, {
+        id,
+        title: "授权电脑操作？",
+        message: "允许 Ding 截屏、移动鼠标、点击与输入吗？",
+        detail:
+          "授权后，agent 在你批准每一次动作时可以操作真实桌面。默认关闭，随时可关。\n" +
+          "限制：坐标必须在屏幕内、按键白名单、单次输入 ≤4000 字符；每个动作都会留痕（不记录输入内容）。\n" +
+          "这不是操作系统级沙箱。",
+        confirmLabel: "我了解风险，授权",
+        danger: true,
+      });
+    });
+    if (!granted) return { ok: false, error: "未授权" };
     writeComputerState({ enabled: true });
     return { ok: true, enabled: true };
+  });
+
+  /* 渲染层答完确认框 → 在这里收答案 */
+  ipcMain.handle(COMPUTER_CHANNEL.confirmAnswer, (_event, answer: { id: string; ok: boolean }) => {
+    if (!pendingConfirm || pendingConfirm.id !== answer.id) return { ok: false, error: "那条确认已经不在了" };
+    clearTimeout(pendingConfirm.timer);
+    const resolve = pendingConfirm.resolve;
+    pendingConfirm = null;
+    resolve(answer.ok === true);
+    return { ok: true };
   });
 
   ipcMain.handle(COMPUTER_CHANNEL.disable, () => {

@@ -401,6 +401,13 @@ export function registerAiIpc(): void {
           ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
           mode: request.toolPolicy ?? "按需确认",
           ...(request.useTools ? { useTools: true } : {}),
+          /*
+           * 步数上限（T1 实测抓到的真缺陷）：以前这里不传，于是引擎兜底的 ?? 4
+           * 成了唯一值 —— 任何对话最多 4 次工具调用。填个表单要 5 步就不够：
+           * open + snapshot + type + type 用完，点提交那一步没了。
+           * 现在由渲染层按这一轮的任务性质给值。
+           */
+          ...(request.maxSteps === undefined ? {} : { maxSteps: request.maxSteps }),
           /* L05：智能体的工具白名单（模型看不到白名单外的工具） */
           ...(request.only?.length ? { only: request.only } : {}),
           abortSignal: controller.signal,

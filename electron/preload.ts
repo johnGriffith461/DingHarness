@@ -434,6 +434,26 @@ const api = {
     type: (text: string) => ipcRenderer.invoke(COMPUTER_CHANNEL.type, text),
     key: (key: string) => ipcRenderer.invoke(COMPUTER_CHANNEL.key, key),
     log: () => ipcRenderer.invoke(COMPUTER_CHANNEL.log),
+    /*
+     * 确认框改由渲染层画（2026-10-19）：主进程发请求 → 页面画自己的框 → 答案回传。
+     * 原来走 `dialog.showMessageBox`，那是 OS 窗口：样式与产品脱节、验收拿不到、还抢焦点。
+     */
+    onConfirmRequest: (
+      listener: (request: {
+        id: string;
+        title: string;
+        message: string;
+        detail?: string;
+        confirmLabel: string;
+        danger?: boolean;
+      }) => void,
+    ) => {
+      const handler = (_event: unknown, request: Parameters<typeof listener>[0]) => listener(request);
+      ipcRenderer.on(COMPUTER_CHANNEL.confirmRequest, handler);
+      return () => ipcRenderer.removeListener(COMPUTER_CHANNEL.confirmRequest, handler);
+    },
+    confirmAnswer: (answer: { id: string; ok: boolean }) =>
+      ipcRenderer.invoke(COMPUTER_CHANNEL.confirmAnswer, answer),
   },
   workbench: {
     /** 保存一个对话产物到磁盘，返回落盘路径与字节数。 */

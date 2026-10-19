@@ -160,6 +160,8 @@ const NOT_IN_BATCH = {
    * 它有自己的花钱闸（--yes-spend）与零出网闸（DING_NO_REAL_MODEL），
    * 由 T0/T1 阶段门手动跑，报告里写清模型与 token。
    */
+  "accept-ten-tasks.mjs": { kind: "needs-model", why: "十任务实测：真模型改真代码、真跑测试判产物。批跑是零出网的假通道，跑它等于把「能不能真干活」这件事换成「脚本会不会照做」——那正是这个基准要证的相反面。手动跑：node scripts/accept/accept-ten-tasks.mjs --yes-spend" },
+  "accept-desktop-tasks.mjs": { kind: "needs-model", why: "十任务里的 6/7/8（预览 / 浏览器 agent / CUA）：浏览器 agent 那条要真模型看懂快照并挑对 ref 填表。手动跑：node scripts/accept/accept-desktop-tasks.mjs --yes-spend" },
   "accept-newprovider.mjs": { kind: "needs-model", why: "从零接一个新供应商：真要 GET /models 拉清单、真要发一轮验连通。假服务器会让这两个按钮恒绿，而用户按它们就是为了排掉地址/格式/密钥错。手动跑：node scripts/accept/accept-newprovider.mjs --yes-spend" },
   "accept-modelconfig-probe.mjs": { kind: "needs-model", why: "「测试连通」按钮要真打 provider 才有意义 —— 假服务器会让它恒绿，而那正是用户按它的原因（排掉密钥错/通道拒绝/模型名拼错）。手动跑：node scripts/accept/accept-modelconfig-probe.mjs --yes-spend" },
   "accept-model-config.mjs": { kind: "needs-model", why: "打真 provider 验参数映射是否真的进了出站请求体。批跑用假通道会让这条变成假绿（实测过：fetch 包装被适配器静默丢掉时假通道全绿、真 provider 一跑 reasoning 就没了）。手动跑：node scripts/accept/accept-model-config.mjs --yes-spend" },
@@ -296,6 +298,11 @@ const CASES = [
    * 这条**可以**进批跑 —— 它不调模型、不发网络请求，只验表单与主进程落盘。
    */
   ["accept-modelconfig-form.mjs", "添加模型表单：可点 / 校验会拦 / 落盘 / 重启还在 / 删除生效"],
+  /*
+   * CUA 确认框（2026-10-19）：主人两轮反馈 —— 先是系统原生弹窗（"太硬核了"），
+   * 再是整页白板（复用了整页设置视图的样式）。这条盯住它必须**在 DOM 里、居中、默认取消**。
+   */
+  ["accept-cua-dialog.mjs", "CUA 确认框在 DOM 里 / 居中模态 / 默认焦点在取消 / Esc 等于取消"],
   /*
    * 「一个人都没来过」的几处空态（§208 那类"没人点过的界面"）。
    * 2026-10-16：从 `NOT_IN_BATCH` 的明账里收进来（它不调模型、用 bootApp + 自隔离数据目录，

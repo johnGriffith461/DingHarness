@@ -746,3 +746,46 @@ export function readStoreFile(file) {
     raw !== null && typeof raw === "object" && !Array.isArray(raw) && typeof raw.__schema === "number" && "data" in raw;
   return enveloped ? raw.data : raw;
 }
+
+/**
+ * **自动回答应用内确认框**（2026-10-19，主人点名）。
+ *
+ * ## 为什么需要
+ *
+ * CUA 授权与每次动作确认现在是**应用内模态**（不再是系统弹窗），默认焦点在「取消」上 ——
+ * 对真用户是对的，但验收脚本会**卡在那儿等人点**。主人原话：
+ * "你就不能把设置成完全允许吗 非得让我一个个手动帮你去点吗"。
+ *
+ * 这条 helper 在后台轮询：一出现 `[data-testid="wb-confirm-dialog"]` 就点确认，
+ * 直到被 `stop()`。它不是"绕过审批"——**审批本身照旧发生了**（对话框真的画了、真的点了），
+ * 只是点击由脚本代劳，与真人的操作路径完全一致。
+ *
+ * ⚠️ 只在**验收**里用。产品里没有这个自动点击，用户的确认永远是真的。
+ *
+ * @param page 页面
+ * @returns `stop()` 停止轮询
+ */
+export function autoConfirmDialogs(page) {
+  let stopped = false;
+  const loop = (async () => {
+    while (!stopped) {
+      try {
+        const ok = page.locator('[data-testid="wb-confirm-ok"]');
+        if ((await ok.count()) > 0) {
+          await ok.first().click({ timeout: 2000 });
+          await page.waitForTimeout(200);
+          continue;
+        }
+      } catch {
+        /* 页面正在切换/关闭：下一轮再看 */
+      }
+      await page.waitForTimeout(300);
+    }
+  })();
+  return {
+    stop: () => {
+      stopped = true;
+      void loop;
+    },
+  };
+}

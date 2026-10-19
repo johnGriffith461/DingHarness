@@ -112,6 +112,17 @@ export type ChatRequest = {
    */
   useTools?: boolean;
   /**
+   * **这一轮最多跑几步工具调用**（T1 实测抓到的真缺陷）。
+   *
+   * 原来桌面聊天**根本没有这个字段**，于是引擎的兜底 `?? 4` 成了唯一值 ——
+   * 也就是"任何对话最多 4 次工具调用"。真跑一个填表任务时：
+   * open + snapshot + type + type = 4 步，**正好在点提交之前用完**，
+   * 模型只能停下（看起来像"没做对"，其实是没步数了）。
+   *
+   * 起标题、翻译这类附带请求仍然不该带工具（它们连 `useTools` 都不给）。
+   */
+  maxSteps?: number;
+  /**
    * 会话 id（C2）：主进程据此把这一轮写进**会话事件日志**（`userData/sessions/<id>.jsonl`）。
    *
    * 为什么要由发起方给：只有它知道"这一轮属于哪段对话/哪个任务"。
@@ -770,6 +781,10 @@ export type ShellBridge = {
     type: (text: string) => Promise<ComputerResultView>;
     key: (key: string) => Promise<ComputerResultView>;
     log: () => Promise<ComputerAuditView[]>;
+    /** 主进程请求确认（渲染层画自己的框，不再用系统原生弹窗）。 */
+    onConfirmRequest: (listener: (request: { id: string; title: string; message: string; detail?: string; confirmLabel: string; danger?: boolean }) => void) => () => void;
+    /** 把用户的答案送回主进程。 */
+    confirmAnswer: (answer: { id: string; ok: boolean }) => Promise<{ ok: boolean; error?: string }>;
   };
   /** 诊断包（2026-10-17 / G17）：预览不写盘，导出写盘并在文件管理器定位；不含密钥值。 */
   diagnostics: {
