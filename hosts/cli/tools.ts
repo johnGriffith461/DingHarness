@@ -23,9 +23,11 @@ import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/f
 import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
 import { createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
+import { insideDirs } from "../../engine/runtime/tools/drivePaths";
+import { killJob, readJob, startJob } from "../../engine/runtime/tools/jobs";
 import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
 import { describeFinish, validateFinish } from "../../engine/runtime/finishContract";
-import { ASK_USER_TOOL, FINISH_TOOL } from "../../shared/agentTools";
+import { ASK_USER_TOOL, FINISH_TOOL, JOB_KILL_TOOL, JOB_OUTPUT_TOOL } from "../../shared/agentTools";
 import { describeAskResult, normalizeAsk } from "../../engine/runtime/tools/askUserTool";
 
 /**
@@ -80,6 +82,8 @@ export function createCliExecutor(opts: {
   extraReadDirs?: readonly string[];
   /** 知识库目录（G15；不给 = 这个宿主没有知识库，工具会如实说） */
   knowledgeDir?: string;
+  /** B-03：后台任务的日志落盘根目录（通常就是数据目录）。 */
+  dataDir?: string;
 }): ToolExecutor {
   const { dirs, makeTools } = opts;
   const extraReadDirs = opts.extraReadDirs ?? [];
@@ -270,12 +274,30 @@ export function createCliExecutor(opts: {
       }
 
       case "run_command": {
-        const { command, workdir, timeout, stdin } = input as {
+        const { command, workdir, timeout, stdin, background } = input as {
           command: string;
           workdir?: string;
           timeout?: number;
           stdin?: string;
+          background?: boolean;
         };
+        /*
+         * B-03：长任务放后台。工作目录仍走**同一套白名单**（不能在授权目录外起进程）。
+         */
+        if (background === true) {
+          const wanted = String(workdir ?? "").trim() || dirs[0] || "";
+          const cwd = wanted ? insideDirs(wanted, dirs) : null;
+          if (!cwd) {
+            const error = "这个工作目录不在授权范围内（只能在你授权的目录里跑命令）";
+            return { ok: false, output: { ok: false, line: error, error }, error };
+          }
+          const started = await startJob({ command, cwd, ...(opts.dataDir ? { dataDir: opts.dataDir } : {}) });
+          if (!started.ok) {
+            return { ok: false, output: { ok: false, line: started.error, error: started.error }, error: started.error };
+          }
+          const line = `已在后台启动：${started.id}（用 job_output 轮询、job_kill 停止）`;
+          return { ok: true, output: { ok: true, line, jobId: started.id, pid: started.pid ?? null } };
+        }
         const result = await runCommandForModel(
           { command, ...(workdir === undefined ? {} : { workdir }), timeout, ...(stdin === undefined ? {} : { stdin }) },
           dirs,
@@ -288,6 +310,28 @@ export function createCliExecutor(opts: {
             : { error: result.error }),
         };
         return { ok: result.ok, output, ...(result.ok ? {} : { error: result.error }) };
+      }
+
+      /* B-03：后台任务的读取与停止 */
+      case JOB_OUTPUT_TOOL: {
+        const { jobId, tailLines } = input as { jobId: string; tailLines?: number };
+        const got = readJob(jobId, tailLines);
+        if (!got.ok) return { ok: false, output: { ok: false, line: got.error, error: got.error }, error: got.error };
+        const state = got.job.running ? "还在跑" : `已结束（退出码 ${got.job.exitCode ?? "?"}）`;
+        return {
+          ok: true,
+          output: {
+            ok: true,
+            line: `后台任务 ${got.job.id}：${state}${got.job.truncated ? "（输出已截断，只留尾部）" : ""}`,
+            ...got.job,
+          },
+        };
+      }
+      case JOB_KILL_TOOL: {
+        const { jobId } = input as { jobId: string };
+        const got = killJob(jobId);
+        if (!got.ok) return { ok: false, output: { ok: false, line: got.error, error: got.error }, error: got.error };
+        return { ok: true, output: { ok: true, line: `已停止后台任务 ${jobId}`, killed: true, jobId } };
       }
 
       /*

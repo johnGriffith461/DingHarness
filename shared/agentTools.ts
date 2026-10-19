@@ -382,6 +382,31 @@ export const RUN_COMMAND_INPUT = z.object({
    * 上限 64 KiB 由执行体按**字节**再判一次（schema 的 max 是字符数）。
    */
   stdin: z.string().max(64 * 1024).optional().describe("要喂给命令的 stdin（最多 64 KiB；不给则命令读到 EOF）"),
+  /*
+   * B-03：长任务放后台 —— 这一轮立刻拿到 jobId，下一步用 `job_output` 轮询。
+   * 不用把终端占住，也不用等超时。
+   */
+  background: z.boolean().optional().describe("true = 放后台，立刻返回 jobId；用 job_output 轮询、job_kill 停止"),
+});
+
+/* ── B-03：后台任务 ─────────────────────────────────────────────── */
+
+export const JOB_OUTPUT_TOOL = "job_output";
+export const JOB_KILL_TOOL = "job_kill";
+
+export const JOB_OUTPUT_DESC = [
+  "读一个后台任务的最新输出（尾部）。",
+  "用 run_command 的 background=true 起任务后，用这里返回的 jobId 轮询；running=false 时看 exitCode。",
+].join("");
+
+export const JOB_OUTPUT_INPUT = z.object({
+  jobId: z.string().trim().min(1).describe("run_command background 返回的 jobId"),
+  tailLines: z.number().int().min(1).max(2000).optional().describe("只看最后多少行（默认全部保留的输出）"),
+});
+
+export const JOB_KILL_DESC = "停止一个后台任务（连同它的子进程）。已经结束的任务也算成功。";
+export const JOB_KILL_INPUT = z.object({
+  jobId: z.string().trim().min(1).describe("要停止的 jobId"),
 });
 
 /* ── P0-01：todo_write ───────────────────────────────────────────
@@ -725,6 +750,9 @@ const TOOL_META: Record<string, AgentToolMeta> = {
   [EDIT_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
   [APPLY_PATCH_TOOL]: { destructive: true, concurrency: "exclusive" },
   [RUN_COMMAND_TOOL]: { destructive: true, concurrency: "exclusive", timeoutMs: 120_000, resultPolicy: "tail" },
+  [JOB_OUTPUT_TOOL]: { concurrency: "safe" },
+  /* 停一个后台任务是写类：它会结束别人（模型自己起的）进程 */
+  [JOB_KILL_TOOL]: { destructive: true, concurrency: "exclusive" },
   [TODO_WRITE_TOOL]: { concurrency: "exclusive" },
   [FINISH_TOOL]: { concurrency: "exclusive" },
   [ASK_USER_TOOL]: { concurrency: "exclusive" },
@@ -746,6 +774,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: EDIT_FILE_TOOL, description: EDIT_FILE_DESC, schema: EDIT_FILE_INPUT },
   { name: APPLY_PATCH_TOOL, description: APPLY_PATCH_DESC, schema: APPLY_PATCH_INPUT },
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
+  { name: JOB_OUTPUT_TOOL, description: JOB_OUTPUT_DESC, schema: JOB_OUTPUT_INPUT },
+  { name: JOB_KILL_TOOL, description: JOB_KILL_DESC, schema: JOB_KILL_INPUT },
   { name: TODO_WRITE_TOOL, description: TODO_WRITE_DESC, schema: TODO_WRITE_INPUT },
   { name: FINISH_TOOL, description: FINISH_DESC, schema: FINISH_INPUT },
   { name: ASK_USER_TOOL, description: ASK_USER_DESC, schema: ASK_USER_INPUT },
@@ -785,6 +815,8 @@ export function toolLabel(name: string): string {
   if (name === LIST_DIR_TOOL) return "看目录";
   if (name === SEARCH_FILES_TOOL) return "找文件";
   if (name === RUN_COMMAND_TOOL) return "跑命令";
+  if (name === JOB_OUTPUT_TOOL) return "后台输出";
+  if (name === JOB_KILL_TOOL) return "停后台";
   /*
    * 连接器（MCP）工具：标签带上**哪个连接器** ——
    * 留痕里只写"连接器"等于没说，用户要判断的是"它把这个动作交给了谁"。
@@ -889,6 +921,10 @@ export function toolArgsSummary(name: string, input: unknown): string {
     const cmd = cut(obj.command, 80);
     const dir = typeof obj.workdir === "string" && obj.workdir.trim() ? ` @${cut(obj.workdir, 40)}` : "";
     return cmd ? `${cmd}${dir}` : "";
+  }
+  if (name === JOB_OUTPUT_TOOL || name === JOB_KILL_TOOL) {
+    const id = cut(obj.jobId, 40);
+    return id ? `任务 ${id}` : "";
   }
   if (name === SEARCH_FILES_TOOL) {
     const what = cut(obj.pattern, 40);

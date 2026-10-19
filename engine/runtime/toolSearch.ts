@@ -37,6 +37,9 @@ export const ALWAYS_TOOLS: readonly string[] = [
   "list_dir",
   "search_files",
   "run_command",
+  /* B-03：后台任务的读取与停止 —— 与 run_command 同一组，漏了模型就轮询不到 */
+  "job_output",
+  "job_kill",
   "todo_write",
   "finish",
   "ask_user",

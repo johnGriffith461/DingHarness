@@ -1,5 +1,6 @@
 import { jsonSchema, type ToolSet } from "ai";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { isMcpTool, parseMcpToolName } from "../../shared/mcp";
 import {
   CANVAS_ADD_NODE_TOOL,
@@ -7,6 +8,8 @@ import {
   EDIT_FILE_TOOL,
   LIST_DIR_TOOL,
   LIST_FILES_TOOL,
+  JOB_KILL_TOOL,
+  JOB_OUTPUT_TOOL,
   MEMORY_LIST_TOOL,
   MEMORY_SAVE_TOOL,
   READ_FILE_TOOL,
@@ -26,6 +29,7 @@ import { buildToolSet, createToolRegistry, type ToolEntryInput } from "../../eng
 import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
 import { parseSandboxMode, writeEffectAllowed } from "../../engine/adapters/sandbox";
 import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/fileState";
+import { killJob, readJob, startJob } from "../../engine/runtime/tools/jobs";
 import type { ToolInfoWire } from "../../shared/ipc";
 /* 插件工具从 pluginHost 直接来（registry 不再转手 re-export —— V5-4 4.1 把 IO 移出最小面） */
 import { pluginToolEntries } from "../../engine/runtime/pluginHost";
@@ -626,11 +630,12 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
   },
 
   [RUN_COMMAND_TOOL]: async (input, env) => {
-    const { command, workdir, timeout, stdin } = input as {
+    const { command, workdir, timeout, stdin, background } = input as {
       command: string;
       workdir?: string;
       timeout?: number;
       stdin?: string;
+      background?: boolean;
     };
     /*
      * ⭐ **把中止信号传下去**（2026-10-16，审计 P35）。
@@ -647,6 +652,21 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       { command, workdir, timeout, ...(stdin === undefined ? {} : { stdin }), ...(env.signal ? { signal: env.signal } : {}) },
       ownedDirs(),
     );
+    /*
+     * B-03：`background=true` 时**不在这里跑完**，交给后台任务表并立刻返回 jobId。
+     * 工作目录沿用同一套白名单（`ownedDirs`），与前台那条一个口径。
+     */
+    if (background === true) {
+      const wanted = String(workdir ?? "").trim() || ownedDirs()[0] || "";
+      const cwd = wanted ? ownedDirs().find((dir) => path.resolve(dir) === path.resolve(wanted)) : null;
+      if (!cwd) {
+        const error = "这个工作目录不在授权范围内（只能在你授权的目录里跑命令）";
+        return { ok: false, line: error, error };
+      }
+      const started = await startJob({ command, cwd, dataDir: app.getPath("userData") });
+      if (!started.ok) return { ok: false, line: started.error, error: started.error };
+      return { ok: true, line: `已在后台启动：${started.id}（用 job_output 轮询、job_kill 停止）`, jobId: started.id };
+    }
     return {
       ok: result.ok,
       line: describeRunResult(result, command, typeof stdin === "string" ? { stdinChars: stdin.length } : {}),
@@ -661,6 +681,25 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
           }
         : { error: result.error }),
     };
+  },
+
+  /* B-03：后台任务的读取与停止（与 CLI 同一份 `jobs.ts`） */
+  [JOB_OUTPUT_TOOL]: async (input) => {
+    const { jobId, tailLines } = input as { jobId: string; tailLines?: number };
+    const got = readJob(jobId, tailLines);
+    if (!got.ok) return { ok: false, line: got.error, error: got.error };
+    const state = got.job.running ? "还在跑" : `已结束（退出码 ${got.job.exitCode ?? "?"}）`;
+    return {
+      ok: true,
+      line: `后台任务 ${got.job.id}：${state}${got.job.truncated ? "（输出已截断，只留尾部）" : ""}`,
+      ...got.job,
+    };
+  },
+  [JOB_KILL_TOOL]: async (input) => {
+    const { jobId } = input as { jobId: string };
+    const got = killJob(jobId);
+    if (!got.ok) return { ok: false, line: got.error, error: got.error };
+    return { ok: true, line: `已停止后台任务 ${jobId}`, killed: true, jobId };
   },
 
   /**
@@ -1008,4 +1047,6 @@ export const TOOL_NAMES = [
   SEARCH_FILES_TOOL,
   EDIT_FILE_TOOL,
   RUN_COMMAND_TOOL,
+  JOB_OUTPUT_TOOL,
+  JOB_KILL_TOOL,
 ] as const;

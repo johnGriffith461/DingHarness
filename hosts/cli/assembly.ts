@@ -44,6 +44,9 @@ export const CLI_TOOLS = [
   "todo_write",
   "finish",
   "ask_user",
+  /* B-03：后台任务的读取与停止 */
+  "job_output",
+  "job_kill",
   "spawn_agent",
   "spawn_agents",
   "knowledge_search",
@@ -122,6 +125,8 @@ export async function buildEngine(
     dirs,
     extraReadDirs: [spill.dir],
     knowledgeDir: dataDir,
+    /* B-03：后台任务的日志落在数据目录下 */
+    dataDir,
     makeTools: (mode, depth, provider, signal, only) => {
       if (!makeTools) throw new Error("工具集还没装配好（不应该发生）");
       return makeTools(mode, depth, provider, signal, only);

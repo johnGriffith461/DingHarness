@@ -110,6 +110,9 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   run_command: { kind: "write" },
   /* D3：apply_patch 会写多个文件，按写处理 */
   apply_patch: { kind: "write" },
+  /* B-03：读后台输出是只读；杀后台进程是写（它结束别人起的进程）。 */
+  job_output: { kind: "read" },
+  job_kill: { kind: "write" },
   /*
    * P0-01：todo_write 只改**本产品自己的待办清单**（任务内的进度投影），
    * 不碰用户文件、不执行命令 —— 与 `memory_save` / `canvas_add_node` 那种
