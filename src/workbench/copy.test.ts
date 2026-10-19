@@ -140,12 +140,13 @@ describe("首页工作模式（D02）", () => {
     }
   });
 
-  it("磁盘读到的值不可信：只认 coding，其余一律 office", () => {
+  it("磁盘读到的值不可信：显式 office 保留，其余一律 coding（P0-08 默认编码）", () => {
     expect(parseHomeMode("coding")).toBe("coding");
     expect(parseHomeMode("office")).toBe("office");
-    expect(parseHomeMode("CODING")).toBe("office");
-    expect(parseHomeMode(undefined)).toBe("office");
-    expect(parseHomeMode(42)).toBe("office");
+    expect(parseHomeMode("CODING")).toBe("coding");
+    expect(parseHomeMode(undefined)).toBe("coding");
+    expect(parseHomeMode(42)).toBe("coding");
+    expect(parseHomeMode(null)).toBe("coding");
   });
 
   it("首屏标题两种模式不同（否则切换看不出变化）", () => {

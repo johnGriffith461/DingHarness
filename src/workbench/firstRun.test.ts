@@ -21,8 +21,12 @@ describe("shouldShowFirstRun", () => {
     expect(shouldShowFirstRun(true, "p/m", [provider(false)])).toBe(false);
   });
 
-  it("任何一家有可用 key → 不弹", () => {
-    expect(shouldShowFirstRun(true, "", [provider(false), provider(true)])).toBe(false);
+  it("有 key 但没有钉住模型 → **仍然弹**（落在选模型那一步，P0-08）", () => {
+    expect(shouldShowFirstRun(true, "", [provider(false), provider(true)])).toBe(true);
+  });
+
+  it("有 key 且钉住模型 → 不弹", () => {
+    expect(shouldShowFirstRun(true, "p/m", [provider(true)])).toBe(false);
   });
 
   it("设置还没载入 / provider 还没读到 → 不弹（避免闪一下）", () => {

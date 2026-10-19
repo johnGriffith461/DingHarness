@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { keepTokensFor } from "@engine/runtime/budget";
+import { compactKeepTokens } from "./compaction";
 import {
   KEEP_TOKENS,
   SUMMARY_MARKER,
@@ -199,5 +201,18 @@ describe("E2：九段摘要与 compaction 事件", () => {
 
   it("旧日志没有 compaction 事件 → 字段不出现", () => {
     expect(finishTurn(emptyTurn()).compactions).toBeUndefined();
+  });
+});
+
+
+/*
+ * P0-08：压缩预算必须用**这一轮真实解析到的模型**，不是 localStorage 里那个可能过期的。
+ * 判据：`compactKeepTokens(model)` 与 `keepTokensFor(model)` 同值。
+ */
+describe("P0-08 compactKeepTokens", () => {
+  it("与 keepTokensFor 同一口径（每个模型各算一遍）", () => {
+    for (const model of ["big-model", "deepseek-v4.1-flash-1017", "unknown-model"]) {
+      expect(compactKeepTokens(model, "long")).toBe(keepTokensFor(model, Date.now(), "long"));
+    }
   });
 });

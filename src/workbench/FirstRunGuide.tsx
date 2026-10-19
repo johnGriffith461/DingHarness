@@ -44,8 +44,14 @@ export function shouldShowFirstRun(
   providers: readonly ProviderInfo[] | null,
 ): boolean {
   if (!loaded || !providers) return false;
+  /*
+   * P0-08：判据只看**有没有钉住模型**。
+   *
+   * 原来"任何一家有 key → 不弹"，于是"有 key、没选模型"的用户永远落不到
+   * "选模型"这一步 —— 向导整块消失，首页显示自动选择，用户不知道自己在用哪个模型。
+   * 现在有 key 的会从第 2 步开始（跳过填 key），仍要求选完模型。
+   */
   if (pinnedModel) return false;
-  if (providers.some((p) => p.available)) return false;
   try {
     return localStorage.getItem(DISMISS_KEY) !== "1";
   } catch {
@@ -60,6 +66,8 @@ export function FirstRunGuide() {
 
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
   const [step, setStep] = useState(0);
+  /* P0-08：有可用 key 时直接从"选模型"开始（不要求重新填 key） */
+  const [autoAdvanced, setAutoAdvanced] = useState(false);
   const [provider, setProvider] = useState("");
   const [key, setKey] = useState("");
   const [model, setModel] = useState("");
@@ -75,7 +83,16 @@ export function FirstRunGuide() {
   const refresh = async (): Promise<void> => {
     try {
       const list = await shell?.ai?.listProviders();
-      if (list) setProviders(list.map((p) => ({ ...p })));
+      if (list) {
+        const mapped = list.map((p) => ({ ...p }));
+        setProviders(mapped);
+        /* 有 key → 跳过第 1 步，直接选模型（只自动跳一次） */
+        if (autoAdvanced === false && mapped.some((p) => p.available)) {
+          setProvider((prev) => prev || (mapped.find((p) => p.available)?.id ?? ""));
+          setStep((prev) => (prev === 0 ? 2 : prev));
+          setAutoAdvanced(true);
+        }
+      }
     } catch {
       /* 读不到就当成还没有（向导仍可用，只是清单空） */
     }

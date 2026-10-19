@@ -4,7 +4,7 @@ import { Check, ChevronDown, ChevronRight, Lock, Sparkles } from "lucide-react";
 import { budgetOf } from "@engine/runtime/budget";
 import { findModel } from "@engine/runtime/models";
 import { listProviders } from "@/ai/aiClient";
-import { readSavedRoute } from "@/ai/route";
+import { readSavedRoute, resolveChatRoute } from "@/ai/route";
 
 import { modelsForProvider } from "./ModelSettingsPage";
 
@@ -71,7 +71,25 @@ export function ModelChip({
     };
   }, [open]);
 
-  const label = route.provider && route.model ? `${route.provider}/${route.model}` : "默认通道";
+  /*
+   * P0-08：标签只说"用户钉住的那个"。没有钉住就写"自动选择"，
+   * 不再把 localStorage 里残留的旧选择冒充成当前模型。
+   * hover 里异步给出真正会被用的路由（拿不到就仍是"自动选择"）。
+   */
+  const label = route.provider && route.model ? `${route.provider}/${route.model}` : "自动选择";
+  const [resolved, setResolved] = useState("");
+  useEffect(() => {
+    if (route.provider && route.model) return;
+    let alive = true;
+    void resolveChatRoute()
+      .then((r) => {
+        if (alive && r.provider && r.model) setResolved(`${r.provider}/${r.model}`);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [route.provider, route.model]);
 
   const pick = (provider: string, model: string): void => {
     if (busy) return;
@@ -136,7 +154,13 @@ export function ModelChip({
         data-testid="wb-model"
         aria-label={`模型：${label}`}
         aria-haspopup="menu"
-        title={busy ? "这一轮正在跑 —— 等它结束再换模型（Ctrl+M）" : "这一轮用哪个模型（Ctrl+M；配 provider 与拉取模型在设置里）"}
+        title={
+          busy
+            ? "这一轮正在跑 —— 等它结束再换模型（Ctrl+M）"
+            : route.provider && route.model
+              ? `这一轮用哪个模型（当前钉住：${route.provider}/${route.model}）`
+              : `自动选择（未钉住模型）${resolved ? `，将使用：${resolved}` : ""}`
+        }
         onClick={onToggle}
       >
         <Sparkles size={13} /> {label} <ChevronDown size={12} />

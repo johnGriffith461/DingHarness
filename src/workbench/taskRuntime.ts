@@ -44,7 +44,7 @@ import {
   type ContextSignals,
 } from "@engine/core/contextManager";
 import { buildHistory } from "./history";
-import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
+import { parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
 import {
   isPlanTransitionAllowed,
   renderApprovedPlan,
@@ -55,7 +55,6 @@ import { planVerification, type VerifyDecision } from "@engine/runtime/verifyLoo
 import { describeFinish, finishedFromTraces } from "@engine/runtime/finishContract";
 import { verificationMessage } from "./verifyContinue";
 
-import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
 import { liteModelNow, personaNow } from "./appSettings";
 import { personaPromptBlock } from "@shared/persona";
@@ -65,6 +64,7 @@ import { memoryPromptBlock } from "@shared/memory";
 import { useMemoryStore } from "./memoryStore";
 import { resolveChatRoute } from "@/ai/route";
 import {
+  compactKeepTokens as compactKeepTokensOf,
   compactedNote,
   compactPrompt,
   indexedNote,
@@ -256,7 +256,7 @@ async function enabledBlock(): Promise<string> {
  *
  * 读不到 / 读到乱值就回落默认值：这个值只影响"什么时候压"，不该让请求失败。
  */
-function compactKeepTokens(): number {
+function compactKeepTokens(modelId?: string): number {
   try {
     const raw = Number(localStorage.getItem("dsh-canvas.compact-keep-tokens"));
     if (Number.isFinite(raw) && raw > 0) return raw;
@@ -270,7 +270,7 @@ function compactKeepTokens(): number {
    * `~/.ding/config.json` 的 `contextBudget` 里显式选。
    * 未登记模型仍然 20k —— 不拿估计窗口发请求。
    */
-  return keepTokensFor(readSavedRoute().model, Date.now(), readBudgetMode());
+  return compactKeepTokensOf(modelId, readBudgetMode());
 }
 
 /** 桌面端读预算档位（与 CLI 配置同名同词；放 `localStorage` 是因为它只影响本机行为）。 */
@@ -361,7 +361,10 @@ export async function compactNow(
 ): Promise<{ ok: boolean; older?: number; error?: string }> {
   const task = current(port.getState().tasks, taskId);
   if (!task) return { ok: false, error: "没有找到这段任务" };
-  const built = buildHistory(task.steps, { factor: calibrationFactor, keepTokens: compactKeepTokens() });
+  const built = buildHistory(task.steps, {
+    factor: calibrationFactor,
+    keepTokens: compactKeepTokens(task.lastRoute?.model),
+  });
   const older = built.older;
   if (!older.length) return { ok: false, error: "没有更早的对话可压缩" };
   const summary = await summaryFor(taskId, older);
@@ -478,7 +481,12 @@ export async function answerTurn(
    * 再对它调 `shouldCompact` 几乎恒为假 —— 摘要那条路等于没接上，被切掉的旧内容
    * 只留下一句"已省略"。现在拿 `all` 算总量、拿 `older` 喂给 ICM。
    */
-  const keepTokens = compactKeepTokens();
+  /*
+   * P0-08：**这一轮只解析一次路由**。压缩预算、请求目标、写回任务上的 lastRoute
+   * 读的是同一个模型 —— 否则"按 A 的窗口压缩、把请求发给 B"。
+   */
+  const route = await resolveRoute({ fresh: history.length === 0 });
+  const keepTokens = compactKeepTokens(route.model);
   const built = buildHistory(history, { factor: calibrationFactor, keepTokens });
   const { messages, truncated, all, older } = built;
   const task = current(port.getState().tasks, taskId);
@@ -581,6 +589,8 @@ export async function answerTurn(
     taskId,
     parts,
     planRequested,
+    false,
+    route,
   );
 
   /*
@@ -616,6 +626,10 @@ export async function answerTurn(
     notes.length ? notes.join("；") : undefined,
     reply.usage,
   );
+  /* P0-08：这一轮实际用的模型写回任务（模型 chip / 上下文表 / 下次压缩都读它） */
+  port.setState((s) => ({
+    tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, lastRoute: reply.route } : t)),
+  }));
 
   /*
    * P0-04：验证闭环。
@@ -829,7 +843,20 @@ export async function runStream(
    * 后续轮次不重复注入（地图很贵，且模型已经看过）。
    */
   codingFirstTurn = false,
-): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string; wroteFiles?: boolean }> {
+  /**
+   * P0-08：调用方**已经解析过**的路由。
+   *
+   * 给了就不再二次解析 —— 同一轮里"压缩用哪个窗口、请求发给谁"必须是同一个模型。
+   */
+  resolvedRoute?: { provider: string; model: string; fellBack?: boolean; pinned?: string },
+): Promise<{
+  text: string;
+  tools: ToolTrace[];
+  usage?: StepUsage;
+  note?: string;
+  wroteFiles?: boolean;
+  route: { provider: string; model: string };
+}> {
   const messages: ChatMessage[] = [
     ...history,
     { role: "user", content: user, ...(parts?.length ? { parts } : {}) },
@@ -846,7 +873,7 @@ export async function runStream(
    * 默认模型不该劫持一段正在进行的对话 —— 用户在那段里手动换过模型，
    * 再发一句又被拽回默认，那是很讨厌的事。
    */
-  const route = await resolveRoute({ fresh: history.length === 0 });
+  const route = resolvedRoute ?? (await resolveRoute({ fresh: history.length === 0 }));
   /*
    * 钉的默认模型失效了就说一句（§184）。
    *
@@ -1087,6 +1114,7 @@ ${map.text}
     ...(view.usage ? { usage: view.usage } : {}),
     ...(fellBackNote ? { note: fellBackNote } : {}),
     ...(view.wroteFiles ? { wroteFiles: true } : {}),
+    route: { provider: route.provider, model: route.model },
   };
 }
 

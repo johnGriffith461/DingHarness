@@ -113,6 +113,11 @@ export function normalizeTask(raw: unknown): WorkTask | null {
    * P0-04：待验证计划也按不可信数据处理 —— 命令必须是字符串、轮次是 0–2 的整数。
    * 旧盘没有该字段就不带（不是"补一个空的"）。
    */
+  const rawRoute = t.lastRoute as Record<string, unknown> | undefined;
+  const lastRoute =
+    rawRoute && typeof rawRoute.provider === "string" && typeof rawRoute.model === "string" && rawRoute.provider && rawRoute.model
+      ? { provider: rawRoute.provider, model: rawRoute.model }
+      : undefined;
   const rawVerify = t.verifyPlan as Record<string, unknown> | undefined;
   const verifyPlan =
     rawVerify && typeof rawVerify.command === "string" && rawVerify.command.trim()
@@ -168,6 +173,7 @@ export function normalizeTask(raw: unknown): WorkTask | null {
     ...(typeof t.planPath === "string" && t.planPath ? { planPath: t.planPath } : {}),
     ...(typeof t.planWriteError === "string" && t.planWriteError ? { planWriteError: t.planWriteError } : {}),
     ...(verifyPlan ? { verifyPlan } : {}),
+    ...(lastRoute ? { lastRoute } : {}),
   };
 }
 

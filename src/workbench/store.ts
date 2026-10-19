@@ -395,14 +395,14 @@ const resolvingTools = new Set<string>();
 /**
  * 读上次选的工作模式（D02）。
  *
- * `localStorage` 在测试环境/无痕模式下可能直接抛 —— 读不到就当 `office`，
- * 这是"默认值"而不是"错误"：模式只影响首页展示。
+ * `localStorage` 在测试环境/无痕模式下可能直接抛 —— 读不到就按 `coding`，
+ * 与"从没存过"同一口径（P0-08：默认身份是编码）。
  */
 function readHomeMode(): HomeMode {
   try {
     return parseHomeMode(localStorage.getItem(HOME_MODE_KEY));
   } catch {
-    return "office";
+    return "coding";
   }
 }
 
@@ -1154,6 +1154,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
     const finishNote = finishNoteOf(reply.tools, reply.wroteFiles);
     nextStep(port, task.id, reply.text, false, user, reply.tools, finishNote || undefined, reply.usage);
+    /* P0-08：这一轮实际用的模型写回任务 */
+    set((s) => ({
+      tasks: s.tasks.map((t) => (t.id === task.id ? { ...t, lastRoute: reply.route } : t)),
+    }));
     /* P0-04：决策与执行都收在 taskRuntime 里（自动跑 / 出卡片 / 写"未验证"） */
     if (reply.wroteFiles) await verifyAfterTurn(port, task.id, mode);
     /*
@@ -1212,6 +1216,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
     // 第二段如果又吐了提问块，也照收（模型有时会追问，原版也允许）
     nextStep(port, advanced.id, reply.text, true, user, reply.tools, undefined, reply.usage);
+    set((s) => ({
+      tasks: s.tasks.map((t) => (t.id === advanced.id ? { ...t, lastRoute: reply.route } : t)),
+    }));
     if (planRequested) {
       const after = current(get().tasks, advanced.id);
       if (after && after.stage !== "awaiting") {

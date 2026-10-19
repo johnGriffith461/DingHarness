@@ -10,6 +10,22 @@ import { contextMeterOf, formatMeter } from "./contextMeter";
 /** 2026-10-19 的时刻（预算表按时间挑版本，固定下来才可复现）。 */
 const NOW = Date.parse("2026-10-19T12:00:00Z");
 
+/*
+ * P0-08：界面上显示的模型必须是**这一任务实际用过的**那个。
+ * 这里在纯函数层钉住口径：给 big-model 就按它算，不给就 unknownWindow。
+ */
+describe("P0-08 模型窗口跟随真实路由", () => {
+  it("lastRoute.model 给已登记模型时按该模型窗口算", () => {
+    const meter = contextMeterOf({ modelId: "deepseek-flash", estimatedTokens: 1000 });
+    expect(meter.unknownWindow).toBe(false);
+  });
+
+  it("没有 lastRoute（modelId 为空）→ unknownWindow", () => {
+    const meter = contextMeterOf({ estimatedTokens: 1000 });
+    expect(meter.unknownWindow).toBe(true);
+  });
+});
+
 describe("contextMeterOf", () => {
   it("⭐ 1M 窗口 → 分母 966k（与预算表的口径一致）", () => {
     const meter = contextMeterOf({

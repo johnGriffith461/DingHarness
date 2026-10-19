@@ -141,3 +141,19 @@ export function signatureOf(messages: readonly ChatMessage[]): string {
   }
   return `${messages.length}:${hash.toString(36)}`;
 }
+
+/**
+ * P0-08：压缩预算（保留多少 token）跟随**这一轮真实解析到的模型**。
+ *
+ * 口径与 `keepTokensFor` 完全相同 —— 这里只多一层"模型从哪来"的收口：
+ * 调用方必须传入本轮实际用的 model id，而不是 `localStorage` 里可能过期的那个。
+ */
+export function compactKeepTokens(
+  modelId: string | undefined,
+  mode: import("@engine/runtime/budget").ContextBudgetMode,
+  now?: number,
+): number {
+  return keepTokensFor(modelId, now, mode);
+}
+
+import { keepTokensFor } from "@engine/runtime/budget";

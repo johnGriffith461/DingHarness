@@ -241,6 +241,14 @@ export type WorkTask = {
   planWriteError?: string;
 
   /**
+   * P0-08：这一段对话**最后一次实际使用**的 provider / model。
+   *
+   * 模型 chip、上下文表、下次压缩预算都读它 —— 不再读 localStorage 里那个
+   * 可能已经过期的"保存的选择"。旧盘没有该字段 = 还没跑过（界面显示"自动选择（未记录）"）。
+   */
+  lastRoute?: { provider: string; model: string };
+
+  /**
    * P0-04：等待用户点「运行验证」的那份计划。
    *
    * 只在 `stage === "verify_ready"` 时有意义；旧盘没有该字段 = 没有待验证的事。

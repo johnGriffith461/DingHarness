@@ -184,7 +184,11 @@ export function suggestionsFor(mode: HomeMode): readonly string[] {
  * @param raw 读到的原始值
  */
 export function parseHomeMode(raw: unknown): HomeMode {
-  return raw === "coding" ? "coding" : "office";
+  /*
+   * P0-08：默认身份是**编码**。只有用户显式选过 `office` 才保持办公 ——
+   * 旧逻辑把"没存过"与"存了乱值"都当 office，于是新用户第一眼是办公助手。
+   */
+  return raw === "office" ? "office" : "coding";
 }
 
 /** 首屏标题跟着模式走（原来那句话对开发者不成立）。 */
