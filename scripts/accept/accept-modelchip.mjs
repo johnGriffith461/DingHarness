@@ -126,6 +126,7 @@ try {
   note(`选模型 → 盘上 ${JSON.stringify(route)}，chip：${model1}`);
 
   /* ④ 档位：另一颗 chip，选高 → 落盘；选回默认 → 键删掉 */
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-effort"]').click();
   await sleep(600);
   const levels =

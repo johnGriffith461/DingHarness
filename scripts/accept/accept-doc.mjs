@@ -169,10 +169,8 @@ try {
     ctx = b.contexts()[0];
     page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
     await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
-    /*
-     * 重启后**打开已有那篇**（不是再新建一篇）。
-     * 第一版这里点的是「新建文档」→ 得到的当然是空标题 + 列表多一项。
-     */
+    /* 重启后回到紧凑首页：+ 菜单在「更多」后面 */
+    await expandComposerMore(page);
     await page.locator('[data-testid="wb-composer-add"]').click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="wb-add-doc"]').click();

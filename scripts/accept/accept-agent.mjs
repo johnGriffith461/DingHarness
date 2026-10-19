@@ -171,6 +171,7 @@ try {
     ctx = b.contexts()[0];
     page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
     await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+    await expandComposerMore(page);
     await page.locator('[data-testid="wb-composer-add"]').click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="wb-add-agent"]').click();

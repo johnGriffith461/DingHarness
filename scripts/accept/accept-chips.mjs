@@ -137,6 +137,7 @@ try {
    * ⚠️ **原生对话框本身自动化不了**（模态），所以这里只能断"入口在、不是假按钮"；
    * 它下游那段（导入结果 → 附着哪些）由 `src/workbench/materialImport.test.ts` 钉住。
    */
+  await expandComposerMore(page);
   await page.locator('[data-testid="wb-composer-add"]').click();
   await page.waitForTimeout(500);
   out.addMenu = await page.evaluate(() => {
