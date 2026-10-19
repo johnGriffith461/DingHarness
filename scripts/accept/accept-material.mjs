@@ -95,7 +95,21 @@ try {
    * 存储在 Phase 4.3 换成了 SQLite，直接读文件永远是空的 ——
    * 而那样红出来的理由是"脚本读错了地方"，看着却像"资料没交给模型"。
    */
-  const records = await readAllSessionRecords(page);
+  /*
+   * ⚠️ 轮询到出现 `request` 为止（最多 20 秒）。
+   * 原来只等 1.2 秒读一次：`wb-send-stop` 可能还没出现就已消失，
+   * 那一轮的 request 还没落盘 —— 实测读到 0 条，四个断言一起"假红"。
+   */
+  let records = [];
+  let requestRecords = 0;
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    records = await readAllSessionRecords(page);
+    requestRecords = records.filter((r) => r?.type === "request").length;
+    if (requestRecords > 0) break;
+    await page.waitForTimeout(600);
+  }
+  report.requestRecords = requestRecords;
   report.sessionFiles = records.length; // 名字留着（历史报告里有它），值改成"读到几条"
   let requestText = "";
   for (const rec of records) {
