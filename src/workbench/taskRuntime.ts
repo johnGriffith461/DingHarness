@@ -579,6 +579,11 @@ export async function runStream(
   parts?: ChatPart[],
   /** C1：计划模式（只读工具 + 计划提示）。由宿主按"任务模式 + 开关"决定。 */
   plan = false,
+  /**
+   * E1：编码任务的首轮注入仓库地图。只在 `history` 为空时由调用方给 true，
+   * 后续轮次不重复注入（地图很贵，且模型已经看过）。
+   */
+  codingFirstTurn = false,
 ): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string; wroteFiles?: boolean }> {
   const messages: ChatMessage[] = [
     ...history,
@@ -642,8 +647,21 @@ export async function runStream(
    * 模型先知道"这个仓库的规则与测试命令"，再谈能力。
    */
   const projectBlock = await projectContextBlock();
+  /*
+   * E1：编码首轮注入地图（不超过 1024 token）。读不到就是空串，不阻塞。
+   */
+  let mapBlock = "";
+  if (codingFirstTurn) {
+    const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+    const map = await Promise.resolve(bridge?.project?.repoMap?.({ maxTokens: 1024 })).catch(() => null);
+    if (map?.text) mapBlock = `
+
+<repo_map>
+${map.text}
+</repo_map>`;
+  }
   const planBlock = plan ? renderPlanPrompt(user) : "";
-  const fullSystem = assembleSystem({ base: system + planBlock, persona, project: projectBlock, memory: remembered, skills: skillBlock, abilities: extra });
+  const fullSystem = assembleSystem({ base: system + planBlock, persona, project: projectBlock + mapBlock, memory: remembered, skills: skillBlock, abilities: extra });
   /**
    * 这一轮的**投影**（C2）：正文、工具留痕、用量只有一份算法。
    *

@@ -633,6 +633,17 @@ export function Composer({
         setText("");
         store.setView("permissions");
         return;
+      case "map": {
+        setText("");
+        const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+        const map = await Promise.resolve(shell?.project?.repoMap?.({ maxTokens: 1024 })).catch(() => null);
+        showMaterialNote(
+          map?.text
+            ? `仓库地图：${map.files} 个文件 / ${map.symbols} 个符号（${map.ms}ms）—— ${map.text.split("\n").slice(0, 3).join(" · ")}`
+            : "这个工作区还没有可索引的 TS/JS 文件",
+        );
+        return;
+      }
       case "help":
         setText("");
         showMaterialNote(renderSlashHelp().replace(/\n+/g, "  "));

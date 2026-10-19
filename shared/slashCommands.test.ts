@@ -38,10 +38,10 @@ describe("detectSlashTrigger", () => {
 });
 
 describe("filterSlashCommands / resolveSlashCommand", () => {
-  it("10 条命令都在，且能按前缀筛", () => {
-    expect(SLASH_COMMANDS).toHaveLength(10);
+  it("11 条命令都在，且能按前缀筛", () => {
+    expect(SLASH_COMMANDS).toHaveLength(11);
     expect(filterSlashCommands("co").map((c) => c.name)).toEqual(["compact", "context", "cost"]);
-    expect(filterSlashCommands("").length).toBe(10);
+    expect(filterSlashCommands("").length).toBe(11);
   });
 
   it("别名能命中（usage → cost，perm → permissions）", () => {

@@ -48,6 +48,14 @@ export type ProjectBridge = {
   readFile: (path: string) => Promise<
     { ok: true; text: string; path: string } | { ok: false; error: string }
   >;
+  /** E1：仓库符号地图（只读；首轮编码任务自动注入，`/map` 也用它）。 */
+  repoMap: (opts?: { maxTokens?: number }) => Promise<{
+    text: string;
+    files: number;
+    symbols: number;
+    skipped: number;
+    ms: number;
+  }>;
   /** 写 `AGENTS.md`（`/init` 用；内容由调用方预览确认后给）。 */
   writeAgents: (content: string) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
 };

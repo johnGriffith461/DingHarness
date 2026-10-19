@@ -13,6 +13,7 @@ import {
   readWorkspaceFile,
   searchWorkspaceEntries,
 } from "../../engine/runtime/workspaceFiles";
+import { buildRepoMap } from "../../engine/runtime/repoMap";
 import type { ProjectContextResult } from "../../shared/projectWire";
 import { workspaceDirsSync } from "./workspaceStore";
 
@@ -38,6 +39,7 @@ export const PROJECT_CHANNEL = {
   listDir: "project:listDir",
   readFile: "project:readFile",
   writeAgents: "project:writeAgents",
+  repoMap: "project:repoMap",
 } as const;
 
 /** 全局规则目录：用户把跨项目约定放这里（`~/.ding/AGENTS.md`）。 */
@@ -49,6 +51,12 @@ function projectRoot(): string {
   const dirs = workspaceDirsSync();
   return dirs[0] ?? process.cwd();
 }
+
+/*
+ * 地图缓存（E1）：全仓扫描 ~2s（1271 文件实测 1.95s）。首轮与 `/map` 会各调一次，
+ * 60 秒内复用同一份；过期后重算（不做 fs.watch：平台差异大，且地图本来就是"看一眼"）。
+ */
+let mapCache: { root: string; at: number; maxTokens: number; value: Awaited<ReturnType<typeof buildRepoMap>> } | null = null;
 
 function read(): ProjectContextResult {
   const ctx = loadProjectContext(projectRoot(), { globalDir: globalRuleDir() });
@@ -72,6 +80,20 @@ export function registerProjectIpc(ipc: Pick<typeof ipcMain, "handle">): void {
   ipc.handle(PROJECT_CHANNEL.readFile, async (_event, file: unknown) => {
     if (typeof file !== "string" || !file.trim()) return { ok: false as const, error: "没有给路径" };
     return await readWorkspaceFile(projectRoot(), file);
+  });
+  ipc.handle(PROJECT_CHANNEL.repoMap, async (_event, opts: unknown) => {
+    const maxTokens =
+      opts && typeof opts === "object" && typeof (opts as { maxTokens?: unknown }).maxTokens === "number"
+        ? Math.max(64, (opts as { maxTokens: number }).maxTokens)
+        : undefined;
+    const root = projectRoot();
+    const budget = maxTokens ?? 1024;
+    if (mapCache && mapCache.root === root && mapCache.maxTokens === budget && Date.now() - mapCache.at < 60_000) {
+      return mapCache.value;
+    }
+    const value = await buildRepoMap(root, { maxTokens: budget });
+    mapCache = { root, at: Date.now(), maxTokens: budget, value };
+    return value;
   });
   ipc.handle(PROJECT_CHANNEL.writeAgents, async (_event, content: unknown) => {
     if (typeof content !== "string" || !content.trim()) return { ok: false as const, error: "内容为空" };

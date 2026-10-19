@@ -851,6 +851,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       task.id,
       options?.parts,
       mode === "coding" && readPlanMode(),
+      mode === "coding",
     );
 
     const verifyNote = reply.wroteFiles && mode === "coding" ? await runVerificationNote(task.id) : "";

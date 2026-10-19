@@ -45,7 +45,7 @@ await step("⭐ 输入 / 出命令菜单，10 条都在", async () => {
   await input.fill("/");
   await sleep(350);
   if (!(await page.locator('[data-testid="wb-slash-menu"]').count())) throw new Error("菜单没出现");
-  const names = ["new", "model", "plan", "compact", "context", "init", "export", "cost", "permissions", "help"];
+  const names = ["new", "model", "plan", "compact", "context", "init", "export", "cost", "permissions", "map", "help"];
   for (const name of names) {
     if (!(await page.locator(`[data-testid="wb-slash-${name}"]`).count())) throw new Error(`缺少 /${name}`);
   }
@@ -87,6 +87,22 @@ await step("/help 执行后输入框清空", async () => {
   const value = await input.inputValue();
   if (value !== "") throw new Error(`输入框还是 ${JSON.stringify(value)}`);
   return "已执行";
+});
+
+await step("E1：/map 给出仓库地图摘要", async () => {
+  await input.fill("/map");
+  await sleep(300);
+  await input.press("Enter");
+  const note = page.locator('[data-testid="wb-material-note"]').last();
+  let text = "";
+  for (let i = 0; i < 30; i += 1) {
+    await sleep(500);
+    if (!(await note.count())) continue;
+    text = await note.innerText();
+    if (text.includes("仓库地图") || text.includes("还没有可索引")) break;
+  }
+  if (!text.includes("仓库地图")) throw new Error(`提示是 ${JSON.stringify(text)}`);
+  return text.slice(0, 60);
 });
 
 await step("B4：Ctrl+L 打开模型菜单", async () => {

@@ -19,7 +19,8 @@ export type SlashCommandName =
   | "export"
   | "cost"
   | "permissions"
-  | "help";
+  | "help"
+  | "map";
 
 export type SlashCommand = {
   name: SlashCommandName;
@@ -39,6 +40,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "export", description: "导出当前会话为 Markdown", group: "会话" },
   { name: "cost", description: "打开用量（与 /context 同页）", group: "上下文", aliases: ["usage"] },
   { name: "permissions", description: "打开权限矩阵", group: "权限", aliases: ["perm"] },
+  { name: "map", description: "看这个仓库的符号地图", group: "上下文" },
   { name: "help", description: "列出全部命令", group: "帮助", aliases: ["?"] },
 ] as const;
 
