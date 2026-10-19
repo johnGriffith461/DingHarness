@@ -129,6 +129,7 @@ const RECORDS_DIR = ".verify";
  *   · `fossil`        化石：早就与产品脱节（打 dev server / 硬编码本机路径），要么重写、要么删
  */
 const NOT_IN_BATCH = {
+  "accept-markdown-real.mjs": { kind: "needs-model", why: "T-03 端到端：真模型吐 Markdown，界面必须真的渲染出 strong/ul/code/pre，且原始 HTML 不成为标签。手动跑：node --import tsx scripts/accept/accept-markdown-real.mjs --yes-spend" },
   "accept-approvals-audit-real.mjs": { kind: "needs-model", why: "T-01 的端到端证据：真 provider 跑「写文件 → 审批 → approvals 表 approved → 审阅列出 diff」。这条要证的是模型真的调工具、闸门真的拦、批准后真的落盘；假通道测不出。手动跑：node --import tsx scripts/accept/accept-approvals-audit-real.mjs --yes-spend" },
   "accept-approval-real.mjs": { kind: "needs-model", why: "§7 场景 3/4：真 provider 验审批后继续与拒绝后不重复（假通道只能证明脚本自己构造的对象）。手动跑：node --import tsx scripts/accept/accept-approval-real.mjs --yes-spend" },
   "accept-harness.mjs": { kind: "needs-model", why: "真 harness 端到端：陌生仓库修失败测试，判据是文件 diff + 测试退出码。假通道只能证明脚本会照做，正是这条要排除的。手动跑：node scripts/accept/accept-harness.mjs --yes-spend" },

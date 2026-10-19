@@ -23,6 +23,7 @@ import { Composer } from "./Composer";
 import { PlanPanel } from "./PlanPanel";
 import { StepAttachments } from "./StepAttachments";
 import { TodoPanel } from "./TodoPanel";
+import { Markdown } from "./Markdown";
 
 export function TaskView() {
   const task = useWorkbenchStore((s) => s.tasks.find((t) => t.id === s.activeTaskId) ?? null);
@@ -155,7 +156,9 @@ export function TaskView() {
             </div>
           ) : (
             <div className="wb-assistant" key={step.id}>
-              <div className="wb-assistant-text">{step.text}</div>
+              <div className="wb-assistant-text">
+                <Markdown text={step.text} />
+              </div>
               {/*
                 这一步用过的工具（§141）。
                 放在正文**下面**：模型"调了工具"这件事用户得看得见 ——
