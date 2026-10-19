@@ -118,6 +118,14 @@ try {
   out.beforeClear = await page.locator('[data-testid^="wb-memory-item-"]').count();
   if (out.beforeClear > 0) {
     await page.locator('[data-testid="wb-memory-clear"]').click();
+    /*
+     * T-04（2026-10-19）：清空现在**必须先确认**（不可逆的数据损失）。
+     * 脚本原来点一下就期望清空 —— 那是旧行为。这里点确认按钮，
+     * 并把"确认框真的出现过"留成证据。
+     */
+    const confirm = page.locator('[data-testid="wb-confirm-ok"]');
+    out.confirmShown = (await confirm.count()) > 0;
+    if (out.confirmShown) await confirm.click();
     await page.waitForTimeout(1200);
   }
   out.afterClear = await page.evaluate(() => ({
