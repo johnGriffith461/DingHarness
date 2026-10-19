@@ -16,7 +16,7 @@ import {
 } from "@shared/agentTools";
 import { taskSessionId } from "@engine/core/events";
 import { fabricatedCost } from "@shared/cost";
-import { branchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
+import { branchFrom, editedBranchFrom, planRewind, resolveRewindTarget } from "./checkpoint";
 import { readConfirmMode } from "./confirmMode";
 import { readPlanMode } from "./planMode";
 import { pickSuggestions, HOME_MODE_KEY, parseHomeMode, suggestionsFor, type HomeMode } from "./copy";
@@ -225,6 +225,11 @@ export type WorkbenchState = {
   rewindTask: (taskId: string, stepId: string) => Promise<boolean>;
   /** 从某一步分叉成一段新对话（§151）。 */
   branchTask: (taskId: string, stepId: string) => void;
+  /**
+   * C4：编辑一条**用户消息**并重发。
+   * 从这条之前 fork 出一段新对话，原对话一个字不动；取消 = 零写入。
+   */
+  editAndResend: (taskId: string, stepId: string, newText: string) => Promise<boolean>;
   /** 回答当前澄清问题。 */
   answer: (option?: TaskOption, custom?: string) => Promise<void>;
   /** 打开已有任务。 */
@@ -758,6 +763,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const branch = branchFrom(task, stepId, newId, (n) => `${newId}-s${n}`, Date.now());
     if (!branch) return;
     set((s) => ({ tasks: upsertTask(s.tasks, branch), activeTaskId: newId, view: "task" }));
+  },
+
+  editAndResend: async (taskId, stepId, newText) => {
+    const text = String(newText ?? "").trim();
+    if (!text) return false;
+    const state = get();
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) return false;
+    const newId = nextId("t");
+    const branch = editedBranchFrom(task, stepId, text, newId, Date.now());
+    if (!branch) return false;
+    set((s) => ({ tasks: upsertTask(s.tasks, branch), activeTaskId: newId, view: "task" }));
+    await answerTurn(port, newId, branch.steps.slice(0, -1), text, undefined, branch.material);
+    return true;
   },
 
   createTask: async (message, options) => {

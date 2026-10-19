@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react";
-import { Copy, FileText, GitBranch, RotateCcw, Share2, Sparkles, ThumbsDown, ThumbsUp, Undo2, Volume2 } from "lucide-react";
+import { Copy, FileText, GitBranch, Pencil, RotateCcw, Share2, Sparkles, ThumbsDown, ThumbsUp, Undo2, Volume2 } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { writeClipboard } from "./uiUtil";
 import { DOC_CREATE_LABELS } from "@shared/doc";
@@ -22,7 +22,11 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
   /** 会话检查点（§151）：回退与分叉。 */
   const rewind = useWorkbenchStore((s) => s.rewindTask);
   const branch = useWorkbenchStore((s) => s.branchTask);
+  /** C4：编辑用户消息并从那条之前 fork 重发。 */
+  const editAndResend = useWorkbenchStore((s) => s.editAndResend);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(step.text);
   const [hint, setHint] = useState("");
   const [speaking, setSpeaking] = useState(false);
   const text = step.text;
@@ -75,6 +79,19 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
 
   return (
     <div className="wb-actions" data-testid="wb-message-actions">
+      {step.role === "user" ? (
+        <button
+          className="wb-icon"
+          title="编辑并重发（从这条之前开新分支）"
+          data-testid={`wb-act-edit-${step.id}`}
+          onClick={() => {
+            setDraft(step.text);
+            setEditing(true);
+          }}
+        >
+          <Pencil size={13} />
+        </button>
+      ) : null}
       <button
         className="wb-icon"
         title="复制"
@@ -189,6 +206,37 @@ export function MessageActions({ taskId, step, cost, at }: { taskId: string; ste
       >
         <GitBranch size={13} />
       </button>
+      {editing && step.role === "user" ? (
+        <div className="wb-editresend" data-testid={`wb-editresend-${step.id}`}>
+          <textarea
+            className="wb-editresend-input"
+            data-testid={`wb-editresend-input-${step.id}`}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={3}
+          />
+          <button
+            className="wb-setpage-btn"
+            data-testid={`wb-editresend-save-${step.id}`}
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm("这会从这条之前开一个新分支并重发；原分支保留。")) return;
+              setBusy(true);
+              void editAndResend(taskId, step.id, draft)
+                .then((ok) => {
+                  if (!ok) flash("没法重发：这条消息不存在或内容为空");
+                  setEditing(false);
+                })
+                .finally(() => setBusy(false));
+            }}
+          >
+            保存并重发
+          </button>
+          <button className="wb-setpage-btn" data-testid={`wb-editresend-cancel-${step.id}`} onClick={() => setEditing(false)}>
+            取消
+          </button>
+        </div>
+      ) : null}
       {hint ? <span className="wb-act-hint" data-testid={`wb-act-hint-${step.id}`}>{hint}</span> : null}
       {typeof cost === "number" ? (
         /*

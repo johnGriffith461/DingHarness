@@ -128,3 +128,40 @@ export function resolveRewindTarget(steps: readonly TaskStep[], stepId: string):
 
 /** 界面上那个动作的说明（顺带把"不撤销副作用"这件事讲在明处）。 */
 export const REWIND_HINT = "回到这一步，之后的轮次会丢掉；已经发生的动作（记忆、画布、定时任务、产物）不会撤销";
+
+/**
+ * C4：编辑一条用户消息后**新开的分支**（纯函数）。
+ *
+ * 语义与 `branchFrom` 的区别只有一处：**目标那条用户消息不被复制**，
+ * 换成用户的 newText。其余（id 重发号、产物不带过去、状态回到 running 由调用方定）相同。
+ *
+ * @returns null = 这条不是用户消息 / 找不到
+ */
+export function editedBranchFrom(
+  task: WorkTask,
+  stepId: string,
+  newText: string,
+  newTaskId: string,
+  now: number,
+): WorkTask | null {
+  const step = task.steps.find((s) => s.id === stepId);
+  if (!step || step.role !== "user") return null;
+  const plan = planRewind(task.steps, stepId);
+  if (!plan) return null;
+  const kept = plan.kept.slice(0, -1);
+  const steps = kept.map((s, i) => ({ ...s, id: `${newTaskId}-s${i + 1}` }));
+  steps.push({ id: `${newTaskId}-s${steps.length + 1}`, role: "user", text: String(newText ?? ""), at: now });
+  return {
+    ...task,
+    id: newTaskId,
+    createdAt: now,
+    stage: "running",
+    startedAt: now,
+    finishedAt: null,
+    steps,
+    questions: [],
+    questionIndex: 0,
+    activity: "正在思考",
+    artifacts: [],
+  };
+}
