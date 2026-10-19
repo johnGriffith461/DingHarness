@@ -112,8 +112,15 @@ try {
   if (out.error) bad.push("异常: " + out.error);
 
   /* ① 压缩真的发生了 */
-  if (!(out.notes ?? []).length) bad.push("界面上没有出现「已压缩为摘要」—— 压缩没触发或没告知用户");
-  else if (!out.notes.join("|").includes("已压缩为摘要")) bad.push("提示文案不对：" + out.notes.join("|"));
+  /*
+   * 压缩有两条合法出路（V6-1c 的 ICM）：
+   *   · compact → 「更早的 N 条对话已压缩为摘要」；
+   *   · fork_index → 「更早的 N 条对话已换成上下文索引（事件流保留，可回放核对）」。
+   * 哪一条取决于当时有没有"活状态"；脚本断言"**告知了用户**"，而不是钉死其中一种。
+   */
+  const noteText = (out.notes ?? []).join("|");
+  if (!noteText) bad.push("界面上没有出现压缩提示 —— 压缩没触发或没告知用户");
+  else if (!/已压缩为摘要|换成上下文索引/.test(noteText)) bad.push("提示文案不对：" + noteText);
 
   /* ② 关键数字穿过了摘要 */
   if (!(out.lastReply ?? "").includes("42")) {

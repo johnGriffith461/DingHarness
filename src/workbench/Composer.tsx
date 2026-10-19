@@ -1281,7 +1281,7 @@ export function Composer({
                       setOpenPop(null);
                     }}
                   >
-                    <span className="wb-chip-check-slot" aria-hidden>
+                    <span className="wb-chip-check-slot">
                       {state.marker === "check" ? <Check size={13} /> : null}
                     </span>
                     {m}

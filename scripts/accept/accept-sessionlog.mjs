@@ -61,6 +61,12 @@ try {
     });
 
   const MEMO_KEY = "幸运数字是 42";
+  /*
+   * T-02（2026-10-19）：闸门现在**待审批即停**。默认档「按需确认」下 memory_save 会被拦，
+   * 这一轮就停在"等你确认"（没有正文）—— 这条脚本验的是会话日志，
+   * 不是审批，所以显式切到「全部允许」让工具真执行、整轮真收尾。
+   */
+  await page.evaluate(() => localStorage.setItem("dsh-canvas.confirm-mode", "全部允许"));
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);
   await page

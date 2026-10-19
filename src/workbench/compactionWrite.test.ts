@@ -34,7 +34,8 @@ describe("recordCompaction", () => {
     stub({ ok: true });
     await recordCompaction("t-1", { tokensBefore: 4000, tokensAfter: 800 });
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.sessionId).toBe("t-1");
+    /* T-01：压缩事件也写在**统一的 task- 会话**下（否则回放时它孤零零挂在裸 id 上） */
+    expect(calls[0]!.sessionId).toBe("task-t-1");
     expect(calls[0]!.info).toMatchObject({ tokensBefore: 4000, tokensAfter: 800 });
   });
 

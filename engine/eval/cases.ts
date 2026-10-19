@@ -187,7 +187,7 @@ const gates: EvalCase[] = [
       copy: ["还没有执行"],
       filesAbsent: ["gated.txt"],
       gate: "pending",
-      minSteps: 2,
+      minSteps: 1,
     },
   },
   {
@@ -237,7 +237,7 @@ const gates: EvalCase[] = [
       copy: ["不要重试"],
       filesAbsent: ["again.txt"],
       gate: "pending",
-      minSteps: 2,
+      minSteps: 1,
     },
   },
 ];
@@ -329,7 +329,7 @@ const subagents: EvalCase[] = [
       eventsAbsent: ["delegation"],
       copy: ["还没有执行"],
       gate: "pending",
-      minSteps: 2,
+      minSteps: 1,
     },
   },
   {

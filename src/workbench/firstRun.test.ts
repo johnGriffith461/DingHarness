@@ -33,4 +33,17 @@ describe("shouldShowFirstRun", () => {
     expect(shouldShowFirstRun(false, "", [provider(false)])).toBe(false);
     expect(shouldShowFirstRun(true, "", null)).toBe(false);
   });
+
+  /*
+   * ⚠️ 2026-10-19 主人实测：他在输入区选过模型（`dsh-canvas.chat-settings` 有值），
+   * 但没走完向导（`settings.pinnedModel` 仍是空）—— 于是每次开应用首跑卡都弹。
+   * 已经在用某个模型的人不该被反复要求"再选一次"。
+   */
+  it("⭐ 已经保存过路由（输入区选过模型）→ 不弹", () => {
+    expect(shouldShowFirstRun(true, "", [provider(true)], { savedRoute: "p/m" })).toBe(false);
+  });
+
+  it("保存的路由半个值（缺 model）不算数 → 仍然弹", () => {
+    expect(shouldShowFirstRun(true, "", [provider(true)], { savedRoute: "p/" })).toBe(true);
+  });
 });

@@ -4,6 +4,7 @@ import { CONFIRM_MODES, type ConfirmMode } from "@shared/ipc";
 
 import { useAppSettings } from "./appSettings";
 import { saveConfirmMode } from "./confirmMode";
+import { readSavedRoute } from "@/ai/route";
 
 /**
  * **首跑向导**（U06，2026-10-18）。
@@ -42,6 +43,7 @@ export function shouldShowFirstRun(
   loaded: boolean,
   pinnedModel: string,
   providers: readonly ProviderInfo[] | null,
+  opts: { savedRoute?: string } = {},
 ): boolean {
   if (!loaded || !providers) return false;
   /*
@@ -52,6 +54,14 @@ export function shouldShowFirstRun(
    * 现在有 key 的会从第 2 步开始（跳过填 key），仍要求选完模型。
    */
   if (pinnedModel) return false;
+  /*
+   * 2026-10-19（主人实测）：他已经在输入区选过模型（路由存在 localStorage），
+   * 但没走完向导 —— 于是每次开应用都弹这张卡。"正在用某个模型的人"不该被反复要求再选一次。
+   * 路由形如 `provider/model`，半个值不算（与 `normalizePinnedModel` 同一口径）。
+   */
+  const saved = String(opts.savedRoute ?? "").trim();
+  const [savedProvider, ...rest] = saved.split("/");
+  if (savedProvider && rest.join("/")) return false;
   try {
     return localStorage.getItem(DISMISS_KEY) !== "1";
   } catch {
@@ -65,6 +75,8 @@ export function FirstRunGuide() {
   const setPinned = useAppSettings((s) => s.setPinned);
 
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
+  /* T-05x：用户自己声明的模型（models.json）也要能在这里选到 —— 否则下拉里只有内置清单 */
+  const [declared, setDeclared] = useState<Array<{ providerId: string; modelId: string }>>([]);
   const [step, setStep] = useState(0);
   /* P0-08：有可用 key 时直接从"选模型"开始（不要求重新填 key） */
   const [autoAdvanced, setAutoAdvanced] = useState(false);
@@ -100,15 +112,35 @@ export function FirstRunGuide() {
 
   useEffect(() => {
     void refresh();
+    void Promise.resolve(
+      (globalThis as unknown as {
+        shell?: { modelConfig?: { list?: () => Promise<{ models?: Array<{ providerId: string; modelId: string }> }> } };
+      }).shell?.modelConfig?.list?.(),
+    )
+      .then((got) => {
+        if (got?.models) setDeclared(got.models.map((m) => ({ providerId: m.providerId, modelId: m.modelId })));
+      })
+      .catch(() => undefined);
     void shell?.secrets
       ?.status()
       .then((s) => setEncrypted(s.encrypted))
       .catch(() => setEncrypted(null));
   }, []);
 
-  if (hidden || !shouldShowFirstRun(loaded, pinnedModel, providers)) return null;
+  /* 输入区已经选过的模型也算"配置好了" —— 不再反复弹这张卡（2026-10-19 主人实测） */
+  const saved = readSavedRoute();
+  const savedRoute = saved.provider && saved.model ? `${saved.provider}/${saved.model}` : "";
+  if (hidden || !shouldShowFirstRun(loaded, pinnedModel, providers, { savedRoute })) return null;
 
   const chosen = providers?.find((p) => p.id === provider);
+  /*
+   * 可选项 = 该 provider 的内置模型 + 用户声明过的模型（去重）。
+   * 只列内置的话，声明型模型（例如中转上的新模型）在这里根本选不到 ——
+   * 下拉看起来是空的，下一步永远点不动。
+   */
+  const modelChoices = chosen
+    ? [...new Set([...chosen.models, ...declared.filter((d) => d.providerId === chosen.id).map((d) => d.modelId)])]
+    : [];
   const dismiss = (): void => {
     try {
       localStorage.setItem(DISMISS_KEY, "1");
@@ -237,14 +269,39 @@ export function FirstRunGuide() {
             <div className="wb-firstrun-title">③ 选模型 + 工作区</div>
             {step === 2 && chosen ? (
               <div className="wb-firstrun-body">
+                {/*
+                  这家没有可选模型时，必须能**换一家**；否则用户卡在这一步，
+                  卡片每次启动都回来（2026-10-19 主人实测的那种"一直都有"）。
+                */}
+                {modelChoices.length === 0 ? (
+                  <select
+                    data-testid="wb-firstrun-provider-switch"
+                    value={provider}
+                    onChange={(e) => {
+                      setProvider(e.target.value);
+                      setModel("");
+                    }}
+                  >
+                    {(providers ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}{p.available ? "（已有 key）" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 <select data-testid="wb-firstrun-model" value={model} onChange={(e) => setModel(e.target.value)}>
                   <option value="">选一个模型…</option>
-                  {chosen.models.map((m) => (
+                  {modelChoices.map((m) => (
                     <option key={m} value={m}>
                       {m}
                     </option>
                   ))}
                 </select>
+                {modelChoices.length === 0 ? (
+                  <div className="wb-firstrun-hint" data-testid="wb-firstrun-no-models">
+                    这家没有可选模型 —— 上面换一家，或去「设置 → 模型」里添加。
+                  </div>
+                ) : null}
                 <button type="button" data-testid="wb-firstrun-workspace" disabled={busy} onClick={() => void addWorkspace()}>
                   {workspace ? "换一个目录" : "选工作目录"}
                 </button>

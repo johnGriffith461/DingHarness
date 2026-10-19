@@ -53,11 +53,12 @@ describe("设置子页的分支（P260）", () => {
        * 这几页由**独立组件**渲染（整页搬进来，用 `if (page === "…") {` 而不是三元），
        * 所以不进上面那个正则的名单：
        *   · models / plugins：设置里跳走的两个子页；
-       *   · team（V5-3 的产品面，V5 收尾加）：`TeamPage` 一整块。
+       *   · team（V5-3 的产品面，V5 收尾加）：`TeamPage` 一整块；
+       *   · memory（T-05）：`MemoryPanel` 整块，用 `if (page === \"memory\")` 渲染。
        * ⚠️ 放行的前提是"它真被渲染"（上面那条 `ids` 断言仍要求 profile/account/general/about
        * 用精确匹配，而 types 里多出来的名字必须在这里说清为什么）。
        */
-      if (["models", "plugins", "team", "knowledge"].includes(name)) continue;
+      if (["models", "plugins", "team", "knowledge", "memory"].includes(name)) continue;
       expect(rendered.has(name), `类型里声明了「${name}」这一页，但这里没有渲染分支`).toBe(true);
     }
   });

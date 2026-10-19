@@ -23,17 +23,7 @@ import { spacing } from "../utils/spacing";
  * 而不是画一个点了没反应的按钮。
  */
 
-export type SettingsSubPage =
-  | "profile"
-  | "account"
-  | "general"
-  | "about"
-  | "models"
-  | "plugins"
-  | "team"
-  | "knowledge"
-  /* T-05：记忆是独立子页（右侧主面板跟着切，不再在左栏内联展开） */
-  | "memory";
+export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team" | "knowledge" | "memory";
 
 export type SettingsPagesProps = {
   /** 显示哪一页。 */

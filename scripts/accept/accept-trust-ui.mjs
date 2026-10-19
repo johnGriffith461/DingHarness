@@ -102,8 +102,6 @@ try {
   await page.waitForTimeout(500);
   await page.locator('[data-testid="wb-acct-settings"]').click();
   await page.waitForTimeout(900);
-  const pages = page.locator('[data-testid^="wb-set-item-"]');
-  out.settingsRows = await pages.count();
   const memRow = page.locator('[data-testid="wb-set-记忆"]');
   if (!(await memRow.count())) {
     /* 兜底：按文本找 */

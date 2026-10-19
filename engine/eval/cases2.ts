@@ -185,7 +185,8 @@ export const gates2: EvalCase[] = [
       [{ call: [{ name: "edit_file", args: { path: "{{dir}}/e.md", oldText: "原文", newText: "改过" } }] }],
       [{ say: "要你确认。" }],
     ],
-    expect: { events: ["tool-call", "tool-result", "done"], copy: ["还没有执行"], gate: "pending", minSteps: 2 },
+    /* T-02：待审批挂起回合 —— 这一步结束就停（不再让模型拿着"还没执行"继续编） */
+    expect: { events: ["tool-call", "tool-result", "done"], copy: ["还没有执行"], gate: "pending", minSteps: 1 },
   },
   {
     id: "gate-lists-then-writes",
@@ -215,7 +216,7 @@ export const gates2: EvalCase[] = [
       copy: ["还没有执行"],
       filesAbsent: ["g2.md"],
       gate: "pending",
-      minSteps: 2,
+      minSteps: 1,
     },
   },
   {

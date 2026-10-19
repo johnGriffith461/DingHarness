@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { connectWithRetry, failOnMarks, freshDir, pickPort, readAllSessionRecords, verdict } from "./harness.mjs";
 
 /* ⚠️ 2026-10-16（审计 G15）：这份脚本原来只把 ✗ 印出来、从不改退出码 —— 批跑里等于没测 */
@@ -30,14 +31,25 @@ const MARK = "验收专用标记-7Q4Z";
 fs.mkdirSync(path.join(DATA, "drive"), { recursive: true });
 fs.writeFileSync(path.join(DATA, "drive", "季度总结.md"), `# 季度总结\n\n${MARK}\n营收增长 12%\n`, "utf8");
 
-/* 没有密钥 → 这一轮必定失败，但请求照记（省时省钱，且结论一样硬） */
+/*
+ * 这一条只验"资料进没进请求体"，**不验模型回答**。
+ *
+ * 旧写法是"空凭据文件 → 这一轮必定失败，但请求照记"—— 那个前提在
+ * 「provider 预检用 resolveSecret」之后不成立了：没有 key 时**连 request 都不会写**
+ * （宿主在解析目标阶段就报错），于是读到 0 条 request，四个断言一起假红。
+ *
+ * 现在：有真实凭据就用真实的（请求一定会发出，模型回不回都不影响判据）；
+ * 没有凭据才退回空文件（那种环境下这条会明确红，而不是静默）。
+ */
+const realKeys = path.join(os.homedir(), ".ding", ".credentials.yaml");
 const EMPTY_KEYS = ".verify/material-keys-empty.yaml";
 fs.writeFileSync(EMPTY_KEYS, "refs:\n", "utf8");
+const KEYS_FILE = fs.existsSync(realKeys) ? realKeys : EMPTY_KEYS;
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.DSH_CANVAS_DATA_DIR = DATA;
-env.DSH_CREDENTIALS_FILE = EMPTY_KEYS;
+env.DSH_CREDENTIALS_FILE = KEYS_FILE;
 
 /* 这台机器的回环端口会随机连不上（见 harness.pickPort）→ 起之前先挑一个能用的。 */
 const __port = await pickPort([12781]);
