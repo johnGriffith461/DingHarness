@@ -4,6 +4,7 @@ import { stdin, stdout } from "node:process";
 import type { Engine, EngineRunRequest } from "../../engine/index";
 import { agentNames } from "../../engine/runtime/agents";
 import { allProviders, firstAvailableProvider, getProvider } from "../../engine/runtime/providers";
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { CONFIRM_MODES, normalizeConfirmMode, type ConfirmMode } from "../../shared/ipc";
 import type { CliConfig } from "./config";
 
@@ -294,7 +295,7 @@ export async function runRepl(ctx: ReplContext, initial: CliConfig): Promise<num
 
 /** `ding` 没给任何参数时：能进 REPL 就进，进不了（没有通道）就说清楚。 */
 export function replPrecondition(): { ok: true } | { ok: false; reason: string } {
-  const provider = firstAvailableProvider();
+  const provider = firstAvailableProvider(resolveSecret);
   if (!provider) {
     return {
       ok: false,

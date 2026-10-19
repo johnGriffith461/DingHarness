@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { firstAvailableProvider } from "../../engine/runtime/providers";
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { AcpAgent } from "../acp/agent";
 import { authorizeCwd, CwdNotAllowedError } from "../cwd";
 import { startAgentServer } from "../server/agentServer";
@@ -48,7 +49,7 @@ export function resolveServePort(raw: string | undefined): PortDecision {
  * 服务态用哪一家 provider（审计 P208 / NEW-N7-14）。
  *
  * **与 `ding run` / REPL / `resume` / `recipe` 同一口径**：命令行显式 > config.json >
- * `firstAvailableProvider()`（第一个有密钥的）。原来这里是 `config.provider ?? ""`，
+ * `firstAvailableProvider(resolveSecret)`（第一个有密钥的）。原来这里是 `config.provider ?? ""`，
  * 于是同一台机器上（只有环境变量 key、config.json 没写 provider —— doctor 与向导
  * 都允许这种状态）`ding run` 能跑，而 `ding serve` / `ding acp` 直接"先配一个 provider"
  * 退出 3。同一件事在四个入口给出三种结果，是宿主一致性最容易被漏的一类。
@@ -57,7 +58,7 @@ export function resolveServePort(raw: string | undefined): PortDecision {
  * @returns provider id；一家都不可用时是空串（调用方据此报错退出）
  */
 export function serveProvider(configProvider: string | undefined): string {
-  return configProvider ?? firstAvailableProvider()?.id ?? "";
+  return configProvider ?? firstAvailableProvider(resolveSecret)?.id ?? "";
 }
 
 /** 这一段宿主侧共用的装配（两个命令一样）。 */

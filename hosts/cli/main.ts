@@ -16,6 +16,7 @@ import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider, isBuiltinProviderId, setCustomProviders } from "../../engine/runtime/providers";
+import { resolveSecret } from "../../engine/runtime/credentials";
 import { PRODUCT_VERSION } from "../../shared/product";
 import { budgetOf, parseBudgetMode, CONTEXT_BUDGET_MODES } from "../../engine/runtime/budget";
 import { buildRunRequest, describeRuntimeModel, resolveRuntimeModel } from "./runInputs";
@@ -231,7 +232,7 @@ async function cmdRun(p: Parsed): Promise<number> {
 
   const dirs = workspaceDirs(flagAll(p, "dir").length ? flagAll(p, "dir") : (config.dirs ?? []));
 
-  const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider()?.id;
+  const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider(resolveSecret)?.id;
   if (!provider || !getProvider(provider)) {
     process.stderr.write(
       `没有可用的 provider。已登记的：${allProviders().map((x) => x.id).join(" / ")}\n` +
@@ -707,7 +708,7 @@ async function cmdDefault(p: Parsed, devMode: boolean): Promise<number> {
   const built = await buildEngine(dirs);
   for (const problem of built.plugins) process.stderr.write(`[plugin] ${problem}\n`);
 
-  const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider()!.id;
+  const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider(resolveSecret)!.id;
   const mode = normalizeConfirmMode(flag(p, "mode") ?? config.mode ?? "按需确认");
   const sessionId = cliSessionId(`repl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
 
