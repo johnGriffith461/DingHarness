@@ -26,7 +26,7 @@ export function renderHelp(devMode: boolean, dataDir: string): string {
   return [
       "ding —— Ding Harness 的命令行宿主",
       "",
-      '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n]',
+      '  ding run "任务" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps n] [--plan] [--background]',
       "  ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>]",
       "  ding sessions --state <会话 id>                # 回放运行态（运行中/等你确认/已暂停…）",
       "  ding review <会话 id> [--json] [--revert <路径>]  # 逐文件看改动 / 回滚某个文件",
@@ -160,7 +160,7 @@ export const KNOWN_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 export const COMMAND_USAGE: Record<string, string> = {
-  run: 'ding run "任务描述" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps <整数>]',
+  run: 'ding run "任务描述" [--dir <目录>] [--provider <id>] [--model <名>] [--mode <档位>] [--steps <整数>] [--plan] [--background]',
   sessions: "ding sessions [--kind chat|task|cli] [--json] [--export <会话 id>] [--state <会话 id>] [--cost [--by session|day|model]]",
   review: "ding review <会话 id> [--json] [--revert <文件路径>]",
   jobs: "ding jobs <list|show|wait|cancel> [任务 id]",

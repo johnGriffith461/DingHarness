@@ -161,6 +161,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "yes",
   /* `ding run --background`（G06）：交给后台任务，父进程立刻返回 */
   "background",
+  /* C-02：计划模式（与桌面那颗 chip 同一份实现：只下发只读工具） */
+  "plan",
   /* `ding import --dry-run`（L09）：只报告会导入什么，不写盘 */
   "dry-run",
   /* `ding board inbox --ack`（L02）：把收件箱标记为已读 */

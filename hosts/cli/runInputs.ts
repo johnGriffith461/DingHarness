@@ -67,6 +67,8 @@ export function buildRunRequest(input: {
   nextSteer: () => string[];
   /** T-08：授权目录（记进会话日志，供 review --revert 继承）。 */
   dirs?: readonly string[];
+  /** C-02：计划模式（只下发只读工具；与桌面那颗 chip 同一份判定）。 */
+  planMode?: boolean;
 }): EngineRunRequest {
   return {
     sessionId: input.sessionId,
@@ -77,6 +79,7 @@ export function buildRunRequest(input: {
     mode: input.mode,
     useTools: true,
     maxSteps: input.steps,
+    ...(input.planMode ? { planMode: true } : {}),
     ...(input.runtime ? { modelConfig: input.runtime } : {}),
     /* 用户声明过这个模型（runtime.manual 或有 matched）→ 允许它不在 provider 清单里 */
     ...(input.runtime?.manual ? { allowUndeclaredModel: true } : {}),

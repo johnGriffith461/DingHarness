@@ -41,6 +41,7 @@ import { replPrecondition, runRepl } from "./repl";
 import { flag, flagAll, KNOWN_FLAGS, parseArgv, parseConfirmModeArg, parseIntFlagValue, type Parsed } from "./args";
 import { AGENT_SPECS } from "../../engine/runtime/agents";
 import { loadProjectContext, renderProjectContext } from "../../engine/runtime/projectContext";
+import { SKILLS_DIR, discoverSkills, selectSkills, skillPromptBlock } from "../../engine/runtime/skills";
 import { CODING_MODE_RULES } from "../../shared/codingPrompt";
 
 /**
@@ -316,12 +317,13 @@ async function cmdRun(p: Parsed): Promise<number> {
     provider,
     ...(chosenModel ? { model: chosenModel } : {}),
     ...(modelRuntime ? { runtime: modelRuntime } : {}),
-    system: cliSystemPrompt(dirs, mode),
+    system: [cliSystemPrompt(dirs, mode, p.flags.has("plan")), cliSkillsBlock(task)].filter(Boolean).join("\n\n"),
     task,
     mode,
     steps: steps.value,
     config,
     dirs,
+    ...(p.flags.has("plan") ? { planMode: true } : {}),
     nextSteer: () => drainSteer(dataDir(), sessionId),
   });
 
@@ -548,7 +550,7 @@ function cmdModels(p: Parsed = { command: "", args: [], flags: new Map() }): num
 }
 
 /** CLI 的系统提示词：只讲"你在哪、能做什么、边界在哪"。 */
-function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
+function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode, plan = false): string {
   /*
    * A1/A2：项目规则与环境。CLI 恒为编码场景，第一个工作区就是项目根；
    * 没有工作区时用进程 cwd（`ding` 通常就在仓库里跑）。
@@ -566,14 +568,47 @@ function cliSystemPrompt(dirs: readonly string[], mode: ConfirmMode): string {
     CODING_MODE_RULES,
     "你是 Ding Harness 无头命令行宿主里的一个 agent（CLI 恒为编码场景）。",
     `你能操作的目录（白名单）：${dirs.join("、")}。白名单之外的路径一律碰不到，不要试。`,
-    "工具有：list_files / list_dir / read_file / write_file / edit_file / apply_patch / search_files / run_command / todo_write / finish / ask_user / spawn_agent。",
+    "工具有：list_files / list_dir / read_file / write_file / edit_file / apply_patch / search_files / run_command / job_output / job_kill / web_fetch / todo_write / finish / ask_user / spawn_agent。",
     "多步任务先用 todo_write 列 3–7 步；做完一步就更新状态。",
     "任务结束时**必须调用 finish 工具**收尾：status=done 时在 evidence.commands 里原样写你实际跑过的验证命令；如果没做完，用 status=blocked 并在 reason 里说明卡点。不要只用正文说\"完成\"。",
-    mode === "全部允许"
-      ? "当前档位「全部允许」：写文件与跑命令**会直接执行**。动手前先想清楚，尤其是覆盖已有文件。"
-      : `当前档位「${mode}」：会改东西的调用会被拦下、交给人确认（无头模式下没人点，等于办不成）。`,
+    ...(plan
+      ? [
+          "当前是**计划模式**：你只拿得到只读工具。先调查并输出一份可执行的计划（步骤、要改哪些文件、怎么验证），不要试图改文件或跑会改东西的命令；等用户批准后再执行。",
+        ]
+      : []),
+    describeModeForCli(mode),
     "做完就把结果说清楚：改了哪些文件、下一步是什么。不要复述工具返回的原文。",
   ].join("\n\n");
+}
+
+/** 档位在 CLI 提示词里的说法（四档各有各的边界；不许用一句"会拦"糊过去）。 */
+function describeModeForCli(mode: ConfirmMode): string {
+  switch (mode) {
+    case "全部允许":
+      return "当前档位「全部允许」：写文件与跑命令**会直接执行**。动手前先想清楚，尤其是覆盖已有文件。";
+    case "接受编辑":
+      return "当前档位「接受编辑」：授权目录里的文件编辑直接执行；跑命令、调用连接器、以及 `.env` / `.git` / `node_modules` / 工作区外路径仍会停下来问人。";
+    case "按需确认":
+      return "当前档位「按需确认」：读操作直接执行，写文件与跑命令会停下来问人（终端里会问你；无头模式下没人点，等于办不成）。";
+    case "每步确认":
+      return "当前档位「每步确认」：每一步调用都会停下来问人（终端里会问你；无头模式下没人点，等于办不成）。";
+  }
+}
+
+/**
+ * C-02：技能注入（与桌面 `skillsBlockFor` 同一份 `engine/runtime/skills.ts`）。
+ *
+ * CLI 没有"技能面板"，但用户可以把 `SKILL.md` 放进 `<数据目录>/skills/` ——
+ * 触发规则（常驻/关键词/路径）与桌面完全一致，所以这是**同一个能力**的另一种入口。
+ */
+function cliSkillsBlock(task: string): string {
+  try {
+    const dir = path.join(dataDir(), SKILLS_DIR);
+    const picked = selectSkills(discoverSkills(dir), { text: task, files: [] });
+    return skillPromptBlock(picked);
+  } catch {
+    return "";
+  }
 }
 
 /**
