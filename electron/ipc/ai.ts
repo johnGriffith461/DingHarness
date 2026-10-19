@@ -347,7 +347,7 @@ export function registerAiIpc(): void {
             ...(e.error ? { error: e.error } : {}),
           };
         }
-        if (e.type === "done") return { requestId, type: "done", ...(e.usage ? { usage: e.usage } : {}) };
+        if (e.type === "done") return { requestId, type: "done", ...(e.usage ? { usage: e.usage } : {}), ...(e.wroteFiles ? { wroteFiles: true } : {}) };
         if (e.type === "error") return { requestId, type: "error", message: e.message };
         /*
          * ⭐ step-finish **要进 IPC**（Phase 13.3）：界面靠它显示"第几步 / 已用多少 token"。

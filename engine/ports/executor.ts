@@ -45,6 +45,8 @@ export type ExecutorContext = {
   signal?: AbortSignal;
   /** 嵌套深度（防止子智能体再派子智能体）。 */
   depth?: number;
+  /** D3：这段会话的 id（读后写校验的键；不给 = 不记读状态）。 */
+  sessionId?: string;
   /**
    * **这段会话归谁的 id**（C3，V5-1 3.7a）：拦住一次调用时，默认的"待谁批"就是它。
    *

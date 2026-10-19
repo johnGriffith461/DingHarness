@@ -34,6 +34,7 @@ import {
   persistArtifacts,
   refineTitle,
   runStream,
+  runVerificationNote,
 } from "./taskRuntime";
 import {
   answerQuestion,
@@ -852,7 +853,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       mode === "coding" && readPlanMode(),
     );
 
-    nextStep(port, task.id, reply.text, false, user, reply.tools, undefined, reply.usage);
+    const verifyNote = reply.wroteFiles && mode === "coding" ? await runVerificationNote(task.id) : "";
+    nextStep(port, task.id, reply.text, false, user, reply.tools, verifyNote || undefined, reply.usage);
     return task.id;
   },
 

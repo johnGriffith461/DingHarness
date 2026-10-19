@@ -107,6 +107,8 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
    * 真隔离要靠系统级手段 —— 这是如实记下的边界，不是"已经有了"。
    */
   run_command: { kind: "write" },
+  /* D3：apply_patch 会写多个文件，按写处理 */
+  apply_patch: { kind: "write" },
   /*
    * Computer Use（V6-2n）：四个都按**写** —— 它们能移动真实鼠标、敲真实键盘、
    * 截取屏幕。按需确认档下必须问；「全部允许」下也仍受 `computer-use.json`

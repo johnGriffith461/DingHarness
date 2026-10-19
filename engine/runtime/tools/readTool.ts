@@ -40,6 +40,9 @@ export type ReadFileResult =
       totalChars: number;
       /** 这段正文从第几行开始（1 基；未分页时是 1）。 */
       fromLine?: number;
+      /** D3：实际读到的绝对路径与指纹（读后写校验用）。 */
+      path: string;
+      fingerprint: { mtimeMs: number; size: number };
       /** 原文总行数（分页时给模型一个"还有多少"的锚）。 */
       totalLines?: number;
     }
@@ -290,6 +293,8 @@ async function readResolved(
     totalChars: total,
     fromLine: from,
     totalLines: allLines.length,
+    path: target,
+    fingerprint: { mtimeMs: stat.mtimeMs, size: stat.size },
   };
 }
 

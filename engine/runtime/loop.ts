@@ -83,7 +83,7 @@ export type TurnEvent =
   | { type: "step-finish"; step?: number; usage?: TurnUsage }
   /* 中途插话（G06）：只上屏，不改变投影 */
   | { type: "steer"; text: string }
-  | { type: "done"; usage?: TurnUsage }
+  | { type: "done"; usage?: TurnUsage; wroteFiles?: boolean }
   | { type: "error"; message: string }
   /**
    * 一次委派的进度（Phase 7.3）。
@@ -208,6 +208,8 @@ export type TurnOutcome = {
   /** 真正用的 provider / model（解析后的）。 */
   provider: string;
   model: string;
+  /** D1：这一轮有没有成功写过文件（`write_file`/`edit_file`/`apply_patch`）。 */
+  wroteFiles?: boolean;
 };
 
 /**
@@ -552,6 +554,8 @@ export async function runTurn(
     let steps = 0;
     /** 这一轮有没有见过"一步结束"（见下面 `finish-step` 那段）。 */
     let sawStepFinish = false;
+    /** D1：这一轮有没有成功写过文件（验证闭环的触发条件之一）。 */
+    let wroteFiles = false;
 
     armStall();
     for await (const part of result.fullStream) {
@@ -573,6 +577,7 @@ export async function runTurn(
          * ⚠️ 子智能体那条原来**没有这一支** —— 于是它的工具报错会被整轮吞掉。
          */
         const failed = part.type === "tool-error";
+        if (!failed && ["write_file", "edit_file", "apply_patch"].includes(part.toolName)) wroteFiles = true;
         const startedTool = toolStarts.get(part.toolCallId);
         if (startedTool) {
           toolSpans.push({
@@ -672,12 +677,12 @@ export async function runTurn(
     } catch {
       usage = undefined; // 拿不到就不给（**不编**）
     }
-    onEvent({ type: "done", ...(usage ? { usage } : {}) });
+    onEvent({ type: "done", ...(usage ? { usage } : {}), ...(wroteFiles ? { wroteFiles: true } : {}) });
     /* OTLP 旁路：没配端点 = 不发（默认零遥测），失败也不影响这一轮 */
     emitSpan(true, usage);
     // 真的跑通了 —— 把这家 provider 标成"已验证"（界面上才敢说可用）
     health.markOk(provider.id);
-    return { ok: true, aborted: false, provider: provider.id, model };
+    return { ok: true, aborted: false, provider: provider.id, model, ...(wroteFiles ? { wroteFiles: true } : {}) };
   } catch (error) {
     /*
      * 看门狗触发时 SDK 抛的是 AbortError（是我们自己 abort 的）——

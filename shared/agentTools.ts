@@ -330,6 +330,27 @@ export const EDIT_FILE_INPUT = z.object({
   replaceAll: z.boolean().optional().describe("替换全部命中；不传则必须唯一匹配"),
 });
 
+export const APPLY_PATCH_TOOL = "apply_patch";
+
+/**
+ * 「打补丁」的说明（D3）。
+ *
+ * 补丁格式照 Codex 的 `*** Begin Patch`（多文件、多 hunk）；与 `edit_file` 并存：
+ * 小改继续用精确替换，跨文件/多段改动用它。解析失败会**报行号且不写文件**。
+ */
+export const APPLY_PATCH_DESC = [
+  "用一段补丁一次改多个文件（新增 / 删除 / 修改）。",
+  "格式：`*** Begin Patch` 开头、`*** End Patch` 结尾；每个文件一段：",
+  "`*** Add File: 路径`（内容行以 + 开头）、`*** Delete File: 路径`、",
+  "`*** Update File: 路径` 后跟一个或多个 `@@` 段（- 旧行 / + 新行 / 空格上下文）。",
+  "小改一个文件优先用 edit_file；这里适合跨文件、多段的改动。",
+  "补丁解析失败会报行号，**不会写任何文件**；路径必须在授权目录里。",
+].join("");
+
+export const APPLY_PATCH_INPUT = z.object({
+  patchText: z.string().min(1).describe("完整补丁文本（含 Begin/End 标记）"),
+});
+
 export const RUN_COMMAND_TOOL = "run_command";
 
 /**
@@ -609,6 +630,7 @@ const TOOL_META: Record<string, AgentToolMeta> = {
   [READ_FILE_TOOL]: { concurrency: "safe" },
   [WRITE_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
   [EDIT_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
+  [APPLY_PATCH_TOOL]: { destructive: true, concurrency: "exclusive" },
   [RUN_COMMAND_TOOL]: { destructive: true, concurrency: "exclusive", timeoutMs: 120_000, resultPolicy: "tail" },
 };
 
@@ -626,6 +648,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: READ_FILE_TOOL, description: READ_FILE_DESC, schema: READ_FILE_INPUT },
   { name: WRITE_FILE_TOOL, description: WRITE_FILE_DESC, schema: WRITE_FILE_INPUT },
   { name: EDIT_FILE_TOOL, description: EDIT_FILE_DESC, schema: EDIT_FILE_INPUT },
+  { name: APPLY_PATCH_TOOL, description: APPLY_PATCH_DESC, schema: APPLY_PATCH_INPUT },
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
   ...COMPUTER_TOOL_SPECS,
   ...BROWSER_TOOL_SPECS,

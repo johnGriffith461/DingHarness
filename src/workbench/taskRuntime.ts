@@ -24,7 +24,7 @@
  */
 import type { ChatMessage, ChatPart, ShellBridge } from "@shared/ipc";
 import type { ProjectContextResult } from "@shared/projectWire";
-import { streamChat, completeOnce } from "../ai/aiClient";
+import { streamChat, completeOnce, runToolOnce } from "../ai/aiClient";
 import { buildCodingFollowUpPrompt, buildFollowUpPrompt, parseAskReply } from "./agent";
 import { artifactFileName, extractArtifacts, type Artifact } from "./artifact";
 import { enabledPromptBlock } from "@shared/library";
@@ -46,6 +46,7 @@ import {
 import { buildHistory } from "./history";
 import { keepTokensFor, parseBudgetMode, type ContextBudgetMode } from "@engine/runtime/budget";
 import { renderPlanPrompt } from "@engine/runtime/planMode";
+import { shouldSuggestReset, shouldVerify, summarizeVerify } from "@engine/runtime/verifyLoop";
 
 import { readSavedRoute } from "@/ai/route";
 import { agentPromptBlock, selectedAgentNow } from "./agentStore";
@@ -504,7 +505,8 @@ export async function answerTurn(
    * 合成一行而不是两条：界面上那一行本来就只放一句。
    */
   const contextNote = contextIndex ? indexedNote(olderCount) : olderCount ? compactedNote(olderCount) : "";
-  const notes = [extraNote, reply.note, contextNote].filter(Boolean);
+  const verifyNote = reply.wroteFiles ? await runVerificationNote(taskId) : "";
+  const notes = [extraNote, reply.note, contextNote, verifyNote].filter(Boolean);
   nextStep(
     port,
     taskId,
@@ -577,7 +579,7 @@ export async function runStream(
   parts?: ChatPart[],
   /** C1：计划模式（只读工具 + 计划提示）。由宿主按"任务模式 + 开关"决定。 */
   plan = false,
-): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string }> {
+): Promise<{ text: string; tools: ToolTrace[]; usage?: StepUsage; note?: string; wroteFiles?: boolean }> {
   const messages: ChatMessage[] = [
     ...history,
     { role: "user", content: user, ...(parts?.length ? { parts } : {}) },
@@ -814,7 +816,51 @@ export async function runStream(
     tools: withSubagentApprovals(view.traces),
     ...(view.usage ? { usage: view.usage } : {}),
     ...(fellBackNote ? { note: fellBackNote } : {}),
+    ...(view.wroteFiles ? { wroteFiles: true } : {}),
   };
+}
+
+/**
+ * D1：一轮写完之后跑验证（用探测到的 `testCommand`）。
+ *
+ * ⚠️ **只在「全部允许」档自动跑**：其它档位下自动执行命令等于绕过审批。
+ * 那种情况给一句话让用户自己决定，不假装验证过。
+ * `ding.verify=off` 可整体关掉。
+ */
+const verifyFailures = new Map<string, boolean[]>();
+
+export async function runVerificationNote(taskId: string): Promise<string> {
+  try {
+    if (localStorage.getItem("ding.verify") === "off") return "";
+  } catch {
+    /* 无 localStorage → 按开启处理 */
+  }
+  const bridge = (globalThis as unknown as { shell?: ShellBridge }).shell;
+  const got = await Promise.resolve(bridge?.project?.context?.()).catch(() => null);
+  const project = got?.context;
+  if (!project?.testCommand) return "";
+  const plan = shouldVerify({
+    wroteFiles: true,
+    mode: "coding",
+    project: { testCommand: project.testCommand, cwd: project.cwd },
+  });
+  if (!plan) return "";
+  if (readConfirmMode() !== "全部允许") {
+    return `已改文件，未自动验证（当前档位「${readConfirmMode()}」）：建议运行 ${plan.command}`;
+  }
+  const result = await runToolOnce({
+    name: "run_command",
+    input: { command: plan.command, workdir: plan.cwd },
+    toolPolicy: "全部允许",
+  });
+  const out = result.output as { exitCode?: number | null; output?: string } | undefined;
+  const exitCode = typeof out?.exitCode === "number" ? out.exitCode : result.ok ? 0 : 1;
+  const summary = summarizeVerify({ exitCode, stdout: out?.output ?? "", stderr: result.ok ? "" : (result.error ?? "") });
+  const recent = [...(verifyFailures.get(taskId) ?? []), summary.ok].slice(-3);
+  verifyFailures.set(taskId, recent);
+  if (summary.ok) return `验证通过（${plan.command}）`;
+  const head = summary.excerpt.split(/\r?\n/).slice(0, 2).join(" ").slice(0, 160);
+  return `验证失败（${plan.command}，退出码 ${exitCode}）：${head}${shouldSuggestReset(recent) ? " —— 连续两次失败，建议重置对话" : ""}`;
 }
 
 /**

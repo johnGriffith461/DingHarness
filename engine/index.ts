@@ -467,6 +467,7 @@ export function createEngine(ports: EnginePorts): Engine {
         ...(request.model ? { model: request.model } : {}),
         ...(request.abortSignal ? { signal: request.abortSignal } : {}),
         depth: 0,
+        ...(request.sessionId ? { sessionId: request.sessionId } : {}),
         /* C3：拦住一次调用时的默认"待谁批" = 这段会话归谁（缺省仍是本机单用户） */
         ...(request.ownerActor ? { owner: request.ownerActor.id } : {}),
         onDelegation: (event) => {

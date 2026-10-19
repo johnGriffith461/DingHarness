@@ -198,7 +198,7 @@ export type ProjectableEvent =
   | { type: "text"; text: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
-  | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number } }
+  | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number }; wroteFiles?: boolean }
   | { type: "error"; message: string }
   /* 中途插话（G06）：只用于上屏，不改变正文投影 */
   | { type: "steer"; text: string }
@@ -272,6 +272,8 @@ export type TurnView = {
   error?: string;
   /** 收到 `done`（或 `error`）—— 这一轮已经结束。 */
   done: boolean;
+  /** D1：这一轮成功写过文件（宿主的验证闭环据此决定是否跑测试）。 */
+  wroteFiles?: boolean;
 };
 
 /**
@@ -385,7 +387,12 @@ export function applyEvent(state: TurnState, event: TurnInput): TurnState {
   }
 
   if (event.type === "done") {
-    return { ...state, done: true, ...(event.usage ? { usage: event.usage } : {}) };
+    return {
+      ...state,
+      done: true,
+      ...(event.usage ? { usage: event.usage } : {}),
+      ...(event.wroteFiles ? { wroteFiles: true } : {}),
+    };
   }
 
   if (event.type === "approval") {
@@ -556,7 +563,7 @@ export type ProjectOptions = {
  * @returns 可显示/可落库的投影
  */
 export function finishTurn(state: TurnState, opts: ProjectOptions = {}): TurnView {
-  const { text, traces, usage, error, done, delegations } = state;
+  const { text, traces, usage, error, done, delegations, wroteFiles } = state;
   /*
    * ⚠️ 展开与"套决策记录"的**顺序**有意义：先展开（子智能体上交的待批项进场），
    * 再套决策记录 —— 反过来的话，给那些待批项的批准记录会找不到对应留痕（审计 P51）。
@@ -580,6 +587,7 @@ export function finishTurn(state: TurnState, opts: ProjectOptions = {}): TurnVie
     ...(delegations.length ? { delegations: [...delegations] } : {}),
     ...(usage ? { usage } : {}),
     ...(error ? { error } : {}),
+    ...(wroteFiles ? { wroteFiles: true } : {}),
   };
   return base;
 }

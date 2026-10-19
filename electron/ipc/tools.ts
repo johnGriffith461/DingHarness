@@ -11,6 +11,7 @@ import {
   READ_FILE_TOOL,
   RUN_COMMAND_TOOL,
   SCHEDULE_CREATE_TOOL,
+  APPLY_PATCH_TOOL,
   SCHEDULE_LIST_TOOL,
   SEARCH_FILES_TOOL,
   SPAWN_AGENT_TOOL,
@@ -21,6 +22,8 @@ import { COMPUTER_CLICK_TOOL, COMPUTER_KEY_TOOL, COMPUTER_SCREENSHOT_TOOL, COMPU
 import type { ConfirmMode } from "../../shared/ipc";
 import { unknownToolNotice } from "../../engine/core/notices";
 import { buildToolSet, createToolRegistry, type ToolEntryInput } from "../../engine/runtime/registry";
+import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
+import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/fileState";
 import type { ToolInfoWire } from "../../shared/ipc";
 /* 插件工具从 pluginHost 直接来（registry 不再转手 re-export —— V5-4 4.1 把 IO 移出最小面） */
 import { pluginToolEntries } from "../../engine/runtime/pluginHost";
@@ -34,7 +37,8 @@ import { readMemory, writeMemory } from "./memoryStore";
 import { broadcastScheduleChanged, loadJobs, saveJobs } from "./scheduleStore";
 import { sendCanvasCommand } from "./canvas";
 import { AGENT_READ_MAX_BYTES, describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
-import { describeWriteResult, writeFileForModel } from "../../engine/runtime/tools/writeTool";
+import { describeWriteResult, resolveWriteTarget, writeFileForModel } from "../../engine/runtime/tools/writeTool";
+import { statFingerprint } from "../../engine/runtime/tools/editTool";
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 import { nothingFoundNote } from "../../engine/runtime/tools/searchTool";
@@ -256,7 +260,7 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
    *   · 大小上限、二进制判定、各种"读不到"的分支都在 `readTool.ts`（纯函数、有单测）；
    *   · 返回的那句话（`describeReadResult`）同时用于**界面留痕**，两边不会说法不一。
    */
-  [READ_FILE_TOOL]: async (input) => {
+  [READ_FILE_TOOL]: async (input, env) => {
     const { path, offset, limit } = input as { path: string; offset?: number; limit?: number };
     /* U02：不分页读整份（到 READ_MAX_BYTES），让 `applySpill` 决定落盘与回注 */
     const paged = offset !== undefined || limit !== undefined;
@@ -265,6 +269,7 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       extraReadDirs: [spillStore().dir],
       page: { offset, limit },
     });
+    if (result.ok) noteRead(env.sessionId, result.path, result.fingerprint);
     return {
       ok: result.ok,
       line: describeReadResult(result, path),
@@ -343,16 +348,38 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     };
   },
 
-  [EDIT_FILE_TOOL]: async (input) => {
+  [APPLY_PATCH_TOOL]: async (input) => {
+    const { patchText } = input as { patchText: string };
+    const parsed = parsePatch(patchText);
+    if (!parsed.ok) {
+      return { ok: false, line: `⚙ 补丁解析失败（第 ${parsed.line ?? "?"} 行）：${parsed.error}`, error: parsed.error };
+    }
+    const result = await serializePathWrite("__apply_patch__", () =>
+      applyPatch(process.cwd(), parsed.ops, {
+        restrictToCwd: false,
+        resolvePath: (p) => resolveWriteTarget(p, ownedDirs()),
+      }),
+    );
+    return {
+      ok: result.ok,
+      line: result.ok ? `⚙ 已应用补丁：${result.changed.join("、")}` : `⚙ 补丁未应用：${result.error ?? ""}`,
+      ...(result.ok ? { changed: result.changed } : { error: result.error }),
+    };
+  },
+
+  [EDIT_FILE_TOOL]: async (input, env) => {
     const { path, oldText, newText, replaceAll } = input as {
       path: string;
       oldText: string;
       newText: string;
       replaceAll?: boolean;
     };
+    const resolved = resolveWriteTarget(path, ownedDirs());
+    const expected = resolved ? expectedFingerprint(env.sessionId, resolved) : undefined;
     const result = await serializePathWrite(path, () =>
-      editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true),
+      editFileForModel(path, oldText, newText, ownedDirs(), replaceAll === true, expected),
     );
+    if (result.ok) noteWrite(env.sessionId, result.path, await statFingerprint(result.path));
     return {
       ok: result.ok,
       line: describeEditResult(result, path),
@@ -586,6 +613,7 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       ...(env.signal ? { signal: env.signal } : {}),
       depth: env.depth ?? 0,
       ...(env.onDelegation ? { onDelegation: env.onDelegation } : {}),
+      ...(env.sessionId ? { sessionId: env.sessionId } : {}),
     });
   },
 
@@ -714,6 +742,8 @@ export type ToolEnv = {
    * 所以从放行启动的子智能体不可中止 —— 如实记着这个边界。
    */
   signal?: AbortSignal;
+  /** D3：这段会话的 id（读后写校验按会话隔离）。 */
+  sessionId?: string;
 };
 
 /**
@@ -731,6 +761,7 @@ export const hostExecutor: ToolExecutor = {
       ...(ctx.depth === undefined ? {} : { depth: ctx.depth }),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       ...(ctx.onDelegation ? { onDelegation: ctx.onDelegation } : {}),
+      ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
     }),
 };
 
@@ -800,6 +831,7 @@ export function agentTools(env: ToolEnv): ToolSet {
       ...(env.signal ? { signal: env.signal } : {}),
       ...(env.depth === undefined ? {} : { depth: env.depth }),
       ...(env.onDelegation ? { onDelegation: env.onDelegation } : {}),
+      ...(env.sessionId ? { sessionId: env.sessionId } : {}),
     },
     /* 落盘（U02）：超限结果写进 userData，回注路径让模型能回读 */
     spill: spillStore(),
@@ -829,6 +861,7 @@ export const TOOL_NAMES = [
   MEMORY_SAVE_TOOL,
   MEMORY_LIST_TOOL,
   SCHEDULE_CREATE_TOOL,
+  APPLY_PATCH_TOOL,
   SCHEDULE_LIST_TOOL,
   CANVAS_ADD_NODE_TOOL,
   SPAWN_AGENT_TOOL,

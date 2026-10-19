@@ -255,7 +255,7 @@ export type AiStreamEvent =
    */
   | { requestId: string; type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { requestId: string; type: "tool-result"; toolCallId: string; toolName: string; output?: unknown; error?: string }
-  | { requestId: string; type: "done"; usage?: { inputTokens?: number; outputTokens?: number } }
+  | { requestId: string; type: "done"; usage?: { inputTokens?: number; outputTokens?: number }; wroteFiles?: boolean }
   /**
    * 一步结束（Phase 13.3：长回合进度叙述）。
    *

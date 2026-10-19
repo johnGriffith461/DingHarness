@@ -34,6 +34,7 @@ export const CLI_TOOLS = [
   "list_dir",
   "search_files",
   "edit_file",
+  "apply_patch",
   "run_command",
   "spawn_agent",
   "spawn_agents",

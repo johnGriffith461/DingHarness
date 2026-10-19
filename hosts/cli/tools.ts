@@ -17,8 +17,10 @@ import {
   searchFilesForModel,
 } from "../../engine/runtime/tools/searchTool";
 import { AGENT_READ_MAX_BYTES, describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
-import { describeWriteResult, writeFileForModel } from "../../engine/runtime/tools/writeTool";
-import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
+import { describeWriteResult, resolveWriteTarget, writeFileForModel } from "../../engine/runtime/tools/writeTool";
+import { describeEditResult, editFileForModel, statFingerprint } from "../../engine/runtime/tools/editTool";
+import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/fileState";
+import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
 import { createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
 
@@ -114,6 +116,7 @@ export function createCliExecutor(opts: {
           extraReadDirs,
           page: { offset, limit },
         });
+        if (result.ok) noteRead(ctx.sessionId, result.path, result.fingerprint);
         return {
           ok: result.ok,
           output: {
@@ -146,6 +149,33 @@ export function createCliExecutor(opts: {
         return { ok: result.ok, output, ...(result.ok ? {} : { error: result.error }) };
       }
 
+      case "apply_patch": {
+        const { patchText } = input as { patchText: string };
+        const parsed = parsePatch(patchText);
+        if (!parsed.ok) {
+          return {
+            ok: false,
+            output: { ok: false, line: `⚙ 补丁解析失败（第 ${parsed.line ?? "?"} 行）：${parsed.error}`, error: parsed.error },
+            error: parsed.error,
+          };
+        }
+        const result = await serializePathWrite("__apply_patch__", () =>
+          applyPatch(opts.dirs[0] ?? process.cwd(), parsed.ops, {
+            restrictToCwd: false,
+            resolvePath: (p) => resolveWriteTarget(p, dirs),
+          }),
+        );
+        return {
+          ok: result.ok,
+          output: {
+            ok: result.ok,
+            line: result.ok ? `⚙ 已应用补丁：${result.changed.join("、")}` : `⚙ 补丁未应用：${result.error ?? ""}`,
+            ...(result.ok ? { changed: result.changed } : { error: result.error }),
+          },
+          ...(result.ok ? {} : { error: result.error }),
+        };
+      }
+
       case "edit_file": {
         const { path: raw, oldText, newText, replaceAll } = input as {
           path: string;
@@ -153,7 +183,12 @@ export function createCliExecutor(opts: {
           newText: string;
           replaceAll?: boolean;
         };
-        const result = await serializePathWrite(raw, () => editFileForModel(raw, oldText, newText, dirs, replaceAll === true));
+        const resolved = resolveWriteTarget(raw, dirs);
+        const expected = resolved ? expectedFingerprint(ctx.sessionId, resolved) : undefined;
+        const result = await serializePathWrite(raw, () =>
+          editFileForModel(raw, oldText, newText, dirs, replaceAll === true, expected),
+        );
+        if (result.ok) noteWrite(ctx.sessionId, result.path, await statFingerprint(result.path));
         const output = {
           ok: result.ok,
           line: describeEditResult(result, raw),

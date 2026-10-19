@@ -39,6 +39,12 @@ import { WRITE_MAX_BYTES, resolveWriteTarget } from "./writeTool";
  */
 export const EDIT_MAX_BYTES = WRITE_MAX_BYTES;
 
+/** D3：读一个文件的指纹（读后写校验 / 写后更新用）。 */
+export async function statFingerprint(file: string): Promise<{ mtimeMs: number; size: number }> {
+  const stat = await fs.stat(file);
+  return { mtimeMs: stat.mtimeMs, size: stat.size };
+}
+
 /** 结果。 */
 export type EditFileResult =
   | { ok: true; path: string; replaced: number; line: number; fuzzy: boolean }
@@ -73,6 +79,7 @@ function countOccurrences(haystack: string, needle: string): number {
  * @param newText 换成什么
  * @param dirs 允许改的目录白名单
  * @param replaceAll 是否替换全部（默认 false = 必须唯一）
+ * @param expected 读这一刻的 `{mtimeMs,size}`（D3 读后写校验；不给就不判 stale）
  * @returns 成功给出落点与替换了几处；失败给出**能照着做**的理由
  */
 export async function editFileForModel(
@@ -81,6 +88,7 @@ export async function editFileForModel(
   newText: string,
   dirs: readonly string[],
   replaceAll = false,
+  expected?: { mtimeMs: number; size: number },
 ): Promise<EditFileResult> {
   const target = resolveWriteTarget(rawPath, dirs);
   if (!target) {
@@ -97,6 +105,13 @@ export async function editFileForModel(
   try {
     const stat = await fs.stat(target);
     if (stat.isDirectory()) return { ok: false, error: "这是一个目录，不是文件" };
+    /*
+     * D3 读后写：文件在你读取之后被外部改过 → 拒绝。
+     * 拿过期内容做替换会把别人刚写的东西盖掉，而且旧内容还"匹配成功"时不会有任何报错。
+     */
+    if (expected && (stat.mtimeMs !== expected.mtimeMs || stat.size !== expected.size)) {
+      return { ok: false, error: "文件在你读取之后被改过（stale）—— 先重新 read_file 看一眼再改" };
+    }
     if (stat.size > EDIT_MAX_BYTES) {
       return { ok: false, error: `文件太大（${Math.round(stat.size / 1024)}KB），不适合整篇读进来改` };
     }
