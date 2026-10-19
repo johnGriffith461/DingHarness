@@ -73,6 +73,7 @@ import {
 import { readConfirmMode } from "./confirmMode";
 import { readReasoningEffort } from "./effortStore";
 import { readPlanMode } from "./planMode";
+import { todosBlockFromSteps } from "./todoContext";
 import {
   acceptQuestions,
   cleanTitle,
@@ -737,7 +738,14 @@ ${map.text}
 </repo_map>`;
   }
   const planBlock = plan ? renderPlanPrompt(user) : "";
-  const fullSystem = assembleSystem({ base: system + planBlock, persona, project: projectBlock + mapBlock, memory: remembered, skills: skillBlock, abilities: extra });
+  /*
+   * P0-01：待办投影。来源是**任务轨迹**（最后一条成功的 todo_write），
+   * 不是最近消息 —— 压缩摘掉早期消息后，清单照样在。
+   * 放在项目规则之后、记忆之前（与 `project` 槽同段）。
+   */
+  const taskForTodos = sessionId ? port.getState().tasks.find((t) => t.id === sessionId) : undefined;
+  const todosBlock = taskForTodos ? todosBlockFromSteps(taskForTodos.steps) : "";
+  const fullSystem = assembleSystem({ base: system + planBlock, persona, project: projectBlock + mapBlock + todosBlock, memory: remembered, skills: skillBlock, abilities: extra });
   /**
    * 这一轮的**投影**（C2）：正文、工具留痕、用量只有一份算法。
    *

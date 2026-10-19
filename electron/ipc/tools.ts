@@ -43,6 +43,7 @@ import { describeWriteResult, resolveWriteTarget, writeFileForModel } from "../.
 import { statFingerprint } from "../../engine/runtime/tools/editTool";
 import { describeEditResult, editFileForModel } from "../../engine/runtime/tools/editTool";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
+import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
 import { nothingFoundNote } from "../../engine/runtime/tools/searchTool";
 import { createSerialQueue, createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { callMcpTool, mcpToolBindings } from "./mcpStore";
@@ -588,6 +589,19 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
       width: got.value.width,
       height: got.value.height,
     };
+  },
+
+  /*
+   * P0-01：待办只做校验与回显；状态由这条 tool-result 本身承载。
+   * 不做落盘 —— 任务轨迹已经在 `tasks.json` 里，重启后照常投影。
+   */
+  [TODO_WRITE_TOOL]: async (input) => {
+    const { todos } = input as { todos?: unknown };
+    const got = normalizeTodos(todos);
+    if (!got.ok) {
+      return { ok: false, line: `待办未更新：${got.error}`, error: got.error };
+    }
+    return { ok: true, line: describeTodoResult(got.todos), todos: got.todos, count: got.todos.length };
   },
 
   [RUN_COMMAND_TOOL]: async (input, env) => {

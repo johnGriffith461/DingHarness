@@ -379,6 +379,37 @@ export const RUN_COMMAND_INPUT = z.object({
   timeout: z.number().int().min(0).optional().describe("超时毫秒数，默认 120000；0 表示不限时"),
 });
 
+/* ── P0-01：todo_write ───────────────────────────────────────────
+ *
+ * 为什么把它做成工具而不是"把计划写在正文里"：正文会被压缩摘掉，
+ * 而工具结果留在任务轨迹里 —— 下一轮、压缩后、重启后都还能投影回 system。
+ * Codex `update_plan` / Roo `update_todo_list` / DSH `todo_write` 同一形状。
+ */
+export const TODO_WRITE_TOOL = "todo_write";
+export const TODO_MAX_ITEMS = 30;
+export const TODO_CONTENT_LIMIT = 200;
+export const TODO_STATUSES = ["pending", "in_progress", "completed", "blocked"] as const;
+
+export const TODO_WRITE_DESC = [
+  "维护当前任务的待办清单（会显示在界面上，并在压缩/重启后继续生效）。",
+  "多步任务先列 3–7 步；每做完一步就更新状态，不要只把计划写在正文里。",
+  "同一时刻只允许一个条目是 in_progress；做不下去时用 blocked 并说明卡点。",
+  "最多 30 条；清单是给用户看的进度，不是内心独白。",
+].join("");
+
+export const TODO_WRITE_INPUT = z.object({
+  todos: z
+    .array(
+      z.object({
+        content: z.string().trim().min(1).max(TODO_CONTENT_LIMIT).describe("这一步要做什么（一句话）"),
+        status: z.enum(TODO_STATUSES).describe("pending 待办 / in_progress 进行中 / completed 完成 / blocked 受阻"),
+      }),
+    )
+    .min(1)
+    .max(TODO_MAX_ITEMS)
+    .describe("完整的待办清单（每次调用传全量，不是增量）"),
+});
+
 export const SPAWN_AGENT_TOOL = "spawn_agent";
 
 /**
@@ -632,6 +663,7 @@ const TOOL_META: Record<string, AgentToolMeta> = {
   [EDIT_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
   [APPLY_PATCH_TOOL]: { destructive: true, concurrency: "exclusive" },
   [RUN_COMMAND_TOOL]: { destructive: true, concurrency: "exclusive", timeoutMs: 120_000, resultPolicy: "tail" },
+  [TODO_WRITE_TOOL]: { concurrency: "exclusive" },
 };
 
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
@@ -650,6 +682,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: EDIT_FILE_TOOL, description: EDIT_FILE_DESC, schema: EDIT_FILE_INPUT },
   { name: APPLY_PATCH_TOOL, description: APPLY_PATCH_DESC, schema: APPLY_PATCH_INPUT },
   { name: RUN_COMMAND_TOOL, description: RUN_COMMAND_DESC, schema: RUN_COMMAND_INPUT },
+  { name: TODO_WRITE_TOOL, description: TODO_WRITE_DESC, schema: TODO_WRITE_INPUT },
   ...COMPUTER_TOOL_SPECS,
   ...BROWSER_TOOL_SPECS,
   ...UIA_TOOL_SPECS,
@@ -675,6 +708,7 @@ export function toolLabel(name: string): string {
   if (name === CANVAS_ADD_NODE_TOOL) return "画布";
   if (name === SPAWN_AGENT_TOOL) return "子智能体";
   if (name === READ_FILE_TOOL) return "读文件";
+  if (name === TODO_WRITE_TOOL) return "待办";
   if (name === LIST_FILES_TOOL) return "列文件";
   if (name === SPAWN_AGENTS_TOOL) return "派小队";
   if (name.startsWith("computer_")) return "电脑操作";

@@ -110,6 +110,13 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   /* D3：apply_patch 会写多个文件，按写处理 */
   apply_patch: { kind: "write" },
   /*
+   * P0-01：todo_write 只改**本产品自己的待办清单**（任务内的进度投影），
+   * 不碰用户文件、不执行命令 —— 与 `memory_save` / `canvas_add_node` 那种
+   * "有后续影响"的写不同。放在只读这一档：计划本身不该被审批打断
+   * （Cline / Codex 的 plan 工具同样不设审批）。
+   */
+  todo_write: { kind: "read" },
+  /*
    * Computer Use（V6-2n）：四个都按**写** —— 它们能移动真实鼠标、敲真实键盘、
    * 截取屏幕。按需确认档下必须问；「全部允许」下也仍受 `computer-use.json`
    * 的授权开关约束（默认关）。

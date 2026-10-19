@@ -569,3 +569,30 @@
 }
 .wb-reader-recent-title:hover { color: var(--accent); }
 
+
+/* ============================================================
+ * P0-01：任务待办面板（只读投影，来源 = 最后一条成功的 todo_write）
+ * ============================================================ */
+.wb-todo {
+  margin: 0 18px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.wb-todo-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+}
+.wb-todo-head em { color: var(--accent); font-style: normal; }
+.wb-todo-list { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.wb-todo-item { display: flex; gap: 6px; align-items: baseline; color: var(--fg-2); font-size: 12.5px; line-height: 1.45; }
+.wb-todo-mark { flex: none; color: var(--fg-3); font-family: var(--dh-font-mono, monospace); font-size: 11px; }
+.wb-todo-item.is-in_progress .wb-todo-mark { color: var(--accent); }
+.wb-todo-item.is-in_progress .wb-todo-text { color: var(--fg); }
+.wb-todo-item.is-completed .wb-todo-text { color: var(--fg-3); text-decoration: line-through; }
+.wb-todo-item.is-blocked .wb-todo-mark { color: var(--danger); }

@@ -23,6 +23,7 @@ import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/f
 import { applyPatch, parsePatch } from "../../engine/runtime/editFormats";
 import { createKeyedSerialQueue } from "../../engine/runtime/serialQueue";
 import { describeRunResult, runCommandForModel } from "../../engine/runtime/tools/execTool";
+import { TODO_WRITE_TOOL, describeTodoResult, normalizeTodos } from "../../engine/runtime/tools/todoTool";
 
 /**
  * CLI 宿主的**执行体**：把内核给的工具名落到真实文件系统上。
@@ -269,6 +270,20 @@ export function createCliExecutor(opts: {
             : { error: result.error }),
         };
         return { ok: result.ok, output, ...(result.ok ? {} : { error: result.error }) };
+      }
+
+      /*
+       * P0-01：待办只做校验与回显。状态来源是这条 tool-result 本身 ——
+       * 不需要新模式的事件；压缩只动消息，不动任务轨迹。
+       */
+      case TODO_WRITE_TOOL: {
+        const { todos } = input as { todos?: unknown };
+        const got = normalizeTodos(todos);
+        if (!got.ok) return { ok: false, output: { ok: false, line: `待办未更新：${got.error}`, error: got.error }, error: got.error };
+        return {
+          ok: true,
+          output: { ok: true, line: describeTodoResult(got.todos), todos: got.todos, count: got.todos.length },
+        };
       }
 
       /*

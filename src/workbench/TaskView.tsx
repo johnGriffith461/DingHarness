@@ -22,6 +22,7 @@ import { MessageActions } from "./MessageActions";
 import { Composer } from "./Composer";
 import { PlanPanel } from "./PlanPanel";
 import { StepAttachments } from "./StepAttachments";
+import { TodoPanel } from "./TodoPanel";
 
 export function TaskView() {
   const task = useWorkbenchStore((s) => s.tasks.find((t) => t.id === s.activeTaskId) ?? null);
@@ -135,6 +136,9 @@ export function TaskView() {
           <Monitor size={15} />
         </button>
       </header>
+
+      {/* P0-01：待办面板（只读；没有待办时不渲染） */}
+      <TodoPanel steps={task.steps} />
 
       {/* G1：右侧计划面板（只在计划状态时出现；流区域仍占满剩余宽度） */}
       <div className="wb-task-body">
