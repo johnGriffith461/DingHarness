@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { WORKSPACE_UNAUTHORIZED_HINT } from "../../../shared/workspace";
 import { insideDirs } from "./drivePaths";
 import { REGEX_MAX_LINE_CHARS, unsafeRegexReason } from "./regexGuard";
 
@@ -127,7 +128,9 @@ export async function searchFilesForModel(
   if (!pattern) return { ok: false, error: "pattern 是空的" };
 
   const start = input.path ? insideDirs(input.path, dirs) : dirs[0] ? path.resolve(dirs[0]) : null;
-  if (!start) return { ok: false, error: "这个目录不在授权范围内（只能搜你授权目录里的东西）" };
+  if (!start) {
+    return { ok: false, error: `这个目录不在授权范围内（只能搜你授权目录里的东西）。${WORKSPACE_UNAUTHORIZED_HINT}` };
+  }
 
   /*
    * ⭐ 正则安检（2026-10-16，审计 P44）：pattern 是**模型写的**，而这里是主进程 ——
@@ -217,7 +220,7 @@ export async function listDirForModel(
   dirs: readonly string[],
 ): Promise<ListDirResult> {
   const start = input.path ? insideDirs(input.path, dirs) : dirs[0] ? path.resolve(dirs[0]) : null;
-  if (!start) return { ok: false, error: "这个目录不在授权范围内" };
+  if (!start) return { ok: false, error: `这个目录不在授权范围内。${WORKSPACE_UNAUTHORIZED_HINT}` };
 
   const depth = Math.max(0, Math.min(input.depth ?? LIST_DIR_DEFAULT_DEPTH, LIST_DIR_MAX_DEPTH));
   const filter = input.pattern ? includeMatcher(input.pattern) : null;

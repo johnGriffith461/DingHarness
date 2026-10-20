@@ -87,3 +87,16 @@ export function workspaceLabel(dir: string): string {
 export function addedNote(dir: string): string {
   return `${WORKSPACE_LABELS.addedNote}（${workspaceLabel(dir)}）`;
 }
+
+/**
+ * F-02（2026-10-20）：**"不在授权范围"的唯一话术**。
+ *
+ * 缺陷形状：向导写着"工作目录可以跳过，之后在设置里加"，而设置里根本没有那一格；
+ * 与此同时四个工具各自用一句不同的"不在授权范围内"把用户/模型拦在门外 ——
+ * 说的话还不一样，没有一句告诉他下一步去哪。
+ *
+ * 现在设置里有了「工作目录」，四个工具的错误末尾也引用这同一个常量
+ * （`engine/runtime/tools/*.ts`；`src/workbench/unauthorizedHint.test.ts` 会扫）。
+ */
+export const WORKSPACE_UNAUTHORIZED_HINT =
+  "未授权目录时 agent 读不到、也改不了。可以去 设置 → 通用 → 工作目录 里加，或点下面的「授权一个目录」。";

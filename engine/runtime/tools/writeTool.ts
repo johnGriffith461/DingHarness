@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { insideDirs } from "./drivePaths";
 import { WRITE_FILE_MODEL_BYTES, WRITE_FILE_MODEL_CHARS } from "../../../shared/agentTools";
+import { WORKSPACE_UNAUTHORIZED_HINT } from "../../../shared/workspace";
 
 /**
  * 「写文件」工具的执行体（2026-10-14）。
@@ -123,7 +124,7 @@ export async function writeFileForModel(
      * 不说"权限不足"：把**能写的范围**讲清楚，模型才知道下一步该怎么办
      * （改个文件名放到云盘里，而不是反复试同一个墙外的路径）。
      */
-    return { ok: false, error: "这个路径不在可写范围内（只能写用户的云盘 / 产物 / 导出目录）" };
+    return { ok: false, error: `这个路径不在可写范围内（只能写已授权的目录）。${WORKSPACE_UNAUTHORIZED_HINT}` };
   }
 
   if (typeof content !== "string") {

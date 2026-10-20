@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { WORKSPACE_UNAUTHORIZED_HINT } from "../../../shared/workspace";
 import { insideDirs } from "./drivePaths";
 
 /**
@@ -217,7 +218,7 @@ async function resolveReadable(
   /* 走到这里 = 既不在白名单、也不在额外只读根、也不是"按名字找"那条路 */
   return {
     ok: false,
-    error: "这个路径不在可读范围内（只能读用户的云盘 / 产物 / 导出目录，以及工具结果的落盘文件）",
+    error: `这个路径不在可读范围内（只能读已授权的目录，以及工具结果的落盘文件）。${WORKSPACE_UNAUTHORIZED_HINT}`,
   };
 }
 

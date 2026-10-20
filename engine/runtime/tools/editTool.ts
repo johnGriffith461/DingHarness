@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { WORKSPACE_UNAUTHORIZED_HINT } from "../../../shared/workspace";
 import { WRITE_MAX_BYTES, resolveWriteTarget } from "./writeTool";
 
 /**
@@ -92,7 +93,7 @@ export async function editFileForModel(
 ): Promise<EditFileResult> {
   const target = resolveWriteTarget(rawPath, dirs);
   if (!target) {
-    return { ok: false, error: "这个路径不在可改范围内（只能改你授权目录里的文件）" };
+    return { ok: false, error: `这个路径不在可改范围内（只能改你授权目录里的文件）。${WORKSPACE_UNAUTHORIZED_HINT}` };
   }
   if (typeof oldText !== "string" || oldText === "") {
     return { ok: false, error: "oldText 是空的 —— 新建文件用 write_file，这里只用来改已有文件里的某一段" };

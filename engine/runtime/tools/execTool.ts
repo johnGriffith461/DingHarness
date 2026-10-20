@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 
+import { WORKSPACE_UNAUTHORIZED_HINT } from "../../../shared/workspace";
 import { insideDirs } from "./drivePaths";
 import {
   assertSandboxAvailable,
@@ -226,7 +227,10 @@ export async function runCommandForModel(
   const wanted = String(input.workdir ?? "").trim() || dirs[0] || "";
   const cwd = wanted ? insideDirs(wanted, dirs) : null;
   if (!cwd) {
-    return { ok: false, error: "这个工作目录不在授权范围内（只能在你授权的目录里跑命令）" };
+    return {
+      ok: false,
+      error: `这个工作目录不在授权范围内（只能在你授权的目录里跑命令）。${WORKSPACE_UNAUTHORIZED_HINT}`,
+    };
   }
 
   const asked = typeof input.timeout === "number" ? input.timeout : COMMAND_DEFAULT_TIMEOUT_MS;
