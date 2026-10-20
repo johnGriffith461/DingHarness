@@ -173,6 +173,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "list",
   "cost",
   "sessions",
+  /* F-07：`ding stats --first-hour` —— 首小时指标（与桌面同一份推导） */
+  "first-hour",
   "keep-provenance",
   /*
    * `--force`（2026-10-16，审计 P214）：备份的输出路径**已存在**时，只有显式给

@@ -3,6 +3,7 @@ import { Activity, Check, RefreshCw, X } from "lucide-react";
 
 import type { ShellBridge, TurnTraceView, UsageSummaryView } from "@shared/ipc";
 import { formatCount } from "@shared/cost";
+import { loadFirstHour, type FirstHourMetrics } from "./firstHour";
 import { NavCollapseButton } from "./NavCollapseButton";
 
 /**
@@ -48,6 +49,8 @@ export function InsightsPage() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [onlyFailed, setOnlyFailed] = useState(false);
+  /** F-07：最近一段任务会话的首小时指标（本地推导，不上报）。 */
+  const [firstHour, setFirstHour] = useState<{ sessionId: string; metrics: FirstHourMetrics } | null>(null);
 
   const refresh = async () => {
     const api = shell();
@@ -57,9 +60,14 @@ export function InsightsPage() {
     }
     setBusy(true);
     try {
-      const [u, t] = await Promise.all([api.stats.usage({ days: 90 }), api.stats.turns({ days: 30, limit: 800 })]);
+      const [u, t, fh] = await Promise.all([
+        api.stats.usage({ days: 90 }),
+        api.stats.turns({ days: 30, limit: 800 }),
+        loadFirstHour(),
+      ]);
       setUsage(u);
       setTraces(t);
+      setFirstHour(fh);
       setNote(
         u.totals.turns || t.length
           ? `用量窗口 ${u.byDay.length} 天（按天、按模型）；追踪窗口最近 30 天。`
@@ -90,6 +98,42 @@ export function InsightsPage() {
 
   return (
     <div className="wb-setpage-body" data-testid="wb-insights">
+      {/*
+        F-07：**第一小时**（本地推导，不上报）。
+        数字来自最近一段任务会话的已有事件日志；与 `ding stats --first-hour` 同一份实现。
+      */}
+      <div className="wb-firsthour" data-testid="wb-firsthour">
+        <div className="wb-firsthour-head">
+          <b>第一小时</b>
+          <em>{firstHour ? `会话 ${firstHour.sessionId}` : "还没有可统计的任务会话"}</em>
+        </div>
+        {firstHour ? (
+          <ul className="wb-firsthour-list">
+            <li data-testid="wb-firsthour-confirmations">
+              确认 {firstHour.metrics.confirmations} 次，其中同一命令重复问 {firstHour.metrics.repeatedCommandAsks} 次
+            </li>
+            <li data-testid="wb-firsthour-awaiting">
+              等待确认共 {Math.round(firstHour.metrics.awaitingTotalMs / 1000)} 秒
+            </li>
+            <li data-testid="wb-firsthour-done">
+              完成声明：带证据 {firstHour.metrics.doneWithEvidence} / 不带证据 {firstHour.metrics.doneWithoutEvidence}
+            </li>
+            <li data-testid="wb-firsthour-errors">
+              错误：
+              {Object.entries(firstHour.metrics.errorsByKind)
+                .map(([kind, n]) => `${kind}=${n}`)
+                .join(" / ") || "无"}
+            </li>
+            <li data-testid="wb-firsthour-last">
+              最后 5 条：{firstHour.metrics.lastEventsBeforeQuit.join(" → ") || "（没有记录）"}
+            </li>
+          </ul>
+        ) : (
+          <div className="wb-setpage-hint">做一件小事之后这里会出现确认次数、等待时长与完成声明是否有证据。</div>
+        )}
+        <div className="wb-setpage-hint">只在本机推导，不上报。安装时刻日志里没有，所以不显示"安装到第一个任务"。</div>
+      </div>
+
       <div className="wb-row" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <NavCollapseButton />
         <button

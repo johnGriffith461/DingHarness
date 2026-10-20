@@ -63,7 +63,7 @@ export function renderHelp(devMode: boolean, dataDir: string): string {
        * 可靠性统计（成功率/工具失败数/p50/p95），用户看不到就不会用。
        * 下面 `help.test.ts` 拿 KNOWN_COMMANDS 与这份输出对账，以后再漏会红。
        */
-      "  ding stats [--days N] [--json]                # 可靠性统计：成功率 / 工具失败数 / p50 / p95",
+      "  ding stats [--days N] [--first-hour] [--json] # 可靠性统计：成功率 / 工具失败数 / p50 / p95（--first-hour 看首小时指标）",
       "  ding tree [会话 id] [--json]                  # 分叉树（谁从哪一刻分出来的）",
       "  ding jobs list|show|wait|cancel [任务 id]     # 后台任务",
       "  ding steer <会话 id> \"要补的话\"               # 中途插话（下一段生效）",
@@ -166,7 +166,7 @@ export const COMMAND_USAGE: Record<string, string> = {
   jobs: "ding jobs <list|show|wait|cancel> [任务 id]",
   steer: 'ding steer <会话 id> "要补的话"',
   tree: "ding tree [会话 id] [--json]",
-  stats: "ding stats [--days N] [--json]",
+  stats: "ding stats [--days N] [--first-hour] [--json]",
   export: "ding export [--out <文件>] [--kind chat|task|cli]（不含密钥）",
   import: "ding import <导出文件.json> [--dry-run]",
   board: "ding board [list|add|claim|done|fail|post|inbox] …",
