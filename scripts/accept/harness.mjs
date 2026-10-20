@@ -637,7 +637,19 @@ export async function connectWithRetry(browserType, url, attempts = 8) {
   let last = null;
   for (let i = 0; i < attempts; i += 1) {
     try {
-      return await browserType.connectOverCDP(url);
+      const browser = await browserType.connectOverCDP(url);
+      /*
+       * ⚠️ 连上了不等于**已经有页面**（2026-10-20 实测）：CDP 握手可能早于
+       * BrowserWindow 建页面，于是紧接着的 `contexts()[0].pages()[0]` 是 undefined
+       * （accept-proto 就这么挂的，报 `Cannot read properties of undefined`）。
+       * 这里等到至少有一个页面再返回 —— 所有自己拿页面的脚本一起受益。
+       */
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        if (browser.contexts().some((ctx) => ctx.pages().length > 0)) return browser;
+        await sleep(300);
+      }
+      return browser;
     } catch (error) {
       last = error;
       await new Promise((r) => setTimeout(r, 1200));
