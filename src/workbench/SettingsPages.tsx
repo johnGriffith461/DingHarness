@@ -8,6 +8,8 @@ import MemoryPanel from "./MemoryPanel";
 import { PhonePage } from "./PhonePage";
 import { PersonalizePanel } from "./PersonalizePanel";
 import { ProjectRulesPanel } from "./ProjectRulesPanel";
+import { WorkspaceSettings } from "./WorkspaceSettings";
+import { PermissionRulesTable } from "./PermissionRulesTable";
 import { LspPanel } from "./LspPanel";
 import { useMemoryStore } from "./memoryStore";
 import { useAppSettings } from "./appSettings";
@@ -37,6 +39,13 @@ export type SettingsPagesProps = {
   pinned?: string;
   /** 可选的通道（§183）。 */
   choices?: Array<{ provider: string; model: string; label: string }>;
+  /**
+   * F-01：重新打开首跑向导。
+   *
+   * 由设置弹窗外壳提供（它才能关掉自己、切回首页）；不给就不画这一行 ——
+   * 单测/别处复用这个组件时不会出现一颗点了没反应的按钮。
+   */
+  onReopenGuide?: () => void;
 };
 
 /** 两页各自的标题与说明。 */
@@ -82,6 +91,7 @@ export default function SettingsPages({
   onNewTopic,
   pinned = "",
   choices = [],
+  onReopenGuide,
 }: SettingsPagesProps) {
   const meta = META[page];
   /** 记忆开关当前状态（从库里读真实值，不是本地 state）。 */
@@ -251,6 +261,25 @@ export default function SettingsPages({
               {SETTINGS_LABELS.newTopic}
             </button>
           </div>
+
+          {/*
+            F-01：向导的"稍后再说"不再是死路 —— 这里可以重开一次。
+            清掉完成/跳过标记、关掉设置、回到首页，向导立刻回来。
+          */}
+          {onReopenGuide ? (
+            <div className="wb-setpage-row">
+              <span className="wb-setpage-label">配置向导</span>
+              <button className="wb-setpage-btn" data-testid="wb-setpage-reopen-guide" onClick={onReopenGuide}>
+                重新运行配置向导
+              </button>
+            </div>
+          ) : null}
+
+          {/* F-02：工作目录（向导答应过的那一格；添加/撤销与输入区同一份 IPC） */}
+          <WorkspaceSettings />
+
+          {/* F-04：「总是允许」攒下的规则能看、能删（原来只写不读） */}
+          <PermissionRulesTable />
 
           {/* A1/A2：项目规则与环境（真的被读进第一轮系统提示词的那几个文件） */}
           <ProjectRulesPanel />

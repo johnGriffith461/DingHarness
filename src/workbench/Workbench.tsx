@@ -67,7 +67,7 @@ import TitleBar from "./TitleBar";
 import { NavSidebar } from "./NavSidebar";
 import { TaskView } from "./TaskView";
 import { HomeView } from "./HomeView";
-import { FirstRunGuide } from "./FirstRunGuide";
+import { FirstRunGuide, useFirstRunVisibility } from "./FirstRunGuide";
 import { CommandPalette } from "./CommandPalette";
 import { SummaryPanel } from "./SummaryPanel";
 
@@ -89,6 +89,13 @@ export default function Workbench() {
   const [summaryCollapsed, setSummaryCollapsed] = useState(true);
   /* G13：命令面板（Ctrl/Cmd+K） */
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /*
+   * F-01（2026-10-20）：首屏只留**一个主动作**。
+   *
+   * 原来向导与首页上下并列，首屏 31 个可点元素在两个主动作之间抢注意力；
+   * 现在向导显示期间首页主体不渲染 —— 用户只需要决定"配不配、怎么配"。
+   */
+  const firstRun = useFirstRunVisibility();
 
   // 定时任务的调度器（阶段 11.6）：整个应用生命周期只启动一次
   useEffect(() => startScheduler(), []);
@@ -295,13 +302,16 @@ export default function Workbench() {
            * 外面这一层 `wb-home-shell` 把它们收成同一列。
            */
           <div className="wb-home-shell" data-testid="wb-home-shell">
-            {/* U06：没配好 key / 没钉模型时先带用户走一遍（配好了就不出现） */}
-            <FirstRunGuide />
-            <HomeView />
+            {/*
+              U06 + F-01：没配好时**只**显示向导（不再与首页并列）。
+              `ready:false` 是"设置/通道还没读完"——先留白一瞬，
+              免得首页先闪出来又被向导盖住（那一下正是"两个主动作"的观感来源）。
+            */}
+            {!firstRun.ready ? null : firstRun.visible ? <FirstRunGuide /> : <HomeView />}
           </div>
         );
     }
-  }, [view]);
+  }, [view, firstRun.ready, firstRun.visible]);
 
   return (
     <div className="wb" data-testid="wb">

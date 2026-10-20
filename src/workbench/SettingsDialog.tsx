@@ -17,6 +17,7 @@ import { useMemoryStore } from "./memoryStore";
 import SettingsPages, { type SettingsSubPage } from "./SettingsPages";
 import { subPageForLabel } from "./settingsSubPage";
 import { THEME_OPTIONS, readTheme } from "./theme";
+import { reopenSetup } from "./FirstRunGuide";
 
 /** 左轨的两段（照 ZCode 的分段：能力在前、基础在后）。 */
 const GROUP_LABEL: Record<number, string> = {
@@ -30,18 +31,42 @@ function themeLabelOf(): string {
   return THEME_OPTIONS.find((o) => o.value === t)?.label ?? t;
 }
 
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+/** 子页 → 左列分区名（只有"从别处直接打开某子页"时才需要）。 */
+const SUBPAGE_LABEL: Partial<Record<SettingsSubPage, string>> = {
+  models: "模型",
+  general: "通用",
+  profile: "本机档案",
+  account: "账号",
+  plugins: "插件·技能·伙伴",
+  team: "团队空间",
+  knowledge: "知识库",
+  memory: "记忆",
+  phone: "手机遥控电脑",
+  about: "关于",
+};
+
+export function SettingsDialog({
+  onClose,
+  initialPage,
+}: {
+  onClose: () => void;
+  /**
+   * F-03：从任务页的"没有可用通道"卡片一键进来时，直接落在模型页。
+   * 省略 = 主列表（原来的行为）。
+   */
+  initialPage?: SettingsSubPage;
+}) {
   /*
    * 记忆面板的开合与真实条数。
    *
    * 条数从 store 取 —— 写死一个"已启用"是之前那个错误说法的来源之一。
    */
   /** 当前在设置的哪个子页（null = 显示主列表）。 */
-  const [subPage, setSubPage] = useState<SettingsSubPage | null>(null);
+  const [subPage, setSubPage] = useState<SettingsSubPage | null>(initialPage ?? null);
   /** 分区搜索词（ZCode 的 `SettingsSearchInput` 的最小可用版）。 */
   const [setQuery, setSetQuery] = useState("");
   /** 当前分区名（面包屑用）—— 点哪一项就记哪个，不靠 subPage 反查（一个分区可能开多个子页）。 */
-  const [sectionLabel, setSectionLabel] = useState("");
+  const [sectionLabel, setSectionLabel] = useState(initialPage ? (SUBPAGE_LABEL[initialPage] ?? "") : "");
   const memCount = useMemoryStore((s) => s.lib.entries.length);
   /** 记忆开关（列表里那一行的 value 用它）。 */
   const memOn = useMemoryStore((s) => s.lib.enabled !== false);
@@ -374,6 +399,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                  * 「开启新话题」= 回到「新工作任务」的空上下文状态（§182）。
                  * 用视图切换而不是"再造一个空任务"：后者会在历史里留一条空任务。
                  */
+                useWorkbenchStore.getState().setView("home");
+                setSubPage(null);
+                onClose();
+              }}
+              /* F-01：清掉完成/跳过标记 → 关设置 → 回首页，向导立刻回来 */
+              onReopenGuide={() => {
+                reopenSetup();
                 useWorkbenchStore.getState().setView("home");
                 setSubPage(null);
                 onClose();

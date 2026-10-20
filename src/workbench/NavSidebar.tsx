@@ -90,9 +90,18 @@ export function NavSidebar() {
   const setView = useWorkbenchStore((s) => s.setView);
   const openTask = useWorkbenchStore((s) => s.openTask);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * F-03：从别处直接打开某个设置子页（例如任务页的「去选模型」）。
+   * `null` = 设置主列表（原来的行为）。
+   */
+  const [settingsPage, setSettingsPage] = useState<import("./SettingsPages").SettingsSubPage | null>(null);
   /* 输入区的「管理模型」要能打开设置（见 Composer 那处说明） */
   useEffect(() => {
-    const onOpen = () => setSettingsOpen(true);
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ page?: import("./SettingsPages").SettingsSubPage }>).detail;
+      setSettingsPage(detail?.page ?? null);
+      setSettingsOpen(true);
+    };
     window.addEventListener("dsh-open-settings", onOpen);
     return () => window.removeEventListener("dsh-open-settings", onOpen);
   }, []);
@@ -430,10 +439,18 @@ export function NavSidebar() {
       {accountMenuOpen ? (
         <AccountMenu
           onClose={() => setAccountMenuOpen(false)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => {
+            setSettingsPage(null);
+            setSettingsOpen(true);
+          }}
         />
       ) : null}
-      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? (
+        <SettingsDialog
+          initialPage={settingsPage ?? undefined}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
 
       {/* 行内 ⋯ 菜单：置顶/取消置顶、重命名、归入项目、移出 */}
       {rowMenu ? (

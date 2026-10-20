@@ -59,23 +59,38 @@ try {
   if (!out.modelStepActive) throw new Error("向导没有落在「选模型」那一步（有 key 时第 1 步应被跳过）");
 
   /*
-   * 布局：向导与首页是**上下**关系（不是左右两列）。
-   * ⚠️ 必须在**向导还开着**的时候量 —— 走完向导它就从 DOM 里消失了。
-   * 防的坏：`.wb-main` 是横排 flex，向导直接做兄弟会占一列，
-   * 首页被挤成窄条、画布被压到右边缘（2026-10-19 截图实测）。
+   * F-01：**首屏只留一个主动作** —— 向导显示期间首页主体不渲染。
+   * （旧行为是"向导在上、首页在下"并列，首屏 31 个可点元素在两个主动作之间抢注意力。）
    */
   const shell = page.locator('[data-testid="wb-home-shell"]');
   out.shellVisible = (await shell.count()) > 0;
-  const homeBox = await page.locator('[data-testid="wb-home"]').boundingBox();
+  out.homeHiddenWhileGuide = (await page.locator('[data-testid="wb-home"]').count()) === 0;
   const cardBox = await guide.locator(".wb-firstrun-card").boundingBox();
-  out.homeWidth = homeBox ? Math.round(homeBox.width) : 0;
   out.guideHeight = cardBox ? Math.round(cardBox.height) : 0;
-  /* 首页要有正经可用宽度（截图里被挤到 ~300px 就是坏的） */
-  out.homeWideEnough = out.homeWidth >= 600;
-  /* 向导卡不该被拉成全高 */
-  out.guideCompact = out.guideHeight > 0 && out.guideHeight < 500;
+  out.guideCardVisible = out.guideHeight > 0;
   /* 向导开着时的样子（证据：给人看的，不是断言） */
   await shot(page, ".verify/firstrun-guide.png");
+
+  /*
+   * F-01 的逃生门：「稍后再说」→ 设置 → 通用 → 重新运行配置向导 → 向导回来。
+   * 缺陷形状：旧版点一次就写死"永不出现"，设置里没有重开入口。
+   */
+  await page.locator('[data-testid="wb-firstrun-skip"]').click();
+  await page.waitForTimeout(800);
+  out.skipShowsHome = (await page.locator('[data-testid="wb-home"]').count()) === 1;
+  out.skipHidesGuide = (await page.locator('[data-testid="wb-firstrun"]').count()) === 0;
+
+  await page.locator('[data-testid="wb-account"]').click();
+  await page.waitForTimeout(300);
+  await page.locator('[data-testid="wb-acct-settings"]').click();
+  await page.waitForTimeout(500);
+  await page.locator('[data-testid="wb-set-通用"]').click();
+  await page.waitForTimeout(500);
+  await page.locator('[data-testid="wb-setpage-reopen-guide"]').click();
+  await page.waitForTimeout(1200);
+  out.reopenShowsGuide = (await page.locator('[data-testid="wb-firstrun"]').count()) === 1;
+  out.reopenHidesHome = (await page.locator('[data-testid="wb-home"]').count()) === 0;
+  if (out.reopenShowsGuide) await shot(page, ".verify/firstrun-reopened.png");
 
   /* 选一个模型并走完 */
   const select = page.locator('[data-testid="wb-firstrun-model"]');
@@ -135,9 +150,12 @@ const checks = [
   ["上下文表显示按窗口推导的预算", out.meterHasBudget === true],
   ["上下文表不写「未记录」", out.meterNotUnknown === true],
   ["首屏默认身份是编码", out.defaultCoding === true],
-  ["首页外壳是上下布局（向导在首页上方）", out.shellVisible === true],
-  ["首页有可用宽度（≥600px，没有被向导挤成窄条）", out.homeWideEnough === true],
-  ["向导卡只占内容高度（<500px，没有被拉成全高）", out.guideCompact === true],
+  ["首页外壳存在", out.shellVisible === true],
+  ["⭐ 向导显示期间首页主体不渲染（首屏只有一个主动作）", out.homeHiddenWhileGuide === true],
+  ["向导卡片真的画出来了", out.guideCardVisible === true],
+  ["⭐「稍后再说」之后首页回来、向导消失", out.skipShowsHome === true && out.skipHidesGuide === true],
+  ["⭐ 设置 → 通用 → 重新运行配置向导：向导回来", out.reopenShowsGuide === true],
+  ["重开之后首页主体再次让位", out.reopenHidesHome === true],
 ];
 
 if (out.error) process.stdout.write(`\n异常：${out.error}\n`);
