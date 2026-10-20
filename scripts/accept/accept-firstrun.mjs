@@ -39,7 +39,8 @@ try {
     process.exit(1);
   }
   const browser = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
-  const page = await waitForPage(browser);
+  /* 这条**就是要验向导**：别让 harness 替我们点掉它 */
+  const page = await waitForPage(browser, 20000, { keepFirstRun: true });
   if (!page) throw new Error(NO_PAGE_HINT);
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
   await page.waitForTimeout(1500);

@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, expandComposerMore } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, expandComposerMore, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**AI 文档的操作条**（§153）—— 缩写 / 扩写 / 润色 / 总结概括。
@@ -46,6 +46,7 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);

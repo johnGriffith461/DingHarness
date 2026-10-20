@@ -12,7 +12,7 @@
 //   ③ 命中的任务**点了真的进那个任务**（任务视图打开，且进的是那一条）；
 //   ④ 搜一个不可能出现的词 → 如实说「没搜到」（不是空列表糊过去）。
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, failOnMarks, finishedTurns, freshDir, killTree, pickPort, verdict, waitTurnEnd } from "./harness.mjs";
+import { bootApp, connectWithRetry, failOnMarks, finishedTurns, freshDir, killTree, pickPort, verdict, waitTurnEnd, dismissFirstRunIfShown } from "./harness.mjs";
 
 /* ⚠️ 审计 G15 的口径：只印 ✗ 不改退出码的脚本等于没测 */
 failOnMarks();
@@ -33,6 +33,7 @@ const browser = await connectWithRetry(chromium, `http://127.0.0.1:${booted.port
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 20_000 });
+await dismissFirstRunIfShown(page);
 await page.waitForTimeout(1500);
 
 const bad = [];

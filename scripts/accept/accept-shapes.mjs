@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openCanvas, shot } from "./harness.mjs";
+import { connectWithRetry, openCanvas, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 形状节点端到端验收（阶段 8.3）。
@@ -38,6 +38,7 @@ async function boot(port) {
   const pages = browser.contexts()[0].pages();
   const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
   await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1800);
   await openCanvas(page);
   await page.waitForTimeout(1500);

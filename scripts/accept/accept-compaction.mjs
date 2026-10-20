@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**上下文压缩**（§149）。
@@ -51,11 +51,13 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /* 把保留额度压到 30 token（默认 20000）—— 只影响"什么时候压" */
   await page.evaluate(() => localStorage.setItem("dsh-canvas.compact-keep-tokens", "30"));
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   out.knob = await page.evaluate(() => localStorage.getItem("dsh-canvas.compact-keep-tokens"));
 
   const assistantCount = () => page.locator(".wb-assistant-text").count();

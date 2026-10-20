@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
-import { bootApp, connectWithRetry, freshDir, killTree, shot, expandComposerMore } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot, expandComposerMore, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**AI 阅读**（§155，对应 `chat/read-web`）。
@@ -74,6 +74,7 @@ try {
   let ctx = b.contexts()[0];
   let page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /* ── ① 入口 ── */
   await page.locator('[data-testid="wb-nav-home"]').click();
@@ -182,6 +183,7 @@ try {
     ctx = b.contexts()[0];
     page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
     await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+    await dismissFirstRunIfShown(page);
     await expandComposerMore(page);
     await page.locator('[data-testid="wb-composer-add"]').click();
     await page.waitForTimeout(300);

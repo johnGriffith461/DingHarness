@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**子智能体**（§150）。
@@ -44,6 +44,7 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /*
    * ⚠️ 档位决定"汇合"能不能看出来（这是 §144 放行路径的真实边界）：
@@ -56,6 +57,7 @@ try {
     await page.evaluate((m) => localStorage.setItem("dsh-canvas.confirm-mode", m), mode);
     await page.reload();
     await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+    await dismissFirstRunIfShown(page);
   };
   const toolLines = () =>
     page.evaluate(() =>

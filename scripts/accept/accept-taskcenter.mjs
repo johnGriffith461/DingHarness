@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, pickPort, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, pickPort, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**任务中心**（§154，对应 `chat/task-center`）。
@@ -99,6 +99,7 @@ try {
   let ctx = b.contexts()[0];
   let page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /* ── ① 入口与三块 ── */
   out.entryExists = (await page.locator('[data-testid="wb-center-open"]').count()) > 0;
@@ -196,6 +197,7 @@ try {
     ctx = b.contexts()[0];
     page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
     await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+    await dismissFirstRunIfShown(page);
     await page.locator('[data-testid="wb-center-open"]').click();
     await page.waitForTimeout(1200);
     out.pinnedMark = await page.evaluate(

@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openCanvas, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, openCanvas, pickPort, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 11.28 验收：画布节点右键菜单。
@@ -36,6 +36,7 @@ const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+await dismissFirstRunIfShown(page);
 await page.waitForTimeout(1500);
 
 const report = {};
@@ -46,6 +47,7 @@ const countNodes = () => page.locator(".react-flow__node").count();
 const reset = async () => {
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1200);
   const open = await page.locator('[data-testid="wb-canvas"]').count();
   if (open === 0) {

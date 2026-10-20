@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**多轮对话（在同一段对话里接着聊）**（§147）。
@@ -55,6 +55,7 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /*
    * ⚠️ 闸门档位设成**全部允许**（2026-10-16，收进批跑时补）。
@@ -66,6 +67,7 @@ try {
   await page.evaluate(() => localStorage.setItem("dsh-canvas.confirm-mode", "全部允许"));
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   const assistantCount = () => page.locator(".wb-assistant-text").count();
   const lastAssistant = () =>

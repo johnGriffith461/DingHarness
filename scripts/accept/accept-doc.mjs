@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, expandComposerMore } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, expandComposerMore, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**AI 文档**（§153）—— 对应本体 `chat/new-doc` / `chat/write`。
@@ -57,6 +57,7 @@ try {
   let ctx = b.contexts()[0];
   let page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /* ── ① 入口：输入区的 + → 新建文档 ── */
   await page.locator('[data-testid="wb-nav-home"]').click();
@@ -169,6 +170,7 @@ try {
     ctx = b.contexts()[0];
     page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
     await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+    await dismissFirstRunIfShown(page);
     /* 重启后回到紧凑首页：+ 菜单在「更多」后面 */
     await expandComposerMore(page);
     await page.locator('[data-testid="wb-composer-add"]').click();

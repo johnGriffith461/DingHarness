@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, expandComposerMore, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, expandComposerMore, freshDir, killTree, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**创作广场**（§159，对应 `chat/coding`）。
@@ -73,6 +73,7 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /* ── ① 入口 ── */
   await page.locator('[data-testid="wb-nav-home"]').click();

@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /** 验：设置里「本机档案」→ 个人资料页、「账号」→ 账号页，且能返回。 */
 const DATA = ".verify/setp-data";
@@ -29,6 +29,7 @@ try {
   const b = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2200);
 
   await page.locator('[data-testid="wb-account"]').click();

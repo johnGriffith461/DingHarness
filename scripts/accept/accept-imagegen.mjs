@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, killTree, openCanvas, pickPort, shot, verdict } from "./harness.mjs";
+import { bootApp, connectWithRetry, killTree, openCanvas, pickPort, shot, verdict, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 图片生成端到端验收（阶段 9.2 / 9.3 的图）。
@@ -38,6 +38,7 @@ async function boot() {
   const pages = browser.contexts()[0].pages();
   const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
   await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1800);
   await openCanvas(page);
   await page.waitForTimeout(1500);

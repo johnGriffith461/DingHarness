@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：左栏的全局快捷键**真的能用**（§136）。
@@ -53,6 +53,7 @@ await waitForPort(__port, 40000);
   const b = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1500);
 
   const has = async (sel) => (await page.locator(sel).count()) > 0;

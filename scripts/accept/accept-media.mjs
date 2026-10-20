@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openSummary, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, openSummary, pickPort, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 11.13 验收：右栏「图片与视频」画廊 + 另两个 tab 的如实空态。
@@ -45,6 +45,7 @@ const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+await dismissFirstRunIfShown(page);
 await page.waitForTimeout(1500);
 
 const report = {};

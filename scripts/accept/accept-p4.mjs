@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, killLeftovers, killTree, openCanvas, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, killLeftovers, killTree, openCanvas, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 持久化端到端验收（PLAN 4.2 / 4.3 / 4.5）。
@@ -64,6 +64,7 @@ async function boot(port) {
   const pages = browser.contexts()[0].pages();
   const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
   await page.waitForSelector('[data-testid="wb"]', { timeout: 25000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1800);
   await openCanvas(page);
   await page.waitForTimeout(1500);

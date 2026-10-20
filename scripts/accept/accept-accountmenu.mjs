@@ -1,7 +1,7 @@
 ﻿import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, pickPort, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：账号菜单 + 「外观设置」子菜单（三选一）。
@@ -37,6 +37,7 @@ try {
   browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2200);
 
   const state = () =>
@@ -147,6 +148,7 @@ try {
   // 5) 刷新 → 记住
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2500);
   out.afterReload = await state();
 

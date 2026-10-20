@@ -242,16 +242,61 @@ export async function waitForPort(port, timeoutMs = 30000) {
  * @param timeoutMs 最多等多久
  * @returns 页面；拿不到返回 null（**由调用方决定怎么报**）
  */
-export async function waitForPage(browser, timeoutMs = 20000) {
+/**
+ * F-01（2026-10-20）：**首屏只剩配置向导**时，先把向导让开。
+ *
+ * 干净数据目录启动后首页主体不渲染（首屏只有一个主动作）——
+ * 大部分验收脚本要操作的是输入区/首页，所以"启动应用"这件事里必须包含
+ * "像真实用户那样点一次『稍后再说』"。这不是绕过 UI：点的是用户会点的同一颗按钮。
+ *
+ * @returns 是否真的点掉了（本来没有向导 → false）
+ */
+export async function dismissFirstRunIfShown(page) {
+  /*
+   * 先等应用**把首屏画出来**再判断：CDP 上刚有页面时 React 还没挂载，
+   * 直接 `count()` 会得到 0 而误判"没有向导"（脚本随后才看到它，已经晚了）。
+   */
+  await page
+    .locator('[data-testid="wb-home"], [data-testid="wb-firstrun"]')
+    .first()
+    .waitFor({ timeout: 15000 })
+    .catch(() => undefined);
+  const guide = page.locator('[data-testid="wb-firstrun"]');
+  if ((await guide.count().catch(() => 0)) === 0) return false;
+  const skip = page.locator('[data-testid="wb-firstrun-skip"]');
+  if ((await skip.count().catch(() => 0)) === 0) return false;
+  await skip.click().catch(() => undefined);
+  /* 向导退场 → 首页挂载，给它一点时间 */
+  await page
+    .locator('[data-testid="wb-home"], [data-testid="wb-firstrun"]')
+    .first()
+    .waitFor({ timeout: 5000 })
+    .catch(() => undefined);
+  await sleep(400);
+  return true;
+}
+
+/**
+ * @param opts.keepFirstRun **要验首跑向导本身**的脚本传它 ——
+ *   默认会把向导点掉（见 `dismissFirstRunIfShown` 的理由）。
+ */
+export async function waitForPage(browser, timeoutMs = 20000, opts = {}) {
   const deadline = Date.now() + timeoutMs;
+  let page = null;
   while (Date.now() < deadline) {
     for (const ctx of browser.contexts()) {
       const pages = ctx.pages();
-      if (pages.length) return pages[0];
+      if (pages.length) {
+        page = pages[0];
+        break;
+      }
     }
+    if (page) break;
     await sleep(400);
   }
-  return null;
+  if (!page) return null;
+  if (!opts.keepFirstRun) await dismissFirstRunIfShown(page);
+  return page;
 }
 
 /**

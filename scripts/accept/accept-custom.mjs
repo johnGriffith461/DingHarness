@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { connectWithRetry, openPluginsPage, pickPort, readStoreFile, waitForPort } from "./harness.mjs";
+import { connectWithRetry, openPluginsPage, pickPort, readStoreFile, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 11.34 验收：添加自定义能力，并确认它**真的走到任务侧**。
@@ -36,6 +36,7 @@ const browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
 const pages = browser.contexts()[0].pages();
 const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
 await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+await dismissFirstRunIfShown(page);
 await page.waitForTimeout(1800);
 
 const report = {};
@@ -179,6 +180,7 @@ try {
   const b2 = await connectWithRetry(chromium, "http://127.0.0.1:9751");
   const p2 = b2.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await p2.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(p2);
   await p2.waitForTimeout(2000);
   report.afterRestartChips = await p2.$$eval(".wb-composer-chip", (els) => els.map((e) => e.textContent.trim()));
   report.afterRestartInstalled = await p2.locator('[data-testid="wb-installed-count"]').textContent().catch(() => null);

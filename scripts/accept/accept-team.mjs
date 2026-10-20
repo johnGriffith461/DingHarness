@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, pickPort, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验：设置 →「团队空间」这一页**真能改账本**（V5-3 的产品面）。
@@ -68,6 +68,7 @@ try {
   const b = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2200);
 
   /* 打开设置 → 团队空间 */

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, finishedTurns, freshDir, readStoreFile, killTree, shot, waitTurnEnd } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, readStoreFile, killTree, shot, waitTurnEnd, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**会话检查点**（§151）—— 回退与分叉。
@@ -52,11 +52,13 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   /* ⚠️ 闸门设成全部允许（见文件头那段说明）：第一轮那个写动作必须真的执行 */
   await page.evaluate(() => localStorage.setItem("dsh-canvas.confirm-mode", "全部允许"));
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   const users = () => page.locator(".wb-bubble-user").count();
   const assistants = () => page.locator(".wb-assistant-text").count();

@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, openPluginsPage, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, openPluginsPage, readStoreFile, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 插件安装（11.7）与项目分组（11.8）的验收。
@@ -55,6 +55,7 @@ async function launch(port) {
   const pages = browser.contexts()[0].pages();
   const page = pages.find((p) => !p.url().startsWith("devtools://")) ?? pages[0];
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1500);
   return { child: booted.child, browser, page, getLog: booted.getLog };
 }

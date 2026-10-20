@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { connectWithRetry, freshDir, killTree, pickPort, readStoreFile, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, freshDir, killTree, pickPort, readStoreFile, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：记忆（对应本体 `chat/memory/list|clear|delete`）。
@@ -44,6 +44,7 @@ try {
   browser = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2200);
 
   await openSettings(page);
@@ -81,6 +82,7 @@ try {
   // 刷新 —— 关键一步
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2500);
   await openSettings(page);
   out.afterReloadRowValue = await page.evaluate(

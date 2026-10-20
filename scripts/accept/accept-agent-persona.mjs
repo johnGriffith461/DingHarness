@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd, expandComposerMore } from "./harness.mjs";
+import { bootApp, connectWithRetry, finishedTurns, freshDir, killTree, shot, waitTurnEnd, expandComposerMore, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**AI 智能体的人设真的生效**（§156）。
@@ -60,6 +60,7 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
 
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(600);

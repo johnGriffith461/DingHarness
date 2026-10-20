@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：「管理历史对话」页（本体路由 `chat/thread/list`）。
@@ -77,6 +77,7 @@ try {
   const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2000);
 
   // 从「最近」那一栏的入口进去
@@ -118,6 +119,7 @@ try {
 
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2200);
   await page.locator('[data-testid="wb-threads-open"]').click();
   await page.waitForTimeout(800);

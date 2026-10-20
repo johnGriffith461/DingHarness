@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { bootApp, connectWithRetry, freshDir, killTree, readAllSessionRecords, shot, verdict } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readAllSessionRecords, shot, verdict, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**会话事件日志真的记下了"模型这一轮看见了什么"**（C2 / INV-1）。
@@ -51,6 +51,7 @@ try {
   const ctx = b.contexts()[0];
   const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1200);
 
   const assistantCount = () => page.locator(".wb-assistant-text").count();

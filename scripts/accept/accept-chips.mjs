@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { connectWithRetry, expandComposerMore, pickPort, shot, waitForPort } from "./harness.mjs";
+import { connectWithRetry, expandComposerMore, pickPort, shot, waitForPort, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：输入区三个 chip（用户报的三个问题）。
@@ -36,6 +36,7 @@ try {
   const b = await connectWithRetry(chromium, "http://127.0.0.1:" + __port);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2200);
   /* C-01：项目 / 插件收在首页的「更多」后面 */
   await expandComposerMore(page);
@@ -86,6 +87,7 @@ try {
    */
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2000);
   /* 刷新后首页回到紧凑态：后面的项目/插件/技能面板步骤要重新展开「更多」 */
   await expandComposerMore(page);

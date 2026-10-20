@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot } from "./harness.mjs";
+import { bootApp, connectWithRetry, freshDir, killTree, readStoreFile, shot, dismissFirstRunIfShown } from "./harness.mjs";
 
 /**
  * 验收：**工具协议端到端**（§141）。
@@ -54,6 +54,7 @@ try {
   const b = await connectWithRetry(chromium, `http://127.0.0.1:${PORT}`);
   const page = b.contexts()[0].pages().find((p) => !p.url().startsWith("devtools://"));
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(2000);
 
   /*
@@ -67,6 +68,7 @@ try {
   await page.evaluate(() => localStorage.setItem("dsh-canvas.confirm-mode", "全部允许"));
   await page.reload();
   await page.waitForSelector('[data-testid="wb"]', { timeout: 20000 });
+  await dismissFirstRunIfShown(page);
   await page.waitForTimeout(1000);
 
   /*
