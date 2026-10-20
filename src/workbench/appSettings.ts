@@ -50,6 +50,8 @@ type State = {
   setNavCollapsed: (value: boolean) => Promise<void>;
   /** 追加一条「总是允许」规则（与已有规则一模一样就不重复加）。 */
   addRule: (rule: PermissionRuleWire) => Promise<boolean>;
+  /** F-04：删除一条规则（「总是允许」攒下的那些得能撤销）。 */
+  removeRule: (rule: PermissionRuleWire) => Promise<boolean>;
   /**
    * 改一个动作的键位。
    *
@@ -205,6 +207,31 @@ export const useAppSettings = create<State>()((set, get) => ({
       set({
         rules: before,
         note: `没能记住这条权限规则：${error instanceof Error ? error.message : String(error)}`,
+      });
+      return false;
+    }
+  },
+
+  /**
+   * 删除一条规则（F-04）。
+   *
+   * 「总是允许」原来只写不读 —— 用户找不到怎么撤销，于是"总是"变成了永久。
+   * 这里按 `action|resource|effect` 三件套删（与 `addRule` 的去重键同一个口径），
+   * 写盘失败就回滚内存，界面不会显示一条已经删掉的规则。
+   */
+  removeRule: async (rule) => {
+    const key = (r: PermissionRuleWire) => `${r.action}|${r.resource ?? "*"}|${r.effect}`;
+    const before = get().rules;
+    const next = before.filter((r) => key(r) !== key(rule));
+    if (next.length === before.length) return false;
+    set({ rules: next, note: "" });
+    try {
+      await persist(get());
+      return true;
+    } catch (error) {
+      set({
+        rules: before,
+        note: `没能删除这条权限规则：${error instanceof Error ? error.message : String(error)}`,
       });
       return false;
     }

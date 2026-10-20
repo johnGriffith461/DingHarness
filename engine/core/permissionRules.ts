@@ -229,15 +229,25 @@ export function ruleFromApproval(
    * `git status` 的"总是允许"不该变成"所有 git 都允许"。
    * 目录类资源放宽到所在目录：用户点"总是允许写这里"，意图是"这个目录可以写"。
    */
+  const isMcp = input.action.startsWith("mcp__");
   const pattern =
     input.action === "run_command"
       ? resource
-      : input.action.startsWith("mcp__")
+      : isMcp
         ? resource
         : resource.replace(/[/\\][^/\\]*$/, "") || resource;
+  /*
+   * ⚠️ 只有**文件路径**类资源才放宽到目录（`dir/**`）。
+   *
+   * 命令是"这一条原文"；MCP 的资源是**服务器名**（`resourceOf` 已经取到 server）——
+   * 给它追加 `/**` 会变成 `github/**`，而实际资源是 `github`，`globToRegExp` 匹配不上：
+   * 用户点了「总是允许」，规则写进去了、却永远不会生效（F-04 的红测试抓到的）。
+   */
   return {
     action: input.action,
-    ...(pattern ? { resource: input.action === "run_command" ? pattern : `${pattern.replace(/[/\\]+$/, "")}/**` } : {}),
+    ...(pattern
+      ? { resource: input.action === "run_command" || isMcp ? pattern : `${pattern.replace(/[/\\]+$/, "")}/**` }
+      : {}),
     effect: "allow",
     ...(ttlDays > 0 ? { expiresAt: now + ttlDays * 86_400_000 } : {}),
     note: "用户在审批时选了「总是允许」",

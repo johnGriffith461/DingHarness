@@ -14,8 +14,31 @@ import { normalizeConfirmMode, type ConfirmMode } from "@shared/ipc";
 
 const KEY = "dsh-canvas.confirm-mode";
 
+/**
+ * 档位变化通知（F-04）。
+ *
+ * 原来档位只存在 localStorage，`TaskView` 这类"不在输入区里"的组件读一次就永远不会更新 ——
+ * 于是"点了本会话自动接受"之后，逃生门卡片还挂在那里。保存处统一通知，订阅方重渲染。
+ */
+const listeners = new Set<() => void>();
+
+/**
+ * **只在本会话生效**的档位（F-04 的「本会话自动接受」）。
+ *
+ * 为什么不写 localStorage：那里的值**跨重启**还在，而按钮上写的是"本会话"——
+ * 写进去就等于骗人（用户重启后会发现所有编辑都不再问）。
+ * 模块级变量在进程重启时自然消失，正是"本会话"的语义。
+ */
+let sessionOverride: ConfirmMode | null = null;
+
+export function subscribeConfirmMode(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 /** 读出当前档位；没存过或存坏了都回落到「按需确认」（Phase 11.5 的安全默认档）。 */
 export function readConfirmMode(): ConfirmMode {
+  if (sessionOverride) return sessionOverride;
   try {
     return normalizeConfirmMode(localStorage.getItem(KEY));
   } catch {
@@ -24,12 +47,29 @@ export function readConfirmMode(): ConfirmMode {
   }
 }
 
-/** 记住档位。 */
-export function saveConfirmMode(mode: ConfirmMode): void {
-  try {
-    localStorage.setItem(KEY, mode);
-  } catch {
-    /* 存不进去也不影响这次会话里已经生效的选择 */
+/**
+ * 记住档位。
+ *
+ * @param opts.sessionOnly `true` = 只改本进程，不写盘（F-04 的逃生门按钮）。
+ *   普通改档位（输入区 chip / 首跑向导）仍然落盘 —— 那是用户的显式长期选择。
+ */
+export function saveConfirmMode(mode: ConfirmMode, opts: { sessionOnly?: boolean } = {}): void {
+  if (opts.sessionOnly) {
+    sessionOverride = mode;
+  } else {
+    sessionOverride = null;
+    try {
+      localStorage.setItem(KEY, mode);
+    } catch {
+      /* 存不进去也不影响这次会话里已经生效的选择 */
+    }
+  }
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {
+      /* 一个订阅者坏了不该带走别的 */
+    }
   }
 }
 

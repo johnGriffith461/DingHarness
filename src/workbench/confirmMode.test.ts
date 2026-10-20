@@ -44,4 +44,18 @@ describe("审批档位的持久化", () => {
     saveConfirmMode("每步确认");
     expect(localStorage.getItem("dsh-canvas.confirm-mode")).toBe("每步确认");
   });
+
+  /*
+   * F-04（2026-10-20）：确认疲劳逃生门上的「本会话自动接受」。
+   * 按钮承诺的是**本会话** —— 所以只改内存，不写 localStorage（重启回原档）。
+   */
+  it("⭐ sessionOnly 只在本进程生效，不写盘", () => {
+    saveConfirmMode("按需确认");
+    saveConfirmMode("接受编辑", { sessionOnly: true });
+    expect(readConfirmMode()).toBe("接受编辑");
+    expect(localStorage.getItem("dsh-canvas.confirm-mode"), "sessionOnly 写了盘 = 按钮在撒谎").toBe("按需确认");
+    /* 再做一次普通保存 = 显式长期选择，覆盖本会话档位 */
+    saveConfirmMode("按需确认");
+    expect(readConfirmMode()).toBe("按需确认");
+  });
 });

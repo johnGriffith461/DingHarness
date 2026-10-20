@@ -5,7 +5,7 @@
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Blocks, Check, ChevronDown, Paperclip, Plus, Sparkles, X } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { draftKeyOf } from "./composerDraft";
@@ -39,7 +39,7 @@ import { useLibraryStore } from "./libraryStore";
 import { findItemIn } from "./libraryStore";
 import { type ConfirmMode, type SessionSearchHit } from "@shared/ipc";
 import { useDocStore } from "./docStore";
-import { confirmOptionState, readConfirmMode, saveConfirmMode } from "./confirmMode";
+import { confirmOptionState, readConfirmMode, saveConfirmMode, subscribeConfirmMode } from "./confirmMode";
 import { ComposerMoreButton } from "./ComposerMoreButton";
 import { ComposerSendButton } from "./ComposerSendButton";
 import SkillPanel from "./SkillPanel";
@@ -230,10 +230,14 @@ export function Composer({
    *    用户选了「每步确认」、离开再回来就变回去了；
    * ② 选择时写回 —— 主进程的工具执行层要靠它做判定（随请求过界）。
    */
-  const [confirmMode, setConfirmModeState] = useState<ConfirmMode>(() => readConfirmMode());
+  /*
+   * F-04：档位可能是**别处**改的（确认卡上的「本会话自动接受」）——
+   * 原来这里只有 `useState` 初值，所以按钮点完 chip 还显示旧档位。
+   * 现在订阅同一份存储：谁改都立刻反映到 chip 上。
+   */
+  const confirmMode = useSyncExternalStore(subscribeConfirmMode, readConfirmMode, readConfirmMode);
   const setConfirmMode = (mode: ConfirmMode): void => {
     saveConfirmMode(mode);
-    setConfirmModeState(mode);
   };
 
   /* ⚠️ 2026-10-16：「模型 · 思考」那颗 chip 搬进 `ModelChip.tsx` 了 —— 它自己带着下拉与落盘，
