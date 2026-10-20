@@ -71,7 +71,15 @@ for (const file of ["package.json", "pnpm-lock.yaml", ".npmrc"]) {
   cpSync(path.join(ROOT, file), path.join(DEPS, file));
 }
 step("装生产依赖到 .verify/app-deps（--prod，不带 devDependencies）");
-execFileSync("pnpm", ["install", "--prod", "--frozen-lockfile", "--ignore-scripts"], {
+/*
+ * ⚠️ `--ignore-workspace` 不能省（F-05 实测，2026-10-20）。
+ *
+ * pnpm 10 从**任意子目录**往上认 `pnpm-workspace.yaml`，于是这条命令会在仓库根
+ * 执行、并且 `--prod` 会把根 `node_modules` 里的 devDependencies **整批删掉** ——
+ * 紧接着 `electron-builder` 就 MODULE_NOT_FOUND。`--ignore-workspace` 让它
+ * 只认 `.verify/app-deps` 这一份自己的 package.json。
+ */
+execFileSync("pnpm", ["install", "--prod", "--frozen-lockfile", "--ignore-scripts", "--ignore-workspace"], {
   cwd: DEPS,
   stdio: "inherit",
   shell: true,

@@ -326,18 +326,21 @@ jobs:
   accept:
     needs: gates
     runs-on: windows-latest
-    timeout-minutes: 40
+    # F-05：这一步现在还要打包（electron-builder）并跑装机版验收，比原来多约 5–8 分钟。
+    timeout-minutes: 55
     env:
       CI: "true"
       DSH_NO_REAL_MODEL: "1"
       DSH_ACCEPT_TIMEOUT_MS: "90000"
-      # 批跑自己的假通道与凭据由 `scripts/verify-acceptances.mjs` 接管（见它的注释）
+      # F-05：这一批里加了四条本轮新卡（首跑 / 工作目录 / 无通道诊断 / 确认疲劳）——
+      # 它们都不调模型、单条 <90s。`accept-installed` 单独一步（要打包产物）。
       DSH_ACCEPT_ONLY: >-
         accept-chips.mjs,accept-panels.mjs,accept-windowctl.mjs,accept-memory.mjs,
         accept-shortcuts.mjs,accept-suggestions.mjs,accept-taskcenter.mjs,
         accept-searchhistory.mjs,accept-material.mjs,accept-sessionlog.mjs,
-        accept-abort.mjs,accept-kvstore.mjs,
-        accept-cli-exit.mjs
+        accept-abort.mjs,accept-kvstore.mjs,accept-cli-exit.mjs,
+        accept-firstrun.mjs,accept-workspace-settings.mjs,
+        accept-route-diagnosis.mjs,accept-confirm-fatigue.mjs
     steps:
       - name: 检出
         uses: actions/checkout@v7
@@ -368,6 +371,17 @@ jobs:
 
       - name: 验收子集（自带假通道 + 零出网闸）
         run: node scripts/verify-acceptances.mjs
+
+      - name: 打包装机版（F-05：win-unpacked 进验收门）
+        # `pnpm package:win` 会同时产出 NSIS 安装包与 win-unpacked；
+        # accept-installed 直接用 win-unpacked（不再走 NSIS 静默安装 —— 那条路从没在本机/CI 跑通过）。
+        #
+        # ⚠️ 这一步要 Electron 二进制（electron-builder 从 `node_modules/electron/dist` 拷）；
+        # 上面「下 Electron 二进制」那一步已经装过，所以不重复下载。
+        run: pnpm package:win
+
+      - name: 装机版 + 打包态数据迁移（accept-installed）
+        run: node scripts/accept/accept-installed.mjs
 
       - name: 失败时把批跑日志带上来
         if: failure()

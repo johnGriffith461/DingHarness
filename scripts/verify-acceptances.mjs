@@ -319,7 +319,15 @@ const CASES = [
   /* T-11..T-16：本机版边界说明 / 用量口径 / 团队路径 / 插件人数 / 权限文案 + 三条复现 */
   ["accept-trust-copy.mjs", "信任面文案（本机版说明 / 用量范围 / 团队路径 / 无人气数 / 权限人话 + 三条复现）"],
   ["accept-trust-ui.mjs", "信任面 UI（清空确认 / 记忆子页 / 档位单勾 / 首页计量不回显）"],
-  ["accept-firstrun.mjs", "首跑默认态（有 key 没模型仍落选模型 / chip 显示真实模型 / 预算按窗口 / 默认编码）"],
+  ["accept-firstrun.mjs", "首跑默认态（首屏只留向导 / 稍后再说可重开 / 选模型后 chip 与预算 / 默认编码）"],
+  /*
+   * F-02（2026-10-20）：设置里真的有了「工作目录」这一格。
+   * 预置 workspaces.json 等价于"用户点过系统目录选择器"（workspaceStore 自己写明的验收口径）；
+   * 断言授权时 runTool 读得到、撤销后立刻读不到。
+   */
+  ["accept-workspace-settings.mjs", "工作目录进设置（列表 / 撤销 / 授权时读得到 / 撤销后立刻读不到 / 话术指向设置）"],
+  ["accept-route-diagnosis.mjs", "无通道诊断（no_key / pinned_dead 两句不同诊断 + 按钮直达设置·模型页）"],
+  ["accept-confirm-fatigue.mjs", "确认疲劳逃生门（第 3 次提示 / 本会话接受编辑不落盘 / 重启回默认 / 规则表可删）"],
   ["accept-versions.mjs", "版本清单与对比（不调模型）"],
   /*
    * 消息操作栏的六个动作（11.19）—— 含「重新生成必须是同一次提问的重跑」。
@@ -426,11 +434,12 @@ const CASES = [
    * ⚠️ 单独 `pnpm verify:accept`（没打过包）时这三条会**报环境红**：
    * 它们的判词是「打包产物不存在 / 还没打包 / 装出来的那份不存在」，`classify` 按这些词
    * 归到 `environment` 那一类（**不静默通过**，也不假装是产品坏了）。
-   * 要全绿得先 `pnpm package:win`（`accept-installed` 还要先静默安装到 `.verify/instA`）。
+   * 要全绿得先 `pnpm package:win`（`accept-installed` 现在直接用 `release/win-unpacked`，
+   * 不再依赖 NSIS 静默安装 —— 见 F-05）。
    */
   ["accept-p6.mjs", "打包产物能起来（release/win-unpacked 的 exe：画布/工具条/标注/自动保存，且没漏 DEV 出口）"],
   ["accept-package.mjs", "打包产物齐不齐（setup.exe 在 + 体积 + 两处图标真的嵌进 PE + app.asar 里有主进程入口）"],
-  ["accept-installed.mjs", "装出来的那份能跑（静默安装到 .verify/instA 之后：外壳渲染 / 导航齐 / 两处交互能动 / 有写用户数据）"],
+  ["accept-installed.mjs", "装机版能跑（win-unpacked：外壳渲染 / 导航齐 / 两处交互能动 / 写新数据目录 / 旧数据迁移且不删旧 / 控制台无 error）"],
   /*
    * §135/§136 新增的三条。它们比上面那批**更抗环境干扰**：开头用 `.verify/harness.mjs`
    * 的 `freshDir()` —— 先杀掉上一轮的残留 Electron 再删数据目录，而不是直接 `rmSync`。

@@ -213,6 +213,15 @@ function migrateLegacyUserData(): void {
   }
 }
 
+/*
+ * F-05（2026-10-20）：**先定数据目录，再迁移**。
+ *
+ * 原来是反的：`migrateLegacyUserData()` 在 `configureDataDir()` 之前跑，
+ * 于是它永远只看系统默认 userData —— `DING_DATA_DIR` 覆盖（验收/便携模式）
+ * 对迁移完全不起作用，这条分支在自动化里**没法被测到**。
+ * 打包态无覆盖时 `configureDataDir()` 直接返回，行为与从前一致。
+ */
+configureDataDir();
 migrateLegacyUserData();
 
 bootMark("main 入口");

@@ -86,6 +86,12 @@ try {
   out.afterNewTopic = {
     settingsClosed: (await page.locator('[data-testid="wb-settings"]').count()) === 0,
     composer: (await page.locator('[data-testid="wb-composer-input"]').count()) > 0,
+    /*
+     * F-01：没钉模型的全新数据目录里，首页主体换成配置向导（首屏只有一个主动作）——
+     * 那同样是"新工作任务"这一屏。判据是"回到 home 外壳"，
+     * 而不是只认已配置状态下才有的输入框。
+     */
+    homeShell: (await page.locator('[data-testid="wb-home-shell"]').count()) > 0,
   };
   out.shot = await shot(page, "settings2.png");
 
@@ -157,7 +163,9 @@ try {
 
   /* ⑤ */
   if (!out.afterNewTopic?.settingsClosed) bad.push("点「开启新话题」之后设置窗口没关");
-  if (!out.afterNewTopic?.composer) bad.push("点「开启新话题」之后没回到新工作任务");
+  if (!out.afterNewTopic?.homeShell && !out.afterNewTopic?.composer) {
+    bad.push("点「开启新话题」之后没回到新工作任务");
+  }
 
   /* ⑥ */
   if (out.aboutTitle !== "关于 Ding Harness") bad.push(`关于页标题不对：${out.aboutTitle}`);
