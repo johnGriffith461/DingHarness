@@ -12,6 +12,7 @@ import {
   type RunState,
 } from "./core/events";
 import { toolArgsSummary } from "../shared/agentTools";
+import { approvalRecord } from "./core/gates";
 import { diffSnapshot, snapshotOf, type Snapshot, type SnapshotDiff } from "./core/snapshot";
 import { ledgerOf, rollup } from "./core/ledger";
 import { modelInfoOf } from "./runtime/models";
@@ -247,6 +248,14 @@ export type EngineRunRequest = {
    * 省略 = 不支持插话（老行为）。CLI 用 `ding steer` 写入队列，这里读它。
    */
   nextSteer?: () => string[];
+  /**
+   * F-06（2026-10-20）：要求模型用 `finish` 声明收尾。
+   *
+   * 编码任务（CLI `ding run` 与桌面 coding 模式）置真 —— 没 finish 就提醒，
+   * 最多两次；仍没有就返回 `unfinished`，宿主显式标「未声明完成」。
+   * 省略 = 老行为（只在改过文件时提醒一次）。
+   */
+  requireFinish?: boolean;
 };
 
 /** 一轮的结局。 */
@@ -287,6 +296,11 @@ export type EngineRunResult = {
   awaitingApproval?: { toolCallId: string; name: string };
   /** D1：这一轮有没有成功写过文件（CLI 的验证闭环用它决定要不要跑）。 */
   wroteFiles?: boolean;
+  /**
+   * F-06：完成提醒已经用完（最多 2 次）仍没有有效 `finish`。
+   * 宿主必须把最终答复显式标成「未声明完成」，不能让它看起来像已完成。
+   */
+  unfinished?: boolean;
 };
 
 export type Engine = {
@@ -508,7 +522,40 @@ export function createEngine(ports: EnginePorts): Engine {
         /* C3：拦住一次调用时的默认"待谁批" = 这段会话归谁（缺省仍是本机单用户） */
         ...(request.ownerActor ? { owner: request.ownerActor.id } : {}),
         /* A-03：CLI 注入的就地审批；桌面不注入 → 仍是 pending 载荷 */
-        ...(ports.approve ? { approve: ports.approve } : {}),
+        ...(ports.approve
+          ? {
+              approve: async (req: {
+                name: string;
+                input: unknown;
+                why?: string;
+                commandRisk?: unknown;
+                toolCallId?: string;
+              }) => {
+                const verdict = await ports.approve!(req);
+                /*
+                 * F-07（2026-10-20）：**就地审批也要留痕**。
+                 *
+                 * 桌面那条路在用户点「允许」时由主进程写 `approval` 记录；
+                 * CLI 的就地审批原来只在终端里问一句 —— 磁盘上什么都看不到。
+                 * 首小时指标要数"问了几次确认"，没有这条记录时 CLI 的答案恒为 0。
+                 * 用已有的 `approval` 记录类型（不新增事件类型），配对依据是 toolCallId。
+                 */
+                if (request.sessionId && req.toolCallId) {
+                  /* 官方形状走 `approvalRecord`（与桌面那条路同一个工厂，别手搓） */
+                  const line = verdict === "deny" ? `⚙ ${req.name}：你已拒绝` : `⚙ ${req.name}：已批准`;
+                  const decision = approvalRecord({
+                    toolCallId: req.toolCallId,
+                    name: req.name,
+                    approved: verdict !== "deny",
+                    line,
+                    decidedBy: LOCAL_USER.id,
+                  });
+                  await record({ ...decision, requestId, actor: LOCAL_USER } as LogInput);
+                }
+                return verdict;
+              },
+            }
+          : {}),
         /* B-01：「接受编辑」判断工作区要用（CLI 与桌面都从自己那份授权目录来） */
         ...(request.workdirs?.length ? { workdirs: [...request.workdirs] } : {}),
         turnEvidence,
@@ -535,6 +582,7 @@ export function createEngine(ports: EnginePorts): Engine {
           ...(request.onRawError ? { onRawError: request.onRawError } : {}),
           ...(request.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: request.stallTimeoutMs }),
           ...(request.nextSteer ? { nextSteer: request.nextSteer } : {}),
+          ...(request.requireFinish === true ? { requireFinish: true } : {}),
           turnEvidence,
           ...(request.useTools
             ? {
@@ -667,6 +715,7 @@ export function createEngine(ports: EnginePorts): Engine {
         requestId,
         ...(outcome.awaitingApproval ? { awaitingApproval: outcome.awaitingApproval } : {}),
         ...(outcome.wroteFiles ? { wroteFiles: true } : {}),
+        ...(outcome.unfinished ? { unfinished: true } : {}),
         ...(recordErrors.length ? { recordErrors } : {}),
       };
     },

@@ -184,6 +184,13 @@ export type ChatRequest = {
   maxSteps?: number;
   /** 会话 id（C2）：主进程据此把这一轮写进会话事件日志。只有发起方知道它属于哪段对话/任务；起标题这类附带请求不给。主进程会把它收窄成安全文件名再落盘。 */
   sessionId?: string;
+  /**
+   * F-06（2026-10-20）：编码任务要求模型用 `finish` 声明收尾。
+   *
+   * 不给 = 老行为（只在改过文件时提醒一次）；给了 = 没 finish 就提醒，最多两次，
+   * 仍没有则这一轮的 `unfinished` 为真、界面/CLI 显式标「未声明完成」。
+   */
+  requireFinish?: boolean;
 };
 
 /**

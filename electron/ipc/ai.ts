@@ -437,6 +437,8 @@ export function registerAiIpc(): void {
           ...(ownedDirs().length ? { workdirs: ownedDirs() } : {}),
           ...(request.plan ? { planMode: true } : {}),
           ...(request.useTools ? { useTools: true } : {}),
+          /* F-06：编码任务要求 finish 声明（提醒上限 2 次，仍没有就标「未声明完成」） */
+          ...(request.requireFinish ? { requireFinish: true } : {}),
           /*
            * 步数上限（T1 实测抓到的真缺陷）：以前这里不传，于是引擎兜底的 ?? 4
            * 成了唯一值 —— 任何对话最多 4 次工具调用。填个表单要 5 步就不够：

@@ -396,6 +396,8 @@ export function buildToolSet(input: {
               input: value,
               ...(call.why ? { why: call.why } : {}),
               ...(call.command ? { commandRisk: call.command } : {}),
+              /* F-07：宿主据此把这次"问过/答过"记成可回放的 approval 记录 */
+              ...(options.toolCallId ? { toolCallId: options.toolCallId } : {}),
             });
             if (verdict === "deny") throw new Error(`用户拒绝了这次调用：${entry.name}`);
           } else {

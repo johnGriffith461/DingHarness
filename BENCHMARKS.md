@@ -282,3 +282,42 @@ Node v24.18.0。只记 token 与墙钟（这个模型没有可核实的单价，
    挂到 120s 看门狗 → 已改成"挂监听时若流已结束，直接按拒绝处理"。
 2. 场景 5 第一跑：`--json` 的 stdout 被人类可读表头污染（`JSON.parse` 失败）→
    已把表头与会话提示改走 stderr（`hosts/cli/main.ts`）。
+
+## 10. 多模型协议工具合规性（2026-10-20，真 provider）
+
+口径：编译产物 `dist-cli/hosts/cli/ding.js`，每件任务一个**独立数据目录**与独立工作区，
+`--mode allow --steps 12 --json`，单会话预算上限 `$0.5`（超了暂停，不是失败）。
+脚本：`npx tsx scripts/verify-model-compliance.ts --yes-spend`（没有 `--yes-spend` 拒跑；
+`DING_NO_REAL_MODEL` / `DSH_NO_REAL_MODEL` 任一开着也拒跑）。
+
+**两家可用通道**（本机凭据实测）：
+
+- `deepseek/deepseek-chat`（官方直连）
+- `tokenrhythm/deepseek-flash`（中转）
+
+**另外两家 key 在、但通道本身不可用**（不是协议不合规，如实记）：
+`qianwen/qwen-plus` 三件任务全部在上游返回「账户余额不足或额度已用完」（0 token 失败）；
+`apihub/deepseek-chat` 本机 DNS 解析不到 `api.apihub.top`（`getaddrinfo ENOTFOUND`）。
+
+| provider/model | 任务 | 退出码 | 墙钟 | token（入+出） | 调过的工具 | todo 合规 | ask 合规 | finish / 证据 | 工具失败 | 重复调用 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| deepseek/deepseek-chat | 修失败测试 | 0 | 17.1s | 34,171+732 | list_files, read_file, run_command, edit_file, finish | 未调用 | 未调用 | done / 1 条证据 | 2 | 4 |
+| deepseek/deepseek-chat | 三步任务 | 0 | 8.8s | 63,735+752 | todo_write, list_files, read_file, run_command, finish | 是（3 项） | 未调用 | done / 1 条证据 | 0 | 0 |
+| deepseek/deepseek-chat | 信息不足 | 0 | 8.2s | 39,072+797 | list_files, list_dir, ask_user, finish | 未调用 | 是 | blocked / 0 条证据 | 0 | 0 |
+| tokenrhythm/deepseek-flash | 修失败测试 | 0 | 21.9s | 52,537+1,958 | list_files, read_file, edit_file, run_command, finish | 未调用 | 未调用 | done / 1 条证据 | 0 | 0 |
+| tokenrhythm/deepseek-flash | 三步任务 | 1 | 124.3s | — | todo_write, list_files, read_file, run_command | 是（3 项） | 未调用 | **未调用**（上游 120s 无输出，看门狗中止） | 0 | 0 |
+| tokenrhythm/deepseek-flash | 信息不足 | 0 | 19.5s | 41,426+1,731 | list_files, list_dir, run_command, ask_user, finish | 未调用 | 是 | blocked / 1 条证据 | 0 | 0 |
+
+合计 **301,101 token**（5 条有 usage 的成功轮；tokenrhythm 三步任务在上游卡住，没有拿到 usage，不补 0）。
+
+**按结果落地的降级**（不是只记录）：
+
+1. **不调 `finish` 的模型** → 完成提醒上限从 1 次提到 **2 次**，并新增
+   `requireFinish`（CLI `ding run` 与桌面 coding 模式置真）：不再只在"改过文件"时提醒，
+   "跑了命令但没声明完成"也会被催；两轮后仍没有有效 `finish` 时，
+   `outcome.unfinished=true`，桌面步骤上写「未声明完成（这一轮没有调用 finish，不能当作已完成）」，
+   CLI 在 stderr 标「未声明完成」并在 `--json` 里带 `unfinished: true`。
+2. **不调 `todo_write` 的模型** → 保持已有行为：没有待办就不显示空待办面板；
+   本次两家都调用了且参数合法（`todos` 3 项、状态词表正确），未触发额外降级。
+3. **`ask_user` 参数不合规** → 两家都通过了同一份 zod schema（`question` 非空、`options` ≤5），
+   本次未触发参数修复；参数校验仍在内核侧（`repairToolCall` 与 schema 同源），不新增第二套。

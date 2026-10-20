@@ -212,6 +212,14 @@ export type TurnRequestInput = {
    * finish 执行体看不到它，证据校验由主循环在收尾时兜底。
    */
   turnEvidence?: TurnEvidence;
+  /**
+   * F-06（2026-10-20）：**这一轮要求模型用 `finish` 声明收尾**。
+   *
+   * 原来的完成提醒只在 `wroteFiles === true` 时触发 —— 于是"跑了几条命令、
+   * 改了内存里的东西、最后只回一段话"的模型一次都不会被提醒。
+   * 编码任务把这一格置真：只要没 finish 就提醒（上限 2 次）。
+   */
+  requireFinish?: boolean;
 };
 
 /** 一次调用的结果（两条路都能用：IPC 那条主要靠 `onEvent`，子智能体主要靠它）。 */
@@ -975,97 +983,107 @@ export async function runTurn(
   deps: TurnDeps = {},
 ): Promise<TurnOutcome> {
   const evidence = input.turnEvidence ?? createTurnEvidence();
-  let firstDone: TurnEvent | undefined;
-  let firstText = "";
   /*
-   * A-01：第一轮的工具往返要**留给第二轮看**。
+   * F-06（2026-10-20）：完成提醒**最多 2 次**（即最多 3 轮）。
    *
-   * 第二轮的 messages 是新建的（`input.messages` + assistant 文本 + 提醒），
-   * 第一轮的工具调用与结果不在里面。不给摘要，模型会以为"还没写过/还没跑过"，
-   * 于是重复执行已经成功的写操作（实测：同名文件已存在）。
+   * 依据是这一轮真 provider 实测：`tokenrhythm/deepseek-flash` 在三步任务里
+   * 调了 todo/read/run 之后既没写文件、也没调用 finish（最后被上游 120s 卡住中止）。
+   * 旧实现的提醒有两个盲区：
+   *   ① 只在 `wroteFiles === true` 时触发 —— 这类"跑命令但不写文件"的模型一次都不会被提醒；
+   *   ② 只提醒一次 —— 模型第二次仍然没 finish 就直接收尾，用户看到的是一句"做完了"。
+   * 现在：`requireFinish` 的轮次只要没 finish 就提醒，最多两次；
+   * 仍没有有效 finish 时返回 `unfinished: true`，宿主据此显式标「未声明完成」。
    *
-   * 用 user 消息而不是伪造 assistant/tool 配对：配对一旦不合法，
-   * 各家 provider 的校验规则不一样（Anthropic 会直接 400），而 user 文本谁都能收。
+   * A-01 的约束不变：每次提醒都带**上一轮已经执行过的工具结果**，避免模型重复执行。
+   * 用 user 消息而不是伪造 assistant/tool 配对：配对不合法各家校验规则不同
+   * （Anthropic 会直接 400），而 user 文本谁都能收。
    */
-  const firstCalls = new Map<string, { name: string; input: unknown }>();
-  const firstTools: PreviousTool[] = [];
-  const first = await runTurnOnce(
-    { ...input, turnEvidence: evidence },
-    (event) => {
-      /* 第一轮的 done 先扣着：决定要不要提醒之后，再决定发不发 */
-      if (event.type === "done") {
-        firstDone = event;
-        return;
-      }
-      if (event.type === "text") firstText += event.text;
-      if (event.type === "tool-call") {
-        firstCalls.set(event.toolCallId, { name: event.toolName, input: event.input });
-        onEvent(event);
-        return;
-      }
-      if (event.type === "tool-result") {
-        const call = firstCalls.get(event.toolCallId);
-        const name = event.toolName || call?.name || "";
-        const ok = !event.error;
-        firstTools.push({
-          name,
-          args: toolArgsSummary(name, call?.input),
-          ok,
-          result: previousToolResult(name, ok, event.output, event.error),
-        });
-        firstCalls.delete(event.toolCallId);
-        onEvent(event);
-        return;
-      }
-      onEvent(event);
-    },
-    deps,
-  );
+  const reminderMax = 2;
+  /** 累积的工具摘要（每轮追加，不只第一轮）。 */
+  let previousTools: PreviousTool[] = [];
+  /** 每轮都在原消息后追加：assistant 文本 + user 提醒。 */
+  let messages = [...input.messages];
+  let wroteAny = false;
+  let attempt: TurnOutcome | null = null;
 
-  /* T-02：等批时**不许**催 finish（那不是没做完，是在等人） */
-  const needsReminder =
-    first.ok && !first.aborted && first.wroteFiles === true && !first.finished && !first.awaitingApproval;
-  if (!needsReminder) {
-    if (firstDone) onEvent(firstDone);
-    return first;
+  for (let round = 0; round <= reminderMax; round += 1) {
+    const calls = new Map<string, { name: string; input: unknown }>();
+    const roundTools: PreviousTool[] = [];
+    let roundText = "";
+    let roundDone: Extract<TurnEvent, { type: "done" }> | undefined;
+
+    const got = await runTurnOnce(
+      { ...input, messages, turnEvidence: evidence },
+      (event) => {
+        /* 这一轮的 done 先扣着：确定不再提醒之后才发，避免一次调用里出现多个"结束" */
+        if (event.type === "done") {
+          roundDone = event;
+          return;
+        }
+        if (event.type === "text") roundText += event.text;
+        if (event.type === "tool-call") {
+          calls.set(event.toolCallId, { name: event.toolName, input: event.input });
+          onEvent(event);
+          return;
+        }
+        if (event.type === "tool-result") {
+          const call = calls.get(event.toolCallId);
+          const name = event.toolName || call?.name || "";
+          const ok = !event.error;
+          roundTools.push({
+            name,
+            args: toolArgsSummary(name, call?.input),
+            ok,
+            result: previousToolResult(name, ok, event.output, event.error),
+          });
+          calls.delete(event.toolCallId);
+          onEvent(event);
+          return;
+        }
+        onEvent(event);
+      },
+      deps,
+    );
+
+    attempt = got;
+    previousTools = [...previousTools, ...roundTools];
+    wroteAny = wroteAny || got.wroteFiles === true;
+
+    /* T-02：等批时**不许**催 finish（那不是没做完，是在等人） */
+    const needsReminder =
+      got.ok &&
+      !got.aborted &&
+      !got.finished &&
+      !got.awaitingApproval &&
+      /* 用**累计**的 wroteAny：第一轮写了、第二轮只回文本，仍然该继续催 */
+      (input.requireFinish === true || wroteAny === true);
+
+    if (!needsReminder || round >= reminderMax) {
+      if (roundDone) {
+        /*
+         * 前面某轮写了文件、最后一轮没写：done 事件仍要带上 wroteFiles。
+         * 否则宿主（验证闭环/完成回显）会以为这一轮没动过文件。
+         */
+        onEvent(wroteAny && !roundDone.wroteFiles ? { ...roundDone, wroteFiles: true } : roundDone);
+      }
+      const unfinished =
+        got.ok && !got.aborted && !got.finished && (round > 0 || wroteAny || input.requireFinish === true);
+      return {
+        ...got,
+        ...(wroteAny ? { wroteFiles: true } : {}),
+        ...(unfinished ? { unfinished: true } : {}),
+      };
+    }
+
+    onEvent({ type: "steer", text: COMPLETION_REMINDER });
+    const toolsBlock = previousTurnToolsBlock(previousTools);
+    messages = [
+      ...messages,
+      ...(roundText.trim() ? [{ role: "assistant" as const, content: roundText }] : []),
+      { role: "user" as const, content: toolsBlock ? `${toolsBlock}\n\n${COMPLETION_REMINDER}` : COMPLETION_REMINDER },
+    ];
   }
 
-  onEvent({ type: "steer", text: COMPLETION_REMINDER });
-  const toolsBlock = previousTurnToolsBlock(firstTools);
-  const reminderBody = toolsBlock ? `${toolsBlock}\n\n${COMPLETION_REMINDER}` : COMPLETION_REMINDER;
-  const second = await runTurnOnce(
-    {
-      ...input,
-      turnEvidence: evidence,
-      /*
-       * 第二轮是**新的一次请求**：模型需要知道上一轮自己说了什么、做过什么。
-       * 工具调用不重放（结果已经落盘/落轨迹），但**调用与结果摘要必须带上** ——
-       * 否则模型会重复执行（见上面 `firstTools` 的说明）。
-       */
-      messages: [
-        ...input.messages,
-        ...(firstText.trim() ? [{ role: "assistant" as const, content: firstText }] : []),
-        { role: "user" as const, content: reminderBody },
-      ],
-    },
-    (event) => {
-      /*
-       * 第一轮写了文件、第二轮没写：done 事件仍要带上 wroteFiles。
-       * 否则宿主（验证闭环/完成回显）会以为这一轮没动过文件。
-       */
-      if (event.type === "done" && first.wroteFiles && !event.wroteFiles) {
-        onEvent({ ...event, wroteFiles: true });
-        return;
-      }
-      onEvent(event);
-    },
-    deps,
-  );
-
-  const wroteFiles = first.wroteFiles === true || second.wroteFiles === true;
-  return {
-    ...second,
-    ...(wroteFiles ? { wroteFiles: true } : {}),
-    ...(second.ok && !second.aborted && !second.finished ? { unfinished: true } : {}),
-  };
+  /* 循环结构上不可达（最后一轮一定 return）；给类型一个收口，不编造结果。 */
+  return attempt ?? { ok: false, aborted: false, provider: input.provider, model: input.model ?? "" };
 }

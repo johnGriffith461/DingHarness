@@ -85,6 +85,11 @@ export function buildRunRequest(input: {
     ...(input.runtime?.manual ? { allowUndeclaredModel: true } : {}),
     ...(input.dirs?.length ? { workdirs: [...input.dirs] } : {}),
     nextSteer: input.nextSteer,
+    /*
+     * F-06：CLI 是编码 agent —— 每一轮都要求 finish 声明。
+     * 没声明就提醒（最多 2 次）；仍没有则 outcome.unfinished，`--json` 与终端都会如实标。
+     */
+    requireFinish: true,
     ...(typeof input.config.maxBudgetUsd === "number" && input.config.maxBudgetUsd > 0
       ? { maxBudgetUsd: input.config.maxBudgetUsd }
       : {}),

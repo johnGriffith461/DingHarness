@@ -15,7 +15,7 @@ import type { ToolExecutor } from "../ports/executor";
  * - 第一轮改了文件、没 finish → **再发一次请求**，且消息里有"finish"；
  * - 第一轮有有效 finish → 不再追加；
  * - 第一轮被 abort → 不再追加；
- * - 提醒只拉一次（第二轮仍没有就收尾，标记 unfinished）。
+ * - F-06：提醒最多拉两次（第三轮仍没有就收尾，标记 unfinished）。
  */
 let port = 0;
 let server: Server;
@@ -129,8 +129,48 @@ describe("主循环 · 完成提醒", () => {
     /* 最后那一次请求带的就是提醒 */
     expect(includesReminder(bodies[bodies.length - 1])).toBe(true);
     expect(events.some((e) => e.type === "steer")).toBe(true);
-    /* 只提醒一次（不会无限循环） */
-    expect(bodies.filter((b) => includesReminder(b)).length).toBe(1);
+    /* F-06：最多提醒两次（第三轮仍没有 finish 就收尾，不会无限循环） */
+    expect(events.filter((e) => e.type === "steer" && e.text.includes("completion_reminder")).length).toBe(2);
+  });
+
+  /*
+   * F-06（2026-10-20，真 provider 实测后加的）：`requireFinish` 的轮次
+   * **即使没写文件**也要提醒 —— 旧判据只看 `wroteFiles`，于是
+   * "跑了几条命令、回一段话就停"的模型一次都不会被催。
+   */
+  it("⭐ requireFinish：没写文件、只跑了命令 → 仍然提醒，第三轮 finish 后收尾", async () => {
+    const evidence = createTurnEvidence();
+    script = () => {
+      if (bodies.length === 1) {
+        return [toolChunk("c1", "run_command", '{"command":"node check.mjs"}'), finish("tool_calls")];
+      }
+      if (bodies.length === 2) return [text("跑完了"), finish("stop")];
+      return [
+        toolChunk(
+          "c2",
+          FINISH_TOOL,
+          JSON.stringify({ status: "done", summary: "做完了", evidence: { commands: ["node check.mjs"] } }),
+        ),
+        finish("tool_calls"),
+      ];
+    };
+    const events: TurnEvent[] = [];
+    const outcome = await runTurn(
+      {
+        provider: "strata",
+        messages: [{ role: "user", content: "跑一下检查" }],
+        tools: toolsFor(evidence),
+        maxSteps: 4,
+        turnEvidence: evidence,
+        requireFinish: true,
+      },
+      (e) => events.push(e),
+    );
+
+    expect(outcome.finished?.status).toBe("done");
+    expect(outcome.unfinished).toBeUndefined();
+    /* 第一轮没 finish → 一次提醒；第二轮就 finish 了 */
+    expect(events.filter((e) => e.type === "steer" && e.text.includes("completion_reminder")).length).toBe(1);
   });
 
   it("第一轮有有效 finish → 不追加提醒", async () => {

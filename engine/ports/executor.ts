@@ -92,6 +92,14 @@ export type ExecutorContext = {
     input: unknown;
     why?: string;
     commandRisk?: unknown;
+    /**
+     * F-07（2026-10-20）：这次调用在日志里的 id。
+     *
+     * 宿主用它把"问过/答过"记成一条可回放的 `approval` 记录 ——
+     * 首小时指标要数确认次数，而 CLI 的就地审批原来在磁盘上**一点痕迹都没有**
+     * （桌面那条路本来就有 pending 留痕）。
+     */
+    toolCallId?: string;
   }) => Promise<"allow" | "allow-always" | "deny">;
   /**
    * B-01：这一轮授权的目录（「接受编辑」档判断"是不是工作区内"要用）。
