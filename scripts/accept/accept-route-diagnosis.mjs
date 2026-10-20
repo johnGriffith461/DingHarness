@@ -33,6 +33,13 @@ async function runState(name, { dataDir, creds, credsBody = "refs:\n", settings 
   if (!(await freshDir(dataDir))) throw new Error(`数据目录 ${dataDir} 删不掉`);
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(creds, credsBody, "utf8");
+  /*
+   * ⚠️ 批跑会给所有子进程设 `STRATA_API_KEY=accept-local-fake`（假通道用），
+   * 而**环境变量的优先级高于凭据文件** —— 不清掉它，"一个 key 都没有"这个状态
+   * 在批跑里根本造不出来（单独跑却是对的，典型的"批跑红、本机绿"）。
+   * 空串 = 当成没有（`resolveSecret` 走 tm 空值回落）。
+   */
+  const blankEnv = { STRATA_API_KEY: "", LUNORA_API_KEY: "" };
   if (settings) fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify(settings, null, 2), "utf8");
 
   const out = { name };
@@ -43,7 +50,7 @@ async function runState(name, { dataDir, creds, credsBody = "refs:\n", settings 
       port: PORT,
       dataDir,
       timeoutMs: 30000,
-      extraEnv: { DING_CREDENTIALS_FILE: creds },
+      extraEnv: { DING_CREDENTIALS_FILE: creds, ...blankEnv },
     });
     child = booted.child;
     if (!booted.ok) throw new Error("应用没起来：" + (booted.getLog() || "").slice(-800));
@@ -66,8 +73,15 @@ async function runState(name, { dataDir, creds, credsBody = "refs:\n", settings 
     await shot(page, `.verify/route-diagnosis-${name}.png`);
 
     await page.locator('[data-testid="wb-home-route-fix-action"]').click();
-    await page.waitForTimeout(800);
-    out.settingsModelsOpen = (await page.locator('[data-testid="wb-setpage-models"]').count()) === 1;
+    /*
+     * 等到"模型页真的画出来"为止（固定 800ms 在机器忙时不够 —— 模型页要拉 provider 清单，
+     * 批跑里实测这一格偶发红，而单独跑是绿的）。
+     */
+    out.settingsModelsOpen = await page
+      .locator('[data-testid="wb-setpage-models"]')
+      .waitFor({ timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
     await shot(page, `.verify/route-diagnosis-${name}-models.png`);
   } finally {
     if (browser) await browser.close();
