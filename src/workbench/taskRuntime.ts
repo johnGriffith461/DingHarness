@@ -64,7 +64,7 @@ import { skillsBlockFor, stricterMode } from "./runInputs";
 import { withSubagentApprovals } from "./subagentBubbles";
 import { memoryPromptBlock } from "@shared/memory";
 import { useMemoryStore } from "./memoryStore";
-import { resolveChatRoute } from "@/ai/route";
+import { diagnoseRouteNow, resolveChatRoute } from "@/ai/route";
 import {
   compactKeepTokens as compactKeepTokensOf,
   compactedNote,
@@ -395,10 +395,19 @@ export async function compactNow(
  * - 通过证据校验 → "完成（…）"；
  * - 改了文件却没有有效 finish → 如实写"未声明完成"，不许把"模型不说话了"当完成。
  */
-export function finishNoteOf(tools: readonly ToolTrace[], wroteFiles?: boolean): string {
+export function finishNoteOf(
+  tools: readonly ToolTrace[],
+  wroteFiles?: boolean,
+  opts: { requireDeclaration?: boolean } = {},
+): string {
   const finished = finishedFromTraces(tools);
   if (finished) return describeFinish(finished);
   if (wroteFiles) return "未声明完成（改了文件，但没有通过证据校验的 finish）";
+  /*
+   * F-06：编码任务里"没调 finish"本身就是未完成声明 —— 即使它没改文件
+   * （实测：模型跑了几条命令、回一段话就停了）。办公任务不要求 finish，保持空。
+   */
+  if (opts.requireDeclaration) return "未声明完成（这一轮没有调用 finish，不能当作已完成）";
   return "";
 }
 
@@ -488,6 +497,24 @@ export async function answerTurn(
    * 读的是同一个模型 —— 否则"按 A 的窗口压缩、把请求发给 B"。
    */
   const route = await resolveRoute({ fresh: history.length === 0 });
+  /*
+   * F-03：**没有路由就不要把空 provider 发出去**（那会得到 `未知 provider：`）。
+   * 先诊断"为什么没有"，把可点的下一步挂到任务上，界面出卡片；
+   * 这一轮到此为止（用户那句话已经在 steps 里，不会丢）。
+   */
+  if (!route.provider) {
+    const diagnosis = await diagnoseRouteNow();
+    port.setState((s) => ({
+      tasks: upsertTask(s.tasks, {
+        ...current(s.tasks, taskId),
+        stage: "failed",
+        finishedAt: Date.now(),
+        activity: diagnosis.message,
+        routeDiagnosis: diagnosis,
+      }),
+    }));
+    return;
+  }
   const keepTokens = compactKeepTokens(route.model);
   const built = buildHistory(history, { factor: calibrationFactor, keepTokens });
   const { messages, truncated, all, older } = built;
@@ -593,6 +620,8 @@ export async function answerTurn(
     planRequested,
     false,
     route,
+    /* F-06：编码任务要求 finish 声明；办公任务不要求 */
+    taskMode(task) === "coding",
   );
 
   /*
@@ -616,7 +645,9 @@ export async function answerTurn(
    * 合成一行而不是两条：界面上那一行本来就只放一句。
    */
   const contextNote = contextIndex ? indexedNote(olderCount) : olderCount ? compactedNote(olderCount) : "";
-  const finishNote = finishNoteOf(reply.tools, reply.wroteFiles);
+  const finishNote = finishNoteOf(reply.tools, reply.wroteFiles, {
+    requireDeclaration: taskMode(task) === "coding",
+  });
   const notes = [extraNote, reply.note, contextNote, finishNote].filter(Boolean);
   nextStep(
     port,
@@ -634,9 +665,9 @@ export async function answerTurn(
       if (t.id !== taskId) return t;
       /* T-02：待审批不是"完成" —— 阶段与文案都要改成"等你确认" */
       if (reply.awaitingApproval) {
-        return { ...t, lastRoute: reply.route, stage: "awaiting", activity: "等你确认", finishedAt: null };
+        return { ...t, lastRoute: reply.route, routeDiagnosis: undefined, stage: "awaiting", activity: "等你确认", finishedAt: null };
       }
-      return { ...t, lastRoute: reply.route };
+      return { ...t, lastRoute: reply.route, routeDiagnosis: undefined };
     }),
   }));
 
@@ -858,6 +889,11 @@ export async function runStream(
    * 给了就不再二次解析 —— 同一轮里"压缩用哪个窗口、请求发给谁"必须是同一个模型。
    */
   resolvedRoute?: { provider: string; model: string; fellBack?: boolean; pinned?: string },
+  /**
+   * F-06：编码任务要求 finish 声明（提醒最多 2 次；仍没有就标「未声明完成」）。
+   * 办公任务为 false —— 那些任务本来就不要求完成契约。
+   */
+  requireFinish = false,
 ): Promise<{
   text: string;
   tools: ToolTrace[];
@@ -999,6 +1035,8 @@ ${map.text}
         maxSteps: 24,
         // C1：计划模式 —— 主进程按它只下发只读工具
         ...(plan ? { plan: true } : {}),
+        /* F-06：编码任务要求 finish 声明（引擎侧提醒上限 2 次） */
+        ...(requireFinish ? { requireFinish: true } : {}),
         // 会话日志（C2）：主进程把这一轮完整记下来（请求体 / 事件 / 用量）
         /* T-01：**唯一**的一处归一化 —— 审批/审阅读的就是这个 id */
         ...(sessionId ? { sessionId: normalizeTaskSessionId(sessionId) } : {}),

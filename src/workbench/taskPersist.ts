@@ -17,6 +17,7 @@ import type { ShellBridge } from "@shared/ipc";
 import { CONTEXT_INDEX_VERSION, type ContextIndex } from "@engine/core/contextManager";
 import { interruptedFromStage } from "@engine/core/recovery";
 import { truncatePlan } from "@engine/runtime/planMode";
+import { normalizeRouteDiagnosis } from "@shared/routeDiagnosis";
 import { INTERRUPTED_NOTE, normalizeArtifacts, normalizeQuestions, normalizeStep, type WorkTask } from "./task";
 import type { StorePort } from "./store";
 
@@ -118,6 +119,7 @@ export function normalizeTask(raw: unknown): WorkTask | null {
     rawRoute && typeof rawRoute.provider === "string" && typeof rawRoute.model === "string" && rawRoute.provider && rawRoute.model
       ? { provider: rawRoute.provider, model: rawRoute.model }
       : undefined;
+  const routeDiagnosis = normalizeRouteDiagnosis(t.routeDiagnosis);
   const rawVerify = t.verifyPlan as Record<string, unknown> | undefined;
   const verifyPlan =
     rawVerify && typeof rawVerify.command === "string" && rawVerify.command.trim()
@@ -174,6 +176,8 @@ export function normalizeTask(raw: unknown): WorkTask | null {
     ...(typeof t.planWriteError === "string" && t.planWriteError ? { planWriteError: t.planWriteError } : {}),
     ...(verifyPlan ? { verifyPlan } : {}),
     ...(lastRoute ? { lastRoute } : {}),
+    ...(routeDiagnosis ? { routeDiagnosis } : {}),
+    ...(t.bulkAcceptOffered === true ? { bulkAcceptOffered: true as const } : {}),
   };
 }
 

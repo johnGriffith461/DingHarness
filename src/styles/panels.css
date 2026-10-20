@@ -620,6 +620,37 @@
 }
 .wb-verify-actions { display: inline-flex; gap: 6px; flex: none; }
 
+/* F-03：没有可用通道时的"诊断 + 下一步"卡片（与验证卡同一形态，颜色用警示） */
+.wb-route-fix {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.wb-route-fix-text { display: grid; gap: 3px; color: var(--fg-2); font-size: 12.5px; }
+.wb-route-fix-text strong { color: var(--fg); font-size: 13px; font-weight: 600; }
+.wb-home-route-fix { width: min(720px, calc(100% - 36px)); margin: 8px auto; }
+
+/* F-04：确认疲劳逃生门（第 3 次待批编辑时出现一次） */
+.wb-confirm-fatigue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.wb-confirm-fatigue-text { color: var(--fg-2); font-size: 12.5px; line-height: 1.5; }
+.wb-confirm-fatigue-actions { display: inline-flex; gap: 6px; flex: none; }
+
 
 /* ============================================================
  * T-03：助手回答的 Markdown 排版（用现有 token，不引入硬编码颜色）

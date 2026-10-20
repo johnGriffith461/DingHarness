@@ -1,5 +1,6 @@
 import type { ShellBridge } from "@shared/ipc";
 import { pickRoute } from "@shared/settings";
+import { diagnoseRoute, type RouteDiagnosis } from "@shared/routeDiagnosis";
 
 /**
  * 解析"这次请求该用哪个 provider/model"（§153 抽出来的共用件）。
@@ -149,6 +150,36 @@ async function availableRoutes(): Promise<string[]> {
 
 /** 给用户看的"没有通道"说明（两处报错用同一句，免得口径分裂）。 */
 export const NO_ROUTE_MESSAGE = "还没有可用的 AI 通道（先确认至少一个 provider 配好了密钥）";
+
+/**
+ * F-03：**诊断现在为什么没有通道，并给出可点的下一步**。
+ *
+ * 读的是与 `resolveChatRoute` 同一批事实（provider 有无密钥/模型、钉住的模型、
+ * `models.json` 里声明的模型）；判定在 `shared/routeDiagnosis.ts`（CLI 用同一份）。
+ */
+export async function diagnoseRouteNow(): Promise<RouteDiagnosis> {
+  let providers: Array<{ id: string; label: string; models: string[]; available: boolean }> = [];
+  try {
+    const { listProviders } = await import("./aiClient");
+    providers = (await listProviders()).map((p) => ({
+      id: p.id,
+      label: p.label,
+      models: p.models ?? [],
+      available: p.available,
+    }));
+  } catch {
+    /* 列不出来 → 交给诊断按"没有密钥"说（CLI/主进程会给更底层的原因） */
+  }
+  let declaredRoutes: string[] = [];
+  try {
+    const declared = await bridge()?.modelConfig?.list?.();
+    declaredRoutes = (declared?.models ?? []).map((m) => `${m.providerId}/${m.modelId}`);
+  } catch {
+    /* 读不到 models.json 不影响主诊断 */
+  }
+  const { pinnedModelNow } = await import("@/workbench/appSettings");
+  return diagnoseRoute({ providers, pinnedModel: pinnedModelNow(), declaredRoutes });
+}
 
 // 供 docStore 用它的桥（避免两处各写一份 `globalThis.shell` 断言）
 export { bridge };

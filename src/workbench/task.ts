@@ -35,6 +35,7 @@ import type { SavedAttachmentMeta } from "@shared/ipc";
 import { ARTIFACT_FORMATS, type Artifact, type ArtifactKind } from "./artifact";
 import { normalizeToolTraces, type ToolTrace } from "@shared/agentTools";
 import type { StepUsage } from "@shared/cost";
+import type { RouteDiagnosis } from "@shared/routeDiagnosis";
 
 /** 对话里的一条。 */
 export type TaskStep = {
@@ -247,6 +248,23 @@ export type WorkTask = {
    * 可能已经过期的"保存的选择"。旧盘没有该字段 = 还没跑过（界面显示"自动选择（未记录）"）。
    */
   lastRoute?: { provider: string; model: string };
+
+  /**
+   * F-03（2026-10-20）：**"为什么没有可用通道"的诊断与下一步**。
+   *
+   * 只在"这一轮根本没发出去"时挂上（无 key / 无模型 / 钉住的通道掉线）；
+   * 界面据此出一张带按钮的卡片，而不是一句"出错了"就结束。
+   * 一旦下一轮真的发出去（有路由）就清掉。
+   */
+  routeDiagnosis?: RouteDiagnosis;
+
+  /**
+   * F-04（2026-10-20）：这一段对话里已经提示过「要不要本会话自动接受编辑」。
+   *
+   * 只在该任务内有效；换任务归零（避免"昨天烦了今天也自动放开"）。
+   * 点「继续逐次问」也置真 —— 用户已经做过选择，不该每次待批都再问一遍。
+   */
+  bulkAcceptOffered?: true;
 
   /**
    * P0-04：等待用户点「运行验证」的那份计划。

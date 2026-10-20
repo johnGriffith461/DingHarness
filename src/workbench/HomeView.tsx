@@ -5,6 +5,9 @@
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
+import { useEffect, useState } from "react";
+import type { RouteDiagnosis } from "@shared/routeDiagnosis";
+import { diagnoseRouteNow } from "@/ai/route";
 import { useWorkbenchStore } from "./store";
 import { HOME_MODES, HOME_TITLE, splitSuggestion } from "./copy";
 import { suggestionIcon } from "./suggestionIcon";
@@ -17,6 +20,22 @@ export function HomeView() {
   const homeMode = useWorkbenchStore((s) => s.homeMode);
   const setHomeMode = useWorkbenchStore((s) => s.setHomeMode);
   const createTask = useWorkbenchStore((s) => s.createTask);
+  /*
+   * F-03：首页也照实说"现在走不通、下一步点哪"。
+   * 只在**阻塞型**诊断时显示（`no_pinned` 只是提示，自动挑选仍可能成功）。
+   */
+  const [blocked, setBlocked] = useState<RouteDiagnosis | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void diagnoseRouteNow()
+      .then((d) => {
+        if (alive && d.blocking) setBlocked(d);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <section className="wb-home" data-testid="wb-home">
@@ -29,6 +48,27 @@ export function HomeView() {
       <div className="wb-home-tools">
         <NavCollapseButton />
       </div>
+      {blocked ? (
+        <div className="wb-route-fix wb-home-route-fix" data-testid="wb-home-route-fix">
+          <div className="wb-route-fix-text">
+            <strong>现在还不能开始任务</strong>
+            <span data-testid="wb-home-route-fix-message">{blocked.message}</span>
+          </div>
+          {blocked.action ? (
+            <button
+              className="wb-tool-btn is-primary"
+              data-testid="wb-home-route-fix-action"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent("dsh-open-settings", { detail: { page: blocked.action?.page ?? "models" } }),
+                )
+              }
+            >
+              {blocked.action.label}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="wb-home-scroll">
         <div className="wb-blob" aria-hidden />
         {/*

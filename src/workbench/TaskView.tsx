@@ -5,13 +5,15 @@
  * 改一处要读两千行 —— 于是「顺手加一行」变成默认做法。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronRight, Clock, HelpCircle, Monitor, RotateCcw } from "lucide-react";
 import { NavCollapseButton } from "./NavCollapseButton";
 import { useWorkbenchStore } from "./store";
 import { continueTargetOf, currentQuestion, progressLabel } from "./task";
 import { ToolTraceList } from "./ToolTraceList";
 import { ChangeReviewPanel } from "./ChangeReviewPanel";
+import { BULK_ACCEPT_NOTE, KEEP_ASKING_NOTE, countEditAsks, hasPendingEdit, shouldOfferBulkAccept } from "./confirmFatigue";
+import { readConfirmMode, saveConfirmMode, subscribeConfirmMode } from "./confirmMode";
 import { normalizeTaskSessionId } from "./sessionId";
 import { ArtifactCard } from "./ArtifactCard";
 
@@ -39,6 +41,10 @@ export function TaskView() {
   /** P0-04：待验证计划的执行与跳过。 */
   const runVerification = useWorkbenchStore((s) => s.runVerification);
   const skipVerification = useWorkbenchStore((s) => s.skipVerification);
+  /** F-04：确认疲劳逃生门。 */
+  const markBulkAcceptOffered = useWorkbenchStore((s) => s.markBulkAcceptOffered);
+  const noteTask = useWorkbenchStore((s) => s.noteTask);
+  const confirmMode = useSyncExternalStore(subscribeConfirmMode, readConfirmMode, readConfirmMode);
   /** 被中断的那一轮该继续什么（见 `task.ts` 的 `continueTargetOf`）。 */
   const interruptedTarget = task ? continueTargetOf(task) : null;
   /** 标题改名：点标题进入，回车/失焦提交。 */
@@ -51,6 +57,17 @@ export function TaskView() {
   if (!task) return <div className="wb-empty">没有打开的任务</div>;
 
   const progress = progressLabel(task, tick);
+  /*
+   * F-04：同一个任务里第 3 次待批编辑 → 提示一次「本会话自动接受」。
+   * 计数按任务算（`task.steps`），换任务自然归零；点哪个按钮都算"已提示"。
+   */
+  const offerBulkAccept =
+    hasPendingEdit(task.steps) &&
+    shouldOfferBulkAccept({
+      editsAsked: countEditAsks(task.steps),
+      alreadyOffered: task.bulkAcceptOffered === true,
+      mode: confirmMode,
+    });
 
   return (
     <section className="wb-task" data-testid="wb-task">
@@ -195,6 +212,70 @@ export function TaskView() {
             </div>
           ),
         )}
+
+        {/*
+          F-04：确认疲劳的逃生门。第 3 次待批编辑时出现一次；
+          「本会话自动接受」只改这一档（不写长期配置），命令仍会逐条问。
+        */}
+        {offerBulkAccept ? (
+          <div className="wb-confirm-fatigue" data-testid="wb-confirm-fatigue">
+            <div className="wb-confirm-fatigue-text">
+              这一轮已经问了你 {countEditAsks(task.steps)} 次编辑。要不要本会话内自动接受编辑（命令仍会问）？
+            </div>
+            <div className="wb-confirm-fatigue-actions">
+              <button
+                className="wb-tool-btn is-primary"
+                data-testid="wb-bulk-accept"
+                onClick={() => {
+                  /* F-04：**只在本会话生效**（不写长期配置，重启回到原档） */
+                  saveConfirmMode("接受编辑", { sessionOnly: true });
+                  markBulkAcceptOffered(task.id);
+                  noteTask(task.id, BULK_ACCEPT_NOTE);
+                }}
+              >
+                本会话自动接受
+              </button>
+              <button
+                className="wb-tool-btn"
+                data-testid="wb-bulk-keep"
+                onClick={() => {
+                  markBulkAcceptOffered(task.id);
+                  noteTask(task.id, KEEP_ASKING_NOTE);
+                }}
+              >
+                继续逐次问
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/*
+          F-03：**没有可用通道**不是一句"出错了"就结束 —— 给出诊断与可点的下一步。
+          按钮直接打开 设置 → 模型（那里既有 key 输入也有模型清单），不是一句正确的废话。
+        */}
+        {task.routeDiagnosis ? (
+          <div className="wb-route-fix" data-testid="wb-route-fix">
+            <div className="wb-route-fix-text">
+              <strong>这一轮没有发出去</strong>
+              <span data-testid="wb-route-fix-message">{task.routeDiagnosis.message}</span>
+            </div>
+            {task.routeDiagnosis.action ? (
+              <button
+                className="wb-tool-btn is-primary"
+                data-testid="wb-route-fix-action"
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent("dsh-open-settings", {
+                      detail: { page: task.routeDiagnosis?.action?.page ?? "models" },
+                    }),
+                  )
+                }
+              >
+                {task.routeDiagnosis.action.label}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {/*
           P0-04：改完文件但当前档位不自动跑命令时，这里出一张卡片。

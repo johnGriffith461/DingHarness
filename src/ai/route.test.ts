@@ -20,13 +20,13 @@ import { describe, expect, it, vi } from "vitest";
  * （拿到 `{provider:"p1", model:""}`）。
  */
 
-const h = vi.hoisted(() => ({ providers: [] as unknown[] }));
+const h = vi.hoisted(() => ({ providers: [] as unknown[], pinned: "" }));
 
 vi.mock("./aiClient", () => ({ listProviders: async () => h.providers }));
-/** 没钉默认模型（这条链在钉了的时候根本走不到下面那段回落逻辑）。 */
-vi.mock("@/workbench/appSettings", () => ({ pinnedModelNow: () => "" }));
+/** 钉住的默认模型由各用例设置（`diagnoseRouteNow` 也读它）。 */
+vi.mock("@/workbench/appSettings", () => ({ pinnedModelNow: () => h.pinned }));
 
-const { resolveChatRoute } = await import("./route");
+const { diagnoseRouteNow, resolveChatRoute } = await import("./route");
 
 describe("没有可用通道时不许返回「空 model」（P254）", () => {
   it("⭐ 可用但没有模型的通道要跳过，挑下一个真有模型的", async () => {
@@ -58,5 +58,61 @@ describe("没有可用通道时不许返回「空 model」（P254）", () => {
     const route = await resolveChatRoute();
     expect(route.provider).toBe("p3");
     expect(route.model).toBe("m3");
+  });
+});
+
+/**
+ * F-03：**无通道时给诊断与可点的下一步**（2026-10-20）。
+ *
+ * 旧行为只有一句"还没有可用的 AI 通道（先确认至少一个 provider 配好了密钥）"——
+ * 既没有下一步，又把"一个 key 都没有"与"有 key 没模型"混成同一句话。
+ */
+describe("diagnoseRouteNow：三种走不通的状态各说各的", () => {
+  it("⭐ 一个 key 都没有 → 去填 key", async () => {
+    h.pinned = "";
+    h.providers = [{ id: "p1", label: "某家", models: ["m"], available: false, keyRef: "P_KEY" }];
+    const d = await diagnoseRouteNow();
+    expect(d.kind).toBe("no_key");
+    expect(d.message).toContain("密钥");
+    expect(d.action?.label).toBe("去填 key");
+    expect(d.blocking).toBe(true);
+  });
+
+  it("⭐ 有 key、有模型、没钉住 → 提示「还没选模型」（不拦路）", async () => {
+    h.pinned = "";
+    h.providers = [{ id: "p1", label: "某家", models: ["m"], available: true, keyRef: "P_KEY" }];
+    const d = await diagnoseRouteNow();
+    expect(d.kind).toBe("no_pinned");
+    expect(d.message).toContain("还没选模型");
+    expect(d.action?.label).toBe("去选模型");
+    expect(d.blocking).toBe(false);
+  });
+
+  it("⭐ 钉住的 provider 掉线 → 换一个模型", async () => {
+    h.pinned = "p1/m";
+    h.providers = [
+      { id: "p1", label: "掉线的那家", models: ["m"], available: false, keyRef: "P_KEY" },
+      { id: "p2", label: "还好的那家", models: ["m2"], available: true, keyRef: "P2_KEY" },
+    ];
+    const d = await diagnoseRouteNow();
+    expect(d.kind).toBe("pinned_dead");
+    expect(d.message).toContain("掉线的那家");
+    expect(d.action?.label).toBe("换一个模型");
+  });
+
+  it("有 key 但没有任何模型 → 去添加模型", async () => {
+    h.pinned = "";
+    h.providers = [{ id: "p1", label: "只有 key", models: [], available: true, keyRef: "P_KEY" }];
+    const d = await diagnoseRouteNow();
+    expect(d.kind).toBe("no_model");
+    expect(d.action?.label).toBe("去添加模型");
+  });
+
+  it("有 key、钉住且可用 → ok（没有动作）", async () => {
+    h.pinned = "p1/m";
+    h.providers = [{ id: "p1", label: "某家", models: ["m"], available: true, keyRef: "P_KEY" }];
+    const d = await diagnoseRouteNow();
+    expect(d.kind).toBe("ok");
+    expect(d.action).toBeUndefined();
   });
 });

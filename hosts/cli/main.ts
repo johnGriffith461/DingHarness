@@ -17,6 +17,7 @@ import { cliSessionId } from "../../engine/core/events";
 import { createSqliteSessionStore } from "../../engine/adapters/sqliteStore";
 import { snapshotOf, type Snapshot } from "../../engine/core/snapshot";
 import { allProviders, firstAvailableProvider, getProvider, isBuiltinProviderId, setCustomProviders } from "../../engine/runtime/providers";
+import { diagnoseRoute } from "../../shared/routeDiagnosis";
 import { resolveSecret } from "../../engine/runtime/credentials";
 import { PRODUCT_VERSION } from "../../shared/product";
 import { budgetOf, parseBudgetMode, CONTEXT_BUDGET_MODES } from "../../engine/runtime/budget";
@@ -242,10 +243,30 @@ async function cmdRun(p: Parsed): Promise<number> {
 
   const provider = flag(p, "provider") ?? config.provider ?? firstAvailableProvider(resolveSecret)?.id;
   if (!provider || !getProvider(provider)) {
-    process.stderr.write(
-      `没有可用的 provider。已登记的：${allProviders().map((x) => x.id).join(" / ")}\n` +
-        `配置方式：设置对应环境变量（例如 DEEPSEEK_API_KEY），或写进 ~/.dsh/.credentials.yaml。\n`,
-    );
+    /*
+     * F-03：与桌面同一份诊断（`shared/routeDiagnosis.ts`）—— 不再是一句
+     * "没有可用的 provider"，而是分清"没 key / 有 key 没模型 / 钉住的掉线"，
+     * 并在 `--json` 里带上同一份 `diagnosis` 给脚本。
+     */
+    const diagnosis = diagnoseRoute({
+      providers: allProviders().map((x) => ({
+        id: x.id,
+        label: x.label,
+        available: resolveSecret(x.keyRef) !== null,
+        models: x.models,
+      })),
+      ...(config.provider && config.model ? { pinnedModel: `${config.provider}/${config.model}` } : {}),
+    });
+    if (p.flags.has("json")) {
+      console.log(JSON.stringify({ ok: false, error: "no_provider", diagnosis }, null, 2));
+    } else {
+      process.stderr.write(
+        `${diagnosis.message}\n` +
+          `已登记的：${allProviders().map((x) => x.id).join(" / ")}\n` +
+          (diagnosis.action ? `下一步：${diagnosis.action.label}（\`ding models\` 看清单 / \`ding init\` 配置凭据）。\n` : "") +
+          `配置方式：设置对应环境变量（例如 DEEPSEEK_API_KEY），或写进 ~/.ding/.credentials.yaml。\n`,
+      );
+    }
     return 3;
   }
 
@@ -393,6 +414,8 @@ async function cmdRun(p: Parsed): Promise<number> {
           /* A-03：脚本要能看见"停在谁身上"和"有没有改过文件"（旧字段一个不动） */
           awaitingApproval: outcome.awaitingApproval ?? null,
           wroteFiles: outcome.wroteFiles === true,
+          /* F-06：提醒用完仍没有 finish —— 脚本必须能看见"这不是已验证的完成" */
+          unfinished: outcome.unfinished === true,
           /* A-04：验证决策与结果（auto 才有 exitCode/excerpt） */
           verification,
         },
@@ -432,6 +455,15 @@ async function cmdRun(p: Parsed): Promise<number> {
           : `无头环境无法确认。要么加 --mode allow（会直接执行），要么在终端里跑同一条命令。\n`),
     );
     return EXIT_AWAITING_APPROVAL;
+  }
+  /*
+   * F-06：提醒用完仍没有 finish —— 不许让这句"看起来像已完成"。
+   * 打印在 stderr（stdout 是结果正文），并在 `--json` 里带 `unfinished: true`。
+   */
+  if (outcome.unfinished && !outcome.awaitingApproval) {
+    process.stderr.write(
+      `\n\x1b[33m未声明完成：模型这一轮没有调用 finish（已经提醒过，仍没有证据化的完成声明）。\x1b[0m\n`,
+    );
   }
   if (!outcome.ok && !outcome.aborted) {
     /*
