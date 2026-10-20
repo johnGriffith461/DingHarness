@@ -335,6 +335,14 @@ export type WorkbenchState = {
     opts?: { remember?: boolean },
   ) => Promise<void>;
   /**
+   * F-04：这段对话里已经给过「本会话自动接受编辑」的提示（点哪个都算）。
+   *
+   * 不给用户反复看到同一句逃生门建议。
+   */
+  markBulkAcceptOffered: (taskId: string) => void;
+  /** 在当前任务的最后一条助手步骤上追加一句说明（与压缩/验证同一套 `note` 机制）。 */
+  noteTask: (taskId: string, note: string) => void;
+  /**
    * P0-04：执行任务上那份待验证计划（用户在卡片上点「运行验证」）。
    *
    * 点击本身就是批准 —— 走的仍是 `run_command` 那条通道，不另开一条执行路径。
@@ -698,6 +706,22 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       ),
     }));
     appendStepNote(port, taskId, "用户跳过验证（本轮没有跑测试）");
+  },
+
+  /**
+   * F-04：标记"这段对话已经提示过本会话自动接受编辑"。
+   *
+   * 落盘（随任务）而不是只在组件 state 里 —— 用户切走再回来不该再被同一句建议打扰。
+   */
+  markBulkAcceptOffered: (taskId) => {
+    set((s) => ({
+      tasks: upsertTask(s.tasks, { ...current(s.tasks, taskId), bulkAcceptOffered: true }),
+    }));
+  },
+
+  /** 在最后一条助手步骤上追加一句（明确写着"谁改的、为什么"）。 */
+  noteTask: (taskId, note) => {
+    appendStepNote(port, taskId, note);
   },
 
   /*
