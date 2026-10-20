@@ -65,6 +65,9 @@ pnpm build                     # 全链（typecheck/lint/test/打包/验收）
 | 一条 CLI 命令 | `hosts/cli/cmdXxx.ts` + `ding.ts` 分派 + `help.ts` + `args.ts` 旗标表 | `args.test.ts` 会扫旗标，漏登记就红 |
 | 一个 CLI 旗标 | `hosts/cli/args.ts` 的 `BOOLEAN_FLAGS`/`VALUE_FLAGS` + `help.ts` 两处用法（总帮助与 `COMMAND_USAGE`） | 退出码若有新语义，同时改 `hosts/cli/exitCode.ts` 与 README 退出码表 |
 | 一个基准任务 | `bench/tasks/<id>/` + `bench/suites/harness.json` | 写清"挡的是哪一种坏"；红的时候要红得对 |
+| 一个设置页里的新格子 | `src/workbench/SettingsPages.tsx` 的 general 页挂组件（如 `WorkspaceSettings` / `PermissionRulesTable`） | 判定做成纯函数 + 单测；文案指向的路径必须真的存在（`accept-workspace-settings.mjs` 验"撤销后立刻读不到"） |
+| 一个新的"走不通"诊断 | `shared/routeDiagnosis.ts` 的 `diagnoseRoute`（界面与 CLI 共用一份） | 每类都要有**不同的**动作按钮；`src/workbench/errorActions.test.ts` 查三类动作两两不同 |
+| 一项新指标 | 从**已有会话日志**推导（`engine/core/firstHour.ts` 这类），不新增事件类型 | 界面与 CLI 必须调同一个函数；推导不出来就写"没有"，不编数 |
 | 一条 ADR | `docs/ADR/NNNN-标题.md`（本地，不入库） | 只增不改；状态写"已决定/已落地/被取代" |
 
 ## 测试写在哪
@@ -93,3 +96,8 @@ pnpm build                     # 全链（typecheck/lint/test/打包/验收）
 - 但凡是"这个字段到底有没有发到上游、上游认不认"这类问题，
   必须打真 provider，并在报告里写清模型、通道、实际 token 与墙钟。
 - 真调用要花钱，所以脚本必须有 `--yes-spend` 闸，并受 `DING_NO_REAL_MODEL` 约束。
+
+**装机版也要验**（F-05，2026-10-20）：`accept-installed.mjs` 跑 `release/win-unpacked`
+（`pnpm package:win` 的产物），并在 CI 每次 push 都跑。它验的是"用户装完之后磁盘上
+那批文件能不能启动"，开发构建通过**不**代表装机版通过 —— 已实测：`typescript` 只在
+devDependencies 时，源码一切正常、装机版启动即崩。
