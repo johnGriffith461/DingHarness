@@ -217,8 +217,14 @@ export function pickSuggestions(
 }
 
 /** 右侧面板的四个 tab（`sidePanel_summary_tab_*`）。 */
+/*
+ * 2026-10-22 主人：终端与工作流是"手边要用的工具"，该在右侧面板里，
+ * 不该占一级导航。加这两个页签之后左栏只剩「新工作任务 / 定时任务」。
+ */
 export const SUMMARY_TABS = [
   { id: "artifacts", label: "产物", key: "sidePanel_summary_tab_artifacts" },
+  { id: "terminal", label: "终端", key: "sidePanel_summary_tab_terminal" },
+  { id: "workflow", label: "工作流", key: "sidePanel_summary_tab_workflow" },
   { id: "browser", label: "浏览器", key: "sidePanel_summary_tab_browser" },
   { id: "media", label: "图片与视频", key: "sidePanel_summary_tab_media" },
   { id: "subtasks", label: "子智能体", key: "sidePanel_summary_tab_subtasks" },

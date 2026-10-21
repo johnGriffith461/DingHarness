@@ -46,11 +46,13 @@ describe("SCHEDULED_SERVED_IDS —— 服务端这一次实际发的清单", () 
   });
 });
 
-describe("SUMMARY_TABS —— 右侧面板是四个 tab", () => {
-  it("四个 tab，键名与上位一致", () => {
-    expect(SUMMARY_TABS.map((t) => t.label)).toEqual(["产物", "浏览器", "图片与视频", "子智能体"]);
+describe("SUMMARY_TABS —— 右侧面板的页签", () => {
+  it("六个 tab，键名与上位一致（2026-10-22 加终端/工作流）", () => {
+    expect(SUMMARY_TABS.map((t) => t.label)).toEqual(["产物", "终端", "工作流", "浏览器", "图片与视频", "子智能体"]);
     expect(SUMMARY_TABS.map((t) => t.key)).toEqual([
       "sidePanel_summary_tab_artifacts",
+      "sidePanel_summary_tab_terminal",
+      "sidePanel_summary_tab_workflow",
       "sidePanel_summary_tab_browser",
       "sidePanel_summary_tab_media",
       "sidePanel_summary_tab_subtasks",

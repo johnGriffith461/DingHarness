@@ -7,7 +7,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  Activity,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -17,11 +16,7 @@ import {
   Minus,
   Pencil,
   Pin,
-  Wrench,
-  Terminal,
-  ShieldCheck,
   Settings,
-  Workflow,
   X,
 } from "lucide-react";
 import { useWorkbenchStore, type WorkbenchView } from "./store";
@@ -51,20 +46,19 @@ import { SettingsDialog } from "./SettingsDialog";
  *   · 澄清提问卡（同一张卡逐题推进，最多 3 题）
  */
 
+/*
+ * 2026-10-22 主人重排（原话见执行记录里的 22 条清单）：
+ *
+ * - 「终端」「工作流」→ **右侧面板的页签**（它们是"手边要用的工具"，不是一级页面）
+ * - 「用量与追踪」→ **设置**（它是统计，不是每天要点的入口）
+ * - 「工具」→ 删掉整页，降级成设置里的一页只读清单（没人用它导航）
+ * - 「权限矩阵」→ 删掉：权限由用户在输入区选档位，子智能体的权限由主智能体规划
+ *
+ * 左栏因此只剩两件事：开新任务、看定时任务。
+ */
 export const NAV: Array<{ view: WorkbenchView; label: string; icon: typeof ListTodo }> = [
   { view: "home", label: "新工作任务", icon: ListTodo },
   { view: "scheduled", label: "定时任务", icon: Clock },
-  /* C-01：「手机遥控电脑」移入设置 —— 本机不可用，不该占主导航。 */
-  /* V6-2c/2d：用量与请求追踪（原来只有单会话弹层，没有跨会话的页） */
-  { view: "usage", label: "用量与追踪", icon: Activity },
-  /* V6-2i/4d：两轴权限矩阵（内核早就有判定，缺的是能看的那张表） */
-  { view: "permissions", label: "权限矩阵", icon: ShieldCheck },
-  /* V6-2l：多 agent 工作流（泳道 + 断点续跑命令） */
-  { view: "workflow", label: "工作流", icon: Workflow },
-  /* D2：工具面板（模型够得着什么、怎么调度） */
-  { view: "tools", label: "工具", icon: Wrench },
-  /* F4：终端（只读回放） */
-  { view: "terminal", label: "终端", icon: Terminal },
 ];
 
 /** 每秒重算一次"已处理 N 秒"。 */
@@ -162,6 +156,39 @@ export function NavSidebar() {
   const pin = useLibraryStore((s) => s.pin);
   const [newProject, setNewProject] = useState("");
   const [creating, setCreating] = useState(false);
+  /*
+   * 2026-10-22 主人：「项目那一块 它应该有个胶囊 里边两个小胶囊 到底分组展示还是按项目展示；
+   * 如果是按项目展示的话，用户点击添加之后 选择一个文件夹（项目文件夹）；
+   * 如果在分组里边 就是默认的」。
+   *
+   * - **按项目**（默认）：点 ＋ 打开系统目录选择器，用目录名当项目名，顺手把这个目录
+   *   授权成工作区（项目本来就该是"一个真实文件夹"，不授权它 agent 也进不去）；
+   * - **按分组**：保持原来的"输入一个名字"——分组是用户自己划的类目，没有对应目录。
+   * 选择记在 localStorage，重启仍然记得。
+   */
+  const [projectMode, setProjectMode] = useState<"project" | "group">(() => {
+    try {
+      return localStorage.getItem("dsh-canvas.project-mode") === "group" ? "group" : "project";
+    } catch {
+      return "project";
+    }
+  });
+  const setMode = (mode: "project" | "group"): void => {
+    setProjectMode(mode);
+    try {
+      localStorage.setItem("dsh-canvas.project-mode", mode);
+    } catch {
+      /* 存不进去也不影响这一次 */
+    }
+  };
+  const pickProjectFolder = async (): Promise<void> => {
+    const shell = (globalThis as unknown as { shell?: { workspace?: { add?: () => Promise<{ dir?: string | null }> } } }).shell;
+    const got = await shell?.workspace?.add?.().catch(() => undefined);
+    if (!got?.dir) return;
+    const name = got.dir.split(/[\/]/).filter(Boolean).pop() || got.dir;
+    const error = addProject(name);
+    if (error) setNoteIfAny(error);
+  };
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const renameTask = useWorkbenchStore((s) => s.renameTask);
   const dropTask = useWorkbenchStore((s) => s.dropTask);
@@ -241,11 +268,36 @@ export function NavSidebar() {
       {/* 项目：上位 groupChats_navBar_entry_groupByProject */}
       <div className="wb-nav-section">
         项目
+        {/* 两个小胶囊：按项目 / 按分组（2026-10-22 主人要求） */}
+        <span className="wb-nav-seg" role="group" aria-label="项目的展示方式">
+          <button
+            className={`wb-nav-seg-btn${projectMode === "project" ? " is-on" : ""}`}
+            data-testid="wb-project-mode-project"
+            aria-pressed={projectMode === "project"}
+            title="按项目：每个项目是一个真实文件夹"
+            onClick={() => setMode("project")}
+          >
+            按项目
+          </button>
+          <button
+            className={`wb-nav-seg-btn${projectMode === "group" ? " is-on" : ""}`}
+            data-testid="wb-project-mode-group"
+            aria-pressed={projectMode === "group"}
+            title="按分组：自己起名字分类，不绑定文件夹"
+            onClick={() => setMode("group")}
+          >
+            按分组
+          </button>
+        </span>
         <button
           className="wb-nav-mini"
-          title="新建项目"
+          title={projectMode === "project" ? "选择一个项目文件夹" : "新建分组"}
           data-testid="wb-project-new"
-          onClick={() => setCreating((v) => !v)}
+          onClick={() => {
+            /* 按项目 → 选文件夹；按分组 → 输入名字（默认那条路） */
+            if (projectMode === "project") void pickProjectFolder();
+            else setCreating((v) => !v);
+          }}
         >
           ＋
         </button>

@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { ChevronLeft } from "lucide-react";
 import { SETTINGS_LABELS, aboutTitle, memoryStateLabel, settingsSections } from "@shared/settings";
 import { ModelSettingsPage } from "./ModelSettingsPage";
@@ -10,6 +11,10 @@ import { PersonalizePanel } from "./PersonalizePanel";
 import { ProjectRulesPanel } from "./ProjectRulesPanel";
 import { WorkspaceSettings } from "./WorkspaceSettings";
 import { LocalDataSettings } from "./LocalDataSettings";
+
+/* 从主导航搬进来的两页（2026-10-22）：复用原组件，只换挂载点 */
+const InsightsPage = lazy(() => import("./InsightsPage").then((m) => ({ default: m.InsightsPage })));
+const ToolsPage = lazy(() => import("./ToolsPage").then((m) => ({ default: m.ToolsPage })));
 import { PermissionRulesTable } from "./PermissionRulesTable";
 import { LspPanel } from "./LspPanel";
 import { useMemoryStore } from "./memoryStore";
@@ -27,7 +32,7 @@ import { spacing } from "../utils/spacing";
  * 而不是画一个点了没反应的按钮。
  */
 
-export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team" | "knowledge" | "memory" | "phone";
+export type SettingsSubPage = "profile" | "account" | "general" | "about" | "models" | "plugins" | "team" | "knowledge" | "memory" | "phone" | "usage" | "tools";
 
 export type SettingsPagesProps = {
   /** 显示哪一页。 */
@@ -62,6 +67,14 @@ const META: Record<SettingsSubPage, { title: string; note: string }> = {
   profile: {
     title: "个人资料",
     note: "本机版没有账号服务端：昵称与头像是本地显示用的，不会同步到任何服务器。",
+  },
+  usage: {
+    title: "用量与追踪",
+    note: "跨会话的请求与花费统计（只读派生数据：从已有会话日志算出来的，不另记一份遥测）。",
+  },
+  tools: {
+    title: "工具",
+    note: "模型现在够得着什么、怎么调度（只读：来源是主进程的注册表，不是另一份清单）。",
   },
   general: {
     title: "通用",
@@ -189,6 +202,26 @@ export default function SettingsPages({
       </div>
 
       <div className="wb-setpage-note">{meta.note}</div>
+
+      {/*
+        2026-10-22：用量与追踪 / 工具从主导航搬进设置。这里复用原来那两个页面组件
+        （不另写一份），只是挂载点变了 —— 数据源与判据一个字没改。
+      */}
+      {page === "usage" ? (
+        <div className="wb-setpage-body" data-testid="wb-setpage-usage-body">
+          <Suspense fallback={<div className="wb-setpage-hint">正在打开…</div>}>
+            <InsightsPage />
+          </Suspense>
+        </div>
+      ) : null}
+
+      {page === "tools" ? (
+        <div className="wb-setpage-body" data-testid="wb-setpage-tools-body">
+          <Suspense fallback={<div className="wb-setpage-hint">正在读取工具注册表…</div>}>
+            <ToolsPage />
+          </Suspense>
+        </div>
+      ) : null}
 
       {page === "general" ? (
         <div className="wb-setpage-body" data-testid="wb-setpage-general-body">

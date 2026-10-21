@@ -446,6 +446,17 @@ async function createWindow(): Promise<void> {
        * 回归守卫：`src/electronGuards.test.ts`（钉住这条取舍与 preload 的相对依赖）。
        */
       sandbox: false,
+      /*
+       * **内置浏览器**（2026-10-22 主人：「内置浏览器呢 吃了？」）。
+       *
+       * 右侧面板的「浏览器」页签用 `<webview>` 加载真实的网页 —— 这是"可交互的内置浏览器"
+       * 唯一不另开窗口的做法。三条边界（同时写进 `SAFETY.md`）：
+       *   · 只在**我们自己的**渲染层里创建；页面侧 `allowpopups` 不开（不许它自己弹窗）；
+       *   · 地址只接受 http/https（`BrowserPane` 里先判）；
+       *   · 它**不是**沙箱：webview 里跑的网页拿不到 `window.shell`（contextIsolation 继承默认）。
+       * 关掉的办法：把这一行删掉，面板会退回"如实说明没有浏览器内核"的空态。
+       */
+      webviewTag: true,
     },
   });
 

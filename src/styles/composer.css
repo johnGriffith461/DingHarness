@@ -89,3 +89,111 @@
 .wb-confirm-text em { font-style: normal; font-size: 11.5px; line-height: 1.5; color: var(--fg-dim); }
 .wb-confirm-pop .wb-chip-option.is-on { background: var(--bg-2); }
 .wb-confirm-pop .wb-chip-option.is-on .wb-confirm-text b { color: var(--accent-strong); }
+
+/*
+ * 右栏的「终端 / 工作流」页签（2026-10-22）：225px 放不下，切到这两个页签时加宽。
+ * 只改宽度，不动别的（收起态的把手、左缘「收起」都按面板宽度定位，自动跟随）。
+ */
+.wb-summary[data-wide="true"] {
+  width: 460px;
+  flex: 0 0 460px;
+}
+.wb-summary-embed {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 2px;
+}
+
+/* 左栏「项目」的两个小胶囊（2026-10-22 主人要求：按项目 / 按分组） */
+.wb-nav-seg {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: 1px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+}
+.wb-nav-seg-btn {
+  padding: 1px 7px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wb-nav-seg-btn.is-on { background: var(--surface); color: var(--fg); font-weight: 600; }
+.wb-nav-seg-btn:hover { color: var(--fg); }
+
+/*
+ * 账号菜单的「外观设置」子菜单**向右弹**（2026-10-22 主人：
+ * 「它箭头明明往右 你干嘛向下打开啊 你该往右弹呢」）。
+ *
+ * 部署：父项是 `.wb-acct` 里的一行，它的定位上下文由 `.wb-acct-menu` 提供（见下）。
+ * 用绝对定位挂在父项右侧，箭头朝右就和行为一致了。
+ */
+.wb-acct-appearance-row { position: relative; }
+.wb-acct-appearance-row > .wb-acct-sub {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: -4px;
+  z-index: 30;
+  min-width: 150px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-modal);
+}
+
+/*
+ * 账号菜单里的「额度用量」（2026-10-22 主人截图：四个字被挤成竖排、还溢出框外）。
+ *
+ * 原来是 `height: 34px; align-items: center` + 一句很长的说明（不换行）——
+ * 在 190px 宽的菜单里，那句说明把标签挤到每字一行。
+ * 改成两行：第一行标签（不换行、不参与收缩），第二行说明（允许换行、小字）。
+ */
+.wb-acct-quota {
+  height: auto;
+  min-height: 34px;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding: 6px 10px;
+}
+.wb-acct-quota > span:not(.wb-acct-radio) { flex: 0 0 auto; white-space: nowrap; }
+.wb-acct-quota em {
+  flex: 1 0 100%;
+  padding-left: 23px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+}
+
+/* 右栏内置浏览器（2026-10-22）：地址栏一行 + webview 占满剩下的高度 */
+.wb-browser { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 6px; }
+.wb-browser-bar { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+.wb-browser-url {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 11.5px;
+}
+.wb-browser-note { font-size: 11px; line-height: 1.5; color: var(--warn); }
+.wb-browser-view {
+  flex: 1;
+  min-height: 240px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}

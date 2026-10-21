@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 
-import { NO_PAGE_HINT, bootApp, connectWithRetry, expandComposerMore, freshDir, killTree, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, expandComposerMore, freshDir, killTree, openSummary, waitForPage } from "./harness.mjs";
 
 /**
  * 验收 T-11 / T-12 / T-13 / T-14 / T-15 + T-16 的三条复现（**不调模型**）。
@@ -78,7 +78,12 @@ try {
     await killTree(booted.child);
     await new Promise((r) => setTimeout(r, 800));
   }
-  out.navAlwaysRendered = out.boots.every((b) => b.found && b.width >= 200 && b.items >= 5);
+  /*
+   * 2026-10-22：主导航只剩 2 项（终端/工作流进右栏、用量与工具进设置、权限矩阵删除），
+   * 所以"至少有 5 个导航项"这条跟着改 —— 判据的本意是"左栏真的渲染出来了"，
+   * 用**宽度 + 至少 2 项**表达同一件事。
+   */
+  out.navAlwaysRendered = out.boots.every((b) => b.found && b.width >= 200 && b.items >= 2);
 
   /* ── 主实例：其它文案与交互 ── */
   const { booted, browser, page } = await bootAt(9481, { DSH_CREDENTIALS_FILE: path.resolve(EMPTY_KEYS) });
@@ -138,11 +143,16 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(400);
 
-  /* T-11：终端页标题改成「命令记录（只读）」 */
+  /*
+   * T-11：终端页标题改成「命令记录（只读）」。
+   * 2026-10-22 主人：终端从主导航移到**右栏页签** —— 判据跟着新位置走
+   * （`out.terminalNavFound` 现在表示"右栏里有这个页签"）。
+   */
   await page.locator('[data-testid="wb-nav-home"]').click();
   await page.waitForTimeout(400);
-  /* 终端入口在左栏导航 */
-  const termNav = page.locator('[data-testid="wb-nav-terminal"]');
+  await openSummary(page);
+  await page.waitForTimeout(500);
+  const termNav = page.locator('[data-testid="wb-summary-tab-terminal"]');
   out.terminalNavFound = (await termNav.count()) > 0;
   if (out.terminalNavFound) {
     await termNav.click();
@@ -157,17 +167,26 @@ try {
   await expandComposerMore(page);
   out.usageChip = (await page.locator('[data-testid="wb-usage"]').innerText().catch(() => "")).trim();
 
-  /* T-12 / T-15：用量页与权限页（用左栏入口） */
-  await page.locator('[data-testid="wb-nav-usage"]').click();
+  /*
+   * T-12：用量页 —— 2026-10-22 主人要求从主导航搬进设置（数据与统计）。
+   * T-15：**权限矩阵页已按主人要求删除**（原话：权限由用户在输入区选档位，
+   *       子智能体的权限由主智能体规划）。这里改成验两件新事实：
+   *       ① 左栏里**不再有**这个入口；② 设置·通用里那张权限规则表还在（可看可删）。
+   */
+  await page.locator('[data-testid="wb-account"]').click();
+  await page.waitForTimeout(400);
+  await page.locator('[data-testid="wb-acct-settings"]').click();
+  await page.waitForTimeout(700);
+  await page.locator('[data-testid="wb-set-用量与追踪"]').click();
   await page.waitForTimeout(800);
   out.insightsUsageTab = (await page.locator('[data-testid="wb-insights-usage-tab"]').innerText().catch(() => "")).trim();
 
-  await page.locator('[data-testid="wb-nav-permissions"]').click();
-  await page.waitForTimeout(800);
-  out.permPlain = (await page.locator('[data-testid="wb-perm-plain"]').innerText().catch(() => "")).trim();
-  out.permOldWording = (await page.locator('[data-testid="wb-perm-plain"]').count())
-    ? (await page.content()).includes("角色是上限，档位是旋钮")
-    : null;
+  await page.locator('[data-testid="wb-setpage-back"]').click().catch(() => undefined);
+  await page.waitForTimeout(500);
+  out.permNavGone = (await page.locator('[data-testid="wb-nav-permissions"]').count()) === 0;
+  out.permRulesKept = (await page.locator('[data-testid="wb-set-通用"]').count()) === 1;
+  await page.locator('[data-testid="wb-settings-close"]').click().catch(() => undefined);
+  await page.waitForTimeout(400);
 
   /* T-11：账号菜单里的额度说明 */
   await page.locator('[data-testid="wb-account"]').click();
@@ -218,8 +237,9 @@ const checks = [
   ["T-11 团队空间有统一的本机版说明", out.teamLocalOnly?.includes("本机数据 + 配对码")],
   ["T-14 插件页不再出现编造的人数", out.pluginHasFakeCounts === false],
   ["T-14 插件页显示「已安装 N 个」", out.installedCountShown === true],
-  ["T-15 权限页改成用户语言（旧措辞已去掉）", out.permOldWording === false],
-  ["T-15 权限页说清「点这一档会发生什么」", out.permPlain?.includes("点某个档位之后")],
+  /* 2026-10-22：权限矩阵页按主人要求删除；改成"入口没了、设置里的规则表还在" */
+  ["T-15 左栏不再有「权限矩阵」入口", out.permNavGone === true],
+  ["T-15 设置·通用里仍能看/删权限规则（规则表还在）", out.permRulesKept === true],
 ];
 
 if (out.error) process.stdout.write(`\n异常：${out.error}\n`);

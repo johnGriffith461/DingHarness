@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, X, Library, Smartphone } from "lucide-react";
+import { Activity, Search, Blocks, Sparkles, Brain, ChevronRight, Laptop, Info, SlidersHorizontal, User, Users, Wrench, X, Library, Smartphone } from "lucide-react";
 import { useWorkbenchStore } from "./store";
 import { SETTINGS_LABELS, pinnedLabel, pinnedStatus, routeOptions } from "@shared/settings";
 import { trapTabKey } from "./focusTrap";
@@ -20,9 +20,16 @@ import { THEME_OPTIONS, readTheme } from "./theme";
 import { reopenSetup } from "./FirstRunGuide";
 
 /** 左轨的两段（照 ZCode 的分段：能力在前、基础在后）。 */
+/*
+ * 三组（2026-10-22 主人：「人家这是正经的设置页 你那是什么狗屎」+ 图 8）。
+ * 图 8 的骨架是 基础设置 / Agent 能力 / 数据与统计 —— 这里照骨架，
+ * 但**只放真实存在的项**：图里有「浏览器控制 / 远程设备 / 电脑控制 / 命令 / 钩子 / 归档管理」，
+ * 我们没有对应实现，就不摆一行点不开的空壳（`src/deadControls.test.ts` 也盯着这条）。
+ */
 const GROUP_LABEL: Record<number, string> = {
   0: "Agent 能力",
   1: "基础设置",
+  2: "数据与统计",
 };
 
 /** 主题的展示名（跟随系统 / 浅色模式 / 深色模式）—— 读的是**当前生效**的那一格。 */
@@ -243,6 +250,13 @@ export function SettingsDialog({
      * 搬进来之后仍然如实标"本机不可用"，不画一个假的可用状态。
      */
     { group: 1, icon: <Smartphone size={13} />, label: "手机遥控电脑", value: "本机不可用" },
+    /*
+     * 2026-10-22 主人：「主页左侧边栏那个用量和追踪 你放在主页干什么 你放到设置里面啊」
+     *                 「主页为什么在左侧边栏放一个工具的页面…你删了都行」
+     * 两页都搬进来：用量是统计（不必天天点），工具是清单（更不是导航）。
+     */
+    { group: 2, icon: <Activity size={13} />, label: "用量与追踪", value: "跨会话统计" },
+    { group: 2, icon: <Wrench size={13} />, label: "工具", value: "模型现在够得着什么" },
   ];
   return createPortal(
     <div
@@ -295,7 +309,7 @@ export function SettingsDialog({
                 onChange={(e) => setSetQuery(e.target.value)}
               />
             </label>
-          {[0, 1].map((group) => (
+          {[0, 1, 2].map((group) => (
             <div className="wb-modal-group" key={group}>
             {/* 分组标题：ZCode 的左列是按组分段的（基础设置 / Agent 能力 / …） */}
             <div className="wb-set-group" data-testid={`wb-set-group-${group}`}>
@@ -352,6 +366,14 @@ export function SettingsDialog({
                         }
                         if (r.label === "账号") {
                           setSubPage("account");
+                          return;
+                        }
+                        if (r.label === "用量与追踪") {
+                          setSubPage("usage");
+                          return;
+                        }
+                        if (r.label === "工具") {
+                          setSubPage("tools");
                           return;
                         }
                       }}

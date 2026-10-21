@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
-import { openApp, expandComposerMore, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
+import { openApp, expandComposerMore, openSummary, sleep, killLeftovers, freshDir, pickPort } from "./harness.mjs";
 
 const bad = [];
 let count = 0;
@@ -154,9 +154,14 @@ await step("C3：模型菜单带搜索框", async () => {
   return "搜索框可用";
 });
 
-await step("D2：工具面板列出注册表里的工具与元数据", async () => {
-  await page.locator('[data-testid="wb-nav-tools"]').click();
+await step("D2：工具页（已从主导航移进设置）列出注册表里的工具与元数据", async () => {
+  /* 2026-10-22 主人：工具页不该占主导航 → 搬进 设置·数据与统计·工具 */
+  await page.locator('[data-testid="wb-account"]').click();
+  await sleep(400);
+  await page.locator('[data-testid="wb-acct-settings"]').click();
   await sleep(700);
+  await page.locator('[data-testid="wb-set-工具"]').click();
+  await sleep(900);
   const rows = await page.locator('[data-testid^="wb-tool-"]').count();
   if (rows < 10) throw new Error(`只有 ${rows} 行`);
   const text = await page.locator('[data-testid="wb-tools-list"]').innerText();
@@ -164,9 +169,14 @@ await step("D2：工具面板列出注册表里的工具与元数据", async () 
   return `${rows} 行`;
 });
 
-await step("F4：终端面板只读空态", async () => {
-  await page.locator('[data-testid="wb-nav-terminal"]').click();
+await step("F4：终端面板只读空态（已从主导航移到右栏页签）", async () => {
+  /* 2026-10-22 主人：终端该在右侧面板里 */
+  await page.locator('[data-testid="wb-settings-close"]').click().catch(() => undefined);
   await sleep(500);
+  await openSummary(page);
+  await sleep(500);
+  await page.locator('[data-testid="wb-summary-tab-terminal"]').click();
+  await sleep(700);
   const empty = page.locator('[data-testid="wb-terminal-empty"]');
   const list = page.locator('[data-testid="wb-terminal-list"]');
   if (!(await list.count())) throw new Error("没有终端列表");

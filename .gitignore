@@ -8,6 +8,8 @@ dist-bin/
 packages/*/dist/
 
 release/
+# 2026-10-22：release/ 里的产物被进程占用时，打包临时落到 release-b/（同样不入库）
+release-b/
 data/
 # M-07：模型目录快照是**要提交**的数据（离线可用、可复核）—— 上面那条 data/ 把它也盖住了
 !engine/runtime/data/

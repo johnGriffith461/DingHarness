@@ -16,6 +16,15 @@ import { ARTIFACT_FORMATS } from "./artifact";
 
 import { formatBytes } from "./uiUtil";
 import { MediaTab } from "./MediaTab";
+import { BrowserPane } from "./BrowserPane";
+import { lazy, Suspense } from "react";
+
+/*
+ * 终端与工作流搬进右栏（2026-10-22 主人）：
+ * 复用原来那两个页面组件（不另写一份），只是挂载点从"一级页面"换成"右栏页签"。
+ */
+const TerminalPanel = lazy(() => import("./TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
+const WorkflowPage = lazy(() => import("./WorkflowPage").then((m) => ({ default: m.WorkflowPage })));
 
 export function SummaryPanel({
   collapsed,
@@ -54,7 +63,12 @@ export function SummaryPanel({
   const artifacts = task?.artifacts ?? [];
 
   return (
-    <aside className={`wb-summary${collapsed ? " is-collapsed" : ""}`} data-testid="wb-summary">
+    <aside
+      className={`wb-summary${collapsed ? " is-collapsed" : ""}`}
+      /* 终端/工作流这两个页签要宽度（225px 读不了表格与日志） */
+      data-wide={tab === "terminal" || tab === "workflow" || tab === "browser" ? "true" : undefined}
+      data-testid="wb-summary"
+    >
       {collapsed ? (
         <button
           className="wb-summary-handle"
@@ -191,6 +205,16 @@ export function SummaryPanel({
             </div>
           ) : null}
         </div>
+      ) : tab === "browser" ? (
+        <div className="wb-summary-embed" data-testid="wb-summary-embed-browser">
+          <BrowserPane />
+        </div>
+      ) : tab === "terminal" || tab === "workflow" ? (
+        <div className="wb-summary-embed" data-testid={`wb-summary-embed-${tab}`}>
+          <Suspense fallback={<div className="wb-summary-empty">正在打开…</div>}>
+            {tab === "terminal" ? <TerminalPanel /> : <WorkflowPage />}
+          </Suspense>
+        </div>
       ) : tab === "media" ? (
         <MediaTab />
       ) : (
@@ -206,9 +230,9 @@ export function SummaryPanel({
             这里说清"为什么空"与"去哪看"，不给一个和自己代码相反的说明。
           */}
           <div className="wb-summary-empty" data-testid={`wb-summary-empty-${tab}`}>
-            {tab === "browser"
-              ? "浏览器操作会话会出现在这里（需要「操作浏览器」能力接入）"
-              : "子智能体不单独列在这里：它跑完记在发起它的那一步上（工具留痕里写着步数与用量）；命令行侧可用 `ding agents` 查看内置专家。"}
+            {tab === "subtasks"
+              ? "子智能体不单独列在这里：它跑完记在发起它的那一步上（工具留痕里写着步数与用量）；命令行侧可用 `ding agents` 查看内置专家。"
+              : "这一页还没有内容。"}
           </div>
         </div>
       )}

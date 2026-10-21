@@ -258,6 +258,14 @@ try {
    *   · 选中项目 → chip 上的字真的跟着变（"能选"的证据）；
    *   · 点「不归入项目」→ chip 回到「项目」（`wb-project-clear` 真能清）。
    */
+  /*
+   * 2026-10-22：项目有「按项目 / 按分组」两种模式（主人要求）。
+   * 按项目 = 选文件夹；按分组 = 输入名字。这条要验"输入名字"那条路 —— 先切模式。
+   */
+  if (await page.locator('[data-testid="wb-project-mode-group"]').count()) {
+    await page.locator('[data-testid="wb-project-mode-group"]').click();
+    await page.waitForTimeout(300);
+  }
   await page.locator('[data-testid="wb-project-new"]').click();
   await page.waitForTimeout(400);
   await page.locator('[data-testid="wb-project-name"]').fill("周报项目");

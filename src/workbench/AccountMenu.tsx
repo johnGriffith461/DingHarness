@@ -131,36 +131,47 @@ export default function AccountMenu({ onClose, onOpenSettings, onOpenStarred }: 
         <span>设置</span>
       </button>
 
-      {/* 「外观设置」是子菜单的父项，本身不执行动作 */}
-      <button
-        className={`${item}${submenuOpen ? " is-open" : ""}`}
-        data-testid="wb-acct-appearance"
-        onClick={() => setSubmenuOpen((v) => !v)}
-      >
-        <Monitor size={15} />
-        <span>外观设置</span>
-        <ChevronRight size={14} className="wb-acct-chevron" />
-      </button>
+      {/*
+        「外观设置」是子菜单的父项，本身不执行动作。
+        ⚠️ 2026-10-22 主人：「它箭头明明往右 你干嘛向下打开啊 你该往右弹呢」——
+        子菜单原来在父项**下方**展开（看起来像"向下"的折叠），而箭头朝右。
+        现在两件事一起改：外面包一层定位容器，子菜单**贴父项右侧**弹出，与箭头一致。
+      */}
+      <div className="wb-acct-appearance-row">
+        <button
+          className={`${item}${submenuOpen ? " is-open" : ""}`}
+          data-testid="wb-acct-appearance"
+          aria-haspopup="menu"
+          aria-expanded={submenuOpen}
+          onClick={() => setSubmenuOpen((v) => !v)}
+        >
+          <Monitor size={15} />
+          <span>外观设置</span>
+          <ChevronRight size={14} className="wb-acct-chevron" />
+        </button>
 
-      {submenuOpen ? (
-        <div className="wb-acct-sub" data-testid="wb-acct-theme-sub">
-          {THEME_OPTIONS.map((opt) => {
-            const Icon = THEME_ICON[opt.value];
-            return (
-              <button
-                key={opt.value}
-                className={`${item} is-sub`}
-                data-testid={`wb-acct-theme-${opt.value}`}
-                onClick={() => pick(opt.value)}
-              >
-                <Icon size={15} />
-                <span>{opt.label}</span>
-                {theme === opt.value ? <Check size={15} className="wb-acct-check" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+        {submenuOpen ? (
+          <div className="wb-acct-sub" data-testid="wb-acct-theme-sub" role="menu">
+            {THEME_OPTIONS.map((opt) => {
+              const Icon = THEME_ICON[opt.value];
+              return (
+                <button
+                  key={opt.value}
+                  className={`${item} is-sub`}
+                  data-testid={`wb-acct-theme-${opt.value}`}
+                  role="menuitemradio"
+                  aria-checked={theme === opt.value}
+                  onClick={() => pick(opt.value)}
+                >
+                  <Icon size={15} />
+                  <span>{opt.label}</span>
+                  {theme === opt.value ? <Check size={15} className="wb-acct-check" /> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
 
       <button className={item} data-testid="wb-acct-starred" onClick={() => { onOpenStarred?.(); onClose(); }}>
         <Folder size={15} />

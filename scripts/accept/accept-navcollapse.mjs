@@ -67,14 +67,15 @@ const clickToggle = async () => {
 /* ---------- 1) 各页面的那颗按钮都真的能用 ---------- */
 
 /*
- * 几个页面（定时任务 / 用量 / 任务视图 + 任务中心；首页左上角那颗也挂上了，见第 3 段）。
- * ⚠️ 2026-10-16：「云盘」整页拆掉了。
- * ⚠️ 2026-10-20（C-01）：「手机遥控电脑」移进设置，不再占主导航 —— 换成「用量与追踪」。
+ * 主导航现在只剩两项（2026-10-22 主人重排）：
+ *   终端 / 工作流 → 右栏页签；用量与追踪 / 工具 → 设置；权限矩阵 → 删除。
+ * 所以这里只逐页验「定时任务」——但**额外**断言"左栏真的只剩这两项"，
+ * 免得以后又悄悄长回一堆一级页面。
  */
-const pages = [
-  ["scheduled", "定时任务"],
-  ["usage", "用量与追踪"],
-];
+const pages = [["scheduled", "定时任务"]];
+
+const navCount = await page.locator('[data-testid^="wb-nav-"]:not([data-testid="wb-nav-collapse"])').count();
+if (navCount !== 2) bad.push(`主导航应只有 2 项（新工作任务 / 定时任务），实际 ${navCount} 项`);
 
 for (const [view, label] of pages) {
   const nav = page.locator(`[data-testid="wb-nav-${view}"]`);

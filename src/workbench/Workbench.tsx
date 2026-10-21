@@ -87,6 +87,15 @@ export default function Workbench() {
    * 仓库里同样的取舍见 `theme.ts`（"改主题的唯一收口"）。
    */
   const [summaryCollapsed, setSummaryCollapsed] = useState(true);
+  /*
+   * 2026-10-22 主人：「打开画布之后 在右侧还有面板两个东西 它俩是重叠呢 还是都能打开啊」。
+   * 现在两者是**并排**（画布 505 + 摘要 225），不重叠 —— 但两个"右栏"同时占着宽度，
+   * 主对话区被压得很窄。所以：**打开画布时自动收起摘要**（用户仍可手动再展开）。
+   * 只做"开画布 → 收摘要"这一个方向：反过来（收画布 → 开摘要）会让关画布后界面突变。
+   */
+  useEffect(() => {
+    if (canvasOpen) setSummaryCollapsed(true);
+  }, [canvasOpen]);
   /* G13：命令面板（Ctrl/Cmd+K） */
   const [paletteOpen, setPaletteOpen] = useState(false);
   /*

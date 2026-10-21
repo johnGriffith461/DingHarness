@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, pickPort, shot, waitForPage } from "./harness.mjs";
+import { NO_PAGE_HINT, bootApp, connectWithRetry, freshDir, killTree, openSummary, pickPort, shot, waitForPage } from "./harness.mjs";
 
 /**
  * 验收：**知识库桌面面板（G15）+ 工作流时间线（G10）**。
@@ -84,7 +84,10 @@ try {
   await page.waitForTimeout(500);
 
   /* ── G10 工作流时间线 ── */
-  await page.locator('[data-testid="wb-nav-workflow"]').click();
+  /* 2026-10-22：工作流从主导航移到右栏页签 */
+  await openSummary(page);
+  await page.waitForTimeout(500);
+  await page.locator('[data-testid="wb-summary-tab-workflow"]').click();
   await page.waitForTimeout(900);
   out.timeline = (await page.locator('[data-testid="wb-workflow-timeline"]').count()) > 0;
   out.segments = await page.evaluate(() =>
