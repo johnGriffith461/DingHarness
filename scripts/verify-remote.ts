@@ -14,6 +14,12 @@
  *
  * 用法：`pnpm exec tsx scripts/verify-remote.ts`（或 `node --import tsx ...`）
  */
+/*
+ * 2026-10-21：`strata`（本机假服务）已从**出厂 provider 表**移除 —— 出厂只剩 DeepSeek。
+ * 它只在 `DING_ACCEPT_PROVIDERS=1` 时注册；这个脚本是验收/评测工具，自己打开。
+ */
+process.env.DING_ACCEPT_PROVIDERS ??= "1";
+
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
