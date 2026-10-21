@@ -26,6 +26,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "vendor:models": "node scripts/vendor-models.mjs",
+    "build:model-snapshot": "tsx scripts/build-model-snapshot.ts",
     "verify:accept": "node scripts/verify-acceptances.mjs",
     "accept:harness": "node scripts/accept/accept-harness.mjs",
     "accept:harness:multi": "node scripts/accept/accept-harness-multistep.mjs",
