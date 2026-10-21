@@ -9,6 +9,9 @@ packages/*/dist/
 
 release/
 data/
+# M-07：模型目录快照是**要提交**的数据（离线可用、可复核）—— 上面那条 data/ 把它也盖住了
+!engine/runtime/data/
+!engine/runtime/data/models.snapshot.json
 *.log
 .env
 .env.local

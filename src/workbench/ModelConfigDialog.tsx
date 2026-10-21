@@ -1,27 +1,31 @@
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 
+import { EFFORT_LABEL, REASONING_EFFORTS, isReasoningEffort } from "@engine/runtime/protocols/reasoning";
 import type { ModelConfigPatchWire, ModelConfigSaveInput } from "@shared/modelConfigWire";
 import type { ShellBridge } from "@shared/ipc";
+import type { EndpointModelCapsWire } from "@shared/providerWire";
+
+import { reasoningRowVisible } from "./modelForm";
+import { prefillFor } from "./modelPrefill";
 
 /**
- * **「添加模型 / 编辑模型」表单**（T0）。
+ * **「添加 / 编辑模型」小窗**（M-04，2026-10-21 重做）。
  *
- * ## 这一版解决什么
+ * ## 字段顺序（主人给的，别改）
  *
- * 以前接一个新中转站的模型，我们没登记就只按 20k 保守默认跑 ——
- * 界面上写着「未登记」，用户却没有任何办法改。现在可以自己声明：
- * 窗口、最大输出、输入模态、能力、推理档位、参数映射。
+ * 模型 → 最大上下文 → 最大输出 → 输入类型 → 思考强度；高级默认收起。
  *
- * ## 几条刻意的取舍
+ * ## 与上一版的三处差别
  *
- * 1. **窗口必填，不预填一个数字**：填小了等于没用，填大了会打爆上游。
- *    空着 + 必填提示，比替用户猜一个"看起来合理"的值诚实。
- * 2. **参数映射不用表达式语言**：写 JSON 对象（改字段名）或规则表（按档位分支）。
- *    真实需求只有这两种，教用户一门语言来改一个键名不划算。
- * 3. **校验就地报错**：哪个字段不合法就标哪个，不弹一个笼统的"保存失败"。
- * 4. **没有"暂未支持"的控件**：勾了原生联网而协议不支持时，保存直接拒绝并说清原因 ——
- *    那是"发请求时静默不生效"的唯一拦住它的地方。
+ * 1. **小窗**：`wb-modal-mask` + `wb-modal-card`（640px），不再整页覆盖；
+ * 2. **模型是下拉**（数据源 = 该 provider 拉回来的清单），最后一项是「手动输入…」；
+ * 3. **窗口/输出/模态自动预填**，下面一行小字写来源（目录 / 端点 / 默认 / 已手动修改）。
+ *
+ * ## 刻意保留的东西
+ *
+ * 「高级」里的能力一个都没删：结构化输出、原生联网、会话中系统消息、
+ * 推理参数映射、输出参数映射、自定义推理档位。它们是既有能力，不是历史包袱。
  */
 
 type Props = {
@@ -35,7 +39,13 @@ type Props = {
     modelId: string;
     contextWindow: number;
     maxOutputTokens: number;
-    inputFormat: { supportsText: boolean; supportsImage: boolean; supportsVideo: boolean; supportsAudio: boolean; supportsPdf: boolean };
+    inputFormat: {
+      supportsText: boolean;
+      supportsImage: boolean;
+      supportsVideo: boolean;
+      supportsAudio: boolean;
+      supportsPdf: boolean;
+    };
     supportsToolCall: boolean;
     supportsJsonSchemaOutput: boolean;
     supportsNativeWebSearch: boolean;
@@ -44,13 +54,22 @@ type Props = {
     reasoningMap: string;
     maxOutputMap: string;
   };
+  /** 该 provider 已拉取的模型名（下拉的数据源）。 */
+  models?: string[];
+  /** 端点自报能力（按模型名）。 */
+  fetched?: Record<string, EndpointModelCapsWire>;
+  /** 未拉取时给一颗「拉取模型」；拉完返回新的清单。 */
+  onPullModels?: () => Promise<string[]>;
+  /** 新增态的预选模型（详情行的「声明」按钮传进来）。 */
+  initialModelId?: string;
   onClose: (saved: boolean) => void;
 };
 
 const MODALITIES = [
   { key: "supportsImage", label: "图片" },
-  { key: "supportsPdf", label: "PDF" },
   { key: "supportsVideo", label: "视频" },
+  { key: "supportsAudio", label: "音频" },
+  { key: "supportsPdf", label: "PDF" },
 ] as const;
 
 const CAPABILITIES = [
@@ -59,18 +78,36 @@ const CAPABILITIES = [
   { key: "supportsMidConversationSystem", label: "对话中系统消息", hint: "允许在消息流中间插入 system 指令" },
 ] as const;
 
-export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol, editing, onClose }: Props) {
-  const [modelId, setModelId] = useState(editing?.modelId ?? "");
-  const [contextWindow, setContextWindow] = useState(
-    editing?.contextWindow ? String(editing.contextWindow) : "",
-  );
-  const [maxOutput, setMaxOutput] = useState(
-    editing?.maxOutputTokens ? String(editing.maxOutputTokens) : "",
-  );
+const MANUAL = "__manual__";
+
+export function ModelConfigDialog({
+  bridge,
+  providerId,
+  providerLabel,
+  protocol,
+  editing,
+  models = [],
+  fetched,
+  onPullModels,
+  initialModelId,
+  onClose,
+}: Props) {
+  const [modelId, setModelId] = useState(editing?.modelId ?? initialModelId ?? "");
+  const [options, setOptions] = useState<string[]>(() => {
+    const list = [...models];
+    if (editing?.modelId && !list.includes(editing.modelId)) list.unshift(editing.modelId);
+    return list;
+  });
+  const [manual, setManual] = useState(!editing && models.length === 0);
+  const [pulling, setPulling] = useState(false);
+  const [contextWindow, setContextWindow] = useState(editing?.contextWindow ? String(editing.contextWindow) : "");
+  const [maxOutput, setMaxOutput] = useState(editing?.maxOutputTokens ? String(editing.maxOutputTokens) : "");
+  const [sourceNote, setSourceNote] = useState(editing ? "已手动修改" : "");
   const [modalities, setModalities] = useState<Record<string, boolean>>({
     supportsImage: editing?.inputFormat.supportsImage ?? false,
-    supportsPdf: editing?.inputFormat.supportsPdf ?? false,
     supportsVideo: editing?.inputFormat.supportsVideo ?? false,
+    supportsAudio: editing?.inputFormat.supportsAudio ?? false,
+    supportsPdf: editing?.inputFormat.supportsPdf ?? false,
   });
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({
     supportsJsonSchemaOutput: editing?.supportsJsonSchemaOutput ?? false,
@@ -81,9 +118,9 @@ export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol,
   const [reasoningDraft, setReasoningDraft] = useState("");
   const [reasoningMap, setReasoningMap] = useState(editing?.reasoningMap ?? "");
   const [maxOutputMap, setMaxOutputMap] = useState(editing?.maxOutputMap ?? "");
+  const [reasoningKnown, setReasoningKnown] = useState((editing?.reasoningLevels.length ?? 0) > 0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  /** 连通性测试的结果（null = 还没测过） */
   const [probe, setProbe] = useState<null | { ok: boolean; text: string }>(null);
   const [probing, setProbing] = useState(false);
   const [mapCheck, setMapCheck] = useState<{ reasoning?: string; output?: string }>({});
@@ -108,7 +145,59 @@ export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol,
     };
   }, [bridge, reasoningMap, maxOutputMap]);
 
-  const addLevel = () => {
+  /**
+   * 选中模型之后**自动带出**能力（新增态才做；编辑态以已有声明为准）。
+   *
+   * 依赖只有 `modelId`：用户手动改完窗口/输出不会被下一次渲染覆盖回去。
+   */
+  useEffect(() => {
+    if (editing) return;
+    const id = modelId.trim();
+    if (!id) {
+      setSourceNote("");
+      return;
+    }
+    const got = prefillFor(providerId, id, fetched?.[id]);
+    if (!got) return;
+    setContextWindow(String(got.contextWindow));
+    setMaxOutput(String(got.maxOutput));
+    setModalities({
+      supportsImage: got.inputModalities.includes("image"),
+      supportsVideo: got.inputModalities.includes("video"),
+      supportsAudio: got.inputModalities.includes("audio"),
+      supportsPdf: got.inputModalities.includes("pdf"),
+    });
+    setReasoningKnown(got.reasoning);
+    setSourceNote(got.label);
+    setErrors((prev) => ({ ...prev, modelId: "", contextWindow: "", maxOutput: "" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在换模型时预填一次（手动修改要保留）
+  }, [modelId]);
+
+  const markEdited = (): void => {
+    if (!editing) setSourceNote("已手动修改");
+  };
+
+  const pull = async (): Promise<void> => {
+    if (!onPullModels) return;
+    setPulling(true);
+    setErrors((prev) => ({ ...prev, fetch: "" }));
+    try {
+      const list = await onPullModels();
+      setOptions(list);
+      setManual(list.length === 0);
+      if (list.length) {
+        setModelId(list[0]!);
+        setManual(false);
+      }
+      if (!list.length) setErrors((prev) => ({ ...prev, fetch: "对方返回的模型清单是空的" }));
+    } catch (error) {
+      setErrors((prev) => ({ ...prev, fetch: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  const addLevel = (): void => {
     const value = reasoningDraft.trim();
     if (!value) return;
     if (reasoningLevels.includes(value)) {
@@ -118,6 +207,13 @@ export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol,
     setReasoningLevels([...reasoningLevels, value]);
     setReasoningDraft("");
     setErrors((prev) => ({ ...prev, reasoning: "" }));
+    setReasoningKnown(true);
+  };
+
+  const effort = reasoningLevels.length === 1 && isReasoningEffort(reasoningLevels[0]) ? reasoningLevels[0] : "";
+  const setEffort = (next: string): void => {
+    setReasoningLevels(next ? [next] : []);
+    markEdited();
   };
 
   const save = async () => {
@@ -155,7 +251,7 @@ export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol,
         supportsText: true,
         supportsImage: modalities.supportsImage,
         supportsVideo: modalities.supportsVideo,
-        supportsAudio: false,
+        supportsAudio: modalities.supportsAudio,
         supportsPdf: modalities.supportsPdf,
       },
       supportsToolCall: true,
@@ -181,14 +277,7 @@ export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol,
     onClose(true);
   };
 
-  /**
-   * **测试连通**：真发一轮最小请求。
-   *
-   * 为什么值得单独一个按钮：表单里填的东西全对、照样连不通的情况太常见 ——
-   * 密钥错、通道拒绝、模型名拼错、输出上限比上游允许的大。
-   * 只有真发一次才知道**现在**能不能用。
-   */
-  const testConnection = async () => {
+  const testConnection = async (): Promise<void> => {
     if (!modelId.trim()) {
       setErrors((prev) => ({ ...prev, modelId: "先填模型 ID 再测" }));
       return;
@@ -211,66 +300,132 @@ export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol,
     );
   };
 
+  const showReasoning = reasoningRowVisible({ reasoning: reasoningKnown || reasoningLevels.length > 0 });
+
   return (
-    <div className="wb-setfull" data-testid="wb-modelconfig-dialog" role="dialog" aria-label="添加模型">
-      <div className="wb-setfull-head">
-        <strong>{editing ? "编辑模型" : "添加模型"}</strong>
-        <span className="wb-card-desc">{providerLabel}</span>
-      </div>
-
-      <div className="wb-card">
-        <div className="wb-card-row">
-          <span className="wb-card-label">模型 ID</span>
-          <span className="wb-card-desc">对方 API 里用的名字，要一字不差</span>
-          <input
-            className="wb-card-input"
-            data-testid="wb-modelconfig-id"
-            spellCheck={false}
-            value={modelId}
-            disabled={Boolean(editing)}
-            onChange={(event) => setModelId(event.target.value)}
-            placeholder="deepseek-v4.1-flash-1017"
-          />
+    <div className="wb-modal-mask" data-testid="wb-modelconfig-mask">
+      <div
+        className="wb-modal wb-modal-card wb-mset-dialog-wide"
+        data-testid="wb-modelconfig-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={editing ? "编辑模型" : "添加模型"}
+      >
+        <div className="wb-modal-head">
+          <strong>{editing ? "编辑模型" : "添加模型"}</strong>
+          <span className="wb-card-desc">{providerLabel}</span>
         </div>
-        {errors.modelId ? <div className="wb-card-note wb-note-bad">{errors.modelId}</div> : null}
 
-        <div className="wb-card-row">
-          <span className="wb-card-label">上下文窗口</span>
-          <span className="wb-card-desc">填小了等于没用，填大了会打爆上游 —— 所以不预填</span>
+        {/* ① 模型 */}
+        <div className="wb-mset-field" data-testid="wb-modelconfig-field-model">
+          <label htmlFor="wb-modelconfig-model-select">模型 *</label>
+          {editing ? (
+            <input className="wb-card-input" data-testid="wb-modelconfig-id" value={modelId} disabled />
+          ) : options.length > 0 && !manual ? (
+            <select
+              id="wb-modelconfig-model-select"
+              className="wb-card-input"
+              data-testid="wb-modelconfig-model-select"
+              value={options.includes(modelId) ? modelId : ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === MANUAL) {
+                  setManual(true);
+                  setModelId("");
+                  return;
+                }
+                setModelId(value);
+              }}
+            >
+              <option value="">选一个模型…</option>
+              {options.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+              <option value={MANUAL}>手动输入…</option>
+            </select>
+          ) : (
+            <input
+              id="wb-modelconfig-model-select"
+              className="wb-card-input"
+              data-testid="wb-modelconfig-id"
+              spellCheck={false}
+              value={modelId}
+              onChange={(event) => setModelId(event.target.value)}
+              placeholder="deepseek-v4.1-flash-1017"
+            />
+          )}
+          <div className="wb-mset-rowline">
+            {onPullModels ? (
+              <button className="wb-page-btn" data-testid="wb-modelconfig-pull" disabled={pulling} onClick={() => void pull()}>
+                {pulling ? "拉取中…" : "拉取模型"}
+              </button>
+            ) : null}
+            {manual && options.length > 0 ? (
+              <button
+                className="wb-page-btn"
+                data-testid="wb-modelconfig-use-list"
+                onClick={() => {
+                  setManual(false);
+                  setModelId("");
+                }}
+              >
+                从清单里选
+              </button>
+            ) : null}
+          </div>
+          {errors.fetch ? <div className="wb-card-note wb-note-bad">{errors.fetch}</div> : null}
+          {errors.modelId ? <div className="wb-card-note wb-note-bad">{errors.modelId}</div> : null}
+        </div>
+
+        {/* ② 最大上下文 */}
+        <div className="wb-mset-field" data-testid="wb-modelconfig-field-context">
+          <label htmlFor="wb-modelconfig-window">最大上下文 *</label>
           <input
+            id="wb-modelconfig-window"
             className="wb-card-input"
             data-testid="wb-modelconfig-window"
             type="number"
             value={contextWindow}
             onFocus={(event) => event.currentTarget.select()}
-            onChange={(event) => setContextWindow(event.target.value)}
-            placeholder="1000000"
+            onChange={(event) => {
+              setContextWindow(event.target.value);
+              markEdited();
+            }}
+            placeholder="128000"
           />
+          {sourceNote ? (
+            <div className="wb-card-note" data-testid="wb-modelconfig-source">
+              来源：{sourceNote}
+            </div>
+          ) : null}
+          {errors.contextWindow ? <div className="wb-card-note wb-note-bad">{errors.contextWindow}</div> : null}
         </div>
-        {errors.contextWindow ? <div className="wb-card-note wb-note-bad">{errors.contextWindow}</div> : null}
 
-        <div className="wb-card-row">
-          <span className="wb-card-label">最大输出 Token</span>
-          <span className="wb-card-desc">模型一次最多能说多少；不给就按 provider 默认</span>
+        {/* ③ 最大输出 */}
+        <div className="wb-mset-field" data-testid="wb-modelconfig-field-output">
+          <label htmlFor="wb-modelconfig-max-output">最大输出</label>
           <input
+            id="wb-modelconfig-max-output"
             className="wb-card-input"
             data-testid="wb-modelconfig-max-output"
             type="number"
             value={maxOutput}
             onFocus={(event) => event.currentTarget.select()}
-            onChange={(event) => setMaxOutput(event.target.value)}
-            placeholder="64000"
+            onChange={(event) => {
+              setMaxOutput(event.target.value);
+              markEdited();
+            }}
+            placeholder="8192（留空 = 按 provider 默认）"
           />
+          <div className="wb-card-note">留空 = 按 provider 默认。</div>
+          {errors.maxOutput ? <div className="wb-card-note wb-note-bad">{errors.maxOutput}</div> : null}
         </div>
-        {errors.maxOutput ? <div className="wb-card-note wb-note-bad">{errors.maxOutput}</div> : null}
-      </div>
 
-      <div className="wb-card">
-        <div className="wb-card-head">高级配置</div>
-
-        <div className="wb-card-row">
-          <span className="wb-card-label">输入类型</span>
-          <span className="wb-card-desc">文本恒可（纯文本是下限）；其余按模型实际能力勾</span>
+        {/* ④ 输入类型 */}
+        <div className="wb-mset-field" data-testid="wb-modelconfig-field-modalities">
+          <label>输入类型</label>
           <span className="wb-modelconfig-chips">
             <em className="wb-modelconfig-chip is-on">文本</em>
             {MODALITIES.map((item) => (
@@ -278,152 +433,166 @@ export function ModelConfigDialog({ bridge, providerId, providerLabel, protocol,
                 key={item.key}
                 className={`wb-modelconfig-chip${modalities[item.key] ? " is-on" : ""}`}
                 data-testid={`wb-modelconfig-${item.key}`}
-                onClick={() => setModalities({ ...modalities, [item.key]: !modalities[item.key] })}
+                onClick={() => {
+                  setModalities({ ...modalities, [item.key]: !modalities[item.key] });
+                  markEdited();
+                }}
               >
                 {item.label}
               </button>
             ))}
           </span>
+          {errors.supportsVideo ? <div className="wb-card-note wb-note-bad">{errors.supportsVideo}</div> : null}
         </div>
-        {errors.supportsVideo ? <div className="wb-card-note wb-note-bad">{errors.supportsVideo}</div> : null}
 
-        {CAPABILITIES.map((item) => (
-          <div className="wb-card-row" key={item.key}>
-            <span className="wb-card-label">{item.label}</span>
-            <span className="wb-card-desc">{item.hint}</span>
-            <button
-              className={`wb-modelconfig-chip${capabilities[item.key] ? " is-on" : ""}`}
-              data-testid={`wb-modelconfig-${item.key}`}
-              onClick={() => setCapabilities({ ...capabilities, [item.key]: !capabilities[item.key] })}
-            >
-              {capabilities[item.key] ? "已开启" : "关闭"}
-            </button>
-          </div>
-        ))}
-        {errors.supportsNativeWebSearch ? (
-          <div className="wb-card-note wb-note-bad">{errors.supportsNativeWebSearch}</div>
-        ) : null}
-
-        <div className="wb-card-row">
-          <span className="wb-card-label">推理等级</span>
-          <span className="wb-card-desc">从低到高；输入区那颗选择器就按这个列表显示</span>
-          <span className="wb-modelconfig-chips">
-            {reasoningLevels.map((level, index) => (
+        {/* ⑤ 思考强度（模型不支持时整行不出现） */}
+        {showReasoning ? (
+          <div className="wb-mset-field" data-testid="wb-modelconfig-field-reasoning">
+            <label>思考强度</label>
+            <span className="wb-modelconfig-chips">
               <button
-                key={`${level}-${index}`}
-                className="wb-modelconfig-chip is-on"
-                data-testid={`wb-modelconfig-level-${level}`}
-                title="点一下删掉"
-                onClick={() => setReasoningLevels(reasoningLevels.filter((_, i) => i !== index))}
+                className={`wb-modelconfig-chip${effort === "" ? " is-on" : ""}`}
+                data-testid="wb-modelconfig-effort-none"
+                onClick={() => setEffort("")}
               >
-                {level} ×
+                无
               </button>
-            ))}
-            <input
-              className="wb-card-input wb-modelconfig-levelinput"
-              data-testid="wb-modelconfig-level-draft"
-              value={reasoningDraft}
-              onChange={(event) => setReasoningDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") addLevel();
-              }}
-              placeholder="加一档"
+              {REASONING_EFFORTS.map((level) => (
+                <button
+                  key={level}
+                  className={`wb-modelconfig-chip${effort === level ? " is-on" : ""}`}
+                  data-testid={`wb-modelconfig-effort-${level}`}
+                  onClick={() => setEffort(level)}
+                >
+                  {EFFORT_LABEL[level]}
+                </button>
+              ))}
+            </span>
+          </div>
+        ) : null}
+
+        <details className="wb-mset-adv" data-testid="wb-modelconfig-advanced">
+          <summary>高级</summary>
+
+          {CAPABILITIES.map((item) => (
+            <div className="wb-card-row" key={item.key}>
+              <span className="wb-card-label">{item.label}</span>
+              <span className="wb-card-desc">{item.hint}</span>
+              <button
+                className={`wb-modelconfig-chip${capabilities[item.key] ? " is-on" : ""}`}
+                data-testid={`wb-modelconfig-${item.key}`}
+                onClick={() => setCapabilities({ ...capabilities, [item.key]: !capabilities[item.key] })}
+              >
+                {capabilities[item.key] ? "已开启" : "关闭"}
+              </button>
+            </div>
+          ))}
+          {errors.supportsNativeWebSearch ? (
+            <div className="wb-card-note wb-note-bad">{errors.supportsNativeWebSearch}</div>
+          ) : null}
+
+          <div className="wb-card-row">
+            <span className="wb-card-label">推理等级</span>
+            <span className="wb-card-desc">从低到高；输入区那颗选择器就按这个列表显示</span>
+            <span className="wb-modelconfig-chips">
+              {reasoningLevels.map((level, index) => (
+                <button
+                  key={`${level}-${index}`}
+                  className="wb-modelconfig-chip is-on"
+                  data-testid={`wb-modelconfig-level-${level}`}
+                  title="点一下删掉"
+                  onClick={() => setReasoningLevels(reasoningLevels.filter((_, i) => i !== index))}
+                >
+                  {level} ×
+                </button>
+              ))}
+              <input
+                className="wb-card-input wb-modelconfig-levelinput"
+                data-testid="wb-modelconfig-level-draft"
+                value={reasoningDraft}
+                onChange={(event) => setReasoningDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") addLevel();
+                }}
+                placeholder="加一档"
+              />
+              <button className="wb-page-btn" data-testid="wb-modelconfig-level-add" onClick={addLevel}>
+                添加
+              </button>
+            </span>
+          </div>
+          {errors.reasoning ? <div className="wb-card-note wb-note-bad">{errors.reasoning}</div> : null}
+
+          <div className="wb-card-row">
+            <span className="wb-card-label">推理参数映射</span>
+            <span className="wb-card-desc">
+              JSON 对象或规则表；<code>{"{{reasoningLevel}}"}</code> 会被替换成这一轮的档位，结果合并进请求体
+            </span>
+            <textarea
+              className="wb-card-input wb-modelconfig-map"
+              data-testid="wb-modelconfig-reasoning-map"
+              rows={3}
+              value={reasoningMap}
+              onChange={(event) => setReasoningMap(event.target.value)}
+              placeholder={'{"reasoning": {"effort": "{{reasoningLevel}}"}}'}
             />
-            <button className="wb-page-btn" data-testid="wb-modelconfig-level-add" onClick={addLevel}>
-              添加
-            </button>
-          </span>
-        </div>
-        {errors.reasoning ? <div className="wb-card-note wb-note-bad">{errors.reasoning}</div> : null}
+          </div>
+          {mapCheck.reasoning ? (
+            <div className="wb-card-note wb-note-bad" data-testid="wb-modelconfig-reasoning-map-error">
+              {mapCheck.reasoning}
+            </div>
+          ) : null}
 
-        <div className="wb-card-row">
-          <span className="wb-card-label">推理参数映射</span>
-          <span className="wb-card-desc">
-            JSON 对象或规则表；<code>{"{{reasoningLevel}}"}</code> 会被替换成这一轮的档位，
-            结果合并进请求体
-          </span>
-          <textarea
-            className="wb-card-input wb-modelconfig-map"
-            data-testid="wb-modelconfig-reasoning-map"
-            rows={3}
-            value={reasoningMap}
-            onChange={(event) => setReasoningMap(event.target.value)}
-            placeholder={'{"reasoning": {"effort": "{{reasoningLevel}}"}}'}
-          />
-        </div>
-        {mapCheck.reasoning ? (
-          <div className="wb-card-note wb-note-bad" data-testid="wb-modelconfig-reasoning-map-error">
-            {mapCheck.reasoning}
+          <div className="wb-card-row">
+            <span className="wb-card-label">输出参数映射</span>
+            <span className="wb-card-desc">
+              各家认的字段名不一样（<code>max_tokens</code> / <code>max_completion_tokens</code>），在这里改
+            </span>
+            <textarea
+              className="wb-card-input wb-modelconfig-map"
+              data-testid="wb-modelconfig-output-map"
+              rows={3}
+              value={maxOutputMap}
+              onChange={(event) => setMaxOutputMap(event.target.value)}
+              placeholder={'{"max_completion_tokens": "{{maxOutputTokens}}"}'}
+            />
+          </div>
+          {mapCheck.output ? (
+            <div className="wb-card-note wb-note-bad" data-testid="wb-modelconfig-output-map-error">
+              {mapCheck.output}
+            </div>
+          ) : null}
+        </details>
+
+        {errors.form ? <div className="wb-card-note wb-note-bad">{errors.form}</div> : null}
+        {probe ? (
+          <div className={`wb-card-note${probe.ok ? "" : " wb-note-bad"}`} data-testid="wb-modelconfig-test-result">
+            {probe.ok ? <Check size={13} /> : <X size={13} />}
+            {probe.text}
           </div>
         ) : null}
 
-        <div className="wb-card-row">
-          <span className="wb-card-label">输出参数映射</span>
-          <span className="wb-card-desc">
-            各家认的字段名不一样（<code>max_tokens</code> / <code>max_completion_tokens</code>），在这里改
-          </span>
-          <textarea
-            className="wb-card-input wb-modelconfig-map"
-            data-testid="wb-modelconfig-output-map"
-            rows={3}
-            value={maxOutputMap}
-            onChange={(event) => setMaxOutputMap(event.target.value)}
-            placeholder={'{"max_completion_tokens": "{{maxOutputTokens}}"}'}
-          />
+        <div className="wb-modal-foot">
+          <button className="wb-page-btn" data-testid="wb-modelconfig-cancel" onClick={() => onClose(false)}>
+            取消
+          </button>
+          <button
+            className="wb-page-btn"
+            data-testid="wb-modelconfig-test"
+            disabled={probing}
+            onClick={() => void testConnection()}
+          >
+            {probing ? "测试中…" : "测试连通"}
+          </button>
+          <button
+            className="wb-page-btn wb-page-btn-primary"
+            data-testid="wb-modelconfig-save"
+            disabled={busy}
+            onClick={() => void save()}
+          >
+            {busy ? "保存中…" : "保存"}
+          </button>
         </div>
-        {mapCheck.output ? (
-          <div className="wb-card-note wb-note-bad" data-testid="wb-modelconfig-output-map-error">
-            {mapCheck.output}
-          </div>
-        ) : null}
-      </div>
-
-      {errors.form ? <div className="wb-card-note wb-note-bad">{errors.form}</div> : null}
-      {probe ? (
-        <div
-          className={`wb-card-note${probe.ok ? "" : " wb-note-bad"}`}
-          data-testid="wb-modelconfig-test-result"
-        >
-          {probe.ok ? <Check size={13} /> : <X size={13} />}
-          {probe.text}
-        </div>
-      ) : null}
-
-      <div className="wb-setfull-foot">
-        <button
-          className="wb-page-btn"
-          data-testid="wb-modelconfig-reset"
-          onClick={() => {
-            setModelId(editing?.modelId ?? "");
-            setContextWindow(editing?.contextWindow ? String(editing.contextWindow) : "");
-            setMaxOutput(editing?.maxOutputTokens ? String(editing.maxOutputTokens) : "");
-            setReasoningLevels(editing?.reasoningLevels ?? []);
-            setReasoningMap(editing?.reasoningMap ?? "");
-            setMaxOutputMap(editing?.maxOutputMap ?? "");
-            setErrors({});
-          }}
-        >
-          重置表单
-        </button>
-        <button
-          className="wb-page-btn"
-          data-testid="wb-modelconfig-test"
-          disabled={probing}
-          onClick={() => void testConnection()}
-        >
-          {probing ? "测试中…" : "测试连通"}
-        </button>
-        <button className="wb-page-btn" data-testid="wb-modelconfig-cancel" onClick={() => onClose(false)}>
-          取消
-        </button>
-        <button
-          className="wb-page-btn wb-page-btn-primary"
-          data-testid="wb-modelconfig-save"
-          disabled={busy}
-          onClick={() => void save()}
-        >
-          {busy ? "保存中…" : "保存"}
-        </button>
       </div>
     </div>
   );

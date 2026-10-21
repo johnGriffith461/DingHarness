@@ -1,4 +1,4 @@
-import { envSecret, type SecretPort } from "../ports/secret";
+import { envSecret, type KeySource, type SecretPort } from "../ports/secret";
 import type { Protocol } from "./models";
 
 /**
@@ -307,8 +307,14 @@ export type ProviderInfo = {
   label: string;
   models: string[];
   note: string;
-  /** 是否检测到可用 key。 */
+  /** 实际生效的 baseURL（已应用环境变量覆盖）。 */
+  baseURL: string;
+  /** 是否检测到可用 key（任何来源）。 */
   available: boolean;
+  /** 密钥来自哪（M-02）：本应用 / 环境变量 / 旧目录 / 没有。 */
+  keySource: KeySource;
+  /** **本应用里配过**（= `keySource === "app"`）。首跑与设置页的"已配置"只看这个。 */
+  configured: boolean;
   /** 密钥的引用名（只是名字，不是密钥本体；设置里填 key 要用它）。 */
   keyRef: string;
 };
@@ -318,17 +324,36 @@ export type ProviderInfo = {
  *
  * `secret` 不给 = 只看环境变量（V5-4 4.1 的端口化）：宿主（CLI / 桌面 / 自检）
  * 一律显式传自己的凭据解析，否则"用户在设置里填的 key"会被当成没配。
+ *
+ * `opts.keySourceOf` 让宿主/测试注入来源判断。**默认实现不碰磁盘**（engine-core 的
+ * 边界要求）：只看环境变量与注入的 `secret` 端口 —— 有值但不是环境变量，就按
+ * "本应用保存的"算。桌面宿主会显式传 `credentials.keySourceOf`（能区分 `~/.dsh`）。
+ *
+ * 来源与 `available` 分开算是有意的：环境变量与旧目录里的 key 都"可用"，
+ * 但**只有本应用里存的那条算"你配过了"**。
  */
-export function listProviders(secret: SecretPort = envSecret): ProviderInfo[] {
-  return allProviders().map((p) => ({
-    id: p.id,
-    label: p.label,
-    models: p.models,
-    note: p.note,
-    /* 2026-10-16：设置页「填 key」要知道写到哪个名字下（只是名字，不是密钥） */
-    keyRef: p.keyRef,
-    available: secret(p.keyRef) !== null,
-  }));
+export function listProviders(
+  secret: SecretPort = envSecret,
+  opts: { keySourceOf?: (ref: string) => KeySource } = {},
+): ProviderInfo[] {
+  const sourceOf =
+    opts.keySourceOf ??
+    ((ref: string): KeySource => (process.env[ref]?.trim() ? "env" : secret(ref) !== null ? "app" : "none"));
+  return allProviders().map((p) => {
+    const keySource = sourceOf(p.keyRef);
+    return {
+      id: p.id,
+      label: p.label,
+      models: p.models,
+      note: p.note,
+      baseURL: p.baseURL,
+      /* 2026-10-16：设置页「填 key」要知道写到哪个名字下（只是名字，不是密钥） */
+      keyRef: p.keyRef,
+      available: secret(p.keyRef) !== null,
+      keySource,
+      configured: keySource === "app",
+    };
+  });
 }
 
 /** 按 id 取 provider 定义（已应用 baseURL 覆盖）。 */

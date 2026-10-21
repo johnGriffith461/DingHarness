@@ -5,7 +5,8 @@
 //
 // 判据（都是"点了要有真后果"）：
 //   ① 设置里点「模型」这一行 → 子页真的打开，左列真列出 provider（不是空壳）；
-//   ② 每家的状态是**真的**：至少有一家写"有密钥"（这台机器配过 key）；
+//   ② 每家的状态是**真的**：至少有一家写出**密钥来源**（本应用已保存 / 来自环境变量 /
+//      来自旧目录）—— 2026-10-21（M-02）起状态词换成了来源，旧词「有密钥」被删掉；
 //   ③ 点「⟳ 拉取模型」→ 要么拉回真清单（勾选框出现），要么给出人话原因（不许静默）；
 //   ④ ⭐ 勾选/取消 与「设为默认」**要落盘**（`dsh-canvas.model-settings`），
 //      而且**主页那颗选择器读的就是它** —— 这条是"配了之后真用得上"的关键。
@@ -45,8 +46,10 @@ try {
   const rows = await page.locator('[data-testid^="wb-modelset-provider-"]').count();
   if (rows < 2) bad.push(`左列只列出 ${rows} 家 provider（不像真列表）`);
   const states = await page.locator(".wb-modelset-row em").allInnerTexts();
-  const hasKey = states.some((s) => s.includes("有密钥") || s.includes("已验证"));
-  if (!hasKey) bad.push(`没有一家显示"有密钥/已验证"（实测：${JSON.stringify(states)}）—— 状态可能是写死的`);
+  /* 2026-10-21（M-02）：状态词是**密钥来源**；「有密钥」那句已被替换（它把别人的 key 也算成你配的） */
+  const hasKey = states.some((s) => /本应用已保存|来自环境变量|来自旧目录|已验证/.test(s));
+  if (!hasKey) bad.push(`没有一家写出密钥来源（实测：${JSON.stringify(states)}）—— 状态可能是写死的`);
+  if (states.some((s) => s.trim() === "有密钥")) bad.push("还在用旧文案「有密钥」（该换成来源词）");
   note(`provider ${rows} 家；状态：${states.map((s) => s.trim()).join(" / ")}`);
 
   /* ③ 点一家 → 它的详情出来（拉取按钮 + 说明） */

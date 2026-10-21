@@ -1,8 +1,9 @@
 import path from "node:path";
 import { app } from "electron";
 import type { ProviderInfo } from "../../shared/ipc";
-import { modelIdsFromJson, modelsUrlFor } from "../../engine/runtime/modelsFetch";
-import { resolveSecret } from "../../engine/runtime/credentials";
+import { modelCapsFromJson, modelIdsFromJson, modelsUrlFor } from "../../engine/runtime/modelsFetch";
+import type { EndpointModelInfo } from "../../engine/runtime/modelCapability";
+import { keySourceOf, resolveSecret } from "../../engine/runtime/credentials";
 import { allProviders, getProvider, listProviders } from "../../engine/runtime/providers";
 import { blockedReason, fetchRemote, realModelBlocked } from "../../engine/runtime/modelGate";
 import { createJsonStore } from "./jsonStore";
@@ -141,7 +142,7 @@ export function markProviderFailed(providerId: string, note: string): void {
  */
 export async function listProvidersWithProbe(): Promise<ProviderInfo[]> {
   const probes = await readProbes();
-  return listProviders(resolveSecret).map((info) => {
+  return listProviders(resolveSecret, { keySourceOf }).map((info) => {
     const probe = probes[info.id];
     return {
       ...info,
@@ -168,7 +169,7 @@ export async function probeProviders(timeoutMs = 8000): Promise<ProbeOutcome[]> 
 
   const out: ProbeOutcome[] = [];
   for (const def of allProviders()) {
-    const info = listProviders(resolveSecret).find((p) => p.id === def.id);
+    const info = listProviders(resolveSecret, { keySourceOf }).find((p) => p.id === def.id);
     if (!info?.available) continue;
     const key = resolveSecret(def.keyRef);
     const started = Date.now();
@@ -220,7 +221,7 @@ export { getProvider };
  */
 export async function fetchModelsFor(
   target: { providerId: string } | { baseURL: string; apiKey: string },
-): Promise<{ ok: boolean; models?: string[]; error?: string }> {
+): Promise<{ ok: boolean; models?: string[]; caps?: Record<string, EndpointModelInfo>; error?: string }> {
   let baseURL: string;
   let apiKey: string | undefined;
   if ("providerId" in target) {
@@ -256,7 +257,9 @@ export async function fetchModelsFor(
     }
     const models = modelIdsFromJson(parsed);
     if (!models.length) return { ok: false, error: "对方没给出可识别的模型清单（不猜，宁可说没有）" };
-    return { ok: true, models };
+    /* M-07：顺手把端点自报的窗口/输出/模态带回去（认不出就留空，不编） */
+    const caps = modelCapsFromJson(parsed);
+    return { ok: true, models, ...(Object.keys(caps).length ? { caps } : {}) };
   } catch (e) {
     const message = String((e as Error)?.message ?? e);
     return { ok: false, error: /timeout|abort/i.test(message) ? "超时（20 秒）——地址对不对？" : message.slice(0, 160) };

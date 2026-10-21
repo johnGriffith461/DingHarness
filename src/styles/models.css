@@ -16,3 +16,168 @@
   font-size: 11px;
   line-height: 1.5;
 }
+
+/* ---------- M-01：三段式布局（左列 240 + 详情；Key 置顶） ---------- */
+
+.wb-modelset-page { display: flex; flex-direction: column; gap: 10px; }
+
+.wb-modelset-page .wb-modelset-list {
+  width: 240px;
+  flex: 0 0 240px;
+  gap: 6px;
+  min-height: 0;
+}
+
+.wb-mset-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg-dim);
+}
+.wb-mset-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.wb-mset-rows { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; }
+.wb-mset-list-foot { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+
+.wb-modelset-page .wb-modelset-row { justify-content: flex-start; }
+.wb-modelset-page .wb-modelset-row em { margin-left: auto; }
+
+.wb-mset-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--fg-faint); }
+.wb-mset-dot.is-verified,
+.wb-mset-dot.is-app { background: var(--ok); }
+.wb-mset-dot.is-env,
+.wb-mset-dot.is-legacy { background: var(--warn); }
+.wb-mset-dot.is-none { background: var(--fg-faint); }
+
+.wb-modelset-row em.is-verified,
+.wb-modelset-row em.is-app { color: var(--ok); }
+.wb-modelset-row em.is-env,
+.wb-modelset-row em.is-legacy { color: var(--warn); }
+.wb-modelset-row em.is-none { color: var(--fg-faint); }
+.wb-modelset-row em.wb-mset-verified {
+  color: var(--ok);
+  font-size: 10.5px;
+  border: 1px solid var(--ok);
+  border-radius: 999px;
+  padding: 0 5px;
+  margin-left: auto;
+}
+/* 有「已验证」那颗时，来源词不再抢右边距 */
+.wb-modelset-row em.wb-mset-verified + em { margin-left: 0; }
+
+.wb-mset-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wb-mset-detail-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wb-mset-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wb-mset-badge {
+  font-style: normal;
+  font-size: 11px;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-dim);
+}
+.wb-mset-badge.is-verified,
+.wb-mset-badge.is-app { color: var(--ok); border-color: var(--ok); }
+.wb-mset-badge.is-env,
+.wb-mset-badge.is-legacy { color: var(--warn); border-color: var(--warn); }
+
+.wb-mset-keyrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wb-mset-keylabel { font-size: 12.5px; min-width: 56px; }
+.wb-mset-keyrow .wb-card-input { flex: 1; min-width: 180px; }
+.wb-mset-baseurl { font-size: 11.5px; color: var(--fg-dim); overflow-wrap: anywhere; }
+.wb-mset-rowline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.wb-mset-models-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.wb-mset-search-inline { width: 160px; }
+
+.wb-mset-group { display: flex; flex-direction: column; gap: 1px; }
+.wb-mset-group-head {
+  padding: 5px 2px 2px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--fg-faint);
+  border-bottom: 1px solid var(--bg-2);
+}
+.wb-mset-caps { display: flex; gap: 4px; }
+.wb-mset-cap {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--accent-strong);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 5px;
+}
+
+.wb-mset-pagenote { font-size: 12px; color: var(--fg-dim); }
+.wb-mset-now { font-size: 11.5px; color: var(--fg-dim); }
+
+/* ---------- M-03/M-04：两个小窗（560 / 640），字段纵向排 ---------- */
+
+.wb-mset-dialog { width: 560px; }
+.wb-mset-dialog-wide { width: 640px; }
+.wb-mset-dialog .wb-mset-field,
+.wb-mset-dialog-wide .wb-mset-field { display: flex; flex-direction: column; gap: 4px; }
+.wb-mset-field > label { font-size: 12.5px; color: var(--fg); }
+/*
+ * ⚠️ `.wb-card-input` 的基础样式带 `flex: 0 0 200px` —— 那是给"一行里控件贴右"
+ * 的横向布局用的宽度。放进纵向排列的字段列表时，flex-basis 作用在**高度**上，
+ * 每个输入框会变成 200px 高（2026-10-21 真机截图撞到）。
+ * 这里按纵向语义重置：宽度撑满、高度由内容决定。
+ */
+.wb-mset-field .wb-card-input {
+  width: 100%;
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 30px;
+}
+.wb-mset-field textarea.wb-card-input { height: auto; min-height: 60px; }
+.wb-mset-field select.wb-card-input { height: 30px; }
+.wb-mset-adv {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wb-mset-adv > summary { cursor: pointer; font-size: 12.5px; color: var(--fg-dim); }
+
+/*
+ * 输入类型 / 思考强度那群小胶囊（M-04）。
+ *
+ * ⚠️ 全仓原本**没有** `.wb-modelconfig-chip` 的样式（2026-10-21 核对：
+ * `grep` 只命中 tsx，没有一条 CSS）—— 上一版那几个按钮就是裸文本。
+ * 这里按 theme token 补上，不引入新色值。
+ */
+.wb-modelconfig-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.wb-modelconfig-chip {
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.wb-modelconfig-chip:hover { color: var(--fg); border-color: var(--line-strong); }
+.wb-modelconfig-chip.is-on {
+  /* 只用暖色 token（--tint-blue 是冷色，品牌验收会判红） */
+  background: var(--bg-2);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.wb-modelconfig-levelinput { width: 90px; flex: 0 0 auto; }
+.wb-modelconfig-map { width: 100%; flex: 0 0 auto; height: auto; min-height: 60px; font-family: inherit; }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { modelIdsFromJson, modelsUrlFor } from "./modelsFetch";
+import { modelCapsFromJson, modelIdsFromJson, modelsUrlFor } from "./modelsFetch";
 
 /**
  * 拉取模型清单（2026-10-16）—— 钉两件纯逻辑：**响应怎么解析**与**地址怎么拼**。
@@ -38,5 +38,46 @@ describe("拉取模型清单", () => {
     expect(modelsUrlFor("https://api.x.com/v1")).toBe("https://api.x.com/v1/models");
     expect(modelsUrlFor("https://api.x.com/v1/chat/completions")).toBe("https://api.x.com/v1/models");
     expect(modelsUrlFor("https://api.x.com/v1/")).toBe("https://api.x.com/v1/models");
+  });
+});
+
+/**
+ * M-07：端点自报能力（照 Continue 的 `fetchModels.ts` 那份映射）。
+ *
+ * 三条形状各钉一条；认不出来的字段**必须留空**（走目录/默认，不编）。
+ */
+describe("端点自报的能力", () => {
+  it("OpenRouter：context_length + top_provider.max_completion_tokens + architecture.input_modalities", () => {
+    const got = modelCapsFromJson({
+      data: [
+        {
+          id: "deepseek/deepseek-chat",
+          context_length: 163840,
+          top_provider: { max_completion_tokens: 16000 },
+          architecture: { input_modalities: ["text", "file"] },
+          supported_parameters: ["tools", "reasoning"],
+        },
+      ],
+    });
+    expect(got["deepseek/deepseek-chat"]).toEqual({
+      contextWindow: 163840,
+      maxOutput: 16000,
+      inputModalities: ["text", "pdf"],
+      reasoning: true,
+    });
+  });
+
+  it("Anthropic：max_input_tokens / max_tokens", () => {
+    const got = modelCapsFromJson({ data: [{ id: "claude-sonnet-4-5", max_input_tokens: 200000, max_tokens: 8192 }] });
+    expect(got["claude-sonnet-4-5"]).toEqual({ contextWindow: 200000, maxOutput: 8192 });
+  });
+
+  it("Gemini：inputTokenLimit / outputTokenLimit", () => {
+    const got = modelCapsFromJson({ models: [{ name: "gemini-2.5-pro", inputTokenLimit: 1048576, outputTokenLimit: 65536 }] });
+    expect(got["gemini-2.5-pro"]).toEqual({ contextWindow: 1048576, maxOutput: 65536 });
+  });
+
+  it("⭐ 什么字段都不认识的条目**不出现**（不拿默认值冒充端点数据）", () => {
+    expect(modelCapsFromJson({ data: [{ id: "mystery-model" }] })).toEqual({});
   });
 });

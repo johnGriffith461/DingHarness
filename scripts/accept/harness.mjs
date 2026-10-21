@@ -349,6 +349,20 @@ export const NO_PAGE_HINT =
  * @returns `bootOnce` 的返回值（`port` 是**实际**用的那个）
  */
 export async function bootApp(options) {
+  /*
+   * M-08：**验收必须显式给隔离数据目录**（2026-10-21）。
+   *
+   * 原来缺省时会落回开发态默认目录 —— 而那条默认路径曾经与用户 profile 重叠，
+   * 于是"跑验收"顺手写脏了用户装完看到的数据。现在缺了直接抛错，
+   * 并给出约定路径 `.verify/acc-<脚本名>-data`（脚本自己拼好传进来）。
+   */
+  if (typeof options?.dataDir !== "string" || !options.dataDir.trim()) {
+    const script = (process.argv[1] ?? "accept-script").split(/[\\/]/).pop()?.replace(/\.mjs$/, "") ?? "accept-script";
+    throw new Error(
+      `bootApp 需要 dataDir（隔离数据目录）—— 约定路径是 .verify/acc-${script}-data。` +
+        " 拒绝落回默认目录：那会写脏真实用户数据（M-08）。",
+    );
+  }
   const tried = [];
   let candidate = options.port;
   for (let i = 0; i < 3; i += 1) {

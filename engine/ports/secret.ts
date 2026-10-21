@@ -12,6 +12,15 @@
 export type SecretPort = (keyRef: string) => string | null;
 
 /**
+ * 一条 key 的**来源**（M-02）。
+ *
+ * 放在端口层（不放 `runtime/credentials.ts`）：`providers.ts` 属于 engine-core
+ * 的最小嵌入面，不能为了一个四字联合类型把 `node:fs` 拖进来
+ * （`src/engineCoreBoundary.test.ts` 会红）。
+ */
+export type KeySource = "app" | "env" | "legacy" | "none";
+
+/**
  * 默认的凭据解析：**只读环境变量**。
  *
  * 取名与 `keyRef` 对齐（provider 表里的那一格就是"环境变量名 / 凭据引用名"）。

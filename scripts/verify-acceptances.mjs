@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -265,6 +265,20 @@ const CASES = [
    */
   ["accept-providers.mjs", "provider 状态诚实（没密钥的写无密钥 / 真跑通一轮之后那一家升成已验证）"],
   ["accept-settings-models.mjs", "设置·模型页（左列 provider / 状态是真的 / 拉取要么出清单要么给人话 / 勾选与默认落盘）"],
+  /*
+   * ── 2026-10-21（M-01..M-08 重做）：七条新的模型管理验收 ──
+   *
+   * 都**不调真模型**：五条只碰设置页与 localStorage/config.json，
+   * 一条用批跑的本地假通道（`/models` + SSE），一条只起停应用。
+   * 每一条都对着主人报的六条里的某一条，判据写在各自文件头。
+   */
+  ["accept-models-layout.mjs", "模型页三段式（左列/详情分离 / Key 在模型区上方 / 两个弹窗都是 520–680 卡片）"],
+  ["accept-key-source.mjs", "密钥来源诚实（旧目录标「来自旧目录」/ 改用本应用保存后变「本应用已保存」）"],
+  ["accept-new-provider.mjs", "添加供应商小窗（URL→Key→模型 / 拉取后 0 选中 / 保存后标本应用已保存且启用清单为空）"],
+  ["accept-model-dialog.mjs", "添加模型小窗（模型下拉 / 五字段顺序 / 能力自动预填且来源可见 / 无「已声明」字样）"],
+  ["accept-model-select.mjs", "模型启用清单（拉取后 0 勾 / 勾 2 个 / 输入区选择器只出现那 2 个）"],
+  ["accept-provider-delete.mjs", "删除/隐藏供应商（自定义级联清理声明 / 内置只能隐藏且隐藏后选择器看不见）"],
+  ["accept-clean-profile.mjs", "干净 profile（任务中心 0 条 + 空态在 / 写一条后重启读得回来，同一批 id）"],
   /*
    * ⚠️ `accept-theme.mjs` **2026-10-14 退役**（从这份清单摘掉，脚本本体留在原地并加了墓碑说明）：
    * 它点的是设置弹窗里的「外观」行，而**外观早就挪到账号菜单的子菜单**（`wb-acct-appearance`）——
@@ -1118,13 +1132,22 @@ console.log(`批跑自带假通道：${localModel.url}（配 DSH_NO_REAL_MODEL=1
  */
 const CRED_FILE = join(RECORDS_DIR, "batch-credentials.yaml");
 try {
+  /*
+   * ⚠️ 先建目录（2026-10-21，CI 逮到的）：这台机器上 `.verify/` 早就在，
+   * 于是写失败这条分支从没被走过 —— 而 CI 的干净检出里没有这个目录，
+   * `writeFileSync` 抛 ENOENT、被下面的 catch 静默吞掉，结果**整批没有凭据文件**。
+   * 之前没暴露是因为"有密钥"看的是环境变量；M-02 之后 `configured` 只认本应用保存的那条，
+   * `accept-firstrun` 立刻就红了。静默兜底 + 隐含依赖 = 只在干净环境里现形。
+   */
+  mkdirSync(RECORDS_DIR, { recursive: true });
   writeFileSync(
     CRED_FILE,
     "refs:\n  STRATA_API_KEY: accept-local-fake\n  LUNORA_API_KEY: accept-local-fake\n",
     "utf8",
   );
-} catch {
-  /* 写不进去就退回"只靠闸"（下面的环境清理照做） */
+} catch (error) {
+  /* 写不进去就退回"只靠闸"（下面的环境清理照做）—— 但**说出来**，别再静默 */
+  console.error(`[批跑] 凭据文件写不进去（${CRED_FILE}）：${error instanceof Error ? error.message : String(error)}`);
 }
 
 /**
@@ -1192,10 +1215,13 @@ function run(file) {
     /*
      * ⭐ **批跑强制一个隔离数据目录**（2026-10-16，审计 G01 的兜底）。
      *
-     * 开发态应用的数据目录默认是**仓库里那个 `data/`**（`main.ts` 的 `configureDataDir`）。
-     * 脚本自己没设 `DSH_CANVAS_DATA_DIR` 的话，这一跑就会去写（甚至删）真实数据。
+     * 脚本自己没设 `DSH_CANVAS_DATA_DIR` 的话，这一跑就会去写（甚至删）不该动的数据。
      * 这一层先给一个 `.verify/` 下的目录兜住；脚本自己设的那个会覆盖它
      * （所以还有下面那道"源码级拒绝"）。
+     *
+     * ⚠️ 2026-10-21（M-08）：开发态应用的数据目录已从**仓库根 `data/`** 改成
+     * `%APPDATA%\ding-harness-dev` —— 但这里仍然强制隔离：验收要的是
+     * "每一条脚本有自己的干净目录"，与产品默认值是哪无关。
      */
     env.DSH_CANVAS_DATA_DIR = env.DSH_CANVAS_DATA_DIR || join(RECORDS_DIR, "batch-data", file.replace(/\.mjs$/, ""));
     const child = spawn(process.execPath, [join(ACCEPT_DIR, file)], {
@@ -1243,8 +1269,12 @@ function run(file) {
  * 这一条脚本**能不能进批跑**（2026-10-16，审计 G01 的源码级守卫）。
  *
  * 判据：不许把应用的数据目录钉成仓库里那个真实的 `data/` ——
- * 那意味着这一跑会**动用户真实的数据**（其中 9 条还带 `rmSync`）。
+ * 那意味着这一跑会**动真实的数据**（其中 9 条还带 `rmSync`）。
  * 命中就**拒跑**（并当场说清为什么），而不是"默默还是跑了"。
+ *
+ * ⚠️ 2026-10-21（M-08）起开发态默认目录不再是仓库 `data/`（改成 `ding-harness-dev`），
+ * 但这条守卫**保留**：脚本里写死 `"data"` 仍然是"指向一份固定的、可能被真数据占用的目录"，
+ * 与产品默认值改没改无关。
  */
 function isolationProblem(file) {
   try {

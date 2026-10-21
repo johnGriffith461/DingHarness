@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { ProviderInfo } from "@engine/runtime/providers";
+import type { ProviderInfo } from "@shared/ipc";
 import { CONFIRM_MODES, type ConfirmMode } from "@shared/ipc";
 
 import { useAppSettings } from "./appSettings";
+import { isConfigured } from "./providerBadge";
 import { saveConfirmMode } from "./confirmMode";
 import { readSavedRoute } from "@/ai/route";
 import type { ShellBridge } from "@shared/ipc";
@@ -263,9 +264,13 @@ export function FirstRunGuide() {
       if (list) {
         const mapped = list.map((p) => ({ ...p }));
         setProviders(mapped);
-        /* 有 key → 跳过第 1 步，直接选模型（只自动跳一次） */
-        if (autoAdvanced === false && mapped.some((p) => p.available)) {
-          setProvider((prev) => prev || (mapped.find((p) => p.available)?.id ?? ""));
+        /*
+         * 有 key → 跳过第 1 步，直接选模型（只自动跳一次）。
+         * ⚠️ M-02：判据从 `available` 改成 `configured` —— `~/.dsh` 里别人的 key
+         * 不能再让向导以为"你已经配过了"。
+         */
+        if (autoAdvanced === false && mapped.some((p) => isConfigured(p))) {
+          setProvider((prev) => prev || (mapped.find((p) => isConfigured(p))?.id ?? ""));
           setStep((prev) => (prev === 0 ? 2 : prev));
           setAutoAdvanced(true);
         }
@@ -331,8 +336,33 @@ export function FirstRunGuide() {
     }
   };
 
-  const addWorkspace = async (): Promise<void> => {
+  /**
+   * M-02：「检测到环境变量里有 X 的密钥，要用它吗？」→ 存一份到本应用。
+   *
+   * 主进程读环境变量、写加密库，**明文不进渲染层**。
+   * 保存后环境变量仍然优先（读取顺序没变），所以提示里要如实说清。
+   */
+  const adoptEnv = async (refName: string): Promise<void> => {
     if (busy) return;
+    setBusy(true);
+    setNote("");
+    try {
+      const got = await shell?.secrets?.adoptEnv(refName);
+      if (got && !got.ok) {
+        setNote(got.reason ?? "没能存下来");
+        return;
+      }
+      setNote("已存一份到本应用（环境变量仍在时优先用环境变量；两者都不可用时才轮到这条）");
+      await refresh();
+      setStep(2);
+    } catch (error) {
+      setNote(`没能存下来：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addWorkspace = async (): Promise<void> => {    if (busy) return;
     setBusy(true);
     try {
       const got = await shell?.workspace?.add();
@@ -386,7 +416,7 @@ export function FirstRunGuide() {
                   {(providers ?? []).map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}
-                      {p.available ? "（已有 key）" : ""}
+                      {isConfigured(p) ? "（已有 key）" : p.keySource === "env" ? "（环境变量里有 key）" : ""}
                     </option>
                   ))}
                 </select>
@@ -394,7 +424,7 @@ export function FirstRunGuide() {
                   type="button"
                   data-testid="wb-firstrun-provider-next"
                   disabled={!provider}
-                  onClick={() => setStep(chosen?.available ? 2 : 1)}
+                  onClick={() => setStep(isConfigured(chosen) ? 2 : 1)}
                 >
                   下一步
                 </button>
@@ -406,6 +436,29 @@ export function FirstRunGuide() {
             <div className="wb-firstrun-title">② 填 key</div>
             {step === 1 && chosen ? (
               <div className="wb-firstrun-body">
+                {/*
+                  M-02：环境变量里已经有这条 key 时，给一条**明确的快捷路径**。
+                  值不经过渲染层（主进程自己读、自己写加密库），界面上永远看不到明文。
+                */}
+                {chosen.keySource === "env" ? (
+                  <div className="wb-firstrun-hint" data-testid="wb-firstrun-env-hint">
+                    检测到环境变量 <code>{chosen.keyRef}</code> 里有密钥 —— 要用它吗？
+                    <button
+                      type="button"
+                      data-testid="wb-firstrun-env-adopt"
+                      disabled={busy}
+                      onClick={() => void adoptEnv(chosen.keyRef)}
+                    >
+                      存一份到本应用
+                    </button>
+                  </div>
+                ) : null}
+                {chosen.keySource === "legacy" ? (
+                  <div className="wb-firstrun-hint" data-testid="wb-firstrun-legacy-hint">
+                    这条密钥来自旧目录 <code>~/.dsh</code>（别的程序也在用）—— 建议在这里另存一条，
+                    以后关掉旧文件也不受影响。
+                  </div>
+                ) : null}
                 <input
                   data-testid="wb-firstrun-key"
                   type="password"
@@ -447,7 +500,7 @@ export function FirstRunGuide() {
                   >
                     {(providers ?? []).map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.label}{p.available ? "（已有 key）" : ""}
+                        {p.label}{isConfigured(p) ? "（已有 key）" : p.keySource === "env" ? "（环境变量里有 key）" : ""}
                       </option>
                     ))}
                   </select>

@@ -112,6 +112,19 @@ try {
   report.addFormOpenedInInstalledApp = (await page.locator('[data-testid="wb-add-form"]').count()) === 1;
 
   /*
+   * M-08（2026-10-21）：**干净装机后任务中心为空**。
+   *
+   * 主人报的第 6 条就是"装完有两条我们的任务"——那条的根因是 dev 与装机版共用
+   * `%APPDATA%\ding-harness`，不是安装包自带数据。这里在**打包产物 + 全新数据目录**上
+   * 断言一次：任务中心 0 条且空态在（否则"没有任务"可能只是"没读到"）。
+   */
+  await page.locator('[data-testid="wb-center-open"]').click();
+  await page.waitForTimeout(1000);
+  report.taskCenterEmptyState = (await page.locator('[data-testid="wb-center-empty"]').count()) === 1;
+  report.taskCenterRows = await page.locator('[data-testid^="wb-center-row-"]').count();
+  await page.screenshot({ path: ".verify/installed-clean-center.png", timeout: 8000 }).catch(() => undefined);
+
+  /*
    * 打包态迁移：新目录里应有旧目录的标记，旧目录本身不许被搬空/删掉。
    * 这里等到文件出现（迁移在主进程启动早期做，页面能渲染时通常已完成）。
    */
@@ -148,9 +161,12 @@ try {
   if (report.pageErrors?.length) bad.push(`页面抛了 ${report.pageErrors.length} 个异常：${report.pageErrors[0]}`);
   /* F-01：装完第一眼必须是配置向导（不是空首页），且能点「稍后再说」走开 */
   if (report.firstRunGuideShown !== true) bad.push("干净数据目录启动时没有出现配置向导（首屏该只有这一个主动作）");
+  /* M-08：干净装机后任务中心必须是空的（主人报的第 6 条） */
+  if (report.taskCenterRows !== 0) bad.push(`干净装机后任务中心有 ${report.taskCenterRows} 条任务（主人报的第 6 条）`);
+  if (report.taskCenterEmptyState !== true) bad.push("任务中心既没任务也没空态（可能压根没读到数据目录）");
   if (report.consoleErrors?.length) bad.push(`控制台有 ${report.consoleErrors.length} 条 error：${report.consoleErrors[0]}`);
 
-  verdict(bad, "装机版可用：连得上 / 外壳渲染 / 导航齐全 / 两处交互能动 / 写新数据目录 / 旧数据迁移且不删旧 / 控制台无 error");
+  verdict(bad, "装机版可用：连得上 / 外壳渲染 / 导航齐全 / 两处交互能动 / 写新数据目录 / 旧数据迁移且不删旧 / 干净装机任务中心为空 / 控制台无 error");
 
   child.kill();
 }

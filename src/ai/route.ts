@@ -89,7 +89,14 @@ export async function resolveChatRoute(
   if (saved.provider) return saved;
   try {
     const { listProviders } = await import("./aiClient");
-    const providers = await listProviders();
+    /* M-06：隐藏的供应商不参与自动选路（读不到设置就按"没隐藏"处理，别把整条路弄断） */
+    let hidden: string[] = [];
+    try {
+      hidden = (await import("@/workbench/appSettings")).useAppSettings.getState().hiddenProviders;
+    } catch {
+      hidden = [];
+    }
+    const providers = (await listProviders()).filter((p) => !hidden.includes(p.id));
     /*
      * ⚠️ 2026-10-16（审计 P254）：**必须排掉"可用但没有模型"的通道**。
      *
@@ -121,7 +128,13 @@ export async function resolveChatRoute(
 async function availableRoutes(): Promise<string[]> {
   try {
     const { listProviders } = await import("./aiClient");
-    const providers = await listProviders();
+    let hidden: string[] = [];
+    try {
+      hidden = (await import("@/workbench/appSettings")).useAppSettings.getState().hiddenProviders;
+    } catch {
+      hidden = [];
+    }
+    const providers = (await listProviders()).filter((p) => !hidden.includes(p.id));
     const routes = providers
       .filter((p) => p.available)
       .flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m}`));
@@ -161,12 +174,20 @@ export async function diagnoseRouteNow(): Promise<RouteDiagnosis> {
   let providers: Array<{ id: string; label: string; models: string[]; available: boolean }> = [];
   try {
     const { listProviders } = await import("./aiClient");
-    providers = (await listProviders()).map((p) => ({
-      id: p.id,
-      label: p.label,
-      models: p.models ?? [],
-      available: p.available,
-    }));
+    let hidden: string[] = [];
+    try {
+      hidden = (await import("@/workbench/appSettings")).useAppSettings.getState().hiddenProviders;
+    } catch {
+      hidden = [];
+    }
+    providers = (await listProviders())
+      .filter((p) => !hidden.includes(p.id))
+      .map((p) => ({
+        id: p.id,
+        label: p.label,
+        models: p.models ?? [],
+        available: p.available,
+      }));
   } catch {
     /* 列不出来 → 交给诊断按"没有密钥"说（CLI/主进程会给更底层的原因） */
   }

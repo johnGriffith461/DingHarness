@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { chromium } from "playwright";
 import {
   NO_PAGE_HINT,
@@ -32,7 +34,27 @@ const out = {};
 let child = null;
 
 try {
-  const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /*
+   * M-02（2026-10-21）：向导"已有 key 就跳过填 key"的判据从 `available` 改成了
+   * `configured`（= 本应用存的）。批跑环境里 `STRATA_API_KEY` **是环境变量**，
+   * 那属于"能用但不是你配的" —— 向导会停在填 key 那一步并给"存一份到本应用"的快捷路径
+   * （那条路径由 `providerBadge.test.ts` + `accept-key-source.mjs` 盯着）。
+   * 这条脚本要验的是**已配置**那一支，所以：
+   *   ① 把环境变量那格清空；
+   *   ② **自己**往 `DSH_CREDENTIALS_FILE` 写一条 —— 不依赖批跑有没有写成
+   *      （CI 的干净检出里 `.verify/` 不存在时，批跑那次写曾经静默失败过）。
+   */
+  const credFile = process.env.DING_CREDENTIALS_FILE?.trim();
+  if (credFile) {
+    fs.mkdirSync(path.dirname(credFile), { recursive: true });
+    fs.writeFileSync(credFile, "refs:\n  STRATA_API_KEY: accept-app-saved-key\n", "utf8");
+  }
+  const booted = await bootApp({
+    port: PORT,
+    dataDir: DATA,
+    timeoutMs: 30000,
+    extraEnv: { STRATA_API_KEY: "" },
+  });
   child = booted.child;
   if (!booted.ok) {
     console.error("[诊断] 应用输出尾部：\n" + (booted.getLog() || "(空)").slice(-1200));

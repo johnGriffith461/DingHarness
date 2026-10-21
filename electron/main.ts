@@ -51,6 +51,9 @@ import { registerDesktopSecretCipher, registerSecretsIpc } from "./ipc/secretSto
 import { registerClipboardIpc } from "./ipc/clipboard";
 import { registerCodingIpc } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL, loadAppSettings, saveAppSettings } from "./ipc/appSettings";
+import { registerLocalDataIpc } from "./ipc/localData";
+import { resolveUserData } from "../shared/userData";
+import { applyPendingReset } from "./localDataReset";
 import { closeKv } from "../engine/adapters/kvStore";
 
 /**
@@ -221,6 +224,50 @@ function migrateLegacyUserData(): void {
  * 对迁移完全不起作用，这条分支在自动化里**没法被测到**。
  * 打包态无覆盖时 `configureDataDir()` 直接返回，行为与从前一致。
  */
+/*
+ * **M-08：先定 userData，再做别的事**（2026-10-21）。
+ *
+ * 主人报的第 6 条（装完有两条我们的任务）根因是 dev 与装机版共用
+ * `%APPDATA%\ding-harness`。这里在任何 `app.getPath("userData")`/`bootLog`
+ * 之前把 dev 指到 `ding-harness-dev`；显式覆盖（验收/便携）仍然最高。
+ */
+{
+  const override =
+    process.env.DING_DATA_DIR?.trim() ||
+    process.env.DH_DATA_DIR?.trim() ||
+    process.env.DSH_CANVAS_DATA_DIR?.trim() ||
+    "";
+  /*
+   * ⚠️ `app.getPath("appData")` / `("userData")` 本身会抛（appData 不可解析的环境里
+   * 实测抛 "Failed to get 'appData' path"，界面是一个 JS 错误框 —— 2026-10-21 撞到）。
+   * 定数据目录是启动期的**零风险动作**：拿不到就什么都不做，绝不因此让主进程崩掉。
+   */
+  try {
+    const choice = resolveUserData({
+      isPackaged: app.isPackaged,
+      override: override ? path.resolve(override) : "",
+      appData: app.getPath("appData"),
+      currentUserData: app.getPath("userData"),
+      join: path.join,
+    });
+    if (choice.userData !== app.getPath("userData")) {
+      fs.mkdirSync(choice.userData, { recursive: true });
+      app.setPath("userData", choice.userData);
+    }
+  } catch {
+    /* 拿不到路径就留在 Electron 默认值：能启动比"目录恰好正确"重要 */
+  }
+  /*
+   * 「清空本机数据」的标记：必须在**打开任何 store 之前**执行
+   * （Windows 上跑着的 SQLite 删不掉，所以清理放在重启后的这一刻）。
+   */
+  try {
+    applyPendingReset(app.getPath("userData"));
+  } catch {
+    /* 同上：清理是附加动作，不该拦住启动 */
+  }
+}
+
 configureDataDir();
 migrateLegacyUserData();
 
@@ -266,22 +313,26 @@ process.on("unhandledRejection", (reason) => {
 });
 
 /**
- * 数据目录。
+ * 数据目录（2026-10-21 改：**只管显式覆盖**）。
  *
- * 分两种情况，因为**打包后 `__dirname` 在 asar 里，是只读的**：
- *   · 打包后：用系统 userData（`%APPDATA%\Ding Harness`）—— 安装目录不可写，写那里会直接失败
- *   · 开发期：用工程根的 `data/`（`.gitignore` 已排除）—— 能直接翻快照文件排查问题
- * 两种情况都可以用 `DING_DATA_DIR` 覆盖（多份数据并行测试时用）；
- * 旧名 `DH_DATA_DIR` / `DSH_CANVAS_DATA_DIR` 继续认（2026-10-19 改名，验收脚本大量在用）。
+ * 用户目录的选择已经由文件顶部那次 `resolveUserData()` 做完了：
+ *   · 显式覆盖（`DING_DATA_DIR` / 旧名）→ 用它；
+ *   · 开发期 → `%APPDATA%\ding-harness-dev`（**不再写工程根 `data/`，也不碰用户 profile**）；
+ *   · 打包后 → 系统默认 userData（`%APPDATA%\Ding Harness`）。
+ *
+ * 这里保留一个"最后一道保险"：override 存在但 userData 还不是它时再设一次。
+ * 为什么不再把 dev 指到工程根的 `data/`：那会让 `electron .` 与用户装完的程序
+ * 看起来"用的是同一份数据"（M-08 报的就是这个），而且删目录时容易误伤。
  */
 function configureDataDir(): void {
   const override =
     process.env.DING_DATA_DIR?.trim() ||
     process.env.DH_DATA_DIR?.trim() ||
     process.env.DSH_CANVAS_DATA_DIR?.trim();
-  if (!override && app.isPackaged) return; // 直接用系统默认 userData
-  const dir = override ? path.resolve(override) : path.join(__dirname, "..", "..", "data");
+  if (!override) return;
+  const dir = path.resolve(override);
   try {
+    if (app.getPath("userData") === dir) return;
     fs.mkdirSync(dir, { recursive: true });
     app.setPath("userData", dir);
     bootLog(`数据目录已切到 ${dir}`);
@@ -505,6 +556,8 @@ safeRegister("review", () => registerReviewIpc(ipcMain), logRegisterFailure);
 safeRegister("skills", () => registerSkillsIpc(ipcMain), logRegisterFailure);
 /* 本地知识库（G15）：桌面面板 + knowledge_search 工具 */
 safeRegister("knowledge", () => registerKnowledgeIpc(ipcMain, () => win), logRegisterFailure);
+/* M-08：设置 → 通用 →「本机数据」（路径可见 / 可清空） */
+safeRegister("localData", () => registerLocalDataIpc(), logRegisterFailure);
   safeRegister("providers", () => registerProviderIpc(() => app.getPath("userData")), logRegisterFailure);
   /* 启动时把磁盘里的自定义供应商装进内核（与 CLI 同一条） */
   safeRegister(
