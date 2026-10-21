@@ -4,9 +4,13 @@ import { CONFIRM_MODES, type ConfirmMode } from "@shared/ipc";
 
 import { useAppSettings } from "./appSettings";
 import { isConfigured } from "./providerBadge";
+import { NewProviderDialog } from "./NewProviderDialog";
 import { saveConfirmMode } from "./confirmMode";
 import { readSavedRoute } from "@/ai/route";
 import type { ShellBridge } from "@shared/ipc";
+
+/** 下拉里"添加自定义服务商"那一项的值（不是真 provider id）。 */
+const CUSTOM_PROVIDER_VALUE = "__custom_provider__";
 
 /**
  * **首跑向导**（U06，2026-10-18）。
@@ -270,6 +274,8 @@ export function FirstRunGuide() {
   const [skipped, setSkipped] = useState<{ labels: string[]; count: number } | null>(null);
   /** 出厂只有一家时：记下它的预填信息，填 key 那一步要如实展示"只差一条 key"。 */
   const [prefilled, setPrefilled] = useState<{ label: string; baseURL: string; models: string[] } | null>(null);
+  /** 「＋ 添加自定义服务商…」开着没有（复用设置页那个小窗，形状与行为同一份）。 */
+  const [addingProvider, setAddingProvider] = useState(false);
 
   const refresh = async (): Promise<void> => {
     try {
@@ -486,6 +492,15 @@ export function FirstRunGuide() {
                   data-testid="wb-firstrun-provider"
                   value={provider}
                   onChange={(e) => {
+                    /*
+                     * 「＋ 添加自定义服务商…」：第一次配置时用户最需要它，却没入口
+                     * （2026-10-22 主人问"没法自定义服务商吗"）。选它**不改变已选值**，
+                     * 只把添加小窗打开；加完自动选中新那家并跳到"选模型"。
+                     */
+                    if (e.target.value === CUSTOM_PROVIDER_VALUE) {
+                      setAddingProvider(true);
+                      return;
+                    }
                     setProvider(e.target.value);
                     setModel("");
                   }}
@@ -497,6 +512,7 @@ export function FirstRunGuide() {
                       {isConfigured(p) ? "（已有 key）" : p.keySource === "env" ? "（环境变量里有 key）" : ""}
                     </option>
                   ))}
+                  <option value={CUSTOM_PROVIDER_VALUE}>＋ 添加自定义服务商…</option>
                 </select>
                 <button
                   type="button"
@@ -604,6 +620,10 @@ export function FirstRunGuide() {
                     data-testid="wb-firstrun-provider-switch"
                     value={provider}
                     onChange={(e) => {
+                      if (e.target.value === CUSTOM_PROVIDER_VALUE) {
+                        setAddingProvider(true);
+                        return;
+                      }
                       setProvider(e.target.value);
                       setModel("");
                     }}
@@ -613,6 +633,7 @@ export function FirstRunGuide() {
                         {p.label}{isConfigured(p) ? "（已有 key）" : p.keySource === "env" ? "（环境变量里有 key）" : ""}
                       </option>
                     ))}
+                    <option value={CUSTOM_PROVIDER_VALUE}>＋ 添加自定义服务商…</option>
                   </select>
                 ) : null}
                 <select data-testid="wb-firstrun-model" value={model} onChange={(e) => setModel(e.target.value)}>
@@ -673,6 +694,28 @@ export function FirstRunGuide() {
           </div>
         ) : null}
       </div>
+
+      {/*
+        自定义服务商（2026-10-22 主人问"没法自定义服务商吗"）：
+        复用设置页那个小窗（URL → Key → 模型），**形状与行为同一份**。
+        加完自动选中新那家并跳到「③ 选模型」—— 那条路已经有 key 了，不必再填。
+      */}
+      {addingProvider ? (
+        <NewProviderDialog
+          bridge={(shell?.providers ?? {}) as ShellBridge["providers"]}
+          onDone={(added, providerId) => {
+            setAddingProvider(false);
+            if (!added) return;
+            /* 手动加过之后不再自动跳步（用户是主动选的这家） */
+            setManual(true);
+            setSkipped(null);
+            void refresh().then(() => {
+              if (providerId) setProvider(providerId);
+              setStep(2);
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

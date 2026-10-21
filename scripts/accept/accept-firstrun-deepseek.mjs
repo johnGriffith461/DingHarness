@@ -113,6 +113,71 @@ try {
   if (/本地测试通道|strata/.test(listText)) bad.push("设置左列里出现了验收通道");
   await page.screenshot({ path: ".verify/mset-11-only-deepseek.png" });
   note("截图：.verify/mset-11-only-deepseek.png");
+
+  /*
+   * ⑥ **自定义服务商**（2026-10-22 主人问"没法自定义服务商吗"）：
+   * 首跑向导第 1 步的下拉里必须有「＋ 添加自定义服务商…」，
+   * 点它复用设置页那个小窗（URL → Key → 模型），保存后回到向导并落到「③ 选模型」。
+   */
+  await page.locator('[data-testid="wb-settings-close"]').click().catch(() => undefined);
+  await sleep(600);
+  /* 回向导：设置 → 通用 → 重新运行配置向导 */
+  await page.locator('[data-testid="wb-account"]').click();
+  await sleep(500);
+  await page.locator('[data-testid="wb-acct-settings"]').click();
+  await sleep(800);
+  await page.locator('[data-testid="wb-set-通用"]').click();
+  await sleep(600);
+  await page.locator('[data-testid="wb-setpage-reopen-guide"]').click();
+  await sleep(1200);
+  const opened = (await page.locator('[data-testid="wb-firstrun"]').count()) === 1;
+  if (!opened) bad.push("重开向导失败（验自定义服务商需要它）");
+  else {
+    /* 回到第 1 步（只有一家时默认落在填 key，点「换一家」） */
+    const back = page.locator('[data-testid="wb-firstrun-back-provider"]');
+    if (await back.count()) await back.click();
+    else if ((await page.locator('[data-testid="wb-firstrun-provider"]').count()) === 0) {
+      /* 已经落在第 1 步 */
+    }
+    await sleep(600);
+    const select = page.locator('[data-testid="wb-firstrun-provider"]');
+    const values = await select.locator("option").evaluateAll((els) => els.map((e) => e.getAttribute("value")));
+    if (!values.includes("__custom_provider__")) {
+      bad.push("⭐ 首跑向导的下拉里没有「＋ 添加自定义服务商…」—— 第一次配置时没路接别家");
+    } else {
+      await select.selectOption("__custom_provider__");
+      await sleep(700);
+      const dlg = page.locator('[data-testid="wb-newprovider-dialog"]');
+      if (!(await dlg.count())) bad.push("选了「添加自定义服务商」但小窗没出来");
+      else {
+        note("自定义服务商小窗已打开 ✓");
+        const fake = process.env.STRATA_BASE_URL ?? "";
+        if (!fake) bad.push("这条验收需要批跑的假通道地址（STRATA_BASE_URL）—— 单独跑时请手动指定");
+        else {
+          await page.locator('[data-testid="wb-newprovider-baseurl"]').fill(fake);
+          await page.locator('[data-testid="wb-newprovider-key"]').fill("accept-custom-key");
+          await page.locator('[data-testid="wb-newprovider-fetch"]').click();
+          await sleep(2500);
+          const picks = page.locator('[data-testid^="wb-newprovider-pick-"]');
+          const count = await picks.count();
+          if (!count) bad.push("自定义服务商拉取模型没拉到（见弹窗里的错误）");
+          else {
+            await picks.first().click();
+            await page.locator('[data-testid="wb-newprovider-save"]').click();
+            await sleep(1800);
+            const steps2 = page.locator(".wb-firstrun-steps > li");
+            const active2 = await steps2.evaluateAll((els) => els.map((e) => e.getAttribute("data-active")));
+            if (active2[2] !== "true") bad.push(`加完自定义服务商没落到「③ 选模型」（active=${active2.join(",")}）`);
+            else note("加完自定义服务商 → 直接到「③ 选模型」✓");
+            const choices = await page.locator('[data-testid="wb-firstrun-model"] option').count().catch(() => 0);
+            if (choices < 2) bad.push("加完之后「选模型」里没有那家的模型");
+          }
+        }
+      }
+    }
+    await page.screenshot({ path: ".verify/mset-13-custom-provider.png" });
+    note("截图：.verify/mset-13-custom-provider.png");
+  }
 } catch (e) {
   bad.push("异常: " + String(e).slice(0, 300));
 } finally {
