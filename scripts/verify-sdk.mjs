@@ -202,7 +202,16 @@ const fake = createServer((req, res) => {
 await new Promise((resolve) => fake.listen(0, "127.0.0.1", resolve));
 const fakeUrl = `http://127.0.0.1:${fake.address().port}/v1`;
 
-const env = { ...process.env, STRATA_BASE_URL: fakeUrl, STRATA_API_KEY: "sk-sdk-verify" };
+/*
+ * 示例用 `strata`（本机假服务）跑，而它 2026-10-21 起**只在 DING_ACCEPT_PROVIDERS=1
+ * 时注册**（出厂 provider 表只剩 DeepSeek）。SDK 冒烟是验收装置，这里显式打开。
+ */
+const env = {
+  ...process.env,
+  STRATA_BASE_URL: fakeUrl,
+  STRATA_API_KEY: "sk-sdk-verify",
+  DING_ACCEPT_PROVIDERS: "1",
+};
 
 /* ── ④ 原样跑示例（先复制进干净工程 —— 从仓库路径跑会解析到仓库的 node_modules） ── */
 console.log("\n③ 干净工程里跑示例");

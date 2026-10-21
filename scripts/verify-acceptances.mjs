@@ -335,6 +335,17 @@ const CASES = [
   ["accept-trust-ui.mjs", "信任面 UI（清空确认 / 记忆子页 / 档位单勾 / 首页计量不回显）"],
   ["accept-firstrun.mjs", "首跑默认态（首屏只留向导 / 稍后再说可重开 / 选模型后 chip 与预算 / 默认编码）"],
   /*
+   * 2026-10-21（主人实测追加）：**跳步必须能解释、能回退**。
+   * 他重装后一进来向导就落在第 3 步、前两步被划掉，而他完全不记得配过 ——
+   * 那条 key 是以前留在 `~/.ding` 里的（重装软件不会删主目录）。
+   */
+  ["accept-firstrun-skipped.mjs", "首跑跳步可解释（说明条写清跳过原因与凭据来源 / 前两步不是删除线 / 换一家与重新填一条都能到达输入）"],
+  /*
+   * 2026-10-21（主人拍板）：**出厂只内置 DeepSeek 一家**，地址与模型都填好、只输 key。
+   * 这条在**用户态**跑（关掉验收通道），顺带断言"假通道不会漏到用户面前"。
+   */
+  ["accept-firstrun-deepseek.mjs", "出厂只有 DeepSeek（向导直接到填 key / 地址与模型已预填 / 用户态看不到验收通道 / 设置左列只有一家）"],
+  /*
    * F-02（2026-10-20）：设置里真的有了「工作目录」这一格。
    * 预置 workspaces.json 等价于"用户点过系统目录选择器"（workspaceStore 自己写明的验收口径）；
    * 断言授权时 runTool 读得到、撤销后立刻读不到。
@@ -1198,6 +1209,11 @@ function run(file) {
     env.DSH_STORE_BACKEND = "file";
     /* 本地假通道 + 零出网闸（审计 G46/G47）；`strata` 是那个本来就指本机的 provider */
     env.DSH_NO_REAL_MODEL = "1";
+    /*
+     * 2026-10-21：`strata` 已从**出厂表**移除（只留 DeepSeek），
+     * 它只在 `DING_ACCEPT_PROVIDERS=1` 时注册 —— 验收装置在这一层统一打开。
+     */
+    env.DING_ACCEPT_PROVIDERS = "1";
     env.STRATA_BASE_URL = localModel.url;
     env.STRATA_API_KEY = "accept-local-fake";
     /*

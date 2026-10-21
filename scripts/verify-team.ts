@@ -1,3 +1,9 @@
+/*
+ * 2026-10-21：`strata`（本机假服务）已从**出厂 provider 表**移除 —— 出厂只剩 DeepSeek。
+ * 它只在 `DING_ACCEPT_PROVIDERS=1` 时注册；这个脚本是验收/评测工具，自己打开。
+ */
+process.env.DING_ACCEPT_PROVIDERS ??= "1";
+
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";

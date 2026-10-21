@@ -52,6 +52,12 @@ function list(p: Parsed): number {
 
 /** `ding bench run [suite]`。 */
 export async function cmdBench(p: Parsed): Promise<number> {
+  /*
+   * eval/bench 走**假 provider**（`strata`）：它已从出厂表移除，只在
+   * `DING_ACCEPT_PROVIDERS=1` 时注册 —— 这两条命令就是"验收/评测"，自己打开。
+   */
+  process.env.DING_ACCEPT_PROVIDERS ??= "1";
+
   const explicit = p.args[0] === "list" || p.args[0] === "run";
   const sub = p.args[0] === "list" ? "list" : "run";
   /* `ding bench run [suite]` 与 `ding bench [suite]` 两种写法都认 */

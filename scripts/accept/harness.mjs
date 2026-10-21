@@ -391,6 +391,13 @@ async function bootOnce({ port, dataDir, extraEnv = {}, cwd = ".", timeoutMs = 3
   env.DSH_DEBUG_PORT = String(port);
   if (dataDir) env.DSH_CANVAS_DATA_DIR = dataDir;
   /*
+   * 验收通道（2026-10-21）：`strata` **不再出现在出厂 provider 表里** ——
+   * 主人看到"本地测试通道"当场就问"是不是还用着你假通道"，所以它只在这个变量下注册。
+   * 验收装置从这一处统一打开；**脚本显式给了就听脚本的**（`accept-firstrun-deepseek`
+   * 要用 `"0"` 验用户态，不能被这里盖回去）。
+   */
+  if (!env.DING_ACCEPT_PROVIDERS) env.DING_ACCEPT_PROVIDERS = "1";
+  /*
    * `extraArgs`：给"要按不同启动参数跑一遍"的验收用（目前只有 DPI 矩阵：
    * `--force-device-scale-factor=1.25` 这类）。放参数而不是另写一份 spawn ——
    * 起应用这一整套（端口探测、CDP 握手、stderr 读掉防阻塞）就是这个文件存在的理由。
