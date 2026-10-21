@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { KeySource } from "../ports/secret";
+
 /**
  * 凭据读取（只读，绝不回传明文给渲染进程）。
  *
@@ -38,17 +40,35 @@ export function legacyCredentialsPath(): string {
 }
 
 /**
+ * 一条 key 的**来源**（M-02）—— 类型在端口层（见 `ports/secret.ts` 的说明），
+ * 这里 re-export 保持既有 import 不变。
+ *
+ * `"app"` 是我们自己的两个落点（`~/.ding` 的凭据文件 / 桌面加密库）；
+ * `"legacy"` 专指 `~/.dsh` —— 那个目录别的程序也在用，里面的 key **不能被算成**
+ * "用户在本应用里配过了"（主人报的第 1 条正是这个）。
+ */
+export type { KeySource } from "../ports/secret";
+
+/**
  * 按优先级列出要读的凭据文件（高优先级在前）。
  *
- * 覆盖变量：`DING_CREDENTIALS_FILE` > `DSH_CREDENTIALS_FILE`（旧名，继续认）。
- * 给了覆盖就只读那一个文件 —— 换机器/测试都要能完全脱离用户目录。
+ * 覆盖变量：
+ * - `DING_CREDENTIALS_FILE` > `DSH_CREDENTIALS_FILE`（旧名，继续认）—— **主位置**；
+ *   给了它且没有单独给旧位置时，只读那一个文件（换机器/测试要能完全脱离用户目录）。
+ * - `DING_LEGACY_CREDENTIALS_FILE` —— **只**换"旧位置"那一格（默认 `~/.dsh`）。
+ *   这条是给验收用的：不然要构造"旧目录里有 key、本应用里没有"就得改家目录，
+ *   而改 `USERPROFILE` 会让 Electron 起不来（2026-10-21 实测）。
  */
 export function credentialsPaths(): string[] {
-  const override =
+  const primaryOverride =
     process.env.DING_CREDENTIALS_FILE?.trim() || process.env.DSH_CREDENTIALS_FILE?.trim();
-  if (override) return [override];
+  const legacyOverride = process.env.DING_LEGACY_CREDENTIALS_FILE?.trim();
+
+  if (primaryOverride) {
+    return legacyOverride && legacyOverride !== primaryOverride ? [primaryOverride, legacyOverride] : [primaryOverride];
+  }
   const primary = primaryCredentialsPath();
-  const legacy = legacyCredentialsPath();
+  const legacy = legacyOverride || legacyCredentialsPath();
   return primary === legacy ? [primary] : [primary, legacy];
 }
 
@@ -111,6 +131,80 @@ function parseRefs(text: string): Record<string, string> {
 let cache: { at: number; files: string; refs: Record<string, string> } | null = null;
 
 /**
+ * 单文件缓存（`keySourceOf` 要区分"这条 key 来自哪一份文件"）。
+ *
+ * `readCredentialRefs` 只给合并后的结果，用来判断"有没有"够了，但**判断不了来源**。
+ * 这里按文件各缓存一份：读还是走同一个 `parseRefs`，不另写一套解析。
+ */
+const fileCache = new Map<string, { at: number; stat: string; refs: Record<string, string> }>();
+
+/** 读**一份**凭据文件的 refs（30s 缓存；文件大小/修改时间变了立刻重读）。 */
+function readRefsFromFile(file: string): Record<string, string> {
+  const now = Date.now();
+  let stat = "";
+  try {
+    const s = fs.statSync(file);
+    stat = `${s.size}:${s.mtimeMs}`;
+  } catch {
+    return {};
+  }
+  const hit = fileCache.get(file);
+  if (hit && hit.stat === stat && now - hit.at < 30_000) return hit.refs;
+  try {
+    const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+    const refs = parseRefs(text);
+    fileCache.set(file, { at: now, stat, refs });
+    return refs;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * **这条 key 从哪来**（诚实来源，不把别人的文件算成"你配过了"）。
+ *
+ * 顺序与 `resolveSecret` 完全一致：环境变量 → 本应用的凭据文件（`~/.ding`）→
+ * 旧位置（`~/.dsh`，只读兜底）→ 桌面加密库（`secrets.dat`）。
+ *
+ * 口径：
+ * - `"app"`    —— 我们自己的（`~/.ding/.credentials.yaml` 或 `secrets.dat`）；
+ * - `"env"`    —— 只来自环境变量；
+ * - `"legacy"` —— 只来自 `~/.dsh`（别的程序/旧版本留下的，不是用户在本应用里配的）；
+ * - `"none"`   —— 哪都没有。
+ *
+ * @param ref 凭据引用名（provider 表里的 `keyRef`）
+ */
+export function keySourceOf(ref: string): KeySource {
+  const name = String(ref ?? "").trim();
+  if (!name) return "none";
+  if (process.env[name]?.trim()) return "env";
+
+  const files = credentialsPaths();
+  const primary = files[0];
+  const legacy = files[1];
+  if (primary && readRefsFromFile(primary)[name]?.trim()) return "app";
+
+  /*
+   * **本应用保存的优先于旧目录**（M-02）：用户在设置里显式存过一条，
+   * 就该是他在用那条 —— 而不是被 `~/.dsh` 里别的程序写的旧值盖住。
+   * 这条顺序与 `resolveSecret` 完全一致，否则界面说的来源会是假的。
+   */
+  try {
+    const mod = require("../adapters/secretStore") as {
+      revealSecretFromStore?: (name: string) => string | null;
+    };
+    const fromStore = mod.revealSecretFromStore?.(name);
+    if (fromStore && fromStore.trim()) return "app";
+  } catch {
+    /* 读不到加密库 = 这一站没有，不改变结论 */
+  }
+
+  /* 覆盖变量只给一个文件时，那份就是"我们自己的"（测试/便携模式显式指定的） */
+  if (legacy && legacy !== primary && readRefsFromFile(legacy)[name]?.trim()) return "legacy";
+  return "none";
+}
+
+/**
  * 让凭据缓存失效。
  *
  * ⚠️ **写完凭据必须调它**（向导那条路）：否则"刚写完、紧接着读"会在 30 秒内
@@ -119,6 +213,7 @@ let cache: { at: number; files: string; refs: Record<string, string> } | null = 
  */
 export function invalidateCredentialCache(): void {
   cache = null;
+  fileCache.clear();
 }
 
 /**
@@ -162,25 +257,36 @@ export function readCredentialRefs(): Record<string, string> {
  * @returns 明文密钥；没有则 null
  */
 export function resolveSecret(envName: string): string | null {
-  const fromEnv = process.env[envName];
+  const name = String(envName ?? "").trim();
+  if (!name) return null;
+  const fromEnv = process.env[name];
   if (fromEnv && fromEnv.trim()) return fromEnv.trim();
-  const fromFile = readCredentialRefs()[envName];
-  if (fromFile && fromFile.trim()) return fromFile.trim();
+
   /*
-   * 第三段：**桌面加密库**（safeStorage / DPAPI / Keychain）。
+   * 顺序（M-02 修正）：本应用主文件 → **本应用加密库** → 旧目录。
    *
-   * 2026-10-16 补：用户能在设置里填 key 之后，存进去的那条必须能被读回来 ——
-   * 否则「存了还是说没密钥」。没注册目录（CLI / 测试）时它返回 null，行为与以前一样。
+   * 原来的顺序是「合并文件（主+旧）→ 加密库」—— 于是用户在设置里存了一条，
+   * 旧目录里那条仍会赢，界面只能如实说"来自旧目录"（保存了却不算数）。
+   * 现在用户**显式保存**的那条优先于 `~/.dsh`；旧目录只剩"兜底"这一层。
    */
+  const files = credentialsPaths();
+  const primary = files[0];
+  const legacy = files[1];
+  const fromPrimary = primary ? readRefsFromFile(primary)[name] : undefined;
+  if (fromPrimary && fromPrimary.trim()) return fromPrimary.trim();
+
   try {
     const mod = require("../adapters/secretStore") as {
       revealSecretFromStore?: (name: string) => string | null;
     };
-    const fromStore = mod.revealSecretFromStore?.(envName);
-    if (fromStore) return fromStore;
+    const fromStore = mod.revealSecretFromStore?.(name);
+    if (fromStore && fromStore.trim()) return fromStore.trim();
   } catch {
     /* 引擎不该因为读不到加密库而炸 */
   }
+
+  const fromLegacy = legacy && legacy !== primary ? readRefsFromFile(legacy)[name] : undefined;
+  if (fromLegacy && fromLegacy.trim()) return fromLegacy.trim();
   return null;
 }
 

@@ -174,6 +174,34 @@ export function writeSecret(
 }
 
 /**
+ * **删一条**（M-06：删供应商时要把它真的从本机凭据库拿走）。
+ *
+ * 与 `writeSecret` 同样的取舍：
+ * - 没有加密能力 → 不假装删了（返回 `removed:false` 与原因）；
+ * - 解不开旧文件 → 拒绝写回（否则会把其余密钥清光）。
+ *
+ * 没这条 key 时返回 `ok:true, removed:false` —— "本来就没有"与"删掉了"要能分开。
+ */
+export function deleteSecret(dir: string, refName: string): { ok: boolean; removed: boolean; reason?: string } {
+  if (!secretsEncrypted()) {
+    return { ok: false, removed: false, reason: `这台机器上拿不到系统密钥保护（${cipherName()}）—— 没法改已存的密钥` };
+  }
+  const prev = readSecretsStrict(dir);
+  if (!prev.ok) {
+    return { ok: false, removed: false, reason: `拒绝改：这一次读不出已存的密钥（${prev.reason}）` };
+  }
+  if (!(refName in prev.value)) return { ok: true, removed: false };
+  try {
+    const all = { ...prev.value };
+    delete all[refName];
+    writeFileSync(secretsPath(dir), cipher!.encrypt(JSON.stringify(all)), { mode: 0o600 });
+    return { ok: true, removed: true };
+  } catch (error) {
+    return { ok: false, removed: false, reason: (error as Error)?.message ?? "改不进去" };
+  }
+}
+
+/**
  * 凭据保护状态（`ding doctor` 的「凭据保护」那一格）。
  *
  * 说清三件事：我们的密钥有没有加密、用的哪一层、那条**明文**文件在不在。

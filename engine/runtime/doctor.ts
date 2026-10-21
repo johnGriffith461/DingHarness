@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { credentialsPath, hasSecret, resolveSecret } from "./credentials";
+import { credentialsPath, hasSecret, keySourceOf, resolveSecret } from "./credentials";
 import { allProviders, firstAvailableProvider, getProvider } from "./providers";
 import { MODEL_CATALOG, STALE_DAYS, UNKNOWN_MODEL_BUDGET, isStale } from "./models";
 import { CONFIRM_MODES, type ConfirmMode } from "../../shared/ipc";
@@ -293,12 +293,27 @@ export function runDoctor(input: DoctorInput): Check[] {
   {
     const file = credentialsPath();
     const ok = withKey.length > 0;
+    /*
+     * M-02：**来源要说出来**（与设置页同一个 `keySourceOf`）。
+     * 只报"几家可用"会让 `~/.dsh` 里别人的 key 看起来像用户自己配的。
+     */
+    const sources = withKey.map((p) => ({ id: p.id, source: keySourceOf(p.keyRef) }));
+    const label = (source: string): string[] =>
+      sources.filter((s) => s.source === source).map((s) => s.id);
+    const app = label("app");
+    const env = label("env");
+    const legacy = label("legacy");
+    const breakdown = [
+      app.length ? `本应用已保存 ${app.join(" / ")}` : "",
+      env.length ? `环境变量 ${env.join(" / ")}` : "",
+      legacy.length ? `旧目录（~/.dsh） ${legacy.join(" / ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("；");
     out.push({
       name: "模型凭据",
       ok,
-      detail: ok
-        ? `${withKey.length} 家可用：${withKey.map((p) => p.id).join(" / ")}（key 来自环境变量或 ${file}）`
-        : `一条都读不到（找过环境变量与 ${file}）`,
+      detail: ok ? `${withKey.length} 家可用（${breakdown}）` : `一条都读不到（找过环境变量与 ${file}）`,
       /*
        * ⚠️ 这段指引原来教的是**读不到的写法**（审计 P198 / NEW-N7-4）：
        * 它让人往凭据文件里写顶格的一行 `DEEPSEEK_API_KEY: sk-…`，而读取端
@@ -307,7 +322,9 @@ export function runDoctor(input: DoctorInput): Check[] {
        * 这正是向导里那个"写成扁平格式"的真 bug 在指引里的复活。
        */
       next: ok
-        ? "无需处理"
+        ? legacy.length
+          ? "上面标「旧目录」的那几家不是在本应用里配的：设置 →「模型」→「改用本应用保存」抄一份，把 ~/.dsh 里的那几条关掉才谈得上「你的 key」"
+          : "无需处理"
         : `跑一次 \`ding init\` 会带你配好；或手动往 ${file} 里加一段（键要缩进在 \`refs:\` **下面一层**，顶格那行读不到）：\n` +
           `       refs:\n         DEEPSEEK_API_KEY: sk-…`,
     });

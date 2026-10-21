@@ -4,7 +4,13 @@ import { customProviders, setCustomProviders, type CustomProviderInput } from ".
 import { writeSecret } from "../../hosts/cli/wizard";
 import { readConfig, writeConfig, type CliConfig } from "../../hosts/cli/config";
 import { fetchModelsFor } from "./aiProbe";
-import type { ProviderAddInput, ProviderAddResult, ProviderFormatWire, CustomProviderWire } from "../../shared/providerWire";
+import type {
+  ProviderAddInput,
+  ProviderAddResult,
+  ProviderFormatWire,
+  ProviderUpdateInput,
+  CustomProviderWire,
+} from "../../shared/providerWire";
 
 /**
  * **自定义供应商的桌面 IPC**（T0「新供应商」）。
@@ -26,6 +32,7 @@ export const PROVIDER_CHANNEL = {
   listCustom: "provider:listCustom",
   fetchModels: "provider:fetchModels",
   add: "provider:add",
+  update: "provider:update",
   remove: "provider:remove",
 } as const;
 
@@ -87,7 +94,8 @@ export function addCustomProvider(dataDir: string, input: ProviderAddInput): Pro
       return { ok: false, error: "Base URL 必须是 http(s) 地址" };
     }
     if (!input.models.length) return { ok: false, error: "至少选一个模型（否则用不了）" };
-    if (!input.apiKey.trim()) return { ok: false, error: "API Key 不能为空" };
+    const apiKey = input.apiKey?.trim() ?? "";
+    if (!apiKey) return { ok: false, error: "API Key 不能为空" };
 
     const { config } = readConfig(dataDir);
     const existing = (config.providers ?? []).map((p) => p.id);
@@ -110,7 +118,7 @@ export function addCustomProvider(dataDir: string, input: ProviderAddInput): Pro
     if (mine) return { ok: false, error: mine.why };
 
     /* 密钥先落盘（`ding init` 向导写的是同一份凭据库） */
-    const written = writeSecret(keyRef, input.apiKey.trim());
+    const written = writeSecret(keyRef, apiKey);
     if (!written.ok) {
       return { ok: false, error: `密钥写不进去：${written.error ?? "未知原因"}` };
     }
@@ -134,6 +142,50 @@ export function removeCustomProvider(dataDir: string, id: string): { ok: boolean
   return { ok: true };
 }
 
+/**
+ * 改一个自定义供应商（M-01 的「编辑」）。
+ *
+ * **id 与 keyRef 不变**（模型声明、启用状态、设置项都挂在 id 上；换 id 等于把它删了重建）。
+ * `apiKey` 省略/空 = 不改密钥；给了才写。
+ */
+export function updateCustomProvider(dataDir: string, id: string, input: ProviderUpdateInput): ProviderAddResult {
+  try {
+    const label = input.label.trim();
+    if (!label) return { ok: false, error: "供应商名字不能为空" };
+    if (!/^https?:\/\//.test(input.baseURL.trim())) return { ok: false, error: "Base URL 必须是 http(s) 地址" };
+    if (!input.models.length) return { ok: false, error: "至少留一个模型（否则用不了）" };
+
+    const { config } = readConfig(dataDir);
+    const providers = config.providers ?? [];
+    const existing = providers.find((p) => p.id === id);
+    if (!existing) return { ok: false, error: `没有这个自定义供应商：${id}` };
+
+    const entry: CustomProviderInput = {
+      id,
+      label,
+      baseURL: input.baseURL.trim(),
+      protocol: protocolOfFormat(input.format),
+      keyRef: existing.keyRef,
+      models: [...new Set(input.models.map((m) => m.trim()).filter(Boolean))],
+    };
+
+    const next = providers.map((p) => (p.id === id ? entry : p));
+    const { rejected } = setCustomProviders(next);
+    const mine = rejected.find((r) => r.id === id);
+    if (mine) return { ok: false, error: mine.why };
+
+    if (input.apiKey && input.apiKey.trim()) {
+      const written = writeSecret(existing.keyRef, input.apiKey.trim());
+      if (!written.ok) return { ok: false, error: `密钥写不进去：${written.error ?? "未知原因"}` };
+    }
+
+    writeConfig(dataDir, { ...config, providers: next });
+    return { ok: true, provider: toWire(entry) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /** 注册通道。 */
 export function registerProviderIpc(getDataDir: () => string): void {
   ipcMain.handle(PROVIDER_CHANNEL.listCustom, () => listCustomProviders(getDataDir()));
@@ -142,6 +194,9 @@ export function registerProviderIpc(getDataDir: () => string): void {
   );
   ipcMain.handle(PROVIDER_CHANNEL.add, (_event, input: ProviderAddInput) =>
     addCustomProvider(getDataDir(), input),
+  );
+  ipcMain.handle(PROVIDER_CHANNEL.update, (_event, id: string, input: ProviderUpdateInput) =>
+    updateCustomProvider(getDataDir(), id, input),
   );
   ipcMain.handle(PROVIDER_CHANNEL.remove, (_event, id: string) => removeCustomProvider(getDataDir(), id));
 }

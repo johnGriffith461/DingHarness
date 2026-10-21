@@ -149,6 +149,32 @@ export function writeSecret(refName: string, value: string): { ok: boolean; file
 }
 
 /**
+ * **从本应用的凭据文件里删一条**（M-06，删供应商时用）。
+ *
+ * 只动 `~/.ding/.credentials.yaml`（`credentialsPath()` 给的主位置）：
+ * 旧位置 `~/.dsh` 是别的程序也在用的，**不删**（要删得让写它的那个程序删）。
+ *
+ * @param refName 凭据引用名
+ * @returns `removed:false` = 那份文件里本来就没有这条（不是失败）
+ */
+export function removeSecretFromPrimary(refName: string): { ok: boolean; removed: boolean; error?: string } {
+  const file = credentialsPath();
+  try {
+    if (!fs.existsSync(file)) return { ok: true, removed: false };
+    const existing = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+    const sameKey = new RegExp(`^\\s*${refName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`);
+    const lines = existing.split(/\r?\n/);
+    const kept = lines.filter((line) => !sameKey.test(line));
+    if (kept.length === lines.length) return { ok: true, removed: false };
+    fs.writeFileSync(file, kept.join("\n").replace(/\n+$/, "\n"), { encoding: "utf8", mode: 0o600 });
+    invalidateCredentialCache();
+    return { ok: true, removed: true };
+  } catch (error) {
+    return { ok: false, removed: false, error: (error as Error)?.message ?? "删不掉" };
+  }
+}
+
+/**
  * 跑一遍向导。
  *
  * ⚠️ 依赖里**只有 `dataDir`**（审计 P221 / NEW-N7-30）：原来还有一个

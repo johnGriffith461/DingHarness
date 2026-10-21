@@ -1,6 +1,14 @@
 import { app, safeStorage } from "electron";
 
-import { cipherName, registerSecretCipher, registerSecretDir, secretsEncrypted, writeSecret } from "../../engine/adapters/secretStore";
+import {
+  cipherName,
+  deleteSecret,
+  registerSecretCipher,
+  registerSecretDir,
+  secretsEncrypted,
+  writeSecret,
+} from "../../engine/adapters/secretStore";
+import { removeSecretFromPrimary } from "../../hosts/cli/wizard";
 
 /**
  * 桌面侧的密钥保护（Phase 14.2）——把 Electron 的 `safeStorage` 接进那个端口。
@@ -57,9 +65,11 @@ function safeStorageName(): string {
 export const SECRETS_CHANNEL = {
   status: "secrets:status",
   set: "secrets:set",
+  adoptEnv: "secrets:adoptEnv",
+  remove: "secrets:remove",
 } as const;
 
-/** 注册这两个通道。 */
+/** 注册这三个通道。 */
 export function registerSecretsIpc(ipcMainInstance: Electron.IpcMain): void {
   ipcMainInstance.handle(SECRETS_CHANNEL.status, () => ({
     encrypted: secretsEncrypted(),
@@ -72,6 +82,45 @@ export function registerSecretsIpc(ipcMainInstance: Electron.IpcMain): void {
       if (typeof value !== "string" || !value.trim()) return { ok: false, reason: "密钥不能为空" };
       const got = writeSecret(app.getPath("userData"), refName.trim(), value.trim());
       return got.ok ? { ok: true } : { ok: false, reason: got.reason };
+    },
+  );
+  /*
+   * M-02：把环境变量里已有的那条 key **抄进本应用**。
+   *
+   * 值只在主进程里走一趟（渲染层从头到尾看不到明文）。保存后环境变量仍然优先
+   * （`resolveSecret` 的顺序没变）—— 所以界面上要如实说"存下了，但环境变量还在时仍用它自己的"。
+   */
+  ipcMainInstance.handle(
+    SECRETS_CHANNEL.adoptEnv,
+    (_event, refName: unknown): { ok: boolean; reason?: string } => {
+      if (typeof refName !== "string" || !refName.trim()) return { ok: false, reason: "引用名不能为空" };
+      const name = refName.trim();
+      const value = process.env[name]?.trim();
+      if (!value) return { ok: false, reason: `环境变量里没有 ${name}` };
+      const got = writeSecret(app.getPath("userData"), name, value);
+      return got.ok ? { ok: true } : { ok: false, reason: got.reason };
+    },
+  );
+  /*
+   * M-06：删一条**本应用存的** key（删自定义供应商时级联）。
+   *
+   * 两个落点都要清：`secrets.dat`（设置里填的）与 `~/.ding/.credentials.yaml`
+   * （新供应商表单写的）。**不动** env 与 `~/.dsh` —— 那两个不归我们管，
+   * 所以返回里如实列出"清掉了哪些 / 哪些还在外面"。
+   */
+  ipcMainInstance.handle(
+    SECRETS_CHANNEL.remove,
+    (_event, refName: unknown): { ok: boolean; removed: string[]; reason?: string } => {
+      if (typeof refName !== "string" || !refName.trim()) return { ok: false, removed: [], reason: "引用名不能为空" };
+      const name = refName.trim();
+      const removed: string[] = [];
+      const storeGot = deleteSecret(app.getPath("userData"), name);
+      if (!storeGot.ok) return { ok: false, removed, reason: storeGot.reason };
+      if (storeGot.removed) removed.push("secrets.dat");
+      const yamlGot = removeSecretFromPrimary(name);
+      if (!yamlGot.ok) return { ok: false, removed, reason: yamlGot.error };
+      if (yamlGot.removed) removed.push("~/.ding/.credentials.yaml");
+      return { ok: true, removed };
     },
   );
 }

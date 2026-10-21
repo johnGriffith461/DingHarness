@@ -63,6 +63,11 @@ import { DIAG_CHANNEL } from "./ipc/diagnostics";
 const api = {
   ping: () => ipcRenderer.invoke(APP_CHANNEL.ping),
   userDataDir: (): Promise<string> => ipcRenderer.invoke(APP_CHANNEL.userDataDir),
+  localData: {
+    summary: () =>
+      ipcRenderer.invoke("localData:summary") as Promise<{ dataDir: string; sessions: number; tasks: number; workspaces: number }>,
+    reset: () => ipcRenderer.invoke("localData:reset") as Promise<{ ok: boolean; reason?: string }>,
+  },
 
   /*
    * 窗口控制（自绘标题栏用）。
@@ -135,6 +140,10 @@ const api = {
     status: () => ipcRenderer.invoke("secrets:status") as Promise<{ encrypted: boolean; where: string }>,
     set: (refName: string, value: string) =>
       ipcRenderer.invoke("secrets:set", refName, value) as Promise<{ ok: boolean; reason?: string }>,
+    adoptEnv: (refName: string) =>
+      ipcRenderer.invoke("secrets:adoptEnv", refName) as Promise<{ ok: boolean; reason?: string }>,
+    remove: (refName: string) =>
+      ipcRenderer.invoke("secrets:remove", refName) as Promise<{ ok: boolean; removed: string[]; reason?: string }>,
   },
   canvas: {
     /** 载入画布文档（含崩溃回退信息）。 */
@@ -355,6 +364,8 @@ const api = {
     fetchModels: (input: { baseURL: string; apiKey: string }) =>
       ipcRenderer.invoke(PROVIDER_CHANNEL.fetchModels, input) as ReturnType<ShellBridge["providers"]["fetchModels"]>,
     add: (input) => ipcRenderer.invoke(PROVIDER_CHANNEL.add, input) as ReturnType<ShellBridge["providers"]["add"]>,
+    update: (id: string, input) =>
+      ipcRenderer.invoke(PROVIDER_CHANNEL.update, id, input) as ReturnType<ShellBridge["providers"]["update"]>,
     remove: (id: string) => ipcRenderer.invoke(PROVIDER_CHANNEL.remove, id) as ReturnType<ShellBridge["providers"]["remove"]>,
   },
   /** D2：工具面板 */

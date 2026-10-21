@@ -37,6 +37,8 @@ export type AppSettingsWire = {
   rules?: PermissionRuleWire[];
   keymap?: KeymapWire;
   persona?: PersonaWire;
+  /** M-06：隐藏的供应商 id（内置只能隐藏，不能删）。 */
+  hiddenProviders?: string[];
 };
 
 export type { CanvasDocument, CanvasLoadResult, CanvasSaveResult, CanvasSnapshotFile };
@@ -120,8 +122,19 @@ export type ProviderInfo = {
   label: string;
   models: string[];
   note: string;
+  /** 实际生效的 baseURL（M-01 详情展示；可选是为了兼容旧夹具）。 */
+  baseURL?: string;
   /** 是否检测到可用密钥。**这不等于真的能调用**。 */
   available: boolean;
+  /**
+   * 密钥来自哪（M-02）：`"app"` 本应用已保存 / `"env"` 环境变量 /
+   * `"legacy"` 旧目录（`~/.dsh`，别的程序也在用）/ `"none"` 没有。
+   *
+   * 可选是为了兼容旧测试夹具；**主进程现在一定会给**。
+   */
+  keySource?: "app" | "env" | "legacy" | "none";
+  /** **本应用里配过**（`keySource === "app"`）。首跑向导与设置页的"已配置"只看这个。 */
+  configured?: boolean;
   /**
    * 本会话（或最近一次探测）里是否**真的成功调用过**。
    * `available: true, verified: false` = 有密钥但还没验证过 ——
@@ -461,6 +474,16 @@ export type ShellBridge = {
   }>;
   userDataDir: () => Promise<string>;
   /**
+   * M-08：本机数据（设置 → 通用）。
+   *
+   * `summary` 给真实路径与三个数字（会话 / 任务 / 授权目录）；
+   * `reset` 会写标记并**重启应用**，干净启动时删除本机数据（密钥不在其中）。
+   */
+  localData: {
+    summary: () => Promise<{ dataDir: string; sessions: number; tasks: number; workspaces: number }>;
+    reset: () => Promise<{ ok: boolean; reason?: string }>;
+  };
+  /**
    * 「记忆」库的读写（§185 起聊天侧也会用）。
    *
    * ⚠️ 它原来**只存在于 preload**，契约里没有 —— 手册点名的两处漂移之一，
@@ -502,6 +525,20 @@ export type ShellBridge = {
     status: () => Promise<{ encrypted: boolean; where: string }>;
     /** 写一条（按引用名，例如 DEEPSEEK_API_KEY）。 */
     set: (refName: string, value: string) => Promise<{ ok: boolean; reason?: string }>;
+    /**
+     * M-02：把**环境变量里已有**的那条 key 抄进本应用的加密库。
+     *
+     * 值不经过渲染层（主进程自己读环境变量、自己写），所以界面上永远看不到明文。
+     * 用途是首跑向导那句"检测到环境变量里有 X 的密钥，要用它吗？"。
+     */
+    adoptEnv: (refName: string) => Promise<{ ok: boolean; reason?: string }>;
+    /**
+     * M-06：删一条**本应用存的** key（删自定义供应商时级联）。
+     *
+     * 只清我们自己的两个落点（加密库 / `~/.ding`）；环境变量与 `~/.dsh` 不归我们删，
+     * 返回的 `removed` 列出真正清掉的位置（空数组 = 本来就没有，不是失败）。
+     */
+    remove: (refName: string) => Promise<{ ok: boolean; removed: string[]; reason?: string }>;
   };
 
   ai: {
@@ -517,6 +554,8 @@ export type ShellBridge = {
     fetchModels: (target: { providerId: string } | { baseURL: string; apiKey: string }) => Promise<{
       ok: boolean;
       models?: string[];
+      /** M-07：端点自报的能力（认不出的模型不在这个表里）。 */
+      caps?: Record<string, { contextWindow?: number; maxOutput?: number; inputModalities?: string[]; reasoning?: boolean }>;
       error?: string;
     }>;
     chat: (request: ChatRequest) => Promise<ChatStartResult>;

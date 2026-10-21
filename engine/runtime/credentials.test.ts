@@ -7,6 +7,7 @@ import {
   credentialsPath,
   credentialsPaths,
   invalidateCredentialCache,
+  keySourceOf,
   legacyCredentialsPath,
   primaryCredentialsPath,
   readCredentialRefs,
@@ -150,5 +151,59 @@ describe("两个文件合并读（老用户不会失效）", () => {
     write(path.join(home, ".ding", ".credentials.yaml"), "refs:\n  K: v2\n");
     invalidateCredentialCache();
     expect(resolveSecret("K")).toBe("v2");
+  });
+});
+
+/**
+ * M-02：**来源诚实**。
+ *
+ * 主人报的第 1 条是"供应商默认有密钥"：旧的 `~/.dsh` 文件里躺着别的程序写的 key，
+ * 我们却把它显示成"用户配过了"。这里逐条钉住四种来源，重点是
+ * **`~/.dsh` 命中必须是 `legacy`，不能是 `app`**。
+ */
+describe("密钥来源（keySourceOf）", () => {
+  const REF = "M02_SOURCE_TEST_KEY";
+
+  it("环境变量优先（与 resolveSecret 的顺序一致）", () => {
+    const home = freshDir();
+    useHome(home);
+    write(path.join(home, ".ding", ".credentials.yaml"), `refs:\n  ${REF}: from-app\n`);
+    process.env[REF] = "from-env";
+    try {
+      expect(keySourceOf(REF)).toBe("env");
+    } finally {
+      delete process.env[REF];
+    }
+  });
+
+  it("本应用的凭据文件 → app", () => {
+    const home = freshDir();
+    useHome(home);
+    write(path.join(home, ".ding", ".credentials.yaml"), `refs:\n  ${REF}: from-app\n`);
+    expect(keySourceOf(REF)).toBe("app");
+  });
+
+  it("⭐ 旧目录（~/.dsh）→ legacy（不是 app —— 这就是那条 bug）", () => {
+    const home = freshDir();
+    useHome(home);
+    write(path.join(home, ".dsh", ".credentials.yaml"), `refs:\n  ${REF}: from-legacy\n`);
+    expect(keySourceOf(REF)).toBe("legacy");
+    /* 可用性说的是"能读到"，来源说的是"谁配的" —— 两件事分开 */
+    expect(resolveSecret(REF)).toBe("from-legacy");
+  });
+
+  it("两处都有时新的赢（app），不会退化成 legacy", () => {
+    const home = freshDir();
+    useHome(home);
+    write(path.join(home, ".dsh", ".credentials.yaml"), `refs:\n  ${REF}: old\n`);
+    write(path.join(home, ".ding", ".credentials.yaml"), `refs:\n  ${REF}: new\n`);
+    expect(keySourceOf(REF)).toBe("app");
+  });
+
+  it("哪都没有 → none；空引用名也是 none", () => {
+    const home = freshDir();
+    useHome(home);
+    expect(keySourceOf(REF)).toBe("none");
+    expect(keySourceOf("   ")).toBe("none");
   });
 });
