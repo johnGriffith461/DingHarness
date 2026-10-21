@@ -99,20 +99,11 @@ export function SummaryPanel({
           2026-10-15（M0 工单 3）按工单口径**移除** —— 摘要没有可设的项，
           摆一颗点不动的齿轮只会让人以为摘要功能坏了。
         */}
-        <button
-          className="wb-summary-collapse"
-          data-testid="wb-summary-collapse"
-          aria-label="收起对话摘要"
-          title="收起对话摘要"
-          onClick={() => onCollapsedChange(true)}
-        >
-          {/* ⚠️ 2026-10-14 主人报的原话：「点一下面板按钮就打开了，然后怎么关呢？」
-              —— 第一版这里只有一枚**没字的右向箭头**（`.wb-icon` + ChevronRight），
-              它太像"往右导航"，没人会当成"收起"。现在**带字**（图标 + 「收起」）。
-              浮标按设计在面板打开时隐藏（原型 `.rail-open .rail-edge { display: none }` 同款），
-              所以关的入口必须在面板自己头上，而且必须一眼看得出来。 */}
-          <PanelRightClose size={13} /> 收起
-        </button>
+        {/*
+          2026-10-22 主人：「我是让你删右上角的那个小收起，而不是删面板那个大收起」——
+          这里原本还有一颗小的「收起」（图标 + 两个字），与左缘那条竖排大字重复。
+          删掉这颗，只留左缘那条（它跟着面板边走动，更好认）。
+        */}
       </header>
 
       <div className="wb-tabs wb-summary-tabs" data-testid="wb-summary-tabs">

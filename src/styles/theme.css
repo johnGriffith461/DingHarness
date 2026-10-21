@@ -950,6 +950,32 @@
 .wb-setpage-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-top: 1px solid var(--bg-2); font-size: 13px; }
 .wb-setpage-label { width: 88px; flex: none; color: var(--fg-dim); }
 .wb-setpage-row em { font-style: normal; color: var(--fg); }
+/*
+ * 2026-10-22 主人报「这个输入框有问题吧 大方框怎么是」：`.wb-setpage-select`
+ * 只有类名、**没有任何样式**（全仓 grep 不到），用的是浏览器默认 select ——
+ * 灰底、窄、和周围卡片不是一个语言。这里按卡片控件补上。
+ */
+.wb-setpage-select {
+  min-width: 260px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12.5px;
+}
+.wb-setpage-select:hover { border-color: var(--line-strong); }
+.wb-setpage-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-setpage-btn:hover { border-color: var(--line-strong); }
 .wb-setpage-hint { padding: 2px 4px 8px; color: var(--fg-faint); font-size: 12px; line-height: 1.7; }
 .wb-workspace-settings { display: flex; flex-direction: column; }
 .wb-workspace-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
@@ -1180,11 +1206,12 @@ html:not([data-kb="1"])
 }
 /* 左列底部：账号块 */
 .wb-setfull .wb-set-rail { display: flex; flex-direction: column; }
-.wb-setfull-account {
-  margin-top: auto; padding: 10px 8px 2px; display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--fg-dim); border-top: 1px solid var(--bg-4);
-}
-.wb-setfull-avatar { width: 20px; height: 20px; border-radius: 50%; background: var(--fg-dim); opacity: 0.6; }
+/*
+ * 2026-10-22 主人报「关于这个页面怎么左下角还有个大横杠呢，写着本机用户 本机模式」：
+ * 那块身份块原来在 `.wb-set-shell` 里当**第三个 flex item**（nav / 身份 / 正文）——
+ * 既在每页左下角画一条横线，又白占了 ~190px 的列宽（这正是"左栏与内容区中间
+ * 那么大一块空白"的来源）。顶栏已经有「本机模式 · 未登录」，这里整块删掉。
+ */
 .wb-set-crumb b { color: var(--fg); }
 
 /* 模型项：「视觉」徽标（轻量圆 pill，贴名字后）与模型名（不许挤压） */
@@ -1246,26 +1273,31 @@ html:not([data-kb="1"])
 
 /* 左列：分区导航（ZCode 的宽度约 240，行高 34，选中圆角条） */
 .wb-setfull .wb-set-rail {
+  /* `flex-basis` 必须一起改：基础那条写的是 `flex: 0 0 208px`，
+     在 flex 布局里 basis 优先于 width —— 只改 width 量出来还是 208。 */
   width: 248px;
+  flex: 0 0 248px;
   padding: 12px 10px;
   border-right: 1px solid var(--bg-4);
   background: var(--bg-1, var(--surface));
 }
 .wb-set-group {
-  padding: 10px 10px 4px;
+  padding: 16px 10px 6px;
   font-size: 11px;
   color: var(--fg-faint, var(--fg-dim));
   letter-spacing: 0.04em;
 }
 /* ⚠️ 行必须**单行**（上一版就是这里没约束，字被挤成一列） */
 .wb-setfull .wb-modal-group { margin: 0; }
+/* 组与组之间断开一点：原来第二组的标题直接贴在第一组最后一行下面 */
+.wb-setfull .wb-modal-group + .wb-modal-group { margin-top: 10px; }
 .wb-setfull .wb-modal-row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 34px;
-  padding: 6px 10px;
+  min-height: 38px;
+  padding: 8px 10px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -1281,7 +1313,13 @@ html:not([data-kb="1"])
  * 而"标…"是哪一项根本看不出来；值是可以截的（它本来就长）。
  */
 .wb-setfull .wb-modal-row-label { flex: 0 0 auto; white-space: nowrap; }
-.wb-setfull .wb-modal-row-icon { flex: 0 0 auto; display: inline-flex; }
+/*
+ * ⚠️ 2026-10-22 主人报「图标偏左啊 不居中」：`.wb-modal-row-icon` 在 workbench.css 里
+ * 是 `display: grid; place-items: center`（居中），而这一条把它覆盖成 `inline-flex` ——
+ * flex 默认 `align-items: flex-start`，13px 的 svg 就贴在 22px 方块的左上角。
+ * 这里显式对齐到中心（用 grid 与基础那份同一口径）。
+ */
+.wb-setfull .wb-modal-row-icon { flex: 0 0 auto; display: grid; place-items: center; }
 .wb-setfull .wb-modal-row em {
   flex: 1 1 auto; min-width: 0; font-size: 11.5px; font-style: normal; color: var(--fg-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right;

@@ -177,7 +177,7 @@ export function ModelChip({
   );
 
   return (
-    <div className="wb-chip-wrap">
+    <div className="wb-chip-wrap wb-chip-model">
       <button
         className="wb-chip"
         data-testid="wb-model"
@@ -192,7 +192,10 @@ export function ModelChip({
         }
         onClick={onToggle}
       >
-        <Sparkles size={13} /> {label} <ChevronDown size={12} />
+        <Sparkles size={13} />
+        {/* 名字包一层：过长时省略（否则它会把工具条里别的按钮挤走，2026-10-22） */}
+        <span className="wb-chip-label">{label}</span>
+        <ChevronDown size={12} />
       </button>
       {open ? (
         <div className="wb-chip-pop wb-model-pop" data-testid="wb-model-pop" role="menu" onMouseLeave={onClose}>

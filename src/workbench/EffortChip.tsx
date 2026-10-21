@@ -33,7 +33,7 @@ export function EffortChip({
   };
 
   return (
-    <div className="wb-chip-wrap">
+    <div className="wb-chip-wrap wb-chip-effort">
       <button
         className="wb-chip"
         data-testid="wb-effort"
@@ -50,7 +50,8 @@ export function EffortChip({
             data-testid="wb-effort-auto"
             onClick={() => pick(undefined)}
           >
-            默认（各家自己的档）{effort === undefined ? <Check size={13} /> : null}
+            {/* 2026-10-22 主人：首项只留「默认」，括号里的解释去掉 */}
+            默认{effort === undefined ? <Check size={13} /> : null}
           </button>
           {REASONING_EFFORTS.map((e) => (
             <button

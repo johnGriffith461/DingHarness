@@ -158,7 +158,7 @@ describe("P192：左栏那颗开关必须带字，且与右栏同一形态", () 
 
   it("⭐ 按钮里有**看得见**的两个字（不是只有一枚图标靠 title 提示）", () => {
     /*
-     * 右栏那颗（`wb-summary-collapse`）就是被主人当场问过「打开了然后怎么关呢」
+     * 右栏那条（`wb-summary-edge`）就是被主人当场问过「打开了然后怎么关呢」
      * 才改成带字的。左栏这颗更硬：收起之后它是**唯一的回程**。
      */
     expect(nav, "又变成一枚没字的图标了 —— 左栏收起后没人认得出这是回程").toMatch(
@@ -166,13 +166,21 @@ describe("P192：左栏那颗开关必须带字，且与右栏同一形态", () 
     );
   });
 
-  it("与右栏共用同一条样式规则（两处形态不会再漂）", () => {
+  it("右栏那条「收起」仍是**竖排 + 贴面板左缘**（两处形态不能再被合并成一条）", () => {
+    /*
+     * ⚠️ 2026-10-22 踩到的：为了"两处同形态"，我把 `.wb-summary-edge` 塞进了
+     * `.wb-nav-collapse` 那条规则 —— 结果 `flex-direction: column` 被覆盖成 row，
+     * 竖排大字变成横排，点击区域也飘到面板外面（`accept-panels` / `accept-smoke` 当场红）。
+     * 右栏那条是**竖排贴边**，左栏那颗是**横排带字**，本来就不是同一种形态。
+     * 守卫改成盯右栏自己那三条：绝对定位、竖排、带字。
+     */
     expect(nav, "要挂上那颗开关的类").toContain('className="wb-nav-collapse"');
     const css = source("src/styles/ding-harness-shell.css");
-    expect(
-      css,
-      "`.wb-nav-collapse` 没和 `.wb-summary-collapse` 写在同一条规则里 —— 形态开始各写一份了",
-    ).toMatch(/\.wb-summary-collapse,\s*\.wb-nav-collapse\s*\{/);
+    const edge = css.slice(css.indexOf(".wb-summary-edge {"));
+    expect(edge, "右栏那条收起丢了绝对定位（会飘到别处）").toMatch(/position:\s*absolute/);
+    expect(edge, "右栏那条收起丢了竖排").toMatch(/flex-direction:\s*column/);
+    expect(edge, "右栏那条收起的字没竖排").toMatch(/writing-mode:\s*vertical/);
+    expect(source("src/workbench/SummaryPanel.tsx"), "右栏那条收起不带字").toMatch(/<span>收起<\/span>/);
   });
 
   it("可访问名与几何还在（收起/展开是两件事、按钮不许禁用）", () => {

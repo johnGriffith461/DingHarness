@@ -306,7 +306,14 @@ export function SettingsDialog({
                 .map((r) => (
                   <div key={r.label}>
                     <button
-                      className="wb-modal-row"
+                      /*
+                       * 2026-10-22 主人报「我按本机档案这个板块 它不应该高亮一下吗」：
+                       * `.is-on` 的样式早就写好了（theme.css 的 `.wb-setfull .wb-modal-row.is-on`），
+                       * 但**从来没人加这个 class** —— 点完左列完全看不出当前在哪一页。
+                       * 判据只有一个：`sectionLabel` 就是这一行的标签（进子页时它被写入）。
+                       */
+                      className={`wb-modal-row${sectionLabel === r.label ? " is-on" : ""}`}
+                      aria-current={sectionLabel === r.label ? "page" : undefined}
                       data-testid={`wb-set-${r.label}`}
                       onClick={() => {
                         setSectionLabel(r.label);
@@ -369,11 +376,11 @@ export function SettingsDialog({
             </div>
           ))}
           </nav>
-          {/* 左列底部：账号（照 ZCode 图二左下角那块） */}
-          <div className="wb-setfull-account" data-testid="wb-setfull-account">
-            <span className="wb-setfull-avatar" aria-hidden />
-            <span>本机用户 · 本机模式</span>
-          </div>
+          {/*
+            2026-10-22 主人报「关于页左下角还有个大横杠，写着本机用户 本机模式」：
+            这块原来既是 `.wb-set-shell` 的第三个 flex item（占掉一列 → 左右之间一大块空白），
+            又在每页左下角画一条横线。顶栏已有「本机模式 · 未登录」，整块删除。
+          */}
           <section className="wb-set-panel" data-testid="wb-set-panel">
             {/* 面包屑：告诉用户"我在哪一层"（ZCode 的 settings-header-breadcrumb） */}
             <div className="wb-set-crumb" data-testid="wb-set-crumb">

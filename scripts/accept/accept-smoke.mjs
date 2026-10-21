@@ -105,7 +105,7 @@ await step("右栏摘要：能展开能收起", async () => {
   const s0 = await collapsed();
   if (!(await openSummary(page))) throw new Error("展开失败（浮标点不开）");
   const s1 = await collapsed();
-  await page.locator('[data-testid="wb-summary-collapse"]').click();
+  await page.locator('[data-testid="wb-summary-edge"]').click();
   await sleep(320);
   const s2 = await collapsed();
   if (!(s0 === true && s1 === false && s2 === true)) throw new Error(`收起=${s0} → 展开=${s1} → 收起=${s2}`);

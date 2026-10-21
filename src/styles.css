@@ -24,6 +24,8 @@
 @import "./styles/firstrun.css";
 /* 模型选择 UX（U07，2026-10-18） */
 @import "./styles/models.css";
+/* 输入区工具条（2026-10-22）：从 workbench.css 分出（那份贴着行数上限） */
+@import "./styles/composer.css";
 /* 命令面板（G13，2026-10-18） */
 @import "./styles/palette.css";
 @import "./styles/theme.css";

@@ -508,13 +508,15 @@
 
 .wb-composer-placeholder { color: var(--fg-faint); padding: 2px 0 8px; }
 
-.wb-composer-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding-top: 6px;
+
+/* 模型 chip 里的名字：可省略，箭头与图标不动 */
+.wb-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.wb-chip { min-width: 0; }
 
 .wb-spacer { flex: 1; }
 
@@ -1331,14 +1333,25 @@
 
 .wb-nav-input:focus { border-color: var(--accent); }
 
+/*
+ * 小徽标（工具页的「内置」、模型菜单的「无密钥」）。
+ *
+ * ⚠️ 2026-10-22 主人报「工具页面里的胶囊里边字我看不清」：原来是**实心朱红底 + `--bg` 文字**，
+ * 而暗色主题下 `--bg` 是深墨 —— 深红底上压深字，10px 字号几乎读不出来。
+ * 改成与 `.wb-mset-cap` 同一形态（浅底 + 描边 + 强调色字）：两个主题都清楚，
+ * 也不再需要"红底配什么字"这种靠主题猜的事。
+ */
 .wb-chip-badge {
   font-style: normal;
-  font-size: 10px;
-  background: var(--accent);
-  color: var(--bg);
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--bg-2);
+  color: var(--accent-strong);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0 5px;
-  margin-left: 2px;
+  padding: 0 6px;
+  margin-left: 4px;
+  line-height: 1.6;
 }
 
 .wb-skill-pop { min-width: 240px; max-height: 260px; overflow-y: auto; }

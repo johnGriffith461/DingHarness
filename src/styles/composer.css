@@ -1,0 +1,91 @@
+/*
+ * 输入区工具条与「执行前问不问」那四档（2026-10-22）。
+ *
+ * 从 `workbench.css` 分出来：那份已经贴着结构守卫的 1700 行上限，
+ * 而这次改动（固定三行布局 / 模型名省略 / 用量下沉 / 四档说明）一次加了 60 多行。
+ *
+ * ⚠️ 它必须在 `workbench.css` **之后**、`craft.css` 与视觉系统之前读，
+ * 才能盖住 `.wb-composer-bar` 的旧规则；位置写在 `src/styles.css` 的 import 串里。
+ */
+
+/*
+ * 工具条**不换行**（2026-10-22 主人报的）。
+ *
+ * 原来 `flex-wrap: wrap`：模型名一长 / 点开「更多」多出几颗 chip，整排就折成两行，
+ * 于是"有的往左推、有的往右推"，按钮位置每次都变。
+ * 现在：单行、左侧可收缩（省略号）、右侧固定；更多内容放到下面那一行。
+ */
+.wb-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  row-gap: 6px;
+  min-width: 0;
+  padding-top: 6px;
+}
+.wb-composer-bar > * { flex: 0 0 auto; }
+/*
+ * **固定三行**（2026-10-22 主人：「这些按钮能不能固定下位置啊…你换个模型名字，
+ * 名字一长就把别的按钮挤走了，你点击更多 又把别的按钮又挤走了」）。
+ *
+ *   第一行：确认档位 / 技能
+ *   第二行：更多 / 模型 / 思考 / 发送（**永远在这里**，不随展开与否移动）
+ *   第三行：项目 / 插件 / 计划 / 附件（只在「更多」展开时出现）
+ *
+ * 做法：`order` 排序 + 用 spacer 占满一整行强制断行（0 高度，不占视觉空间）。
+ * 这样"模型名长"只影响它自己（省略号），不影响任何按钮的位置。
+ */
+.wb-composer-bar > .wb-spacer { order: 20; flex: 1 0 100%; height: 0; min-height: 0; }
+.wb-composer-bar > [data-testid="wb-composer-more"] { order: 30; }
+.wb-composer-bar > .wb-chip-model { order: 31; flex: 0 1 auto; min-width: 0; }
+.wb-composer-bar > .wb-chip-effort { order: 32; }
+.wb-composer-bar > [data-testid="wb-send"] { order: 33; }
+/* 附件 ＋：主操作行末尾（Composer 里没给它加 class，按 testid 命中） */
+.wb-composer-bar > [data-testid="wb-composer-add"] { order: 34; }
+/* 模型 chip 是唯一允许收缩的：名字过长时省略，而不是把别家挤走 */
+.wb-composer-bar > .wb-chip-model > .wb-chip { max-width: 240px; }
+/*
+ * 「更多」展开的那一批（项目 / 插件 / 计划）—— **单独一行**，在主操作条下面。
+ * 它是 bar 之后的一个独立容器（DOM 里就在那儿），所以展开与收起都不会推动
+ * 模型 / 思考 / 发送的位置。宽度不够时它自己换行，主条不受影响。
+ */
+/*
+ * 「更多」展开的那一批（项目 / 插件 / 计划）—— **单独一行**。
+ * 它们仍在同一个 bar 里，用 order 排到主操作行之后（100），
+ * 展开与收起只影响最后这一行，模型 / 思考 / 发送的位置纹丝不动。
+ */
+.wb-composer-bar > [data-testid="wb-project"],
+.wb-composer-bar > .wb-env,
+.wb-composer-bar > [data-testid="wb-plan-toggle"] { order: 100; }
+
+/* 输入框下面那一行：用量数字（不再是工具条里的按钮） */
+.wb-composer-usage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 2px 4px 0;
+  min-height: 20px;
+}
+.wb-composer-usage .wb-chip { font-size: 11px; padding: 1px 8px; }
+
+/* ---------- 「执行前问不问」那四档（2026-10-22 重做） ---------- */
+.wb-confirm-pop { min-width: 300px; padding: 6px; }
+.wb-confirm-head {
+  padding: 4px 8px 6px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  letter-spacing: 0.02em;
+}
+.wb-confirm-pop .wb-chip-option {
+  height: auto;
+  min-height: 44px;
+  padding: 6px 8px;
+  align-items: flex-start;
+}
+.wb-confirm-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; }
+.wb-confirm-text b { font-size: 13px; font-weight: 600; color: var(--fg); }
+.wb-confirm-text em { font-style: normal; font-size: 11.5px; line-height: 1.5; color: var(--fg-dim); }
+.wb-confirm-pop .wb-chip-option.is-on { background: var(--bg-2); }
+.wb-confirm-pop .wb-chip-option.is-on .wb-confirm-text b { color: var(--accent-strong); }

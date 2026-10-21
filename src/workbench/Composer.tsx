@@ -49,6 +49,8 @@ import { CONFIRM_MODES } from "./uiUtil";
 import { UsagePopover } from "./UsagePopover";
 import { ContextMeterBar } from "./ContextMeterBar";
 import { ModelChip } from "./ModelChip";
+import { CONFIRM_HINT } from "./confirmHints";
+import { useComposerDismiss } from "./useComposerDismiss";
 import { EffortChip } from "./EffortChip";
 import { sumUsage } from "@shared/cost";
 
@@ -255,6 +257,11 @@ export function Composer({
 
   const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"): void =>
     setOpenPop((cur) => (cur === which ? null : which));
+  /* 2026-10-22 主人：点对话框应把插件/模型那些弹层收掉（判据与两次弯路见该文件头） */
+  useComposerDismiss(openPop !== null || composerAdvanced, () => {
+    setOpenPop(null);
+    setComposerAdvanced(false);
+  });
 
   const installed = useLibraryStore((s) => s.lib.installed);
   const enabled = useLibraryStore((s) => s.lib.enabled);
@@ -387,7 +394,8 @@ export function Composer({
     const next = !readPlanMode();
     savePlanMode(next);
     setPlanOn(next);
-    showMaterialNote(next ? "计划模式：只读工具，先给计划、确认后再执行" : "已退出计划模式");
+    /* 2026-10-22：进入时上方已有 `wb-plan-banner` 说同一句话，不再叠一条提示（退出才说） */
+    if (!next) showMaterialNote("已退出计划模式");
   };
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   /**
@@ -1271,7 +1279,13 @@ export function Composer({
             <Check size={13} /> {confirmMode} <ChevronDown size={12} />
           </button>
           {openPop === "confirm" ? (
-            <div className="wb-chip-pop" data-testid="wb-confirm-pop" onMouseLeave={() => setOpenPop(null)}>
+            <div
+              className="wb-chip-pop wb-confirm-pop"
+              data-testid="wb-confirm-pop"
+              onMouseLeave={() => setOpenPop(null)}
+            >
+              {/* 2026-10-22：四档各配一句说明（原来四行纯文字，主人说太丑） */}
+              <div className="wb-confirm-head">执行前问不问</div>
               {CONFIRM_MODES.map((m) => {
                 const state = confirmOptionState(m, confirmMode);
                 return (
@@ -1294,7 +1308,7 @@ export function Composer({
                     <span className="wb-chip-check-slot">
                       {state.marker === "check" ? <Check size={13} /> : null}
                     </span>
-                    {m}
+                    <span className="wb-confirm-text"><b>{m}</b><em>{CONFIRM_HINT[m]}</em></span>
                   </button>
                 );
               })}
@@ -1438,34 +1452,29 @@ export function Composer({
           onClose={() => closePop(popToken.current)}
         />
 
-        {/*
-          ⚠️ 这里原来有一颗 `disabled` 的「模型档位」chip，写死显示 `AUTO · LOW`。
-          2026-10-15（M0 工单 3）按工单口径**移除** —— 两个理由都成立：
-
-            ① 它显示的不是任何真实状态（项目里没有"档位"这一层），等于**编了个数**；
-            ② 模型其实**是能选的**，只是不在这儿：设置 →「新对话默认模型」
-               （`accept-pinned` 盯着那条路）。摆一颗点不动的档位键，
-               反而会让人以为"模型不能选"。
-
-          真做档位选择的时候它会带着真功能回来。
-        */}
+        {/* 2026-10-15 移除了那颗写死 `AUTO · LOW` 的「模型档位」chip：它显示的不是真实状态
+            （项目里没有"档位"这层），而模型本来就能在设置里选。真做档位时它再带着功能回来。 */}
         {/*
           Token 用量（2026-10-14）：数从**当前任务的各步真实用量**合计来
           （`sumUsage` 逐项求和，吞吐量由 `usageRows` 用"总输出 ÷ 总耗时"现算）。
           没有任务、或 provider 没给用量时它显示空态 —— **不编数**。
         */}
-        <ContextMeterBar />
-        <UsagePopover
-          usage={sumUsage((activeTask?.steps ?? []).map((s) => s.usage))}
-          open={openPop === "usage"}
-          onToggle={() => togglePop("usage")}
-        />
         <ComposerSendButton
           running={running}
           hasText={text.trim() !== ""}
           {...(sendLabel ? { label: sendLabel } : {})}
           onSend={submit}
           onStop={() => useWorkbenchStore.getState().abort(activeTask?.id)}
+        />
+      </div>
+
+      {/* 用量数字挪到输入框**下方**一行（2026-10-22 主人：别占工具条的按钮位） */}
+      <div className="wb-composer-usage" data-testid="wb-composer-usage">
+        <ContextMeterBar />
+        <UsagePopover
+          usage={sumUsage((activeTask?.steps ?? []).map((s) => s.usage))}
+          open={openPop === "usage"}
+          onToggle={() => togglePop("usage")}
         />
       </div>
 
