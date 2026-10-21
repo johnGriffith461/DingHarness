@@ -77,7 +77,7 @@ export function ConfirmDialog({
           {request.message}
         </p>
         {request.detail ? (
-          <p className="wb-modal-detail" style={{ whiteSpace: "pre-line" }}>
+          <p className="wb-modal-detail" data-testid="wb-confirm-detail" style={{ whiteSpace: "pre-line" }}>
             {request.detail}
           </p>
         ) : null}
