@@ -151,7 +151,11 @@ try {
   if (report.error) bad.push(`装出来的那份起不来或渲染失败：${report.error}`);
   if (!report.connected) bad.push("调试端口没连上（进程起了但没起来）");
   if (!report.appShellRendered) bad.push("装出来的那份没有渲染出外壳（wb 根节点缺失）");
-  if ((report.navItems?.length ?? 0) < 5) bad.push(`左侧导航只有 ${report.navItems?.length ?? 0} 项（装机版像是缺资源）`);
+  /*
+   * 2026-10-22：主导航按主人要求收成两项（终端/工作流进右栏、用量与工具进设置、权限矩阵删除）。
+   * 这条的本意是"装机版渲染出了左栏、不是缺资源的空壳"，用"≥2 项"表达同一件事。
+   */
+  if ((report.navItems?.length ?? 0) < 2) bad.push(`左侧导航只有 ${report.navItems?.length ?? 0} 项（装机版像是缺资源）`);
   if (!report.pluginsPageOpened) bad.push("装机版里点「技能」没打开页面");
   if (!report.addFormOpenedInInstalledApp) bad.push("装机版里「添加技能」弹不出表单（交互死）");
   if (!report.userDataDir) bad.push("装机版没有写用户数据目录（数据会丢）");
