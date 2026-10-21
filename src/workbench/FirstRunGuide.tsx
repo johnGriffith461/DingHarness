@@ -257,6 +257,19 @@ export function FirstRunGuide() {
   );
 
   const shell = (globalThis as unknown as { shell?: ShellBridge }).shell;
+  /*
+   * ⭐ 2026-10-21（主人实测）：**跳步必须说清为什么，而且能退回去改**。
+   *
+   * 原来的行为是"只要有一家 configured 就直接 setStep(2)"，界面上第 1、2 步
+   * 变成灰色删除线 —— 用户第一眼看到的是"这两步我没做过，怎么就打勾了"，
+   * 而且**没有任何入口**能回到前两步（"重新运行向导"也会再被跳一次）。
+   * 现在：跳步时记下原因（哪几家 / 来源），卡片顶部说清并给「重新配一遍」；
+   * 前两步也允许点回去（`manual` 为 true 后不再自动跳）。
+   */
+  const [manual, setManual] = useState(false);
+  const [skipped, setSkipped] = useState<{ labels: string[]; count: number } | null>(null);
+  /** 出厂只有一家时：记下它的预填信息，填 key 那一步要如实展示"只差一条 key"。 */
+  const [prefilled, setPrefilled] = useState<{ label: string; baseURL: string; models: string[] } | null>(null);
 
   const refresh = async (): Promise<void> => {
     try {
@@ -268,11 +281,25 @@ export function FirstRunGuide() {
          * 有 key → 跳过第 1 步，直接选模型（只自动跳一次）。
          * ⚠️ M-02：判据从 `available` 改成 `configured` —— `~/.dsh` 里别人的 key
          * 不能再让向导以为"你已经配过了"。
+         * ⚠️ 用户点过「重新配一遍」之后（`manual`）**不再自动跳**。
          */
-        if (autoAdvanced === false && mapped.some((p) => isConfigured(p))) {
-          setProvider((prev) => prev || (mapped.find((p) => isConfigured(p))?.id ?? ""));
+        const configuredList = mapped.filter((p) => isConfigured(p));
+        if (!manual && autoAdvanced === false && configuredList.length > 0) {
+          setProvider((prev) => prev || (configuredList[0]?.id ?? ""));
           setStep((prev) => (prev === 0 ? 2 : prev));
           setAutoAdvanced(true);
+          setSkipped({ labels: configuredList.map((p) => p.label), count: configuredList.length });
+        } else if (!manual && autoAdvanced === false && mapped.length === 1 && mapped[0]) {
+          /*
+           * **出厂只有一家**（2026-10-21，主人要求"只留 DeepSeek、信息都填好、只输 key"）：
+           * 没有可选的，就别让用户在一个只有一项的下拉里点一次 —— 直接预选并落到「填 key」。
+           * 这一步仍在向导里（第 1 步会显示 ✓ + 预填信息），不是"偷偷跳过"。
+           */
+          const only = mapped[0];
+          setProvider((prev) => prev || only.id);
+          setStep((prev) => (prev === 0 ? 1 : prev));
+          setAutoAdvanced(true);
+          setPrefilled({ label: only.label, baseURL: only.baseURL ?? "", models: only.models ?? [] });
         }
       }
     } catch {
@@ -399,9 +426,60 @@ export function FirstRunGuide() {
             稍后再说
           </button>
         </header>
+
+        {/*
+          跳步必须**说清为什么**（2026-10-21 主人实测）：
+          他看到第 1、2 步被划掉，却完全不记得自己配过 —— 因为那条 key 是
+          以前用 CLI/桌面配的、留在 ~/.ding 里，重装软件不会删它。
+          这里把来源说出来，并给一个明确的「重新配一遍」。
+        */}
+        {skipped && !manual && step > 1 ? (
+          <div className="wb-firstrun-notice" data-testid="wb-firstrun-skipped">
+            <span>
+              已跳过前两步：本机已有 {skipped.count} 家的密钥（本应用已保存，来自 <code>~/.ding</code>）——
+              {skipped.labels.slice(0, 3).join(" / ")}
+              {skipped.count > 3 ? ` 等 ${skipped.count} 家` : ""}。
+            </span>
+            <button
+              type="button"
+              data-testid="wb-firstrun-restart"
+              onClick={() => {
+                setManual(true);
+                setSkipped(null);
+                setStep(0);
+                setModel("");
+              }}
+            >
+              我要重新配一遍
+            </button>
+          </div>
+        ) : null}
+
         <ol className="wb-firstrun-steps">
           <li data-active={step === 0} data-done={step > 0}>
-            <div className="wb-firstrun-title">① 选一家模型服务</div>
+            <div className="wb-firstrun-title">
+              ① 选一家模型服务
+              {step > 0 && provider ? (
+                <button
+                  type="button"
+                  className="wb-firstrun-back"
+                  data-testid="wb-firstrun-back-provider"
+                  onClick={() => {
+                    setManual(true);
+                    setSkipped(null);
+                    setStep(0);
+                  }}
+                >
+                  换一家
+                </button>
+              ) : null}
+            </div>
+            {step > 0 && provider ? (
+              <div className="wb-firstrun-hint" data-testid="wb-firstrun-picked">
+                已选：{providers?.find((p) => p.id === provider)?.label ?? provider}
+                {prefilled ? "（地址与模型已预填）" : ""}
+              </div>
+            ) : null}
             {step === 0 ? (
               <div className="wb-firstrun-body">
                 <select
@@ -433,9 +511,41 @@ export function FirstRunGuide() {
           </li>
 
           <li data-active={step === 1} data-done={step > 1}>
-            <div className="wb-firstrun-title">② 填 key</div>
+            <div className="wb-firstrun-title">
+              ② 填 key
+              {step > 1 && chosen ? (
+                <button
+                  type="button"
+                  className="wb-firstrun-back"
+                  data-testid="wb-firstrun-back-key"
+                  onClick={() => {
+                    setManual(true);
+                    setSkipped(null);
+                    setStep(1);
+                  }}
+                >
+                  重新填一条
+                </button>
+              ) : null}
+            </div>
+            {step > 1 && chosen ? (
+              <div className="wb-firstrun-hint" data-testid="wb-firstrun-key-skipped">
+                已跳过：这一家已有本应用保存的密钥（<code>{chosen.keyRef}</code>）—— 不想用它就点上面的「重新填一条」。
+              </div>
+            ) : null}
             {step === 1 && chosen ? (
               <div className="wb-firstrun-body">
+                {/*
+                  出厂只有一家时，第 1 步已经把 provider 预选好了 —— 这里如实说清
+                  "地址与模型都填好了，只差一条 key"（主人 2026-10-21 的要求）。
+                */}
+                {prefilled && prefilled.label === chosen.label ? (
+                  <div className="wb-firstrun-hint" data-testid="wb-firstrun-prefilled">
+                    渠道信息已填好：<code>{prefilled.baseURL}</code>
+                    {prefilled.models.length ? `　模型：${prefilled.models.slice(0, 4).join(" / ")}` : ""}
+                    　—— 你只需要下面这一条 key。
+                  </div>
+                ) : null}
                 {/*
                   M-02：环境变量里已经有这条 key 时，给一条**明确的快捷路径**。
                   值不经过渲染层（主进程自己读、自己写加密库），界面上永远看不到明文。
