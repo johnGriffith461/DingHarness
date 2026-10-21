@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -1132,13 +1132,22 @@ console.log(`批跑自带假通道：${localModel.url}（配 DSH_NO_REAL_MODEL=1
  */
 const CRED_FILE = join(RECORDS_DIR, "batch-credentials.yaml");
 try {
+  /*
+   * ⚠️ 先建目录（2026-10-21，CI 逮到的）：这台机器上 `.verify/` 早就在，
+   * 于是写失败这条分支从没被走过 —— 而 CI 的干净检出里没有这个目录，
+   * `writeFileSync` 抛 ENOENT、被下面的 catch 静默吞掉，结果**整批没有凭据文件**。
+   * 之前没暴露是因为"有密钥"看的是环境变量；M-02 之后 `configured` 只认本应用保存的那条，
+   * `accept-firstrun` 立刻就红了。静默兜底 + 隐含依赖 = 只在干净环境里现形。
+   */
+  mkdirSync(RECORDS_DIR, { recursive: true });
   writeFileSync(
     CRED_FILE,
     "refs:\n  STRATA_API_KEY: accept-local-fake\n  LUNORA_API_KEY: accept-local-fake\n",
     "utf8",
   );
-} catch {
-  /* 写不进去就退回"只靠闸"（下面的环境清理照做） */
+} catch (error) {
+  /* 写不进去就退回"只靠闸"（下面的环境清理照做）—— 但**说出来**，别再静默 */
+  console.error(`[批跑] 凭据文件写不进去（${CRED_FILE}）：${error instanceof Error ? error.message : String(error)}`);
 }
 
 /**
