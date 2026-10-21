@@ -88,8 +88,32 @@ try {
   out.dialogOpened = (await dialog.count()) > 0;
   if (!out.dialogOpened) throw new Error("点了「添加模型」对话框没出来");
 
-  /* ① 先试一次**不填窗口**保存：必须被拦住 */
+  /*
+   * M-04（2026-10-21 改）：模型字段现在是**下拉**（数据源=已拉取清单），
+   * 最后一项「手动输入…」才切回文本框。这条要填的是一个**没拉过**的模型名，
+   * 所以先切到手动输入；没有下拉（干净目录、没拉过）时本来就直接是文本框。
+   * 另外「高级」默认收起 —— 里面的控件要先展开才点得到。
+   */
+  const modelSelect = page.locator('[data-testid="wb-modelconfig-model-select"]');
+  if ((await modelSelect.count()) > 0) {
+    await modelSelect.selectOption("__manual__").catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
+  await page.locator('[data-testid="wb-modelconfig-advanced"] > summary').click();
+  await page.waitForTimeout(300);
+
+  /*
+   * ① 先试一次**不填窗口**保存：必须被拦住。
+   *
+   * ⚠️ 2026-10-21（M-04）：窗口现在会**自动预填**（目录没命中时给默认值并标
+   * 「默认值（未登记模型，请核对）」）—— 这是方案要的行为，不是"替用户编数"。
+   * 所以这一段的做法改成：先确认它**确实预填了**，再**手动清空**去验"空窗口被拦"。
+   */
   await page.locator('[data-testid="wb-modelconfig-id"]').fill("probe-user-model");
+  await page.waitForTimeout(400);
+  const prefilled = await page.locator('[data-testid="wb-modelconfig-window"]').inputValue();
+  out.prefilledDefault = Number(prefilled) > 0;
+  await page.locator('[data-testid="wb-modelconfig-window"]').fill("");
   await page.locator('[data-testid="wb-modelconfig-save"]').click();
   await page.waitForTimeout(600);
   const afterEmpty = readModels();
@@ -167,7 +191,8 @@ try {
 const checks = [
   ["「添加模型」按钮在模型清单卡里", out.addButtonVisible === true],
   ["点开之后对话框真的出现", out.dialogOpened === true],
-  ["不填窗口时被拦住（没写进 models.json）", out.emptyWindowRejected === true],
+  ["选中模型后窗口被自动预填（未登记 → 默认值 + 来源标注）", out.prefilledDefault === true],
+  ["清空窗口时被拦住（没写进 models.json）", out.emptyWindowRejected === true],
   ["拦的时候显示了错误提示", out.emptyWindowErrorShown === true],
   ["最大输出 ≥ 窗口时被拦住", out.oversizeOutputRejected === true],
   ["合法值保存后 models.json 里有这条规则", out.savedFile === true && out.savedRuleCount === 1],

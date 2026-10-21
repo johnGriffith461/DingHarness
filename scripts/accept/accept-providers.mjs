@@ -81,13 +81,22 @@ const readStates = async () => {
     const row = page.locator(`[data-testid="wb-modelset-provider-${id}"]`);
     if ((await row.count()) === 0) continue;
     const text = ((await row.first().innerText()) ?? "").replace(/\s+/g, " ").trim();
-    out[id] = text.includes("已验证")
-      ? "已验证"
-      : text.includes("无密钥")
-        ? "无密钥"
-        : text.includes("有密钥")
-          ? "有密钥"
-          : "其它(" + text.slice(0, 24) + ")";
+    /*
+     * 2026-10-21（M-02）改了词汇：状态词是**密钥来源**（本应用已保存 / 来自环境变量 /
+     * 来自旧目录 / 无密钥），「已验证」是**另一颗**小字（真调通过才有）。
+     * 旧文案「有密钥」被明确替换 —— 它把"别的程序留的 key"也说成你配的。
+     */
+    const verified = (await page.locator(`[data-testid="wb-modelset-verified-${id}"]`).count()) > 0 || text.includes("已验证");
+    const source = text.includes("本应用已保存")
+      ? "本应用已保存"
+      : text.includes("来自环境变量")
+        ? "来自环境变量"
+        : text.includes("来自旧目录")
+          ? "来自旧目录"
+          : text.includes("无密钥")
+            ? "无密钥"
+            : "其它(" + text.slice(0, 24) + ")";
+    out[id] = { source, verified };
   }
   return out;
 };
@@ -131,20 +140,25 @@ try {
 
   /* ① 状态是真的：没密钥的必须写「无密钥」（不许"全都能用"）*/
   const beforeStates = out.before ?? {};
+  const hasKey = (s) => Boolean(s) && s.source !== "无密钥" && !s.source.startsWith("其它");
   if (!beforeStates.strata) bad.push("左列里没有批跑那把唯一有密钥的通道（strata）");
-  else if (beforeStates.strata !== "有密钥") {
-    bad.push(`还没调过任何模型，strata 却不写「有密钥」而是「${beforeStates.strata}」—— 状态不是真的`);
+  else if (!hasKey(beforeStates.strata)) {
+    bad.push(`还没调过任何模型，strata 却不显示来源（实际：${JSON.stringify(beforeStates.strata)}）—— 状态不是真的`);
+  } else if (beforeStates.strata.verified) {
+    bad.push("还没调过任何模型，strata 却已经标「已验证」—— 成功没发生过就先标了");
   }
-  if (beforeStates.deepseek && beforeStates.deepseek !== "无密钥") {
-    bad.push(`deepseek 这把没有密钥，界面却写「${beforeStates.deepseek}」—— 在假装可用`);
+  if (beforeStates.deepseek && beforeStates.deepseek.source !== "无密钥") {
+    bad.push(`deepseek 这把没有密钥，界面却写「${JSON.stringify(beforeStates.deepseek)}」—— 在假装可用`);
   }
 
-  /* ② ⭐ 真调用成功过才升级（原来"没有替代品"的那半个）*/
+  /* ② ⭐ 真调用成功过才升级：来源词不变（它说的是"谁的 key"），「已验证」出现 */
   const afterStates = out.after ?? {};
   if (!out.turnDone) bad.push("那一轮没跑完（会话记录里没等到 done）—— 后面的判据无从谈起");
-  else if (afterStates.strata !== "已验证") {
-    bad.push(`真跑通一轮之后，strata 没有升成「已验证」而是「${afterStates.strata}」—— 成功没记到界面上`);
+  else if (!afterStates.strata?.verified) {
+    bad.push(`真跑通一轮之后，strata 没有标「已验证」（实际：${JSON.stringify(afterStates.strata)}）—— 成功没记到界面上`);
+  } else {
+    console.log(`   真跑通一轮之后：${JSON.stringify(afterStates.strata)}`);
   }
 
-  verdict(bad, "provider 状态诚实：没密钥的写「无密钥」/ 真跑通一轮之后那一家升成「已验证」");
+  verdict(bad, "provider 状态诚实：没密钥的写「无密钥」/ 来源词如实（本应用/环境变量/旧目录）/ 真跑通一轮之后标「已验证」");
 }

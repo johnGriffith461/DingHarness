@@ -103,6 +103,12 @@ const BARE_FIXTURES = [
   "accept-approvals-audit-real.mjs",
   /* 同上：这两条也要预置 models.json（自带 {version,rules} 格式） */
   "accept-markdown-real.mjs",
+  /*
+   * M-06（2026-10-21）：预置一个自定义供应商 + 两条模型声明。
+   * `config.json`（CLI 配置）与 `models.json`（模型能力表）**本来就不是** C1 信封，
+   * 各有自己的格式；这条要验的正是"删供应商时这两份一起清干净"。
+   */
+  "accept-provider-delete.mjs",
   "accept-trust-ui.mjs",
   "accept-approve.mjs",
   "accept-artifacts.mjs",

@@ -32,7 +32,19 @@ const out = {};
 let child = null;
 
 try {
-  const booted = await bootApp({ port: PORT, dataDir: DATA, timeoutMs: 30000 });
+  /*
+   * M-02（2026-10-21）：向导"已有 key 就跳过填 key"的判据从 `available` 改成了
+   * `configured`（= 本应用存的）。批跑环境里 `STRATA_API_KEY` **是环境变量**，
+   * 那属于"能用但不是你配的" —— 向导会停在填 key 那一步并给"存一份到本应用"的快捷路径
+   * （那条路径由 `providerBadge.test.ts` + `accept-key-source.mjs` 盯着）。
+   * 这条脚本要验的是**已配置**那一支，所以把环境变量那格清空，让 key 从凭据文件来。
+   */
+  const booted = await bootApp({
+    port: PORT,
+    dataDir: DATA,
+    timeoutMs: 30000,
+    extraEnv: { STRATA_API_KEY: "" },
+  });
   child = booted.child;
   if (!booted.ok) {
     console.error("[诊断] 应用输出尾部：\n" + (booted.getLog() || "(空)").slice(-1200));
