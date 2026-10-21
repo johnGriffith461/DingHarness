@@ -9,6 +9,7 @@ import { PhonePage } from "./PhonePage";
 import { PersonalizePanel } from "./PersonalizePanel";
 import { ProjectRulesPanel } from "./ProjectRulesPanel";
 import { WorkspaceSettings } from "./WorkspaceSettings";
+import { LocalDataSettings } from "./LocalDataSettings";
 import { PermissionRulesTable } from "./PermissionRulesTable";
 import { LspPanel } from "./LspPanel";
 import { useMemoryStore } from "./memoryStore";
@@ -277,6 +278,9 @@ export default function SettingsPages({
 
           {/* F-02：工作目录（向导答应过的那一格；添加/撤销与输入区同一份 IPC） */}
           <WorkspaceSettings />
+
+          {/* M-08：本机数据（真实路径 + 可清空；密钥不在其中） */}
+          <LocalDataSettings />
 
           {/* F-04：「总是允许」攒下的规则能看、能删（原来只写不读） */}
           <PermissionRulesTable />

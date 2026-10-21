@@ -39,6 +39,8 @@ type State = {
   keymap: Keymap;
   /** 助手人格偏好（L06）。 */
   persona: PersonaPref;
+  /** M-06：隐藏的供应商 id（内置只能隐藏，不能删）。 */
+  hiddenProviders: string[];
   loaded: boolean;
   /** 上一次写盘的说明（成功为空串；失败时给一句人话，界面据此如实提示）。 */
   note: string;
@@ -60,11 +62,25 @@ type State = {
   setKeyChord: (action: KeyAction, chord: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   /** 改人格偏好（传 undefined 的字段表示不改）。 */
   setPersona: (patch: Partial<PersonaPref>) => Promise<void>;
+  /** M-06：隐藏一个供应商（内置删不掉，但能从模型选择器里消失）。 */
+  hideProvider: (id: string) => Promise<void>;
+  /** M-06：恢复一个被隐藏的供应商。 */
+  unhideProvider: (id: string) => Promise<void>;
 };
 
 /** 磁盘上那份（不可信）→ 干净的设置对象。 */
 function readSettings(
-  raw: { pinnedModel?: unknown; liteModel?: unknown; navCollapsed?: unknown; rules?: unknown; keymap?: unknown; persona?: unknown } | undefined,
+  raw:
+    | {
+        pinnedModel?: unknown;
+        liteModel?: unknown;
+        navCollapsed?: unknown;
+        rules?: unknown;
+        keymap?: unknown;
+        persona?: unknown;
+        hiddenProviders?: unknown;
+      }
+    | undefined,
 ): {
   pinnedModel: string;
   liteModel: string;
@@ -72,6 +88,7 @@ function readSettings(
   rules: PermissionRuleWire[];
   keymap: Keymap;
   persona: PersonaPref;
+  hiddenProviders: string[];
 } {
   return {
     pinnedModel: typeof raw?.pinnedModel === "string" ? raw.pinnedModel : "",
@@ -104,6 +121,9 @@ function readSettings(
     /* 键位与人格的收窄在 `shared/` 那一份里（主进程也用同一份，不许两边各写一遍） */
     keymap: normalizeKeymap(raw?.keymap),
     persona: normalizePersona(raw?.persona),
+    hiddenProviders: Array.isArray(raw?.hiddenProviders)
+      ? [...new Set(raw.hiddenProviders.filter((id): id is string => typeof id === "string" && Boolean(id.trim())).map((id) => id.trim()))]
+      : [],
   };
 }
 
@@ -114,6 +134,7 @@ export const useAppSettings = create<State>()((set, get) => ({
   rules: [],
   keymap: { ...DEFAULT_KEYMAP },
   persona: {},
+  hiddenProviders: [],
   loaded: false,
   note: "",
 
@@ -133,6 +154,7 @@ export const useAppSettings = create<State>()((set, get) => ({
         rules: clean.rules,
         keymap: clean.keymap,
         persona: clean.persona,
+        hiddenProviders: clean.hiddenProviders,
         loaded: true,
       });
     } catch {
@@ -273,6 +295,36 @@ export const useAppSettings = create<State>()((set, get) => ({
       });
     }
   },
+
+  /* M-06：隐藏 / 恢复供应商（内置删不掉，但能从模型选择器里消失） */
+  hideProvider: async (id) => {
+    const before = get().hiddenProviders;
+    if (before.includes(id)) return;
+    set({ hiddenProviders: [...before, id], note: "" });
+    try {
+      await persist(get());
+    } catch (error) {
+      set({
+        hiddenProviders: before,
+        note: `没能记住隐藏状态：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  },
+
+  unhideProvider: async (id) => {
+    const before = get().hiddenProviders;
+    const next = before.filter((x) => x !== id);
+    if (next.length === before.length) return;
+    set({ hiddenProviders: next, note: "" });
+    try {
+      await persist(get());
+    } catch (error) {
+      set({
+        hiddenProviders: before,
+        note: `没能记住隐藏状态：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  },
 }));
 
 /**
@@ -282,7 +334,7 @@ export const useAppSettings = create<State>()((set, get) => ({
  * 把它从盘上抹掉"—— 那正是这个文件头警告过的缺陷形状。
  */
 async function persist(
-  state: Pick<State, "pinnedModel" | "liteModel" | "navCollapsed" | "rules" | "keymap" | "persona">,
+  state: Pick<State, "pinnedModel" | "liteModel" | "navCollapsed" | "rules" | "keymap" | "persona" | "hiddenProviders">,
 ): Promise<void> {
   await bridge()?.appSettings?.write({
     pinnedModel: state.pinnedModel,
@@ -291,6 +343,7 @@ async function persist(
     rules: state.rules,
     keymap: state.keymap,
     persona: state.persona,
+    hiddenProviders: state.hiddenProviders,
   });
 }
 

@@ -6,7 +6,7 @@ import { findModel } from "@engine/runtime/models";
 import { listProviders } from "@/ai/aiClient";
 import { readSavedRoute, resolveChatRoute } from "@/ai/route";
 
-import { modelsForProvider } from "./ModelSettingsPage";
+import { modelsForProvider } from "./modelSettingsStore";
 import { pinnedModelNow, useAppSettings } from "./appSettings";
 
 /**
@@ -44,11 +44,13 @@ export function ModelChip({
 }) {
   const [route, setRoute] = useState(() => readSavedRoute());
   const [providers, setProviders] = useState<
-    Array<{ id: string; label: string; models: string[]; available: boolean; note?: string }>
+    Array<{ id: string; label: string; models: string[]; available: boolean; note?: string; emptyEnabled?: boolean }>
   >([]);
   const [branch, setBranch] = useState("");
   /* C3：搜索（模型 id / provider 名，不区分大小写） */
   const [query, setQuery] = useState("");
+  /* M-06：隐藏的供应商不出现在选择器里 */
+  const hiddenProviders = useAppSettings((s) => s.hiddenProviders);
 
   useEffect(() => {
     if (!open) return;
@@ -57,20 +59,26 @@ export function ModelChip({
       .then((list) => {
         if (!alive) return;
         setProviders(
-          list.map((p) => ({
-            id: p.id,
-            label: p.label,
-            models: modelsForProvider(p.id, p.models).models,
-            available: p.available,
-            ...(p.note ? { note: p.note } : {}),
-          })),
+          list
+            .filter((p) => !hiddenProviders.includes(p.id))
+            .map((p) => {
+              const got = modelsForProvider(p.id, p.models);
+              return {
+                id: p.id,
+                label: p.label,
+                models: got.models,
+                available: p.available,
+                emptyEnabled: got.emptyEnabled,
+                ...(p.note ? { note: p.note } : {}),
+              };
+            }),
         );
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [open, hiddenProviders]);
 
   /*
    * P0-08：标签只说"用户钉住的那个"。没有钉住就写"自动选择"，
@@ -154,6 +162,20 @@ export function ModelChip({
 
   const single = providers.length === 1 ? providers[0] : undefined;
 
+  /** M-05：这一家一个都没启用时，给一条**直达设置**的出口（别让用户对着空清单发呆）。 */
+  const emptyEnabledRow = (providerId: string) => (
+    <button
+      className="wb-chip-option wb-model-manage"
+      data-testid={`wb-model-empty-enabled-${providerId}`}
+      onClick={() => {
+        onClose();
+        onOpenSettings?.();
+      }}
+    >
+      这个供应商还没启用模型 → 去设置里勾选
+    </button>
+  );
+
   return (
     <div className="wb-chip-wrap">
       <button
@@ -223,7 +245,9 @@ export function ModelChip({
           ) : single ? (
             <>
               <div className="wb-chip-title">{single.label}</div>
-              {single.models.slice(0, 12).map((m) => modelItem(single.id, m, single.available))}
+              {single.models.length === 0 && single.emptyEnabled
+                ? emptyEnabledRow(single.id)
+                : single.models.slice(0, 12).map((m) => modelItem(single.id, m, single.available))}
             </>
           ) : (
             <>
@@ -243,6 +267,7 @@ export function ModelChip({
                     >
                       <span className="wb-model-group-name">
                         {p.label}
+                        {p.emptyEnabled ? <em className="wb-chip-badge">未启用模型</em> : null}
                         {p.available ? null : <em className="wb-chip-badge">无密钥</em>}
                       </span>
                       <ChevronRight size={12} />
@@ -253,6 +278,9 @@ export function ModelChip({
                   <div className="wb-model-leaf" data-testid="wb-model-leaf">
                     {(() => {
                       const provider = providers.find((p) => p.id === branch);
+                      if (provider && provider.models.length === 0 && provider.emptyEnabled) {
+                        return emptyEnabledRow(provider.id);
+                      }
                       return (provider?.models ?? [])
                         .slice(0, 12)
                         .map((m) => modelItem(branch, m, provider?.available ?? true));

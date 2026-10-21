@@ -72,6 +72,11 @@ export type AppSettings = {
   keymap?: Keymap;
   /** **助手人格偏好**（L06）：只影响提示词，不改界面排版。 */
   persona?: PersonaPref;
+  /**
+   * **隐藏的供应商**（M-06）：内置供应商不能删，只能从模型选择器里藏起来。
+   * 存 id；设置页里能恢复。
+   */
+  hiddenProviders?: string[];
 };
 
 /**
@@ -81,7 +86,7 @@ export type AppSettings = {
  * 手写进去的坏键会被 `normalizeAppSettings` 静默丢掉，而"我明明设了啊"就是从这里来的
  * （与 CLI 那边 `CONFIG_KEYS` 同一个理由，审计 P202）。
  */
-export const APP_SETTINGS_KEYS = ["pinnedModel", "liteModel", "navCollapsed", "rules", "keymap", "persona"] as const;
+export const APP_SETTINGS_KEYS = ["pinnedModel", "liteModel", "navCollapsed", "rules", "keymap", "persona", "hiddenProviders"] as const;
 
 /**
  * 把落盘的（不可信）值收窄。
@@ -116,6 +121,11 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
   out.keymap = normalizeKeymap(s.keymap);
   const persona = normalizePersona(s.persona);
   if (Object.keys(persona).length) out.persona = persona;
+  /* M-06：隐藏的 provider id 只收非空字符串（坏值丢掉，不因此卡住整份设置） */
+  if (Array.isArray(s.hiddenProviders)) {
+    const ids = [...new Set(s.hiddenProviders.filter((id): id is string => typeof id === "string" && Boolean(id.trim())).map((id) => id.trim()))];
+    if (ids.length) out.hiddenProviders = ids;
+  }
   return out;
 }
 
