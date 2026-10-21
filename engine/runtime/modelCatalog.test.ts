@@ -70,14 +70,16 @@ describe("分组（groupsOf / groupCatalog）", () => {
     expect(groupsOf(cap)).toEqual(["未登记"]);
   });
 
-  it("⭐ provider 表里恰好 7 个未登记模型 —— 它们全在「未登记」组，推荐组里一个都没有", () => {
+  it("⭐ provider 表里的未登记模型恰好一条 —— 它只进「未登记」组，推荐组里一个都没有", () => {
     const ids = new Set<string>();
     for (const provider of allProviders()) for (const model of provider.models) ids.add(model);
     const caps = [...ids].map((id) => capabilityOf(id));
     const unregistered = caps.filter((c) => !c.registered);
-    expect(unregistered.map((c) => c.id).sort()).toEqual(
-      ["claude-3-5-sonnet", "deepseek-reasoner", "deepseek-v3", "gemini-3.1-pro-preview", "gemini-3.5-flash", "qwen-max", "qwen-turbo"].sort(),
-    );
+    /*
+     * 2026-10-21：出厂表只剩 DeepSeek 一家，`deepseek-chat` 已在目录里，
+     * 未登记的只剩 `deepseek-reasoner`（它同时是 budget 那边"未登记模型"的样本）。
+     */
+    expect(unregistered.map((c) => c.id).sort()).toEqual(["deepseek-reasoner"]);
     const recommended = caps.filter((c) => groupsOf(c).includes("推荐"));
     expect(recommended.every((c) => c.registered), "推荐里混进了未登记模型").toBe(true);
   });

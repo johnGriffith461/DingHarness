@@ -39,6 +39,14 @@ export default defineConfig({
   test: {
     environment: "node",
     /*
+     * 验收通道（2026-10-21）：`strata` 已从**出厂 provider 表**移除（只留 DeepSeek），
+     * 它只在 `DING_ACCEPT_PROVIDERS=1` 时注册。单测与 eval/bench 大量用它当
+     * "本机假 provider"，所以测试环境统一打开 —— 与 `scripts/accept/harness.mjs`
+     * 同一个原则：**假通道只存在于验收/测试里，用户态看不到**。
+     * `engine/runtime/providers.test.ts` 会显式清掉它来断言"出厂只有一家"。
+     */
+    env: { DING_ACCEPT_PROVIDERS: "1" },
+    /*
      * `engine/**` 也在里面：内核是**纯逻辑**（不 import electron），
      * 所以它能与渲染层一起在同一个 node 环境里被直接断言 —— 那是"可整包单测"
      * 这条不变量在工程上的落点（内核测试不需要起应用）。

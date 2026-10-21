@@ -28,15 +28,15 @@ import { findModel } from "./models";
  * 里"**未登记模型**零漂移"那条断言的样本。所以"把它登记进目录"与"保留一个未登记样本"
  * 是两件事，不要顺手删。
  */
-const KNOWN_GAPS = new Set([
-  "deepseek/deepseek-reasoner",
-  "apihub/deepseek-v3",
-  "apihub/claude-3-5-sonnet",
-  "qianwen/qwen-max",
-  "qianwen/qwen-turbo",
-  "google/gemini-3.5-flash",
-  "google/gemini-3.1-pro-preview",
-]);
+/*
+ * 2026-10-21：出厂 provider 表收窄成**只有 DeepSeek 一家**（主人拍板），
+ * 那批"中转站/官方直连"的漂移条目随表项一起消失了 —— 它们不再是
+ * "用户选得到但目录里没有"的东西。只剩 `deepseek-reasoner` 这一条。
+ *
+ * ⚠️ 棘轮只许往下调（删条目是对的）；但**名单里必须留至少一个样本**，
+ * 因为 `budget.test.ts` 那条"未登记模型零漂移"要用它当未登记样本。
+ */
+const KNOWN_GAPS = new Set(["deepseek/deepseek-reasoner"]);
 
 describe("provider 表 vs 目录表（P233）", () => {
   it("⭐ provider 表里可选的模型，目录表都得认（新漂一条就红）", () => {

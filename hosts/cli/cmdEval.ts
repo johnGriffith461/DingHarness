@@ -99,6 +99,12 @@ export function baselineUpdateAllowed(only: string | undefined): { ok: true } | 
  * @returns 退出码（有失败 = 1）
  */
 export async function cmdEval(p: Parsed): Promise<number> {
+  /*
+   * eval/bench 走**假 provider**（`strata`）：它已从出厂表移除，只在
+   * `DING_ACCEPT_PROVIDERS=1` 时注册 —— 这两条命令就是"验收/评测"，自己打开。
+   */
+  process.env.DING_ACCEPT_PROVIDERS ??= "1";
+
   const only = p.args[0];
   if (only && !EVAL_CATEGORIES.includes(only as (typeof EVAL_CATEGORIES)[number])) {
     process.stderr.write(`没有这一类评测集：${only}\n可选：${EVAL_CATEGORIES.join(" / ")}\n`);

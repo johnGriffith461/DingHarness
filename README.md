@@ -104,7 +104,12 @@ pnpm verify
 
 ### 配置模型
 
-模型走三种协议（OpenAI 兼容 / Anthropic / Google），内置十个 provider：DeepSeek 官方、tokenrhythm / apiKeyFan / API_HUB 中转、通义千问、Anthropic、Google、OpenAI、OpenRouter、strata。
+**出厂只内置 DeepSeek 一家**：地址（`https://api.deepseek.com/v1`）、协议、模型清单
+（`deepseek-chat` / `deepseek-reasoner`）都填好了 —— 你只需要一条 API Key。
+其余端点（中转站、Anthropic、Gemini、OpenRouter、自建服务）走设置里的
+**「添加供应商」**自己接：支持 OpenAI 兼容 / Anthropic / Google 三种线路协议，
+把地址填进去点「拉取模型」就能拿到对方的模型清单。
+
 密钥按以下优先级读取：
 
 1. 环境变量
@@ -112,7 +117,8 @@ pnpm verify
 3. `~/.dsh/.credentials.yaml`（**旧位置，只读兜底** —— 那个目录别的程序也在用，
    Ding 只把自己那份搬走，老文件里的 key 照旧读得到）
 
-设置页有连通性探测，用来区分「配了密钥」和「密钥真的可用」。
+设置页会**如实标出每条 key 的来源**（本应用已保存 / 来自环境变量 / 来自旧目录）——
+只有"本应用已保存"才算你配过，别的程序留在旧目录里的 key 不会被冒认。
 
 ## 架构
 
