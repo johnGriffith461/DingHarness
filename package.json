@@ -20,6 +20,7 @@
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/mark-electron-cjs.mjs",
     "lint": "oxlint",
     "package:win": "node scripts/stage-app.mjs && electron-builder --win nsis --publish never",
+    "package:win:b": "node scripts/stage-app.mjs && electron-builder --win nsis --publish never --config.directories.output=release-b",
     "poc:sdk": "tsx scripts/poc-sdk.mjs",
     "test": "vitest run",
     "verify:drive-paths": "tsx scripts/verify-drive-paths.ts",
