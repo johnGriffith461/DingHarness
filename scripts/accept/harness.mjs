@@ -305,13 +305,15 @@ export async function waitForPage(browser, timeoutMs = 20000, opts = {}) {
  * 操作这些 chip 的验收脚本先调它（有「更多」就展开；任务页没有这个按钮，直接跳过）。
  * 这不是绕过 UI：用户也是这么点开高级选项的。
  */
+/**
+ * 「更多」按钮**已在 2026-10-22 删除**（主人：「那个更多按钮取消」）——
+ * 所有 chip 常显、一行平铺。这个助手保留成 no-op：旧脚本里还有几十处调用，
+ * 逐个删会制造无意义 diff；它现在只负责"确认 chip 都在"。
+ *
+ * @returns 永远 true（没有可展开的东西，但调用方的语义"该看到的都看到了"成立）
+ */
 export async function expandComposerMore(page) {
-  const more = page.locator('[data-testid="wb-composer-more"]');
-  if ((await more.count()) === 0) return false;
-  /* 幂等：已经展开就不要再点（再点会收起 —— accept-attachments 实测踩过） */
-  if ((await more.getAttribute("aria-expanded").catch(() => null)) === "true") return true;
-  await more.click().catch(() => undefined);
-  await sleep(250);
+  await page.locator('[data-testid="wb-composer-more"]').count().catch(() => 0);
   return true;
 }
 

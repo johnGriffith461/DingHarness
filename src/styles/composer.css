@@ -1,4 +1,26 @@
 /*
+ * 输入区的外壳（2026-10-22）：
+ * `.wb-composer-shell` 是**不带边框的容器**（列宽/外边距在它身上），
+ * `.wb-composer` 才是那张输入卡片。用量那行字落在 shell 的第二行，
+ * 所以它在卡片**外面**、卡片下面 —— 主人明确要的位置。
+ */
+.wb-composer-shell {
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+/* 卡片自己的外边距/宽度交给 shell，别叠加两份 */
+.wb-composer-shell > .wb-composer {
+  margin: 0;
+  max-width: none;
+  width: 100%;
+}
+
+/*
  * 输入区工具条与「执行前问不问」那四档（2026-10-22）。
  *
  * 从 `workbench.css` 分出来：那份已经贴着结构守卫的 1700 行上限，
@@ -45,6 +67,10 @@
 
 .wb-composer-bar::-webkit-scrollbar { display: none; }
 .wb-composer-bar > * { flex: 0 0 auto; }
+/* 窄窗也要一行（主人：窗口缩小后不能变成多行）——允许 chip 收缩，不换行 */
+.wb-composer-bar > .wb-chip,
+.wb-composer-bar > .wb-chip-wrap { flex: 0 1 auto; min-width: 0; }
+.wb-composer-bar > .wb-chip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-composer-bar > .wb-spacer { flex: 1 1 auto; min-width: 6px; }
 /* 模型 chip 是唯一允许收缩的：名字过长时省略，而不是把别家挤走 */
 .wb-composer-bar > .wb-chip-model { flex: 0 1 auto; min-width: 0; }
@@ -187,4 +213,13 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--bg);
+}
+
+/* 输入框下面那一行：文字，不是按钮（2026-10-22） */
+.wb-usage-inline {
+  font-size: 11px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

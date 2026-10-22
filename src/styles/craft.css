@@ -349,14 +349,11 @@ html[data-kb="1"] .wb-composer:focus-within {
  * 项目、附件、插件、计划、思考、用量收进「更多」；**任务页不隐藏任何一项**。
  * 隐藏用 `display:none`（不是 disabled），所以不会留下"点了没反应"的控件。
  */
-.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-project"],
-.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-composer-add"],
-.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-plugins"],
-.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-plan-toggle"],
-.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-effort"],
-.wb-composer[data-compact-home="true"]:not([data-advanced="true"]) [data-testid="wb-usage"] {
-  display: none;
-}
+/*
+ * 2026-10-22 主人：「那个更多按钮取消」—— 所有 chip 常显，一行平铺。
+ * 原来这里用 `display:none` 把项目/附件/插件/计划/思考/用量收进「更多」，
+ * 现在那个折叠入口删了，隐藏规则也一起删（否则点了"取消更多"反而少了一半按钮）。
+ */
 .wb-composer-bar > *:nth-child(3) .wb-chip { animation-delay: 60ms; }
 .wb-composer-bar > *:nth-child(4) .wb-chip { animation-delay: 120ms; }
 .wb-composer-bar > *:nth-child(5) .wb-chip { animation-delay: 180ms; }

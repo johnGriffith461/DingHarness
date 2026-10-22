@@ -40,14 +40,12 @@ import { findItemIn } from "./libraryStore";
 import { type ConfirmMode, type SessionSearchHit } from "@shared/ipc";
 import { useDocStore } from "./docStore";
 import { confirmOptionState, readConfirmMode, saveConfirmMode, subscribeConfirmMode } from "./confirmMode";
-import { ComposerMoreButton } from "./ComposerMoreButton";
 import { ComposerSendButton } from "./ComposerSendButton";
 import SkillPanel from "./SkillPanel";
 import { runFeedbackCommand } from "./feedbackExport";
 
 import { CONFIRM_MODES } from "./uiUtil";
-import { UsagePopover } from "./UsagePopover";
-import { ContextMeterBar } from "./ContextMeterBar";
+import { ComposerUsageLine } from "./ComposerUsageLine";
 import { ModelChip } from "./ModelChip";
 import { CONFIRM_HINT } from "./confirmHints";
 import { useComposerDismiss } from "./useComposerDismiss";
@@ -208,10 +206,8 @@ export function Composer({
   /** 这一轮在跑吗（跑着的时候不许换模型 —— ZCode 的锁定语义）。 */
   const taskRunning = useWorkbenchStore((s) => (s.tasks.find((x) => x.id === s.activeTaskId)?.stage ?? "") === "running");
   const [openPop, setOpenPop] = useState<
-    null | "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"
+    null | "project" | "confirm" | "skill" | "plugin" | "add" | "model" | "effort"
   >(null);
-  /* C-01：首页首屏收敛 —— 高级 chip（项目/插件/计划/思考/用量/附件）收进「更多」。 */
-  const [composerAdvanced, setComposerAdvanced] = useState(false);
   /*
    * 工作区（2026-10-14）：用户授权给 agent 干活的目录。
    * 列表在**菜单打开时**才拉（它是主进程的磁盘状态，没必要一直挂着）。
@@ -255,13 +251,10 @@ export function Composer({
     if (popToken.current === token) setOpenPop(null);
   };
 
-  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "usage" | "model" | "effort"): void =>
+  const togglePop = (which: "project" | "confirm" | "skill" | "plugin" | "add" | "model" | "effort"): void =>
     setOpenPop((cur) => (cur === which ? null : which));
   /* 2026-10-22 主人：点对话框应把插件/模型那些弹层收掉（判据与两次弯路见该文件头） */
-  useComposerDismiss(openPop !== null || composerAdvanced, () => {
-    setOpenPop(null);
-    setComposerAdvanced(false);
-  });
+  useComposerDismiss(openPop !== null, () => setOpenPop(null));
 
   const installed = useLibraryStore((s) => s.lib.installed);
   const enabled = useLibraryStore((s) => s.lib.enabled);
@@ -685,19 +678,24 @@ export function Composer({
   };
 
   return (
-    <div
-      className="wb-composer"
-      /* C-01：首页首屏只留输入框/推荐卡/模型/档位；其余 chip 收进「更多」。 */
-      data-compact-home={view === "home" ? "true" : undefined}
-      data-advanced={composerAdvanced ? "true" : undefined}
-      data-testid="wb-composer"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        const files = Array.from(e.dataTransfer?.files ?? []);
-        if (files.length) void addAttachments(files);
-      }}
-    >
+    /*
+     * 两层（2026-10-22 主人：「本段对话…位置还得往下，在输入框外的下面」）：
+     * 外层 shell 不带边框与底色，只负责列宽；内层 `.wb-composer` 才是那张输入卡片。
+     * 用量那行字因此落在**卡片外面**、卡片下方。
+     */
+    <div className="wb-composer-shell" data-testid="wb-composer-shell">
+      <div
+        className="wb-composer"
+        /* C-01：首页首屏只留输入框/推荐卡/模型/档位；其余 chip 收进「更多」。 */
+        data-compact-home={view === "home" ? "true" : undefined}
+        data-testid="wb-composer"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const files = Array.from(e.dataTransfer?.files ?? []);
+          if (files.length) void addAttachments(files);
+        }}
+      >
       <input
         ref={fileInputRef}
         type="file"
@@ -1414,12 +1412,10 @@ export function Composer({
 
         <span className="wb-spacer" />
         {/*
-          C-01：首页的「更多」—— 项目/插件/计划/思考/用量/附件收在这里；
-          任务页不渲染它（那些 chip 直接全显示）。
+          2026-10-22 主人：「那个更多按钮取消 因为点击了更多按钮出来的工作条
+          他不是弹出往左或者往右弹 是左右都弹 所以干脆不弹」——
+          所有 chip 常显，一行平铺。
         */}
-        {view === "home" ? (
-          <ComposerMoreButton advanced={composerAdvanced} onToggle={() => setComposerAdvanced((v) => !v)} />
-        ) : null}
         {/* C1：计划模式 chip（真开关：只读工具面 + 计划提示） */}
         <button
           className={`wb-chip${planOn ? " is-on" : ""}`}
@@ -1468,15 +1464,13 @@ export function Composer({
         />
       </div>
 
-      {/* 用量数字挪到输入框**下方**一行（2026-10-22 主人：别占工具条的按钮位） */}
-      <div className="wb-composer-usage" data-testid="wb-composer-usage">
-        <ContextMeterBar />
-        <UsagePopover
-          usage={sumUsage((activeTask?.steps ?? []).map((s) => s.usage))}
-          open={openPop === "usage"}
-          onToggle={() => togglePop("usage")}
-        />
       </div>
+
+      {/*
+        2026-10-22 主人：「本段对话这个按钮取消…位置还得往下，在输入框外的下面」——
+        这行字在**卡片外面**（shell 的第二行），不是卡片内底部。
+      */}
+      <ComposerUsageLine usage={sumUsage((activeTask?.steps ?? []).map((s) => s.usage))} />
 
       {enabledNames.length > 0 ? (
         <div className="wb-composer-chips" data-testid="wb-enabled-chips">

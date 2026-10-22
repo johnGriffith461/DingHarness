@@ -165,7 +165,11 @@ try {
   await page.waitForTimeout(600);
   /* C-01：用量 chip 收在首页的「更多」后面 */
   await expandComposerMore(page);
-  out.usageChip = (await page.locator('[data-testid="wb-usage"]').innerText().catch(() => "")).trim();
+  /*
+   * 2026-10-22 主人：「本段对话这个按钮取消 把里面内容放到对话框的下面
+   * 写着输出多少 Token 输入多少 Token」—— 那颗 chip 没了，改读框下那行字。
+   */
+  out.usageLine = (await page.locator('[data-testid="wb-usage-inline"]').innerText().catch(() => "")).trim();
 
   /*
    * T-12：用量页 —— 2026-10-22 主人要求从主导航搬进设置（数据与统计）。
@@ -230,7 +234,7 @@ const checks = [
   ["T-11 手机遥控页有统一的本机版说明", out.phoneLocalOnly?.includes("手机遥控需要配套手机端")],
   ["T-11 终端页标题改成「命令记录（只读）」", out.terminalTitle?.includes("命令记录（只读）")],
   ["T-11 账号菜单额度写明「本机版没有额度体系」", out.accountQuota?.includes("本机版没有额度体系")],
-  ["T-12 输入区用量 chip 写「本段对话」", out.usageChip?.includes("本段对话")],
+  ["T-12 输入框下面那行写清 Token 用量（不再是按钮）", /tokens|Token|用量/.test(out.usageLine ?? "")],
   ["T-12 用量页标注「最近 90 天」", out.insightsUsageTab?.includes("最近 90 天")],
   ["T-13 团队空间拆出「名册与口令」一行", out.teamRoster?.includes("名册与口令")],
   ["T-13 团队空间写明成本来自 sessions.db", out.teamCostSource?.includes("sessions.db")],
