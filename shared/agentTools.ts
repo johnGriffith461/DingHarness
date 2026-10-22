@@ -223,6 +223,28 @@ export const READ_FILE_INPUT = z.object({
   limit: z.number().int().positive().optional().describe("最多读几行；省略 = 读到单次字数为准"),
 });
 
+/* ── A-02（2026-10-22）：读图片 ── */
+
+export const READ_IMAGE_TOOL = "read_image";
+
+/**
+ * 「读图片」的说明。
+ *
+ * 用户给设计稿/截图/报错图时用它 —— 图片会作为**图片内容**交给模型（不是路径）。
+ * 模型不支持看图时会明确说"我看不到"，不要据此编内容。
+ */
+export const READ_IMAGE_DESC = [
+  "读取**工作区**里的一张图片，把图片本身交给模型看（不是只给路径）。",
+  "用户给设计稿、截图、报错截图，或要对比视觉细节时用它。",
+  "支持 png/jpg/jpeg/webp/gif；PDF 这一版不解析（先用 read_file 取文字）。",
+  "路径规则与 read_file 相同（绝对路径 / 相对工作目录 / 只给文件名）。",
+  "单张上限 12 MiB；当前模型不支持看图时，结果里会明说「我看不到内容」，不要凭猜测描述图片。",
+].join("");
+
+export const READ_IMAGE_INPUT = z.object({
+  path: z.string().trim().min(1).describe("图片路径（绝对路径、相对工作目录、或只给文件名）"),
+});
+
 export const WRITE_FILE_TOOL = "write_file";
 
 /**
@@ -761,6 +783,8 @@ const TOOL_META: Record<string, AgentToolMeta> = {
   [LIST_DIR_TOOL]: { concurrency: "safe" },
   [SEARCH_FILES_TOOL]: { concurrency: "safe" },
   [READ_FILE_TOOL]: { concurrency: "safe" },
+  /* 读图片同样是只读、可并行 */
+  [READ_IMAGE_TOOL]: { concurrency: "safe" },
   [WRITE_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
   [EDIT_FILE_TOOL]: { destructive: true, concurrency: "exclusive" },
   [APPLY_PATCH_TOOL]: { destructive: true, concurrency: "exclusive" },
@@ -787,6 +811,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   { name: LIST_DIR_TOOL, description: LIST_DIR_DESC, schema: LIST_DIR_INPUT },
   { name: SEARCH_FILES_TOOL, description: SEARCH_FILES_DESC, schema: SEARCH_FILES_INPUT },
   { name: READ_FILE_TOOL, description: READ_FILE_DESC, schema: READ_FILE_INPUT },
+  { name: READ_IMAGE_TOOL, description: READ_IMAGE_DESC, schema: READ_IMAGE_INPUT },
   { name: WRITE_FILE_TOOL, description: WRITE_FILE_DESC, schema: WRITE_FILE_INPUT },
   { name: EDIT_FILE_TOOL, description: EDIT_FILE_DESC, schema: EDIT_FILE_INPUT },
   { name: APPLY_PATCH_TOOL, description: APPLY_PATCH_DESC, schema: APPLY_PATCH_INPUT },
@@ -822,6 +847,7 @@ export function toolLabel(name: string): string {
   if (name === CANVAS_ADD_NODE_TOOL) return "画布";
   if (name === SPAWN_AGENT_TOOL) return "子智能体";
   if (name === READ_FILE_TOOL) return "读文件";
+  if (name === READ_IMAGE_TOOL) return "读图片";
   if (name === TODO_WRITE_TOOL) return "待办";
   if (name === FINISH_TOOL) return "完成";
   if (name === ASK_USER_TOOL) return "提问";

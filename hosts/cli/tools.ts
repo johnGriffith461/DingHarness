@@ -17,6 +17,7 @@ import {
   searchFilesForModel,
 } from "../../engine/runtime/tools/searchTool";
 import { AGENT_READ_MAX_BYTES, describeReadResult, readFileForModel } from "../../engine/runtime/tools/readTool";
+import { readImageForModel, resolveImagePath } from "../../engine/runtime/tools/readImageTool";
 import { describeWriteResult, resolveWriteTarget, writeFileForModel } from "../../engine/runtime/tools/writeTool";
 import { describeEditResult, editFileForModel, statFingerprint } from "../../engine/runtime/tools/editTool";
 import { expectedFingerprint, noteRead, noteWrite } from "../../engine/runtime/fileState";
@@ -110,6 +111,26 @@ export function createCliExecutor(opts: {
         }
         const text = parts.join("\n\n");
         return { ok: true, output: { count: dirs.length, line: `列了 ${dirs.length} 个授权目录`, text } };
+      }
+
+      case "read_image": {
+        /* A-02：CLI 也能读图（路径白名单与 read_file 同一套） */
+        const { path: raw } = input as { path: string };
+        const resolved = await resolveImagePath(raw, dirs);
+        if (!resolved.ok) return { ok: false, error: resolved.error };
+        const got = await readImageForModel(resolved.file, { modelSupportsImage: ctx.modelSupportsImage === true });
+        if (!got.ok) return { ok: false, error: got.error };
+        return {
+          ok: true,
+          output: {
+            ok: true,
+            line: got.line,
+            path: got.path,
+            bytes: got.bytes,
+            ...(got.media ? { media: got.media } : {}),
+            ...(got.note ? { note: got.note } : {}),
+          },
+        };
       }
 
       case "read_file": {

@@ -31,6 +31,7 @@ import type { ToolEntryInput } from "./registry";
  */
 export const ALWAYS_TOOLS: readonly string[] = [
   "read_file",
+  "read_image",
   "write_file",
   "edit_file",
   "list_files",

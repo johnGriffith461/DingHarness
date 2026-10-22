@@ -13,6 +13,7 @@ import {
   MEMORY_LIST_TOOL,
   MEMORY_SAVE_TOOL,
   READ_FILE_TOOL,
+  READ_IMAGE_TOOL,
   RUN_COMMAND_TOOL,
   SCHEDULE_CREATE_TOOL,
   APPLY_PATCH_TOOL,
@@ -83,6 +84,7 @@ import { app } from "electron";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
 import { currentPermissionRules } from "./appSettings";
 import { imageResultFor } from "../../shared/imageContent";
+import { readImageForModel, resolveImagePath } from "../../engine/runtime/tools/readImageTool";
 
 /**
  * 读一张 PNG 成 base64（A-01）。
@@ -313,6 +315,27 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
    *   · 大小上限、二进制判定、各种"读不到"的分支都在 `readTool.ts`（纯函数、有单测）；
    *   · 返回的那句话（`describeReadResult`）同时用于**界面留痕**，两边不会说法不一。
    */
+  /**
+   * 读一张图片给模型看（A-02）。
+   *
+   * 路径白名单与 `read_file` 同一套（`ownedDirs()` + `resolveImagePath`）；
+   * 图片字节走 `media`（A-01 的通道），模型真的看得见。
+   */
+  [READ_IMAGE_TOOL]: async (input, env) => {
+    const { path: raw } = input as { path: string };
+    const resolved = await resolveImagePath(raw, ownedDirs());
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const got = await readImageForModel(resolved.file, { modelSupportsImage: env.modelSupportsImage === true });
+    if (!got.ok) return { ok: false, error: got.error };
+    return {
+      ok: true,
+      line: got.line,
+      path: got.path,
+      bytes: got.bytes,
+      ...(got.media ? { media: got.media } : {}),
+      ...(got.note ? { note: got.note } : {}),
+    };
+  },
   [READ_FILE_TOOL]: async (input, env) => {
     const { path, offset, limit } = input as { path: string; offset?: number; limit?: number };
     /* U02：不分页读整份（到 READ_MAX_BYTES），让 `applySpill` 决定落盘与回注 */

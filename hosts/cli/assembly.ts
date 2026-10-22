@@ -30,6 +30,7 @@ import { createCliExecutor } from "./tools";
 export const CLI_TOOLS = [
   "list_files",
   "read_file",
+  "read_image",
   "write_file",
   "list_dir",
   "search_files",

@@ -83,6 +83,8 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
    * （`permissions.test.ts` 盯着这件事）—— 默认放行是个便利，不是让人省掉声明的理由。
    */
   read_file: { kind: "read" },
+  /* 读图片只读（把图片字节念给模型，不改任何东西）。 */
+  read_image: { kind: "read" },
   /* 列文件同样是只读（只读文件名与大小，不读正文）。 */
   list_files: { kind: "read" },
   /*
