@@ -152,6 +152,17 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   browser_scroll: { kind: "read" },
   browser_screenshot: { kind: "read" },
   /*
+   * B-03 新增的七个动作（2026-10-22）：悬停/等待是只读；按键/选择/导航会改页面状态 → 写。
+   * 与上面六条同一口径（都算"会改内置浏览器里的页面状态"）。
+   */
+  browser_hover: { kind: "read" },
+  browser_wait_for: { kind: "read" },
+  browser_press_key: { kind: "write" },
+  browser_select: { kind: "write" },
+  browser_go_back: { kind: "write" },
+  browser_go_forward: { kind: "write" },
+  browser_reload: { kind: "write" },
+  /*
    * 元素版 Computer Use（G05）：枚举窗口/元素是**只读**；执行动作是**写**
    * （它真的会点按钮、写输入框）。两者分开，别让"看一眼窗口"也要点确认。
    */

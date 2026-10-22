@@ -8,6 +8,7 @@ import { markUntrusted } from "../../shared/untrusted";
 import { NOT_ATTACHED_NOTICE as NOT_ATTACHED, isAttachable } from "../../shared/browserAttach";
 import { blockedReason } from "../../shared/browserUrl";
 import { renderSnapshot as renderAxSnapshot, clearRefs, type AxNode, type SnapshotRef } from "../../engine/runtime/browserSnapshot";
+import { parseKeyCombo } from "../../shared/keyCombo";
 
 /**
  * **浏览器 agent 的宿主**（G04，2026-10-18）。
@@ -171,6 +172,37 @@ async function ensureDebugger(contents: import("electron").WebContents) {
     await contents.debugger.sendCommand("Page.enable");
   }
   return contents.debugger;
+}
+
+/** 把 ref 解析成 `{contents, backendNodeId}`（B-03 的 hover/select 共用）。 */
+function refBackend(
+  ref: string,
+): { contents: import("electron").WebContents; backendNodeId: number } | { error: string } {
+  const contents = live();
+  if (!contents) return { error: NOT_ATTACHED };
+  const backendNodeId = refToBackend.get(String(ref ?? "").trim());
+  if (!backendNodeId) {
+    return { error: `快照里没有这个 ref：${ref} —— 重新取一次 browser_snapshot（页面可能已变）` };
+  }
+  return { contents, backendNodeId };
+}
+
+/** 元素中心点（B-03：click/hover 共用同一套量法）。 */
+async function centerOf(
+  dbg: import("electron").Debugger,
+  backendNodeId: number,
+): Promise<{ x: number; y: number } | { error: string }> {
+  const resolved = (await dbg.sendCommand("DOM.resolveNode", { backendNodeId })) as { object?: { objectId?: string } };
+  const objectId = resolved.object?.objectId;
+  if (!objectId) return { error: "这个元素已经不在页面上了 —— 重新取一次快照" };
+  await dbg.sendCommand("Runtime.callFunctionOn", {
+    objectId,
+    functionDeclaration: "function(){this.scrollIntoView({block:'center',inline:'center'});}",
+  });
+  const box = (await dbg.sendCommand("DOM.getBoxModel", { objectId })) as { model?: { content?: number[] } };
+  const q = box.model?.content;
+  if (!q || q.length < 8) return { error: "量不到这个元素的位置（它可能不可见）" };
+  return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 };
 }
 
 /** 截图落盘目录（`<userData>/browser-shots`）。 */
@@ -377,6 +409,151 @@ export async function browserType(
   } catch (error) {
     return { ok: false, error: `输入失败：${describeCdpError(error)}` };
   }
+}
+
+/**
+ * 悬停（B-03）：ref → 中心 → `Input.dispatchMouseEvent(type:"mouseMoved")`。
+ */
+export async function browserHover(ref: string): Promise<BrowserResult<{ name: string }>> {
+  const target = refBackend(ref);
+  if ("error" in target) return { ok: false, error: target.error };
+  try {
+    const dbg = await ensureDebugger(target.contents);
+    const point = await centerOf(dbg, target.backendNodeId);
+    if ("error" in point) return { ok: false, error: point.error };
+    await dbg.sendCommand("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+    return { ok: true, value: { name: ref } };
+  } catch (error) {
+    return { ok: false, error: `悬停失败：${describeCdpError(error)}` };
+  }
+}
+
+/**
+ * 按键（B-03）：支持 `Enter` / `Escape` / `Tab` 与 `Control+A`、`Shift+Tab` 这种组合。
+ *
+ * 组合键的解析放在 `shared/keyCombo.ts`（纯函数、有单测），这里只负责发事件。
+ */
+export async function browserPressKey(raw: string): Promise<BrowserResult<{ key: string }>> {
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
+  const combo = parseKeyCombo(raw);
+  if ("error" in combo) return { ok: false, error: combo.error };
+  try {
+    const dbg = await ensureDebugger(contents);
+    const base = {
+      key: combo.key,
+      code: combo.code,
+      windowsVirtualKeyCode: combo.keyCode,
+      nativeVirtualKeyCode: combo.keyCode,
+      modifiers: combo.modifiers,
+    };
+    await dbg.sendCommand("Input.dispatchKeyEvent", { type: "keyDown", ...base });
+    await dbg.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+    return { ok: true, value: { key: raw.trim() } };
+  } catch (error) {
+    return { ok: false, error: `按键失败：${describeCdpError(error)}` };
+  }
+}
+
+/**
+ * 下拉选择（B-03）：在页面里设置 `<select>` 的值并派发 `change`。
+ *
+ * 为什么不用鼠标点开原生下拉：原生弹层不在 DOM 里，模型点不到；
+ * 直接设值 + 派发事件与用户选一次的效果一致（React/Vue 都认 change）。
+ */
+export async function browserSelect(ref: string, values: string[]): Promise<BrowserResult<{ picked: string[] }>> {
+  const target = refBackend(ref);
+  if ("error" in target) return { ok: false, error: target.error };
+  try {
+    const dbg = await ensureDebugger(target.contents);
+    const resolved = (await dbg.sendCommand("DOM.resolveNode", { backendNodeId: target.backendNodeId })) as {
+      object?: { objectId?: string };
+    };
+    const objectId = resolved.object?.objectId;
+    if (!objectId) return { ok: false, error: "这个元素已经不在页面上了 —— 重新取一次快照" };
+    const got = (await dbg.sendCommand("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function(values){
+        if (!(this instanceof HTMLSelectElement)) return { ok: false, reason: "not-select" };
+        const wanted = new Set(values.map(String));
+        let picked = 0;
+        for (const opt of Array.from(this.options)) {
+          const next = wanted.has(opt.value);
+          if (opt.selected !== next) opt.selected = next;
+          if (next) picked += 1;
+        }
+        if (!picked) return { ok: false, reason: "no-match" };
+        this.dispatchEvent(new Event("input", { bubbles: true }));
+        this.dispatchEvent(new Event("change", { bubbles: true }));
+        return { ok: true, picked };
+      }`,
+      arguments: [{ value: values }],
+      returnByValue: true,
+    })) as { result?: { value?: { ok?: boolean; reason?: string; picked?: number } } };
+    const value = got.result?.value;
+    if (!value?.ok) {
+      return {
+        ok: false,
+        error:
+          value?.reason === "no-match"
+            ? `下拉里没有这些值：${values.join(", ")}`
+            : `${ref} 不是一个 <select>（重新取一次快照看看它的 role）`,
+      };
+    }
+    return { ok: true, value: { picked: values } };
+  } catch (error) {
+    return { ok: false, error: `选择失败：${describeCdpError(error)}` };
+  }
+}
+
+/** 后退 / 前进 / 刷新（B-03）。 */
+export async function browserHistory(step: "back" | "forward" | "reload"): Promise<BrowserResult<{ url: string }>> {
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
+  try {
+    if (step === "reload") contents.reload();
+    else {
+      const history = contents.navigationHistory;
+      if (step === "back") {
+        if (!history.canGoBack()) return { ok: false, error: "没有上一页了（后退到底）" };
+        history.goBack();
+      } else {
+        if (!history.canGoForward()) return { ok: false, error: "没有下一页了（前进到底）" };
+        history.goForward();
+      }
+    }
+    return { ok: true, value: { url: contents.getURL() } };
+  } catch (error) {
+    return { ok: false, error: `导航失败：${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+/**
+ * 等页面出现某段文字（B-03）。
+ *
+ * 轮询 `document.body.innerText`：比"等固定秒数"可靠（慢网也能等到）。
+ * 超时如实说没等到 —— 不假装成功。
+ */
+export async function browserWaitFor(opts: { text?: string; timeoutMs?: number }): Promise<BrowserResult<{ waitedMs: number }>> {
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
+  const text = String(opts.text ?? "").trim();
+  if (!text) return { ok: false, error: "要等什么？给 text" };
+  const timeout = Math.min(30_000, Math.max(500, opts.timeoutMs ?? 8000));
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    try {
+      const hit = (await contents.executeJavaScript(
+        `document.body ? document.body.innerText.includes(${JSON.stringify(text)}) : false`,
+        true,
+      )) as boolean;
+      if (hit) return { ok: true, value: { waitedMs: Date.now() - started } };
+    } catch {
+      /* 页面正在导航：继续等 */
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return { ok: false, error: `等了 ${timeout}ms 页面上也没出现「${text}」` };
 }
 
 /**

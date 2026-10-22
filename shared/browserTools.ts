@@ -22,6 +22,14 @@ export const BROWSER_CLICK_TOOL = "browser_click";
 export const BROWSER_TYPE_TOOL = "browser_type";
 export const BROWSER_SCROLL_TOOL = "browser_scroll";
 export const BROWSER_SCREENSHOT_TOOL = "browser_screenshot";
+/* B-03（2026-10-22）：动作补齐 —— 悬停 / 按键 / 下拉 / 前进后退 / 刷新 / 等待 */
+export const BROWSER_HOVER_TOOL = "browser_hover";
+export const BROWSER_PRESS_KEY_TOOL = "browser_press_key";
+export const BROWSER_SELECT_TOOL = "browser_select";
+export const BROWSER_GO_BACK_TOOL = "browser_go_back";
+export const BROWSER_GO_FORWARD_TOOL = "browser_go_forward";
+export const BROWSER_RELOAD_TOOL = "browser_reload";
+export const BROWSER_WAIT_FOR_TOOL = "browser_wait_for";
 
 const HEAD =
   "操作内置浏览器（独立窗口、持久登录态）。需要用户在「权限矩阵」页授权浏览器；" +
@@ -50,13 +58,45 @@ export const BROWSER_SCROLL_INPUT = z.object({
   deltaY: z.number().int().describe("滚动多少像素（正数向下）"),
 });
 export const BROWSER_SCREENSHOT_INPUT = z.object({}).describe("不需要参数");
+export const BROWSER_HOVER_INPUT = z.object({
+  ref: z.string().trim().min(1).describe("快照里的 ref（形如 e3 或 f1e3）"),
+});
+export const BROWSER_PRESS_KEY_INPUT = z.object({
+  key: z.string().trim().min(1).describe('要按的键：单个键（Enter / Escape / Tab）或组合（Control+A、Shift+Tab）'),
+});
+export const BROWSER_SELECT_INPUT = z.object({
+  ref: z.string().trim().min(1).describe("下拉框的 ref"),
+  values: z.array(z.string()).min(1).max(10).describe("要选中的值（按 option 的 value 匹配）"),
+});
+export const BROWSER_GO_BACK_INPUT = z.object({}).describe("不需要参数");
+export const BROWSER_GO_FORWARD_INPUT = z.object({}).describe("不需要参数");
+export const BROWSER_RELOAD_INPUT = z.object({}).describe("不需要参数");
+export const BROWSER_WAIT_FOR_INPUT = z.object({
+  text: z.string().trim().min(1).optional().describe("等页面上出现这段文字"),
+  timeoutMs: z.number().int().min(500).max(30000).optional().describe("最多等多久（默认 8000ms）"),
+});
 
 export const BROWSER_OPEN_DESC = `${HEAD}\n打开一个地址（或把当前页导航过去）。返回页面标题和最终地址。`;
 export const BROWSER_SNAPSHOT_DESC = `${HEAD}\n取当前页的**紧凑快照**：可交互元素（按钮/链接/输入框，带 \`@N\` ref、角色、可访问名）与少量可见文字。\n动手之前先取快照，别猜坐标。`;
 export const BROWSER_CLICK_DESC = `${HEAD}\n点击快照里某个 ref 对应的元素。`;
 export const BROWSER_TYPE_DESC = `${HEAD}\n往快照里某个输入框 ref 里输入文字（可选回车提交）。`;
 export const BROWSER_SCROLL_DESC = `${HEAD}\n在当前页滚动若干像素（负数向上）。`;
-export const BROWSER_SCREENSHOT_DESC = `${HEAD}\n截当前页，返回落盘路径与尺寸（界面可预览）。`;
+export const BROWSER_SCREENSHOT_DESC = `${HEAD}
+截当前页，把**图片本身**交给模型看（模型不支持图片时会明说）。`;
+export const BROWSER_HOVER_DESC = `${HEAD}
+把鼠标移到某个 ref 上（触发悬停菜单/提示）。`;
+export const BROWSER_PRESS_KEY_DESC = `${HEAD}
+按一个键或组合键（Enter / Escape / Tab / Control+A）。`;
+export const BROWSER_SELECT_DESC = `${HEAD}
+在快照里某个 select 上选择给定的值（按 option 的 value 匹配）。`;
+export const BROWSER_GO_BACK_DESC = `${HEAD}
+后退一页。`;
+export const BROWSER_GO_FORWARD_DESC = `${HEAD}
+前进一页。`;
+export const BROWSER_RELOAD_DESC = `${HEAD}
+刷新当前页。`;
+export const BROWSER_WAIT_FOR_DESC = `${HEAD}
+等页面上出现某段文字（最多 8 秒，超时如实说没等到）。`;
 
 /** 注册表吃的那六条（顺序即注入顺序）。 */
 export const BROWSER_TOOL_SPECS: readonly AgentToolSpec[] = [
@@ -66,6 +106,13 @@ export const BROWSER_TOOL_SPECS: readonly AgentToolSpec[] = [
   { name: BROWSER_TYPE_TOOL, description: BROWSER_TYPE_DESC, schema: BROWSER_TYPE_INPUT },
   { name: BROWSER_SCROLL_TOOL, description: BROWSER_SCROLL_DESC, schema: BROWSER_SCROLL_INPUT },
   { name: BROWSER_SCREENSHOT_TOOL, description: BROWSER_SCREENSHOT_DESC, schema: BROWSER_SCREENSHOT_INPUT },
+  { name: BROWSER_HOVER_TOOL, description: BROWSER_HOVER_DESC, schema: BROWSER_HOVER_INPUT },
+  { name: BROWSER_PRESS_KEY_TOOL, description: BROWSER_PRESS_KEY_DESC, schema: BROWSER_PRESS_KEY_INPUT },
+  { name: BROWSER_SELECT_TOOL, description: BROWSER_SELECT_DESC, schema: BROWSER_SELECT_INPUT },
+  { name: BROWSER_GO_BACK_TOOL, description: BROWSER_GO_BACK_DESC, schema: BROWSER_GO_BACK_INPUT },
+  { name: BROWSER_GO_FORWARD_TOOL, description: BROWSER_GO_FORWARD_DESC, schema: BROWSER_GO_FORWARD_INPUT },
+  { name: BROWSER_RELOAD_TOOL, description: BROWSER_RELOAD_DESC, schema: BROWSER_RELOAD_INPUT },
+  { name: BROWSER_WAIT_FOR_TOOL, description: BROWSER_WAIT_FOR_DESC, schema: BROWSER_WAIT_FOR_INPUT },
 ];
 
 /** 是不是浏览器工具（策略表/资源提取都按这个前缀判，别到处抄名字）。 */

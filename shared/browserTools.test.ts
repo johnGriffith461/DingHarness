@@ -17,7 +17,7 @@ import {
  */
 
 describe("工具声明", () => {
-  it("六条都在，顺序固定", () => {
+  it("十三条都在，顺序固定（B-03 补了七个动作）", () => {
     expect(BROWSER_TOOL_SPECS.map((t) => t.name)).toEqual([
       "browser_open",
       "browser_snapshot",
@@ -25,6 +25,13 @@ describe("工具声明", () => {
       "browser_type",
       "browser_scroll",
       "browser_screenshot",
+      "browser_hover",
+      "browser_press_key",
+      "browser_select",
+      "browser_go_back",
+      "browser_go_forward",
+      "browser_reload",
+      "browser_wait_for",
     ]);
   });
 

@@ -71,8 +71,15 @@ import {
   BROWSER_SCROLL_TOOL,
   BROWSER_SNAPSHOT_TOOL,
   BROWSER_TYPE_TOOL,
+  BROWSER_HOVER_TOOL,
+  BROWSER_PRESS_KEY_TOOL,
+  BROWSER_SELECT_TOOL,
+  BROWSER_GO_BACK_TOOL,
+  BROWSER_GO_FORWARD_TOOL,
+  BROWSER_RELOAD_TOOL,
+  BROWSER_WAIT_FOR_TOOL,
 } from "../../shared/browserTools";
-import { browserClick, browserOpen, browserScreenshot, browserScroll, browserSnapshot, browserType } from "./browserHost";
+import { browserClick, browserHistory, browserHover, browserOpen, browserPressKey, browserScreenshot, browserScroll, browserSelect, browserSnapshot, browserType, browserWaitFor } from "./browserHost";
 import { evaluateRules } from "../../engine/core/permissionRules";
 import { readComputerState } from "./computer";
 import { actOnUiaElement, listUiaWindows, snapshotUiaWindow, uiaSupported } from "./uia";
@@ -624,6 +631,42 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const { deltaY } = input as { deltaY: number };
     const got = await browserScroll(deltaY);
     return got.ok ? { ok: true, line: `滚动到 y=${got.value.y}` } : { ok: false, error: got.error };
+  },
+  [BROWSER_HOVER_TOOL]: async (input) => {
+    const { ref } = input as { ref: string };
+    const got = await browserHover(ref);
+    return got.ok ? { ok: true, line: `悬停在 ${ref} 上` } : { ok: false, error: got.error };
+  },
+  [BROWSER_PRESS_KEY_TOOL]: async (input) => {
+    const { key } = input as { key: string };
+    const got = await browserPressKey(key);
+    return got.ok ? { ok: true, line: `按了 ${got.value.key}` } : { ok: false, error: got.error };
+  },
+  [BROWSER_SELECT_TOOL]: async (input) => {
+    const { ref, values } = input as { ref: string; values: string[] };
+    const got = await browserSelect(ref, values);
+    return got.ok
+      ? { ok: true, line: `在 ${ref} 上选了 ${got.value.picked.join(" / ")}` }
+      : { ok: false, error: got.error };
+  },
+  [BROWSER_GO_BACK_TOOL]: async () => {
+    const got = await browserHistory("back");
+    return got.ok ? { ok: true, line: `后退到 ${got.value.url}`, url: got.value.url } : { ok: false, error: got.error };
+  },
+  [BROWSER_GO_FORWARD_TOOL]: async () => {
+    const got = await browserHistory("forward");
+    return got.ok ? { ok: true, line: `前进到 ${got.value.url}`, url: got.value.url } : { ok: false, error: got.error };
+  },
+  [BROWSER_RELOAD_TOOL]: async () => {
+    const got = await browserHistory("reload");
+    return got.ok ? { ok: true, line: `刷新了（${got.value.url}）`, url: got.value.url } : { ok: false, error: got.error };
+  },
+  [BROWSER_WAIT_FOR_TOOL]: async (input) => {
+    const { text, timeoutMs } = input as { text?: string; timeoutMs?: number };
+    const got = await browserWaitFor({ ...(text === undefined ? {} : { text }), ...(timeoutMs === undefined ? {} : { timeoutMs }) });
+    return got.ok
+      ? { ok: true, line: `等到了（${got.value.waitedMs}ms）` }
+      : { ok: false, error: got.error };
   },
   [BROWSER_SCREENSHOT_TOOL]: async (_input, env) => {
     const got = await browserScreenshot();
