@@ -82,6 +82,19 @@ import type { ComputerKey } from "../../shared/computer";
 import { app } from "electron";
 import { createFileSpillStore } from "../../engine/adapters/spillStore";
 import { currentPermissionRules } from "./appSettings";
+import { imageResultFor } from "../../shared/imageContent";
+
+/**
+ * 读一张 PNG 成 base64（A-01）。
+ * 读不到就回空串 —— `imageResultFor` 会把它变成一句"是空的"，不是假装有图。
+ */
+async function readPngBase64(file: string): Promise<string> {
+  try {
+    return (await fs.readFile(file)).toString("base64");
+  } catch {
+    return "";
+  }
+}
 import { KNOWLEDGE_SEARCH_TOOL } from "../../shared/knowledgeTools";
 import { lspActive, lspNoteForEdits } from "./lsp";
 
@@ -588,15 +601,30 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     const got = await browserScroll(deltaY);
     return got.ok ? { ok: true, line: `滚动到 y=${got.value.y}` } : { ok: false, error: got.error };
   },
-  [BROWSER_SCREENSHOT_TOOL]: async () => {
+  [BROWSER_SCREENSHOT_TOOL]: async (_input, env) => {
     const got = await browserScreenshot();
     if (!got.ok) return { ok: false, error: got.error };
+    /*
+     * A-01：**模型要看得见**。以前这里只回路径，模型全程是瞎的 ——
+     * 现在读回字节、按"这一轮的模型支不支持图片"决定给内容块还是一句人话。
+     * 超过 1.5 MiB 时如实说"要缩小"（不截断 base64）。
+     */
+    const base64 = await readPngBase64(got.value.path);
+    const decision = imageResultFor({
+      path: got.value.path,
+      mime: "image/png",
+      base64,
+      modelSupportsImage: env.modelSupportsImage === true,
+    });
     return {
       ok: true,
       line: `截图 ${got.value.width}×${got.value.height}`,
       path: got.value.path,
       width: got.value.width,
       height: got.value.height,
+      ...(decision.kind === "image"
+        ? { media: [decision.media] }
+        : { note: decision.text }),
     };
   },
 
@@ -836,7 +864,7 @@ export async function runToolOnce(
    * 换成哪个 provider 只影响成本与质量，不影响语义。所以调用方给一个默认 provider 即可。
    */
   env: ToolEnv = { mode: "全部允许", provider: "" },
-): Promise<{ ok: boolean; output?: unknown; error?: string }> {
+): Promise<{ ok: boolean; output?: unknown; error?: string; media?: Array<{ mime: string; base64: string }> }> {
   /*
    * 连接器（MCP）工具**不在 `EXECUTORS` 这个静态表里**（它们是运行时才出现的，
    * 取决于用户配了哪些 server）。所以先按名字分流：认得出前缀就走连接器。
@@ -893,7 +921,12 @@ export async function runToolOnce(
         error: typeof body.error === "string" && body.error ? body.error : "执行失败（工具没有说明原因）",
       };
     }
-    return { ok: true, output };
+    /*
+     * A-01：执行体把图片放在 `output.media` 里，这里**原样透传**给内核
+     * （内核据此拼成 AI SDK 的图片内容块）。
+     */
+    const media = (output as { media?: Array<{ mime: string; base64: string }> } | undefined)?.media;
+    return media?.length ? { ok: true, output, media } : { ok: true, output };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -938,6 +971,11 @@ export type ToolEnv = {
   sessionId?: string;
   /** P0-02：这一轮的真实执行账本（finish 证据校验用）。 */
   turnEvidence?: TurnEvidence;
+  /**
+   * A-01：这一轮能不能看图（内核算好传下来，见 `engine/index.ts`）。
+   * 截图类工具据此决定给图片内容块还是退化成一句"我看不到"。
+   */
+  modelSupportsImage?: boolean;
 };
 
 /**
@@ -957,6 +995,7 @@ export const hostExecutor: ToolExecutor = {
       ...(ctx.onDelegation ? { onDelegation: ctx.onDelegation } : {}),
       ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
       ...(ctx.turnEvidence ? { turnEvidence: ctx.turnEvidence } : {}),
+      ...(ctx.modelSupportsImage === undefined ? {} : { modelSupportsImage: ctx.modelSupportsImage }),
     }),
 };
 

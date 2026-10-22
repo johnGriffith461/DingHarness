@@ -15,7 +15,7 @@ import { toolArgsSummary } from "../shared/agentTools";
 import { approvalRecord } from "./core/gates";
 import { diffSnapshot, snapshotOf, type Snapshot, type SnapshotDiff } from "./core/snapshot";
 import { ledgerOf, rollup } from "./core/ledger";
-import { modelInfoOf } from "./runtime/models";
+import { findModel, modelInfoOf } from "./runtime/models";
 import type { ContentPart } from "./runtime/messageTransform";
 import { planToolNames } from "./runtime/planMode";
 import type { MemberRole } from "./core/members";
@@ -558,6 +558,16 @@ export function createEngine(ports: EnginePorts): Engine {
           : {}),
         /* B-01：「接受编辑」判断工作区要用（CLI 与桌面都从自己那份授权目录来） */
         ...(request.workdirs?.length ? { workdirs: [...request.workdirs] } : {}),
+        /*
+         * A-01：这一轮能不能看图 —— 从**模型配置**读一次（不是让执行体各自猜）。
+         * `modelConfig.inputFormat.supportsImage` 是权威来源；
+         * 没给配置时退回目录表的能力（`capabilityOf`）。
+         */
+        modelSupportsImage: (() => {
+          const cfg = request.modelConfig as { inputFormat?: { supportsImage?: boolean } } | undefined;
+          if (cfg?.inputFormat?.supportsImage !== undefined) return cfg.inputFormat.supportsImage === true;
+          return findModel(request.model)?.capabilities?.attachment === true;
+        })(),
         turnEvidence,
         onDelegation: (event) => {
           const turnEvent: TurnEvent = { type: "delegation", ...event };

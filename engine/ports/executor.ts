@@ -28,6 +28,17 @@ export type ToolResult = {
   output?: unknown;
   /** 失败原因（一句话，给人看）。 */
   error?: string;
+  /**
+   * **图片内容块**（A-01，2026-10-22）。
+   *
+   * 以前截图类工具只回一个路径 —— 模型全程"看不见图"。现在执行体把图放在这里，
+   * 注册表会把它组装成 AI SDK 的 `{ type:"content", value:[text, file] }`，
+   * 模型真的能看到像素。
+   *
+   * ⚠️ **base64 绝不进会话日志**：投影只记 `line`/`path`（见 `engine/core/events.ts`
+   * 的 `describeToolResult` 那条路），否则一份截图就能把日志撑爆。
+   */
+  media?: Array<{ mime: string; base64: string }>;
 };
 
 /**
@@ -39,6 +50,14 @@ export type ToolResult = {
 export type ExecutorContext = {
   /** 闸门档位。执行体**不再自己判**（内核判过了），它只是需要知道，例如往下传。 */
   mode: ConfirmMode;
+  /**
+   * **这一轮的模型能不能看图**（A-01，2026-10-22）。
+   *
+   * 截图类工具据此决定：给图片内容块，还是退化成一句"我看不到"。
+   * 唯一的权威来源是模型配置/目录的 `inputFormat.supportsImage`
+   * （`engine/runtime/loop.ts` 算一次传下来，执行体不许自己猜）。
+   */
+  modelSupportsImage?: boolean;
   /** 这一轮的 provider / model（`spawn_agent` 派子智能体时要沿用同一个）。 */
   provider: string;
   model?: string;

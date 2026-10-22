@@ -17,6 +17,7 @@ import type { ExecutorContext, ToolExecutor } from "../ports/executor";
 import { noopHooks, runHookWithTimeout, type HooksPort } from "../ports/hooks";
 import type { SpillPort } from "../ports/spill";
 import { applySpill } from "./spill";
+import { describeToolResult } from "../../shared/agentTools";
 import { selectToolNames } from "./toolSearch";
 
 /**
@@ -457,6 +458,23 @@ export function buildToolSet(input: {
          * 留痕才会写"失败"；返回一个 ok:false 的**正常**载荷会被当成"工具跑成功了"。
          */
         if (result.ok) {
+          /*
+           * ⭐ **图片内容块**（A-01，2026-10-22）：执行体给了 `media` 就按 AI SDK 的
+           * `{type:"content", value:[text, file…]}` 返回 —— 模型才真的看得见截图。
+           *
+           * 两种形状不能混：给 content 时**不再走 spill**（那份载荷是结构化的，
+           * 落盘会把 base64 写成一份大文件，而模型仍然只拿到路径）。
+           * 文本那一行仍由 `describeToolResult` 生成（留痕与日志同一口径）。
+           */
+          if (result.media?.length) {
+            return {
+              type: "content" as const,
+              value: [
+                { type: "text" as const, text: describeToolResult(entry.name, true, result.output, undefined, effectiveValue) },
+                ...result.media.map((m) => ({ type: "file" as const, mediaType: m.mime, data: m.base64 })),
+              ],
+            };
+          }
           /*
            * 落盘（U02）：**成功结果**才有"完整证据"这回事。
            * 失败的一句人话本来就短，而且它是结论而不是证据。
