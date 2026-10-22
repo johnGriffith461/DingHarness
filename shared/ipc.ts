@@ -484,6 +484,14 @@ export type ShellBridge = {
     reset: () => Promise<{ ok: boolean; reason?: string }>;
   };
   /**
+   * B-01：右栏浏览器与 agent 工具接**同一个** webContents。
+   * 面板在 `<webview>` 就绪后把它的 id 报上来，卸载时报 detach。
+   */
+  browserAttach: {
+    attach: (webContentsId: number) => Promise<{ ok: boolean; error?: string }>;
+    detach: (webContentsId?: number) => Promise<{ ok: boolean }>;
+  };
+  /**
    * 「记忆」库的读写（§185 起聊天侧也会用）。
    *
    * ⚠️ 它原来**只存在于 preload**，契约里没有 —— 手册点名的两处漂移之一，

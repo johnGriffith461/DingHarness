@@ -67,6 +67,45 @@ export function BrowserPane() {
     }
   };
 
+  /*
+   * ⭐ **B-01：把面板这个 webview 交给 agent 工具**（2026-10-22）。
+   *
+   * 之前 agent 操作的是另一个独立 BrowserWindow —— 用户看 A、模型读 B。
+   * 现在面板一就绪就把 webContentsId 报上去（`browser:attach`），
+   * 所有 browser_* 动作都打在同一页上；卸载时解绑。
+   */
+  useEffect(() => {
+    const view = viewRef.current as unknown as
+      | {
+          addEventListener?: (t: string, cb: () => void) => void;
+          removeEventListener?: (t: string, cb: () => void) => void;
+          getWebContentsId?: () => number;
+        }
+      | null;
+    if (!view?.addEventListener) return;
+    const shell = (globalThis as unknown as {
+      shell?: { browserAttach?: { attach: (id: number) => Promise<{ ok: boolean; error?: string }>; detach: (id?: number) => Promise<{ ok: boolean }> } };
+    }).shell;
+    let attachedId: number | null = null;
+    const onReady = (): void => {
+      try {
+        const id = view.getWebContentsId?.();
+        if (!id) return;
+        attachedId = id;
+        void shell?.browserAttach?.attach(id);
+      } catch {
+        /* 面板还没挂上 webContents（极早期）：下一次 dom-ready 再说 */
+      }
+    };
+    view.addEventListener("dom-ready", onReady);
+    /* 已经就绪的（重挂载时 dom-ready 不会再发）也补一次 */
+    onReady();
+    return () => {
+      view.removeEventListener?.("dom-ready", onReady);
+      if (attachedId !== null) void shell?.browserAttach?.detach(attachedId);
+    };
+  }, []);
+
   useEffect(() => {
     /* webview 的加载失败只给一句人话，不把 Chromium 的 -3 错误码糊到界面上 */
     const view = viewRef.current as unknown as

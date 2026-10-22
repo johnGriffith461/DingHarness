@@ -52,6 +52,7 @@ import { registerClipboardIpc } from "./ipc/clipboard";
 import { registerCodingIpc } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL, loadAppSettings, saveAppSettings } from "./ipc/appSettings";
 import { registerLocalDataIpc } from "./ipc/localData";
+import { registerBrowserAttachIpc } from "./ipc/browserAttach";
 import { resolveUserData } from "../shared/userData";
 import { applyPendingReset } from "./localDataReset";
 import { closeKv } from "../engine/adapters/kvStore";
@@ -569,6 +570,8 @@ safeRegister("skills", () => registerSkillsIpc(ipcMain), logRegisterFailure);
 safeRegister("knowledge", () => registerKnowledgeIpc(ipcMain, () => win), logRegisterFailure);
 /* M-08：设置 → 通用 →「本机数据」（路径可见 / 可清空） */
 safeRegister("localData", () => registerLocalDataIpc(), logRegisterFailure);
+/* B-01：右栏浏览器与 agent 接同一个 webContents */
+safeRegister("browserAttach", () => registerBrowserAttachIpc(), logRegisterFailure);
   safeRegister("providers", () => registerProviderIpc(() => app.getPath("userData")), logRegisterFailure);
   /* 启动时把磁盘里的自定义供应商装进内核（与 CLI 同一条） */
   safeRegister(

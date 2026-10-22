@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from "electron";
+import { app, webContents as electronWebContents, type WebContents } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -8,6 +8,7 @@ import {
 } from "../../shared/browserTools";
 import { previewableUrl } from "../../shared/preview";
 import { markUntrusted } from "../../shared/untrusted";
+import { NOT_ATTACHED_NOTICE as NOT_ATTACHED, isAttachable } from "../../shared/browserAttach";
 
 /**
  * **浏览器 agent 的宿主**（G04，2026-10-18）。
@@ -64,53 +65,65 @@ export type BrowserSnapshot = {
 /** 浏览器动作的结果。 */
 export type BrowserResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
-/** 单例宿主（同一时间只操作一个页面）。 */
-let agentWin: BrowserWindow | null = null;
+/**
+ * **单例宿主 = 右栏那个 `<webview>` 的 webContents**（B-01，2026-10-22）。
+ *
+ * 之前这里是 `new BrowserWindow()` —— 一个独立窗口「Ding · 浏览器」。
+ * 于是"用户看的"（右栏 webview）与"模型操作的"（这个窗口）是**两个浏览器**：
+ * 两套 cookie、两个页面，agent 读不到用户正在看的那一页。
+ *
+ * 现在只剩一个：面板把自己的 webContentsId 报上来（`browser:attach`），
+ * 所有动作都打到**同一个** webContents。
+ */
+let agentContents: WebContents | null = null;
+
+/**
+ * 接上右栏的 `<webview>`。
+ *
+ * @param id `webview.getWebContentsId()`
+ */
+export function attachToWebContents(id: number): BrowserResult<{ id: number }> {
+  if (!Number.isInteger(id) || id <= 0) return { ok: false, error: "webContentsId 不合法" };
+  const contents = electronWebContents.fromId(id);
+  if (!contents) return { ok: false, error: "找不到那个 webContents（面板可能已经关了）" };
+  if (!isAttachable(contents.getType())) {
+    return { ok: false, error: `只接受右栏浏览器的 webview（收到的是 ${contents.getType()}）` };
+  }
+  if (agentContents && !agentContents.isDestroyed() && agentContents.id !== contents.id) {
+    /* 重复 attach：覆盖，旧的自动解绑（不额外做清理，它归面板管） */
+    console.log(`[browser] 切换浏览器：${agentContents.id} → ${contents.id}`);
+  }
+  agentContents = contents;
+  /* 关页/导航时模型那边的"当前页"自然跟着变；这里只做销毁清理 */
+  contents.once("destroyed", () => {
+    if (agentContents === contents) agentContents = null;
+  });
+  /*
+   * B-05：导航与弹窗在这里收口（与地址策略同一处判定）。
+   * 之前只有独立窗口自己设过 deny；接上 webview 之后必须在这里补。
+   */
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  return { ok: true, value: { id: contents.id } };
+}
+
+/** 面板卸载 / 关页时解绑。 */
+export function detachFromWebContents(id?: number): void {
+  if (!agentContents) return;
+  if (typeof id === "number" && agentContents.id !== id) return;
+  agentContents = null;
+}
 
 /** 截图落盘目录（`<userData>/browser-shots`）。 */
 function shotsDir(): string {
   return path.join(app.getPath("userData"), "browser-shots");
 }
 
-/** 当前页（没有就 null）。 */
-function live(): BrowserWindow | null {
-  return agentWin && !agentWin.isDestroyed() ? agentWin : null;
+/** 当前页（没有就是 null —— 调用方给"先打开右栏浏览器"的人话）。 */
+function live(): WebContents | null {
+  return agentContents && !agentContents.isDestroyed() ? agentContents : null;
 }
 
-/**
- * 确保有一个 agent 浏览器窗口。
- *
- * @param allowExternal 是否允许外网地址（工具层判完再传进来）
- */
-async function ensureWindow(allowExternal: boolean): Promise<BrowserWindow> {
-  const existing = live();
-  if (existing) return existing;
-  const win = new BrowserWindow({
-    width: 1180,
-    height: 820,
-    title: "Ding · 浏览器",
-    autoHideMenuBar: true,
-    webPreferences: {
-      partition: "persist:agent-browser",
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  /*
-   * 新窗口一律拒：`window.open` / target=_blank 在 agent 场景下没有"新标签"的语义，
-   * 允许它会开出一堆没人管的窗口（而且绕过了地址策略）。要在新页面上操作，
-   * 让模型 `browser_open` 导航过去 —— 那一步会再过一次地址校验。
-   */
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  agentWin = win;
-  win.on("closed", () => {
-    agentWin = null;
-  });
-  /* `allowExternal` 在这里只是"要不要打日志"，地址校验在 open 那一处统一做 */
-  if (!allowExternal) console.log("[browser] 以本机地址模式启动（外网需显式放行）");
-  return win;
-}
+
 
 /**
  * 打开一个地址。
@@ -143,14 +156,14 @@ export async function browserOpen(
       return { ok: false, error: "这个地址解析不了（检查一下写法）" };
     }
   }
-  const win = await ensureWindow(opts.allowExternal);
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
   try {
-    await win.loadURL(target.toString());
+    await contents.loadURL(target.toString());
   } catch (error) {
     return { ok: false, error: `打不开：${error instanceof Error ? error.message : String(error)}` };
   }
-  win.show();
-  return { ok: true, value: { url: win.webContents.getURL(), title: win.webContents.getTitle() } };
+  return { ok: true, value: { url: contents.getURL(), title: contents.getTitle() } };
 }
 
 /**
@@ -162,12 +175,12 @@ export async function browserOpen(
 export async function browserSnapshot(opts: { maxElements?: number; maxNodes?: number } = {}): Promise<
   BrowserResult<BrowserSnapshot>
 > {
-  const win = live();
-  if (!win) return { ok: false, error: "还没有打开页面 —— 先用 browser_open" };
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
   const script = buildSnapshotScript(opts.maxElements ?? 120, opts.maxNodes ?? 300);
   try {
-    const raw = (await win.webContents.executeJavaScript(script, true)) as BrowserSnapshot;
-    const iframes = await win.webContents.executeJavaScript("document.querySelectorAll('iframe').length", true);
+    const raw = (await contents.executeJavaScript(script, true)) as BrowserSnapshot;
+    const iframes = await contents.executeJavaScript("document.querySelectorAll('iframe').length", true);
     return { ok: true, value: { ...raw, iframes: Number(iframes) || 0 } };
   } catch (error) {
     return { ok: false, error: `取快照失败：${error instanceof Error ? error.message : String(error)}` };
@@ -183,12 +196,12 @@ export async function browserSnapshot(opts: { maxElements?: number; maxNodes?: n
  * @param ref 快照里的 `@N`
  */
 export async function browserClick(ref: string): Promise<BrowserResult<{ name: string }>> {
-  const win = live();
-  if (!win) return { ok: false, error: "还没有打开页面 —— 先用 browser_open" };
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
   const selector = buildRefSelector(ref);
   if (!selector) return { ok: false, error: `ref 格式不对（要形如 @3）：${ref}` };
   try {
-    const got = (await win.webContents.executeJavaScript(
+    const got = (await contents.executeJavaScript(
       `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) return { found: false };
@@ -220,12 +233,12 @@ export async function browserType(
   text: string,
   submit = false,
 ): Promise<BrowserResult<{ chars: number }>> {
-  const win = live();
-  if (!win) return { ok: false, error: "还没有打开页面 —— 先用 browser_open" };
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
   const selector = buildRefSelector(ref);
   if (!selector) return { ok: false, error: `ref 格式不对（要形如 @3）：${ref}` };
   try {
-    const focused = (await win.webContents.executeJavaScript(
+    const focused = (await contents.executeJavaScript(
       `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) return false;
@@ -237,15 +250,15 @@ export async function browserType(
     )) as boolean;
     if (!focused) return { ok: false, error: `${ref} 不是可聚焦的输入框（重新取一次快照看看它的 role）` };
 
-    win.webContents.debugger.attach("1.3");
+    contents.debugger.attach("1.3");
     try {
-      await win.webContents.debugger.sendCommand("Input.insertText", { text });
+      await contents.debugger.sendCommand("Input.insertText", { text });
       if (submit) {
-        await win.webContents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-        await win.webContents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        await contents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        await contents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
       }
     } finally {
-      win.webContents.debugger.detach();
+      contents.debugger.detach();
     }
     return { ok: true, value: { chars: text.length } };
   } catch (error) {
@@ -259,10 +272,10 @@ export async function browserType(
  * @param deltaY 像素（正数向下）
  */
 export async function browserScroll(deltaY: number): Promise<BrowserResult<{ y: number }>> {
-  const win = live();
-  if (!win) return { ok: false, error: "还没有打开页面 —— 先用 browser_open" };
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
   try {
-    const y = (await win.webContents.executeJavaScript(
+    const y = (await contents.executeJavaScript(
       `(() => { window.scrollBy({ top: ${Math.trunc(deltaY)}, behavior: 'instant' }); return Math.round(window.scrollY); })()`,
       true,
     )) as number;
@@ -278,10 +291,10 @@ export async function browserScroll(deltaY: number): Promise<BrowserResult<{ y: 
  * @returns 落盘路径与尺寸
  */
 export async function browserScreenshot(): Promise<BrowserResult<{ path: string; width: number; height: number }>> {
-  const win = live();
-  if (!win) return { ok: false, error: "还没有打开页面 —— 先用 browser_open" };
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
   try {
-    const image = await win.webContents.capturePage();
+    const image = await contents.capturePage();
     const size = image.getSize();
     const dir = shotsDir();
     fs.mkdirSync(dir, { recursive: true });
@@ -318,9 +331,12 @@ export function describeSnapshot(snapshot: BrowserSnapshot): string {
   ].join("\n");
 }
 
-/** 应用退出时收窗口（不留孤儿）。 */
+/**
+ * 应用退出时解绑（B-01 之后这里**不销毁 webContents**）。
+ *
+ * 那个 webContents 属于右栏面板：它由渲染进程持有，窗口关掉时 Electron 自己会收。
+ * 主进程在这里硬销毁反而会和面板的清理撞车（面板还会去 detach 一次）。
+ */
 export function closeBrowserHost(): void {
-  const win = live();
-  if (win) win.destroy();
-  agentWin = null;
+  agentContents = null;
 }

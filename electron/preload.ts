@@ -63,6 +63,12 @@ import { DIAG_CHANNEL } from "./ipc/diagnostics";
 const api = {
   ping: () => ipcRenderer.invoke(APP_CHANNEL.ping),
   userDataDir: (): Promise<string> => ipcRenderer.invoke(APP_CHANNEL.userDataDir),
+  browserAttach: {
+    attach: (webContentsId: number) =>
+      ipcRenderer.invoke("browser:attach", webContentsId) as Promise<{ ok: boolean; error?: string }>,
+    detach: (webContentsId?: number) =>
+      ipcRenderer.invoke("browser:detach", webContentsId) as Promise<{ ok: boolean }>,
+  },
   localData: {
     summary: () =>
       ipcRenderer.invoke("localData:summary") as Promise<{ dataDir: string; sessions: number; tasks: number; workspaces: number }>,
