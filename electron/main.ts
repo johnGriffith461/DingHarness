@@ -53,6 +53,7 @@ import { registerCodingIpc } from "./ipc/codingStore";
 import { APP_SETTINGS_CHANNEL, loadAppSettings, saveAppSettings } from "./ipc/appSettings";
 import { registerLocalDataIpc } from "./ipc/localData";
 import { registerBrowserAttachIpc } from "./ipc/browserAttach";
+import { setBrowserNavigateListener } from "./ipc/browserHost";
 import { resolveUserData } from "../shared/userData";
 import { applyPendingReset } from "./localDataReset";
 import { closeKv } from "../engine/adapters/kvStore";
@@ -572,6 +573,16 @@ safeRegister("knowledge", () => registerKnowledgeIpc(ipcMain, () => win), logReg
 safeRegister("localData", () => registerLocalDataIpc(), logRegisterFailure);
 /* B-01：右栏浏览器与 agent 接同一个 webContents */
 safeRegister("browserAttach", () => registerBrowserAttachIpc(), logRegisterFailure);
+/* B-06：agent 导航 → 地址栏跟随（面板收到 browser:navigated 后会更新并自动展开） */
+safeRegister(
+  "browserAttach:navigate",
+  () => {
+    setBrowserNavigateListener((info) => {
+      win?.webContents.send("browser:navigated", info);
+    });
+  },
+  logRegisterFailure,
+);
   safeRegister("providers", () => registerProviderIpc(() => app.getPath("userData")), logRegisterFailure);
   /* 启动时把磁盘里的自定义供应商装进内核（与 CLI 同一条） */
   safeRegister(

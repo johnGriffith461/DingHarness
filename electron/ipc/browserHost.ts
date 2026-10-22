@@ -124,6 +124,16 @@ export function attachToWebContents(id: number): BrowserResult<{ id: number }> {
   };
   contents.on("did-navigate", resetRefs);
   contents.on("did-navigate-in-page", resetRefs);
+  const notify = (): void => {
+    try {
+      navigateListener?.({ url: contents.getURL(), title: contents.getTitle(), by: "agent" });
+    } catch {
+      /* 通知失败不影响导航本身 */
+    }
+  };
+  contents.on("did-navigate", notify);
+  contents.on("did-navigate-in-page", notify);
+  contents.on("page-title-updated", notify);
   return { ok: true, value: { id: contents.id } };
 }
 
@@ -203,6 +213,20 @@ async function centerOf(
   const q = box.model?.content;
   if (!q || q.length < 8) return { error: "量不到这个元素的位置（它可能不可见）" };
   return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 };
+}
+
+/**
+ * 导航通知（B-06）：agent 或用户让页面跳转时，告诉宿主"现在在哪一页"。
+ *
+ * 宿主（主进程）把它推给渲染层的地址栏；面板因此**跟 agent 走同一个页面**。
+ * 没有订阅者时什么也不做（CLI / 测试）。
+ */
+type NavigateInfo = { url: string; title: string; by: "agent" | "user" };
+let navigateListener: ((info: NavigateInfo) => void) | null = null;
+
+/** 注册导航通知（桌面宿主在注册 IPC 时调一次）。 */
+export function setBrowserNavigateListener(fn: ((info: NavigateInfo) => void) | null): void {
+  navigateListener = fn;
 }
 
 /** 截图落盘目录（`<userData>/browser-shots`）。 */

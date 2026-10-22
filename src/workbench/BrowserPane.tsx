@@ -106,6 +106,29 @@ export function BrowserPane() {
     };
   }, []);
 
+  /*
+   * B-06：**地址栏跟随 agent**（2026-10-22）。
+   *
+   * agent 调 `browser_open` 或点击导致跳转时，主进程推 `browser:navigated`：
+   * 这里更新地址栏，并让工作台把面板展开 —— 用户看到的就是 agent 在操作的那一页。
+   pressing「展开面板」用一条 DOM 事件（与 `dsh-open-settings` 同一套做法，不引全局 store）。
+   */
+  useEffect(() => {
+    const shell = (globalThis as unknown as {
+      shell?: { browserAttach?: { onNavigated?: (cb: (info: { url: string; title: string; by: "agent" | "user" }) => void) => () => void } };
+    }).shell;
+    const off = shell?.browserAttach?.onNavigated?.((info) => {
+      if (!info?.url) return;
+      setDraft(info.url);
+      setUrl(info.url);
+      setNote("");
+      if (info.by === "agent") {
+        window.dispatchEvent(new CustomEvent("dsh-open-summary"));
+      }
+    });
+    return () => off?.();
+  }, []);
+
   useEffect(() => {
     /* webview 的加载失败只给一句人话，不把 Chromium 的 -3 错误码糊到界面上 */
     const view = viewRef.current as unknown as
@@ -148,6 +171,9 @@ export function BrowserPane() {
         <button className="wb-page-btn" data-testid="wb-browser-go" onClick={() => go(draft)}>
           <Globe size={12} /> 打开
         </button>
+        <span className="wb-browser-single" title="这一版是单页：没有多标签">
+          单页
+        </span>
         <a
           className="wb-icon"
           href={url}

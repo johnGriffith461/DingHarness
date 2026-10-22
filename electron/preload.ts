@@ -68,6 +68,11 @@ const api = {
       ipcRenderer.invoke("browser:attach", webContentsId) as Promise<{ ok: boolean; error?: string }>,
     detach: (webContentsId?: number) =>
       ipcRenderer.invoke("browser:detach", webContentsId) as Promise<{ ok: boolean }>,
+    onNavigated: (listener: (info: { url: string; title: string; by: "agent" | "user" }) => void) => {
+      const handler = (_event: unknown, info: { url: string; title: string; by: "agent" | "user" }) => listener(info);
+      ipcRenderer.on("browser:navigated", handler);
+      return () => ipcRenderer.removeListener("browser:navigated", handler);
+    },
   },
   localData: {
     summary: () =>

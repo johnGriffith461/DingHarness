@@ -108,6 +108,15 @@ export default function Workbench() {
 
   // 定时任务的调度器（阶段 11.6）：整个应用生命周期只启动一次
   useEffect(() => startScheduler(), []);
+  /*
+   * B-06：agent 打开/跳转页面时，把右栏展开到「浏览器」页签 ——
+   * 用户不用自己去找"模型刚才在干什么"。
+   */
+  useEffect(() => {
+    const open = (): void => setSummaryCollapsed(false);
+    window.addEventListener("dsh-open-summary", open);
+    return () => window.removeEventListener("dsh-open-summary", open);
+  }, []);
 
   // AI 文档（§153）：启动时读一次磁盘（磁盘是权威）
   useEffect(() => {

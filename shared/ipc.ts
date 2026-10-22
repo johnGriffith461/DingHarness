@@ -490,6 +490,11 @@ export type ShellBridge = {
   browserAttach: {
     attach: (webContentsId: number) => Promise<{ ok: boolean; error?: string }>;
     detach: (webContentsId?: number) => Promise<{ ok: boolean }>;
+    /**
+     * B-06：页面导航时通知（agent 打开/点击跳转、用户自己跳转都会发）。
+     * 面板用它更新地址栏并自动展开 —— 用户看到的就是 agent 在操作的那一页。
+     */
+    onNavigated: (listener: (info: { url: string; title: string; by: "agent" | "user" }) => void) => () => void;
   };
   /**
    * 「记忆」库的读写（§185 起聊天侧也会用）。
