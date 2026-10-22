@@ -42,13 +42,24 @@ export const ALWAYS_TOOLS: readonly string[] = [
   "job_output",
   "job_kill",
   "web_fetch",
+  /* B 阶段：浏览器快照是"看一眼页面"的唯一入口，被裁掉模型就只能瞎猜 */
+  "browser_snapshot",
   "todo_write",
   "finish",
   "ask_user",
 ];
 
 /** 默认阈值：工具数 ≤ 这个值就全量下发。 */
-export const DEFER_THRESHOLD = 40;
+/**
+ * 工具数超过这个值就启用 BM25 搜索 + 只暴露核心工具（D-07，2026-10-22）。
+ *
+ * 原来是 40：而本轮加完 `read_image` 之后桌面侧正好 40 个（22 内置 + 8 浏览器
+ * + 4 UIA + 4 computer + 2 知识库），**刚好压在阈值上** —— 再多一个协议工具
+ * 就会让模型看不到 `read_file`/`finish` 这类核心件（实测踩过：模型说
+ * "我这边可用的工具里没有 todo_write 和 finish"）。
+ * 降到 32，留出余量；真正的兜底是 `ALWAYS_TOOLS`（它们永不被裁）。
+ */
+export const DEFER_THRESHOLD = 32;
 
 /** 除了核心之外，按得分再给几个。 */
 export const SEARCH_LIMIT = 12;
