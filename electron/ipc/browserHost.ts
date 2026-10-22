@@ -2,14 +2,12 @@ import { app, webContents as electronWebContents, type WebContents } from "elect
 import fs from "node:fs";
 import path from "node:path";
 
-import {
-  buildRefSelector,
-  buildSnapshotScript,
-} from "../../shared/browserTools";
+
 import { previewableUrl } from "../../shared/preview";
 import { markUntrusted } from "../../shared/untrusted";
 import { NOT_ATTACHED_NOTICE as NOT_ATTACHED, isAttachable } from "../../shared/browserAttach";
 import { blockedReason } from "../../shared/browserUrl";
+import { renderSnapshot as renderAxSnapshot, clearRefs, type AxNode, type SnapshotRef } from "../../engine/runtime/browserSnapshot";
 
 /**
  * **浏览器 agent 的宿主**（G04，2026-10-18）。
@@ -118,6 +116,13 @@ export function attachToWebContents(id: number): BrowserResult<{ id: number }> {
   };
   contents.on("will-navigate", (event, url) => guard(event, url));
   contents.on("will-redirect", (event, url) => guard(event, url));
+  /* B-02：导航之后旧的 backendNodeId 全部失效 —— ref 从 e1 重新开始 */
+  const resetRefs = (): void => {
+    clearRefs(refRegistry);
+    refToBackend.clear();
+  };
+  contents.on("did-navigate", resetRefs);
+  contents.on("did-navigate-in-page", resetRefs);
   return { ok: true, value: { id: contents.id } };
 }
 
@@ -126,6 +131,46 @@ export function detachFromWebContents(id?: number): void {
   if (!agentContents) return;
   if (typeof id === "number" && agentContents.id !== id) return;
   agentContents = null;
+}
+
+/**
+ * **ref 的稳定来源**（B-02）：`backendDOMNodeId → eN`。
+ *
+ * 挂在模块级（不是每次快照新建）：同一个 DOM 节点在连续快照里复用同一个 ref，
+ * 页面局部刷新不会让别的元素换号。导航时清空（旧 id 在新页面上没有意义）。
+ */
+const refRegistry = new Map<number, string>();
+/** 反查：ref → backendNodeId（click/type 用）。 */
+const refToBackend = new Map<string, number>();
+
+/** CDP 的报错常常是 `{ code, message }`，给模型看的要是一句话。 */
+function describeCdpError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Debugger is not attached|not attached/i.test(message)) {
+    return "调试通道没接上（页面可能刚导航）—— 重新取一次快照";
+  }
+  if (/Cannot find context|Object reference chain/i.test(message)) {
+    return "页面已经变了（这个元素不在了）—— 重新取一次快照";
+  }
+  if (/another debugger|DevTools/i.test(message)) {
+    return "开发者工具正开着，调试通道被占用 —— 先关掉开发者工具再试";
+  }
+  return message.slice(0, 200);
+}
+
+/** 接上 CDP（已经附着就直接复用；DevTools 打开时会失败，交给调用方出人话）。 */
+async function ensureDebugger(contents: import("electron").WebContents) {
+  if (!contents.debugger.isAttached()) {
+    contents.debugger.attach("1.3");
+    /*
+     * 两个 domain 都要显式开：`Accessibility` 不开时 `getFullAXTree` 可能返回空，
+     * `DOM` 不开时 `resolveNode` / `getBoxModel` 拿不到对象。
+     */
+    await contents.debugger.sendCommand("Accessibility.enable");
+    await contents.debugger.sendCommand("DOM.enable");
+    await contents.debugger.sendCommand("Page.enable");
+  }
+  return contents.debugger;
 }
 
 /** 截图落盘目录（`<userData>/browser-shots`）。 */
@@ -180,66 +225,114 @@ export async function browserOpen(
 }
 
 /**
- * 取快照（注入脚本读 DOM）。
+ * 取快照：**CDP 的 Accessibility 树**（B-02，2026-10-22）。
  *
- * @param opts.maxElements 最多列多少个可交互元素
- * @param opts.maxNodes 最多列多少段可见文字
+ * 旧做法是"注入脚本枚举固定 CSS 选择器 + 每次从 1 重排 `data-dsh-ref`"，
+ * 页面一重渲染 ref 就可能指错元素，而且 iframe 内容完全看不到。
+ * 现在：
+ * - `Page.getFrameTree` 拿到全部 frame，每个 frame 各取一次 `Accessibility.getFullAXTree`；
+ * - 渲染交给 `engine/runtime/browserSnapshot.ts`（纯函数、9 条单测）；
+ * - ref 绑在 `backendDOMNodeId` 上（`refRegistry`），`did-navigate` 时清空。
+ *
+ * @param opts.maxChars 文本上限（默认 12k）
  */
-export async function browserSnapshot(opts: { maxElements?: number; maxNodes?: number } = {}): Promise<
-  BrowserResult<BrowserSnapshot>
+export async function browserSnapshot(opts: { maxChars?: number } = {}): Promise<
+  BrowserResult<{ url: string; title: string; text: string; refs: SnapshotRef[]; total: number; truncated: boolean }>
 > {
   const contents = live();
   if (!contents) return { ok: false, error: NOT_ATTACHED };
-  const script = buildSnapshotScript(opts.maxElements ?? 120, opts.maxNodes ?? 300);
   try {
-    const raw = (await contents.executeJavaScript(script, true)) as BrowserSnapshot;
-    const iframes = await contents.executeJavaScript("document.querySelectorAll('iframe').length", true);
-    return { ok: true, value: { ...raw, iframes: Number(iframes) || 0 } };
+    const dbg = await ensureDebugger(contents);
+    const tree = (await dbg.sendCommand("Page.getFrameTree")) as {
+      frameTree?: { frame?: { id?: string }; childFrames?: Array<{ frame?: { id?: string } }> };
+    };
+    /* 主 frame + 一层子 frame（再深的用 flatten 递归展开） */
+    const frameIds: string[] = [];
+    const walkFrames = (node: { frame?: { id?: string }; childFrames?: unknown[] } | undefined): void => {
+      const id = node?.frame?.id;
+      if (id) frameIds.push(id);
+      for (const child of (node?.childFrames ?? []) as Array<{ frame?: { id?: string }; childFrames?: unknown[] }>) {
+        walkFrames(child);
+      }
+    };
+    walkFrames(tree.frameTree);
+
+    const texts: string[] = [];
+    const allRefs: SnapshotRef[] = [];
+    let total = 0;
+    let truncated = false;
+    for (let i = 0; i < frameIds.length; i += 1) {
+      const frameId = frameIds[i];
+      if (!frameId) continue;
+      const got = (await dbg.sendCommand("Accessibility.getFullAXTree", { frameId })) as { nodes?: AxNode[] };
+      const rendered = renderAxSnapshot(got.nodes ?? [], refRegistry, {
+        framePrefix: i === 0 ? "" : `f${i}`,
+        ...(opts.maxChars === undefined ? {} : { maxChars: opts.maxChars }),
+      });
+      for (const r of rendered.refs) refToBackend.set(r.ref, r.backendNodeId);
+      texts.push(rendered.text);
+      allRefs.push(...rendered.refs);
+      total += rendered.total;
+      truncated = truncated || rendered.truncated;
+    }
+    return {
+      ok: true,
+      value: {
+        url: contents.getURL(),
+        title: contents.getTitle(),
+        text: texts.join(String.fromCharCode(10, 10)),
+        refs: allRefs,
+        total,
+        truncated,
+      },
+    };
   } catch (error) {
-    return { ok: false, error: `取快照失败：${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, error: `取快照失败：${describeCdpError(error)}` };
   }
 }
 
 /**
- * 点一个 ref。
+ * 点一个 ref（B-02：ref → backendNodeId → 真实鼠标事件）。
  *
- * 做法：在页面里 `el.click()` —— 对绝大多数框架（React/Vue）都成立，
- * 而且不需要算坐标（坐标会随滚动/缩放漂移，那是另一个要维护的东西）。
- *
- * @param ref 快照里的 `@N`
+ * 比"在页面里 `el.click()`"更接近真人：先滚到中间、按真实坐标按下抬起。
+ * 也让"点完页面跳转"这种副作用与用户点一次的行为一致。
  */
 export async function browserClick(ref: string): Promise<BrowserResult<{ name: string }>> {
   const contents = live();
   if (!contents) return { ok: false, error: NOT_ATTACHED };
-  const selector = buildRefSelector(ref);
-  if (!selector) return { ok: false, error: `ref 格式不对（要形如 @3）：${ref}` };
+  const backend = refToBackend.get(ref.trim());
+  if (!backend) {
+    return { ok: false, error: `快照里没有这个 ref：${ref} —— 重新取一次 browser_snapshot（页面可能已变）` };
+  }
   try {
-    const got = (await contents.executeJavaScript(
-      `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return { found: false };
-        const label = (el.getAttribute('aria-label') || el.innerText || el.value || '').trim().slice(0, 60);
-        el.scrollIntoView({ block: 'center' });
-        el.click();
-        return { found: true, label };
-      })()`,
-      true,
-    )) as { found: boolean; label?: string };
-    if (!got.found) return { ok: false, error: `页面上找不到 ${ref} —— 页面可能变了，重新取一次快照` };
-    return { ok: true, value: { name: got.label || ref } };
+    const dbg = await ensureDebugger(contents);
+    const resolved = (await dbg.sendCommand("DOM.resolveNode", { backendNodeId: backend })) as {
+      object?: { objectId?: string };
+    };
+    const objectId = resolved.object?.objectId;
+    if (!objectId) return { ok: false, error: "这个元素已经不在页面上了 —— 重新取一次快照" };
+    await dbg.sendCommand("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: "function(){this.scrollIntoView({block:'center',inline:'center'});}",
+    });
+    const box = (await dbg.sendCommand("DOM.getBoxModel", { objectId })) as {
+      model?: { content?: number[] };
+    };
+    const q = box.model?.content;
+    if (!q || q.length < 8) return { ok: false, error: "量不到这个元素的位置（它可能不可见）" };
+    const x = (q[0] + q[2] + q[4] + q[6]) / 4;
+    const y = (q[1] + q[3] + q[5] + q[7]) / 4;
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await dbg.sendCommand("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+    }
+    return { ok: true, value: { name: ref } };
   } catch (error) {
-    return { ok: false, error: `点击失败：${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, error: `点击失败：${describeCdpError(error)}` };
   }
 }
 
 /**
- * 往一个输入框里输入文字。
- *
- * 先聚焦、选中已有内容、再用 `Input.insertText`（走输入法通道，中文没问题）。
- *
- * @param ref 输入框 ref
- * @param text 文字
- * @param submit 输入后是否回车
+ * 往 ref 指向的输入框里输入（B-02：ref → backendNodeId → 聚焦 → insertText）。
  */
 export async function browserType(
   ref: string,
@@ -248,34 +341,41 @@ export async function browserType(
 ): Promise<BrowserResult<{ chars: number }>> {
   const contents = live();
   if (!contents) return { ok: false, error: NOT_ATTACHED };
-  const selector = buildRefSelector(ref);
-  if (!selector) return { ok: false, error: `ref 格式不对（要形如 @3）：${ref}` };
+  const backend = refToBackend.get(ref.trim());
+  if (!backend) {
+    return { ok: false, error: `快照里没有这个 ref：${ref} —— 重新取一次 browser_snapshot` };
+  }
   try {
-    const focused = (await contents.executeJavaScript(
-      `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return false;
-        el.focus();
-        if (typeof el.select === 'function') el.select();
-        return document.activeElement === el;
-      })()`,
-      true,
-    )) as boolean;
-    if (!focused) return { ok: false, error: `${ref} 不是可聚焦的输入框（重新取一次快照看看它的 role）` };
-
-    contents.debugger.attach("1.3");
-    try {
-      await contents.debugger.sendCommand("Input.insertText", { text });
-      if (submit) {
-        await contents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-        await contents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    const dbg = await ensureDebugger(contents);
+    const resolved = (await dbg.sendCommand("DOM.resolveNode", { backendNodeId: backend })) as {
+      object?: { objectId?: string };
+    };
+    const objectId = resolved.object?.objectId;
+    if (!objectId) return { ok: false, error: "这个元素已经不在页面上了 —— 重新取一次快照" };
+    const focused = (await dbg.sendCommand("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration:
+        "function(){ this.focus(); if (typeof this.select === 'function') this.select(); return document.activeElement === this; }",
+      returnByValue: true,
+    })) as { result?: { value?: unknown } };
+    if (focused.result?.value !== true) {
+      return { ok: false, error: `${ref} 不是可聚焦的输入框（重新取一次快照看看它的 role）` };
+    }
+    await dbg.sendCommand("Input.insertText", { text });
+    if (submit) {
+      for (const type of ["keyDown", "keyUp"]) {
+        await dbg.sendCommand("Input.dispatchKeyEvent", {
+          type,
+          key: "Enter",
+          code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+        });
       }
-    } finally {
-      contents.debugger.detach();
     }
     return { ok: true, value: { chars: text.length } };
   } catch (error) {
-    return { ok: false, error: `输入失败：${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, error: `输入失败：${describeCdpError(error)}` };
   }
 }
 

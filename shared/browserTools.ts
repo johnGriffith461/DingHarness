@@ -30,15 +30,19 @@ const HEAD =
 export const BROWSER_OPEN_INPUT = z.object({
   url: z.string().trim().min(1).describe("要打开的地址（默认只允许本机：localhost / 127.0.0.1）"),
 });
+/*
+ * B-02（2026-10-22）：快照换成 **ARIA 树文本**（带 `ref=eN`），所以参数从
+ * "最多几个元素/节点"改成"文本上限"。旧的 maxElements/maxNodes 不再有意义
+ * （渲染器自己按角色过滤），留着只会让模型以为能控制它。
+ */
 export const BROWSER_SNAPSHOT_INPUT = z.object({
-  maxElements: z.number().int().min(10).max(300).optional().describe("最多列多少个可交互元素，默认 120"),
-  maxNodes: z.number().int().min(50).max(600).optional().describe("最多列多少个 DOM 节点（只取有可见文字/可交互的），默认 300"),
+  maxChars: z.number().int().min(2000).max(60000).optional().describe("文本上限（默认 12000 字符，超了截断）"),
 });
 export const BROWSER_CLICK_INPUT = z.object({
-  ref: z.string().trim().min(1).describe("快照里给出的元素 ref（形如 @3）"),
+  ref: z.string().trim().min(1).describe("快照里给出的元素 ref（形如 e3 或 f1e3）"),
 });
 export const BROWSER_TYPE_INPUT = z.object({
-  ref: z.string().trim().min(1).describe("快照里给出的输入框 ref"),
+  ref: z.string().trim().min(1).describe("快照里给出的输入框 ref（形如 e3 或 f1e3）"),
   text: z.string().min(1).max(4000).describe("要输入的文字"),
   submit: z.boolean().optional().describe("输入后按回车（表单提交场景）"),
 });

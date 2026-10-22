@@ -72,7 +72,7 @@ import {
   BROWSER_SNAPSHOT_TOOL,
   BROWSER_TYPE_TOOL,
 } from "../../shared/browserTools";
-import { browserClick, browserOpen, browserScreenshot, browserScroll, browserSnapshot, browserType, describeSnapshot } from "./browserHost";
+import { browserClick, browserOpen, browserScreenshot, browserScroll, browserSnapshot, browserType } from "./browserHost";
 import { evaluateRules } from "../../engine/core/permissionRules";
 import { readComputerState } from "./computer";
 import { actOnUiaElement, listUiaWindows, snapshotUiaWindow, uiaSupported } from "./uia";
@@ -594,17 +594,18 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     return { ok: true, line: `打开了「${got.value.title || got.value.url}」`, url: got.value.url, title: got.value.title };
   },
   [BROWSER_SNAPSHOT_TOOL]: async (input) => {
-    const { maxElements, maxNodes } = input as { maxElements?: number; maxNodes?: number };
-    const got = await browserSnapshot({ ...(maxElements === undefined ? {} : { maxElements }), ...(maxNodes === undefined ? {} : { maxNodes }) });
+    /* B-02：快照现在是 **ARIA 树文本**（带 ref=eN），不再是元素数组 */
+    const { maxChars } = input as { maxChars?: number };
+    const got = await browserSnapshot({ ...(maxChars === undefined ? {} : { maxChars }) });
     if (!got.ok) return { ok: false, error: got.error };
     const s = got.value;
     return {
       ok: true,
-      line: `取了快照（${s.elements.length} 个可交互元素${s.truncated.elements || s.truncated.nodes ? "，已截断" : ""}）`,
+      line: `取了快照（${s.refs.length} 个可指代元素${s.truncated ? "，已截断" : ""}）`,
       url: s.url,
       title: s.title,
-      elements: s.elements.length,
-      text: describeSnapshot(s),
+      elements: s.refs.length,
+      text: s.text,
     };
   },
   [BROWSER_CLICK_TOOL]: async (input) => {
