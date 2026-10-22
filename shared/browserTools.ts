@@ -30,6 +30,10 @@ export const BROWSER_GO_BACK_TOOL = "browser_go_back";
 export const BROWSER_GO_FORWARD_TOOL = "browser_go_forward";
 export const BROWSER_RELOAD_TOOL = "browser_reload";
 export const BROWSER_WAIT_FOR_TOOL = "browser_wait_for";
+/* B-04（2026-10-22）：可观测性 —— 控制台 / 网络 / 在最近一次快照里搜 */
+export const BROWSER_CONSOLE_TOOL = "browser_console";
+export const BROWSER_NETWORK_TOOL = "browser_network";
+export const BROWSER_FIND_TOOL = "browser_find";
 
 const HEAD =
   "操作内置浏览器（独立窗口、持久登录态）。需要用户在「权限矩阵」页授权浏览器；" +
@@ -71,6 +75,11 @@ export const BROWSER_SELECT_INPUT = z.object({
 export const BROWSER_GO_BACK_INPUT = z.object({}).describe("不需要参数");
 export const BROWSER_GO_FORWARD_INPUT = z.object({}).describe("不需要参数");
 export const BROWSER_RELOAD_INPUT = z.object({}).describe("不需要参数");
+export const BROWSER_CONSOLE_INPUT = z.object({}).describe("不需要参数");
+export const BROWSER_NETWORK_INPUT = z.object({}).describe("不需要参数");
+export const BROWSER_FIND_INPUT = z.object({
+  text: z.string().trim().min(1).describe("要搜的文字（在最近一次快照里找）"),
+});
 export const BROWSER_WAIT_FOR_INPUT = z.object({
   text: z.string().trim().min(1).optional().describe("等页面上出现这段文字"),
   timeoutMs: z.number().int().min(500).max(30000).optional().describe("最多等多久（默认 8000ms）"),
@@ -95,6 +104,12 @@ export const BROWSER_GO_FORWARD_DESC = `${HEAD}
 前进一页。`;
 export const BROWSER_RELOAD_DESC = `${HEAD}
 刷新当前页。`;
+export const BROWSER_CONSOLE_DESC = `${HEAD}
+最近 50 条控制台输出（level + text），排错用。`;
+export const BROWSER_NETWORK_DESC = `${HEAD}
+最近 50 条网络请求（method/url/status），**不含 header 与 body**（避免带出 token）。`;
+export const BROWSER_FIND_DESC = `${HEAD}
+在**最近一次快照**里搜文字，返回命中的行（含 ref），省一次全量快照。`;
 export const BROWSER_WAIT_FOR_DESC = `${HEAD}
 等页面上出现某段文字（最多 8 秒，超时如实说没等到）。`;
 
@@ -113,6 +128,9 @@ export const BROWSER_TOOL_SPECS: readonly AgentToolSpec[] = [
   { name: BROWSER_GO_FORWARD_TOOL, description: BROWSER_GO_FORWARD_DESC, schema: BROWSER_GO_FORWARD_INPUT },
   { name: BROWSER_RELOAD_TOOL, description: BROWSER_RELOAD_DESC, schema: BROWSER_RELOAD_INPUT },
   { name: BROWSER_WAIT_FOR_TOOL, description: BROWSER_WAIT_FOR_DESC, schema: BROWSER_WAIT_FOR_INPUT },
+  { name: BROWSER_CONSOLE_TOOL, description: BROWSER_CONSOLE_DESC, schema: BROWSER_CONSOLE_INPUT },
+  { name: BROWSER_NETWORK_TOOL, description: BROWSER_NETWORK_DESC, schema: BROWSER_NETWORK_INPUT },
+  { name: BROWSER_FIND_TOOL, description: BROWSER_FIND_DESC, schema: BROWSER_FIND_INPUT },
 ];
 
 /** 是不是浏览器工具（策略表/资源提取都按这个前缀判，别到处抄名字）。 */

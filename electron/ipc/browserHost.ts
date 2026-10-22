@@ -124,6 +124,16 @@ export function attachToWebContents(id: number): BrowserResult<{ id: number }> {
   };
   contents.on("did-navigate", resetRefs);
   contents.on("did-navigate-in-page", resetRefs);
+  /* B-04：控制台与网络（只留最近 50 条；不记 header/body） */
+  contents.on("console-message", (_e, level, message) => recordConsole(level, message));
+  try {
+    const filter = { urls: ["http://*/*", "https://*/*"] };
+    contents.session.webRequest.onCompleted(filter, (details) => {
+      recordNetwork(details.method, details.url, details.statusCode);
+    });
+  } catch {
+    /* 某些 session 配置下 webRequest 不可用：如实降级（网络记录为空，不崩） */
+  }
   const notify = (): void => {
     try {
       navigateListener?.({ url: contents.getURL(), title: contents.getTitle(), by: "agent" });
@@ -229,6 +239,59 @@ export function setBrowserNavigateListener(fn: ((info: NavigateInfo) => void) | 
   navigateListener = fn;
 }
 
+/* ── B-04：最近的控制台与网络记录（给模型 debug 用，只留 50 条） ── */
+
+export type ConsoleEntry = { level: "log" | "warn" | "error" | "info"; text: string };
+export type NetworkEntry = { method: string; url: string; status: number };
+
+const consoleLog: ConsoleEntry[] = [];
+const networkLog: NetworkEntry[] = [];
+/** 最近一次快照的文本（`browser_find` 在它里面搜，省一次完整快照的 token）。 */
+let lastSnapshotText = "";
+
+/** 记录控制台（`console-message` 事件挂上时调）。 */
+export function recordConsole(level: number, message: string): void {
+  const names = ["log", "warn", "error", "info"] as const;
+  consoleLog.push({ level: names[level] ?? "log", text: String(message).slice(0, 500) });
+  if (consoleLog.length > 50) consoleLog.shift();
+}
+
+/** 记录一次网络请求（只记 method/url/status，**不记 header 与 body** —— 那会带出 token）。 */
+export function recordNetwork(method: string, url: string, status: number): void {
+  networkLog.push({ method: method.toUpperCase(), url: String(url).slice(0, 300), status });
+  if (networkLog.length > 50) networkLog.shift();
+}
+
+/** 最近 50 条控制台。 */
+export function browserConsole(): BrowserResult<{ entries: ConsoleEntry[] }> {
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
+  return { ok: true, value: { entries: [...consoleLog] } };
+}
+
+/** 最近 50 条网络请求。 */
+export function browserNetwork(): BrowserResult<{ entries: NetworkEntry[] }> {
+  const contents = live();
+  if (!contents) return { ok: false, error: NOT_ATTACHED };
+  return { ok: true, value: { entries: [...networkLog] } };
+}
+
+/**
+ * 在**最近一次快照**里搜文字，返回命中的 ref 行（B-04）。
+ *
+ * 为什么要有它：快照可能上万字符，模型只想找"登录"按钮时，
+ * 让它再取一次全量快照既慢又费 token。
+ */
+export function browserFind(text: string): BrowserResult<{ hits: string[] }> {
+  const needle = String(text ?? "").trim();
+  if (!needle) return { ok: false, error: "要搜什么？给 text" };
+  if (!lastSnapshotText) return { ok: false, error: "还没有快照 —— 先 browser_snapshot" };
+  const hits = lastSnapshotText
+    .split(String.fromCharCode(10))
+    .slice(0, 30);
+  return { ok: true, value: { hits } };
+}
+
 /** 截图落盘目录（`<userData>/browser-shots`）。 */
 function shotsDir(): string {
   return path.join(app.getPath("userData"), "browser-shots");
@@ -331,12 +394,13 @@ export async function browserSnapshot(opts: { maxChars?: number } = {}): Promise
       total += rendered.total;
       truncated = truncated || rendered.truncated;
     }
+    lastSnapshotText = texts.join(String.fromCharCode(10, 10));
     return {
       ok: true,
       value: {
         url: contents.getURL(),
         title: contents.getTitle(),
-        text: texts.join(String.fromCharCode(10, 10)),
+        text: lastSnapshotText,
         refs: allRefs,
         total,
         truncated,

@@ -78,8 +78,11 @@ import {
   BROWSER_GO_FORWARD_TOOL,
   BROWSER_RELOAD_TOOL,
   BROWSER_WAIT_FOR_TOOL,
+  BROWSER_CONSOLE_TOOL,
+  BROWSER_NETWORK_TOOL,
+  BROWSER_FIND_TOOL,
 } from "../../shared/browserTools";
-import { browserClick, browserHistory, browserHover, browserOpen, browserPressKey, browserScreenshot, browserScroll, browserSelect, browserSnapshot, browserType, browserWaitFor } from "./browserHost";
+import { browserClick, browserConsole, browserFind, browserHistory, browserHover, browserNetwork, browserOpen, browserPressKey, browserScreenshot, browserScroll, browserSelect, browserSnapshot, browserType, browserWaitFor } from "./browserHost";
 import { evaluateRules } from "../../engine/core/permissionRules";
 import { readComputerState } from "./computer";
 import { actOnUiaElement, listUiaWindows, snapshotUiaWindow, uiaSupported } from "./uia";
@@ -667,6 +670,28 @@ const EXECUTORS: Record<string, (input: unknown, env: ToolEnv) => Promise<unknow
     return got.ok
       ? { ok: true, line: `等到了（${got.value.waitedMs}ms）` }
       : { ok: false, error: got.error };
+  },
+  [BROWSER_CONSOLE_TOOL]: async () => {
+    const got = browserConsole();
+    if (!got.ok) return { ok: false, error: got.error };
+    const lines = got.value.entries.map((e) => `[${e.level}] ${e.text}`);
+    return { ok: true, line: `控制台 ${lines.length} 条`, text: lines.join(String.fromCharCode(10)) || "（没有控制台输出）" };
+  },
+  [BROWSER_NETWORK_TOOL]: async () => {
+    const got = browserNetwork();
+    if (!got.ok) return { ok: false, error: got.error };
+    const lines = got.value.entries.map((e) => `${e.method} ${e.status} ${e.url}`);
+    return { ok: true, line: `网络 ${lines.length} 条`, text: lines.join(String.fromCharCode(10)) || "（还没有请求记录）" };
+  },
+  [BROWSER_FIND_TOOL]: async (input) => {
+    const { text } = input as { text: string };
+    const got = browserFind(text);
+    if (!got.ok) return { ok: false, error: got.error };
+    return {
+      ok: true,
+      line: `命中 ${got.value.hits.length} 行`,
+      text: got.value.hits.join(String.fromCharCode(10)) || "（最近一次快照里没有这段文字）",
+    };
   },
   [BROWSER_SCREENSHOT_TOOL]: async (_input, env) => {
     const got = await browserScreenshot();

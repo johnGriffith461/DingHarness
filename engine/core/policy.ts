@@ -162,6 +162,10 @@ export const TOOL_POLICY: Record<string, ToolPolicy> = {
   browser_go_back: { kind: "write" },
   browser_go_forward: { kind: "write" },
   browser_reload: { kind: "write" },
+  /* B-04：控制台/网络/快照内搜索都是只读 */
+  browser_console: { kind: "read" },
+  browser_network: { kind: "read" },
+  browser_find: { kind: "read" },
   /*
    * 元素版 Computer Use（G05）：枚举窗口/元素是**只读**；执行动作是**写**
    * （它真的会点按钮、写输入框）。两者分开，别让"看一眼窗口"也要点确认。
