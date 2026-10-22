@@ -9,55 +9,46 @@
  */
 
 /*
- * 工具条**不换行**（2026-10-22 主人报的）。
+ * 工具条：**一行平铺**（2026-10-22 主人第二次点名）。
  *
- * 原来 `flex-wrap: wrap`：模型名一长 / 点开「更多」多出几颗 chip，整排就折成两行，
- * 于是"有的往左推、有的往右推"，按钮位置每次都变。
- * 现在：单行、左侧可收缩（省略号）、右侧固定；更多内容放到下面那一行。
+ * 我上一版为了"位置固定"把它拆成三行（确认/技能、更多+模型+思考+发送、高级项），
+ * 结果全堆在左边 —— 主人的话：「你咋全给我把按钮放在对话框的左边了 堆在一起好看吗
+ * 平铺啊，一行」。
+ *
+ * 现在的规矩：
+ *   · `flex-wrap: nowrap` —— 永远一行，不折行、不分堆；
+ *   · 顺序就是 DOM 顺序（附件 / 项目 / 确认 / 技能 / 插件 / 更多 / 计划 / 模型 / 思考 / 发送）；
+ *   · `.wb-spacer` 吃掉多余宽度，把「更多 / 模型 / 思考 / 发送」推到右边；
+ *   · 窗口实在窄到放不下时**横向滚动**（`overflow-x: auto`），而不是换行 ——
+ *     换行会让按钮跳位，横向滚动至少保证"还是一行"。
+ *   · 模型名是唯一允许收缩的（省略号），它长不会把别人挤走。
  */
 .wb-composer-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  row-gap: 6px;
+  /* 展开「更多」后一行会很长：间距压到 4px，尽量在 780 宽里放下 */
+  gap: 4px;
+  flex-wrap: nowrap;
   min-width: 0;
   padding-top: 6px;
+  /*
+   * ⚠️ **不许**给这一条加 `overflow`（2026-10-22 踩到）：
+   * chip 的下拉/面板是绝对定位的子元素，`overflow: auto` 会把它们**裁掉** ——
+   * 表现是"设置档位/项目/技能面板点了没反应"（元素在，但被裁到可视区外，
+   * `accept-chips` / `accept-panels` / `accept-smoke` 三条当场全红）。
+   * 压缩间距之后一行本来就放得下（实测 scrollWidth == clientWidth），不需要滚动。
+   */
 }
+/* 工具条里的 chip 比别处紧一档（同一行要塞 10 个） */
+.wb-composer-bar > .wb-chip { padding: 4px 7px; font-size: 12px; }
+.wb-composer-bar > .wb-chip-wrap > .wb-chip { padding: 4px 7px; font-size: 12px; }
+
+.wb-composer-bar::-webkit-scrollbar { display: none; }
 .wb-composer-bar > * { flex: 0 0 auto; }
-/*
- * **固定三行**（2026-10-22 主人：「这些按钮能不能固定下位置啊…你换个模型名字，
- * 名字一长就把别的按钮挤走了，你点击更多 又把别的按钮又挤走了」）。
- *
- *   第一行：确认档位 / 技能
- *   第二行：更多 / 模型 / 思考 / 发送（**永远在这里**，不随展开与否移动）
- *   第三行：项目 / 插件 / 计划 / 附件（只在「更多」展开时出现）
- *
- * 做法：`order` 排序 + 用 spacer 占满一整行强制断行（0 高度，不占视觉空间）。
- * 这样"模型名长"只影响它自己（省略号），不影响任何按钮的位置。
- */
-.wb-composer-bar > .wb-spacer { order: 20; flex: 1 0 100%; height: 0; min-height: 0; }
-.wb-composer-bar > [data-testid="wb-composer-more"] { order: 30; }
-.wb-composer-bar > .wb-chip-model { order: 31; flex: 0 1 auto; min-width: 0; }
-.wb-composer-bar > .wb-chip-effort { order: 32; }
-.wb-composer-bar > [data-testid="wb-send"] { order: 33; }
-/* 附件 ＋：主操作行末尾（Composer 里没给它加 class，按 testid 命中） */
-.wb-composer-bar > [data-testid="wb-composer-add"] { order: 34; }
+.wb-composer-bar > .wb-spacer { flex: 1 1 auto; min-width: 6px; }
 /* 模型 chip 是唯一允许收缩的：名字过长时省略，而不是把别家挤走 */
-.wb-composer-bar > .wb-chip-model > .wb-chip { max-width: 240px; }
-/*
- * 「更多」展开的那一批（项目 / 插件 / 计划）—— **单独一行**，在主操作条下面。
- * 它是 bar 之后的一个独立容器（DOM 里就在那儿），所以展开与收起都不会推动
- * 模型 / 思考 / 发送的位置。宽度不够时它自己换行，主条不受影响。
- */
-/*
- * 「更多」展开的那一批（项目 / 插件 / 计划）—— **单独一行**。
- * 它们仍在同一个 bar 里，用 order 排到主操作行之后（100），
- * 展开与收起只影响最后这一行，模型 / 思考 / 发送的位置纹丝不动。
- */
-.wb-composer-bar > [data-testid="wb-project"],
-.wb-composer-bar > .wb-env,
-.wb-composer-bar > [data-testid="wb-plan-toggle"] { order: 100; }
+.wb-composer-bar > .wb-chip-model { flex: 0 1 auto; min-width: 0; }
+.wb-composer-bar > .wb-chip-model > .wb-chip { max-width: 220px; }
 
 /* 输入框下面那一行：用量数字（不再是工具条里的按钮） */
 .wb-composer-usage {
