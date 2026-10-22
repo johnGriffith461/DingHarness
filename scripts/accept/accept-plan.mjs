@@ -84,34 +84,61 @@ await sleep(2200);
 /* C-01：计划 chip 收在首页的「更多」后面 */
 await expandComposerMore(page);
 const input = page.locator('[data-testid="wb-composer-input"]');
-const chip = page.locator('[data-testid="wb-plan-toggle"]');
+/*
+ * 2026-10-22 主人：「计划 这个东西 放到 对话框的加号里面」——
+ * 计划从工具条上的 chip 变成「＋」菜单里的一项（`wb-add-plan`），菜单点完就关。
+ * 所以判据改成"打开 ＋ 菜单 → 点它 → 提示条出现"，状态用菜单项的 aria-checked 读。
+ */
 const banner = page.locator('[data-testid="wb-plan-banner"]');
+/** 打开「＋」菜单（幂等：已经开着就不要点第二下，那会把它关掉）。 */
+const openAdd = async () => {
+  if (await page.locator('[data-testid="wb-add-pop"]').count()) return;
+  await page.locator('[data-testid="wb-composer-add"]').click();
+  await sleep(250);
+};
+/** 关掉「＋」菜单（幂等）。 */
+const closeAdd = async () => {
+  if (!(await page.locator('[data-testid="wb-add-pop"]').count())) return;
+  await page.locator('[data-testid="wb-composer-input"]').click();
+  await sleep(200);
+};
+/** 计划模式现在开着没有：从「＋」菜单里那一项的 aria-checked 读（读完关掉菜单）。 */
+const pressed = async () => {
+  await openAdd();
+  const value = await page.locator('[data-testid="wb-add-plan"]').getAttribute("aria-checked");
+  await closeAdd();
+  return value === "true";
+};
 
-const pressed = async () => (await chip.getAttribute("aria-pressed")) === "true";
-
-await step("计划 chip 存在且初始关闭", async () => {
-  if (!(await chip.count())) throw new Error("没有 wb-plan-toggle");
+await step("「＋」菜单里有计划模式，初始关闭", async () => {
+  await openAdd();
+  if (!(await page.locator('[data-testid="wb-add-plan"]').count())) {
+    await closeAdd();
+    throw new Error("「＋」菜单里没有「计划模式」");
+  }
   if (await pressed()) throw new Error("初始就是开着的");
   return "初始 idle";
 });
 
-await step("⭐ 点 chip → 计划模式打开，提示条出现", async () => {
-  await chip.click();
-  await sleep(300);
-  if (!(await pressed())) throw new Error("aria-pressed 还是 false");
+await step("⭐ 点「计划模式」→ 计划模式打开，提示条出现", async () => {
+  await openAdd();
+  await page.locator('[data-testid="wb-add-plan"]').click();
+  await sleep(350);
   if (!(await banner.count())) throw new Error("提示条没出现");
+  if (!(await pressed())) throw new Error("aria-checked 还是 false");
   return "已进入计划模式";
 });
 
-await step("再点 chip → 退出，提示条消失", async () => {
-  await chip.click();
-  await sleep(300);
-  if (await pressed()) throw new Error("还是开着");
+await step("再点「计划模式」→ 退出，提示条消失", async () => {
+  await openAdd();
+  await page.locator('[data-testid="wb-add-plan"]').click();
+  await sleep(350);
   if (await banner.count()) throw new Error("提示条还在");
+  if (await pressed()) throw new Error("还是开着");
   return "已退出";
 });
 
-await step("Shift+Tab 与 chip 是同一个开关", async () => {
+await step("Shift+Tab 与「＋」里那项是同一个开关", async () => {
   await input.click();
   await input.press("Shift+Tab");
   await sleep(300);

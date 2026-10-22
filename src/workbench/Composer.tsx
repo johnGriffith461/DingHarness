@@ -1094,6 +1094,23 @@ export function Composer({
               >
                 创作广场
               </button>
+              {/*
+                2026-10-22 主人：「计划 这个东西 放到 对话框的加号里面」——
+                从工具条挪进「＋」菜单。它是个**开关**，所以带勾选态。
+              */}
+              <button
+                className={`wb-chip-option${planOn ? " is-on" : ""}`}
+                data-testid="wb-add-plan"
+                role="menuitemcheckbox"
+                aria-checked={planOn}
+                title={planOn ? "计划模式：只读工具；再点一次退出" : "进入计划模式（只读工具）"}
+                onClick={() => {
+                  togglePlan();
+                  setOpenPop(null);
+                }}
+              >
+                <Blocks size={13} /> 计划模式{planOn ? <Check size={13} /> : null}
+              </button>
               <button
                 className="wb-chip-option"
                 data-testid="wb-add-image"
@@ -1416,16 +1433,6 @@ export function Composer({
           他不是弹出往左或者往右弹 是左右都弹 所以干脆不弹」——
           所有 chip 常显，一行平铺。
         */}
-        {/* C1：计划模式 chip（真开关：只读工具面 + 计划提示） */}
-        <button
-          className={`wb-chip${planOn ? " is-on" : ""}`}
-          data-testid="wb-plan-toggle"
-          aria-pressed={planOn}
-          title={planOn ? "计划模式：只读工具；再按一次退出" : "进入计划模式（Shift+Tab）"}
-          onClick={togglePlan}
-        >
-          <Blocks size={13} /> 计划
-        </button>
         {/* 模型 · 思考：真选择器（组件在 ModelChip.tsx） */}
         <ModelChip
           open={openPop === "model"}

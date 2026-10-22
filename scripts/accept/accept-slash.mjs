@@ -124,9 +124,14 @@ await step("C1：Shift+Tab 切换计划模式", async () => {
   await input.press("Shift+Tab");
   await sleep(300);
   if (!(await page.locator('[data-testid="wb-plan-banner"]').count())) throw new Error("计划提示条没出现");
-  await expandComposerMore(page);
-  const pressed = await page.locator('[data-testid="wb-plan-toggle"]').getAttribute("aria-pressed");
-  if (pressed !== "true") throw new Error(`chip aria-pressed=${pressed}`);
+  /* 2026-10-22：计划挪进「＋」菜单 —— 状态从菜单项的 aria-checked 读 */
+  await page.locator('[data-testid="wb-composer-add"]').click();
+  await sleep(250);
+  const pressed = await page.locator('[data-testid="wb-add-plan"]').getAttribute("aria-checked");
+  await page.keyboard.press("Escape");
+  await sleep(200);
+  if (pressed !== "true") throw new Error(`计划模式项 aria-checked=${pressed}`);
+  await input.click();
   await input.press("Shift+Tab");
   await sleep(250);
   if (await page.locator('[data-testid="wb-plan-banner"]').count()) throw new Error("再按一次没退出");
