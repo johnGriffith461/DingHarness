@@ -9,6 +9,7 @@ import {
 import { previewableUrl } from "../../shared/preview";
 import { markUntrusted } from "../../shared/untrusted";
 import { NOT_ATTACHED_NOTICE as NOT_ATTACHED, isAttachable } from "../../shared/browserAttach";
+import { blockedReason } from "../../shared/browserUrl";
 
 /**
  * **浏览器 agent 的宿主**（G04，2026-10-18）。
@@ -103,6 +104,20 @@ export function attachToWebContents(id: number): BrowserResult<{ id: number }> {
    * 之前只有独立窗口自己设过 deny；接上 webview 之后必须在这里补。
    */
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  /*
+   * B-05：**所有导航入口都过同一条策略** —— 点击链接、脚本跳转、重定向。
+   * 之前只在 `browserOpen` 里判一次，页面里点一下就能绕过去。
+   * 本机页面在这里是**放开**的（用户自己的测试站要能用；外网首次导航仍由
+   * `browserOpen` 的 allowExternal 决定）。
+   */
+  const guard = (event: { preventDefault: () => void }, url: string): void => {
+    const why = blockedReason(url, { allowLocal: true });
+    if (!why) return;
+    event.preventDefault();
+    console.log(`[browser] 拦下一次导航：${why}（${url.slice(0, 120)}）`);
+  };
+  contents.on("will-navigate", (event, url) => guard(event, url));
+  contents.on("will-redirect", (event, url) => guard(event, url));
   return { ok: true, value: { id: contents.id } };
 }
 
@@ -146,12 +161,10 @@ export async function browserOpen(
           "这个地址不是本机的 —— 外网地址要先放行（在审批卡片上点「总是允许」，或在设置里加一条 browser_open 的 allow 规则）",
       };
     }
+    const why = blockedReason(String(raw ?? ""), { allowLocal: false });
+    if (why) return { ok: false, error: why };
     try {
-      const parsed = new URL(String(raw ?? "").trim());
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        return { ok: false, error: "只支持 http(s) 地址" };
-      }
-      target = parsed;
+      target = new URL(String(raw ?? "").trim());
     } catch {
       return { ok: false, error: "这个地址解析不了（检查一下写法）" };
     }
