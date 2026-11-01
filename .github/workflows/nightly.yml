@@ -47,7 +47,7 @@ jobs:
       - name: 构建产物摘要（失败不掩盖门禁结论）
         if: always()
         run: pnpm cli:build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: nightly-evidence
